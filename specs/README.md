@@ -16,6 +16,8 @@ what they say, and behaviour changes start with a spec change.
 | [0007](0007-history-and-backups.md) | History and Backups | Accepted |
 | [0008](0008-memory-and-side-channels.md) | Memory Hygiene and Side Channels | Draft |
 | [0009](0009-clients-and-platforms.md) | Clients and Platforms | Draft |
+| [0010](0010-password-generator.md) | Password Generator | Accepted |
+| [0011](0011-cli.md) | Command-Line Interface | Accepted |
 
 ## Process
 

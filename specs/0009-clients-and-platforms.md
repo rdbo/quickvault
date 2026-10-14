@@ -31,9 +31,7 @@ the likely first target there).
 
 ### 3. CLI (v1)
 
-Minimum commands: `init`, `ls`, `show`, `add`, `edit`, `rm`, `mv`,
-`copy <entry> [field]`, `totp <entry>`, `history`, `restore`, `sync`,
-`passwd`, `recovery`, `export`, `import`.
+The full command set is specified in [0011](0011-cli.md).
 
 - **Unlocking (v1):** every command that needs the vault prompts for the
   master password and locks again when it exits. No background agent in v1;

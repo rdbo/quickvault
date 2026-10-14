@@ -17,6 +17,8 @@ spec disagree, the spec wins.
 | G6 | Side-channel awareness (memory, timing, clipboard, screen, OS leaks) | [0008](specs/0008-memory-and-side-channels.md) |
 | G7 | Recoverable history: undo deletions and bad syncs | [0007](specs/0007-history-and-backups.md) |
 | G8 | Multi-user, multi-vault server, self-hosted or hosted | [0006](specs/0006-server-authentication.md) |
+| G9 | Strong, unbiased password and passphrase generation | [0010](specs/0010-password-generator.md) |
+| G10 | Scriptable CLI as the first client | [0011](specs/0011-cli.md) |
 
 **Non-goals (v1):** sharing vaults between users, browser extension,
 auto-type, key files, hardware tokens. The design must not *preclude* them.

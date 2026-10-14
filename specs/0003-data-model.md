@@ -117,7 +117,8 @@ Not in v1. Nested groups cover organization. The CBOR model leaves room to add
 ## Open Questions
 
 1. Custom icons (user-uploaded images) — store them as attachments?
-2. Password generator settings: per vault or per device?
+2. ~~Password generator settings: per vault or per device?~~ Per vault,
+   proposed in 0010 §5.
 
 ## Changelog
 
