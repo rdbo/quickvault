@@ -87,6 +87,33 @@ the same sets of versions end up with identical current state.
 
 The same algorithm applies to groups and vault metadata.
 
+```mermaid
+flowchart TD
+    start(["Record exists locally and remotely"]) --> same{"Same version?"}
+    same -->|yes| nothing(["Nothing to do"])
+    same -->|no| desc{"Does one descend from the other?"}
+    desc -->|yes| take(["Take the descendant"])
+    desc -->|"no: concurrent edits"| base{"Common ancestor still in history?"}
+    base -->|no| lww["Fallback: whole record, higher HLC wins"]
+    lww --> flag
+    base -->|yes| attr["Compare every attribute of a and b with the base"]
+    attr --> who{"Who changed this attribute?"}
+    who -->|nobody| keepbase["Keep the base value"]
+    who -->|one side| oneside["Take that side's value"]
+    who -->|"both, same value"| samev["Take that value"]
+    who -->|"both, different values"| conflict["Higher HLC wins, mark conflict"]
+    who -->|"one deleted, one modified"| keepmod["Keep the modified field, mark conflict"]
+    keepbase --> merged
+    oneside --> merged
+    samev --> merged
+    conflict --> merged
+    keepmod --> merged
+    merged["New merged version: parents a and b, new HLC"] --> any{"Any conflict?"}
+    any -->|no| done(["Done"])
+    any -->|yes| flag["Keep a and b in history with the conflict flag"]
+    flag --> done
+```
+
 ### 3. Server sync protocol (outline)
 
 3.1. The server stores per vault an **append-only log** of
@@ -95,17 +122,57 @@ monotonically increasing integer assigned by the server.
 
 3.2. Sync round:
 1. `GET /vaults/{id}/changes?since={cursor}` → versions with `server_seq > cursor`.
-2. Client merges them locally.
+2. Client verifies, decrypts and merges them locally, and checks the state
+   commitment (§5).
 3. `POST /vaults/{id}/changes` with local versions not yet pushed, along with the
    `server_seq` the client last saw. The server rejects with `409` if newer
    entries arrived meanwhile; the client loops back to step 1.
 4. Client stores the new cursor in `sync_state`.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client (vault unlocked)
+    participant S as Server
+    Note over C: trigger: unlock, local edit, timer, or manual (3.5)
+    C->>S: start a device session if none is active (0006)
+    C->>S: GET changes since cursor
+    S-->>C: new versions, latest state commitment, server_seq
+    C->>C: verify commitment MAC, epoch not lower than stored epoch
+    C->>C: decrypt versions, reject replays (HLC not newer than known)
+    C->>C: three-way merge per field (2.6), repair group tree
+    C->>C: check the server view matches the commitment's state hash
+    alt a check failed
+        C->>C: stop, keep local data, warn the user (rollback or freeze)
+    else no local changes
+        C->>C: store cursor and epoch
+    else local changes to push
+        C->>C: write new state commitment (epoch + 1)
+        C->>S: POST changes, based on server_seq
+        alt server received newer changes meanwhile
+            S-->>C: 409 Conflict
+            Note over C,S: start again from step 2
+        else accepted
+            S-->>C: new server_seq
+            C->>C: store cursor and epoch
+        end
+    end
+```
 
 3.3. The server never decrypts, validates or merges records; it only orders
 and stores them. All validation is on the client.
 
 3.4. Wire format: CBOR over HTTPS. Endpoints and auth are specified in 0006
 and a future protocol spec.
+
+3.5. **When sync runs.** Merging needs VK, so sync only runs while the vault
+is unlocked:
+- right after unlocking;
+- after a local change, debounced (about 2 seconds after the last edit);
+- every 5 minutes while unlocked (configurable);
+- on demand (`qvault sync`, sync button).
+
+A locked vault never syncs; its changes wait for the next unlock.
 
 ### 4. File-based sync
 
@@ -178,6 +245,28 @@ or shows different devices different histories, a *fork*), check 2 of §5.2
 fails on at least one device: its local records don't match the commitment it
 is shown. The device warns as in §5.2.
 
+The two checks catch different attacks. In this example, the laptop has
+added an entry and pushed state commitment epoch 42:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant L as Laptop (stored epoch 42)
+    participant S as Malicious server
+    participant P as Phone (stored epoch 41)
+    alt server hides the new commitment (rollback)
+        S-->>P: old commitment, epoch 41
+        P->>P: 41 is not lower than 41, accepted for now
+        S-->>L: old commitment, epoch 41
+        L->>L: 41 is lower than stored 42, rollback detected
+        L->>L: keep local data, warn the user
+    else server sends the commitment but withholds the entry (freeze)
+        S-->>P: commitment epoch 42, without the new entry
+        P->>P: records don't match the state hash, detected
+        P->>P: keep local data, warn the user
+    end
+```
+
 5.4. **What can't be detected:** a brand-new device has no stored epoch, so it
 can't tell whether the newest commitment it receives is truly the newest.
 Mitigations: after first sync, the client shows "last changed on <date> by
@@ -201,3 +290,5 @@ the regression on its next sync.
 - 2026-10-14: Per-field three-way merge; two-level rollback protection
   (per-record HLC + authenticated vault state commitment).
 - 2026-10-14: Concurrent commits: later push wins after merging (§5.3).
+- 2026-10-14: Sync triggers (§3.5); Mermaid diagrams for the sync round,
+  three-way merge and rollback detection.

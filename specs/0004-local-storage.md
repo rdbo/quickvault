@@ -40,7 +40,9 @@ CREATE TABLE header (
 CREATE TABLE keyslot (
   slot_id      BLOB PRIMARY KEY,
   slot_type    TEXT NOT NULL,          -- password | quick-unlock
-                                       -- keyslots are never synced (0006)
+                                       -- rows are never synced; the current
+                                       -- password keyslot travels only inside
+                                       -- the VK-encrypted keyslot record (0006)
   device_id    BLOB,                   -- quick-unlock only; never synced
   suite        INTEGER NOT NULL,
   wrapped_vk   BLOB NOT NULL
@@ -77,6 +79,49 @@ CREATE TABLE sync_state (
 );
 ```
 
+```mermaid
+erDiagram
+    HEADER {
+        INTEGER format_version
+        BLOB vault_id
+        INTEGER min_suite
+        INTEGER kdf_suite
+        BLOB kdf_salt
+        BLOB header_mac
+    }
+    KEYSLOT {
+        BLOB slot_id PK
+        TEXT slot_type "password or quick-unlock"
+        BLOB device_id "quick-unlock only"
+        INTEGER suite
+        BLOB wrapped_vk
+    }
+    RECORD {
+        BLOB record_id PK
+        INTEGER suite
+        BLOB ciphertext "nonce and AEAD output"
+    }
+    RECORD_HISTORY {
+        BLOB record_id PK, FK
+        BLOB version_id PK
+        INTEGER suite
+        BLOB ciphertext
+    }
+    ATTACHMENT_CHUNK {
+        BLOB attachment_id PK, FK
+        INTEGER idx PK
+        INTEGER suite
+        BLOB ciphertext
+    }
+    SYNC_STATE {
+        BLOB remote_id PK
+        BLOB ciphertext "cursor, epoch"
+    }
+    HEADER ||--|{ KEYSLOT : "unlocked through"
+    RECORD ||--o{ RECORD_HISTORY : "previous versions"
+    RECORD ||--o{ ATTACHMENT_CHUNK : "attachment_meta record owns"
+```
+
 2.1. Only IDs, suite numbers and slot types are plaintext. Timestamps, HLCs,
 kinds and tombstone flags live inside the ciphertext.
 
@@ -104,6 +149,25 @@ with `aad = "qv/record" ‖ vault_id ‖ record_id ‖ suite`.
 5.1. Every mutation is one SQLite transaction: move the current version to
 `record_history`, write the new version, enforce history limits (0007).
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant UI as UI or CLI
+    participant Core as qv-core
+    participant DB as Vault file (SQLite)
+    UI->>Core: edit entry (handle, changes)
+    Core->>Core: new envelope: payload, new HLC, device_id, prev_version_hash
+    Core->>Core: Padmé padding, encrypt with the per-record key and a fresh nonce
+    Core->>DB: BEGIN IMMEDIATE
+    Core->>DB: check the file was not changed by another program
+    Core->>DB: copy the current row to record_history
+    Core->>DB: write the new row to record
+    Core->>DB: prune history beyond N versions (conflict versions kept 30 days)
+    Core->>DB: COMMIT
+    Core->>Core: update the in-memory index, schedule a sync
+    Core-->>UI: updated entry view
+```
+
 5.2. Plaintext MUST NEVER be written to the database, temp files, logs or
 crash reports.
 
@@ -128,3 +192,4 @@ crash reports.
 
 - 2026-10-14: Initial draft.
 - 2026-10-14: Status → Accepted.
+- 2026-10-14: Schema and write path as Mermaid diagrams (no behaviour change).

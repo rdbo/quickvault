@@ -74,6 +74,27 @@ response.
 typed into the webview. Keep it to the shortest time possible, clear inputs
 immediately after use.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant W as Webview UI
+    participant Core as qv-core (Rust)
+    participant OS as OS clipboard
+    W->>Core: list entries
+    Core-->>W: views: title, username, URL, field IDs (protected values left out)
+    U->>W: click Copy password
+    W->>Core: copy(field ID)
+    Core->>OS: write the value, marked sensitive
+    Note over W: the value never enters the webview
+    Core->>Core: start the 20 s timer
+    Core->>OS: clear, if the clipboard still holds our value
+    U->>W: click Reveal
+    W->>Core: reveal(field ID)
+    Core-->>W: value, temporarily
+    Note over W: shown for 30 s, then dropped from UI state
+```
+
 > **Open design area.** Revisit before UI work starts. Options include a
 > native (non-webview) secure input widget, Dioxus native rendering (Blitz)
 > once mature, or accepting the webview exposure as within the "unlocked
@@ -96,3 +117,4 @@ scope malware on an unlocked device (0001).
 
 - 2026-10-14: Initial draft.
 - 2026-10-14: CLI prints secrets only with `--reveal` (0009 §3).
+- 2026-10-14: Secret boundary as a Mermaid diagram.

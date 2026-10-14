@@ -48,35 +48,33 @@ auto-type, key files, hardware tokens. The design must not *preclude* them.
 
 ## 3. System overview
 
-```
-┌──────────────────────────── Client device ─────────────────────────────┐
-│                                                                        │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────────┐  │
-│  │  qv-app      │  │  qv-cli      │  │  OS integration shims        │  │
-│  │  (Dioxus UI) │  │  (clap)      │  │  autofill service/extension, │  │
-│  └──────┬───────┘  └──────┬───────┘  │  keystore, clipboard          │  │
-│         │ handles          │          └──────────────┬───────────────┘  │
-│         ▼                  ▼                         ▼                  │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │ qv-core   — vault session API, secret boundary, auto-lock         │  │
-│  ├──────────────┬──────────────────┬──────────────────┬─────────────┤  │
-│  │ qv-model     │ qv-crypto        │ qv-store         │ qv-sync     │  │
-│  │ entries,     │ suites, keys,    │ SQLite vault     │ HLC, merge, │  │
-│  │ groups, CBOR │ wrap/unwrap      │ file (rusqlite)  │ protocol    │  │
-│  └──────────────┴──────────────────┴────────┬─────────┴──────┬──────┘  │
-│                                             │                │         │
-│                                     vault.qvault        HTTPS (TLS 1.3, │
-│                                    (one SQLite file)   hybrid PQ KEX)  │
-└─────────────────────────────────────────────┼────────────────┼─────────┘
-                                              │                │
-                         file-sync tools ◄────┘                ▼
-                    (Syncthing, Dropbox, …)     ┌──────────────────────────┐
-                                                │ qv-server (Axum)         │
-                                                │ accounts, devices,       │
-                                                │ encrypted record log,    │
-                                                │ snapshots / retention    │
-                                                │ Postgres or SQLite (sqlx)│
-                                                └──────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph device["Client device"]
+        app["qv-app: Dioxus UI"]
+        cli["qv-cli: qvault command"]
+        shims["qv-platform: autofill, keystore, clipboard"]
+        core["qv-core: vault sessions, secret boundary, auto-lock"]
+        model["qv-model: entries, groups, CBOR"]
+        crypto["qv-crypto: suites, keys, wrap and unwrap"]
+        store["qv-store: SQLite vault file"]
+        sync["qv-sync: HLC, merge, sync client"]
+        file[("vault.qvault, one SQLite file")]
+        app -->|"views and handles"| core
+        cli --> core
+        shims --> core
+        core --> model
+        core --> crypto
+        core --> store
+        core --> sync
+        store --> file
+    end
+    fsync["File-sync tools: Syncthing, Dropbox"]
+    server["qv-server (Axum): accounts, devices, encrypted record log, retention"]
+    sdb[("Postgres or SQLite")]
+    file <--> fsync
+    sync <-->|"HTTPS, TLS 1.3 with hybrid PQ key exchange"| server
+    server --> sdb
 ```
 
 ## 4. Repository layout
@@ -91,20 +89,47 @@ quickvault/
 │   ├── qv-crypto/         # primitives, suites, key hierarchy, padding
 │   ├── qv-model/          # plaintext data model + CBOR (de)serialization
 │   ├── qv-store/          # SQLite vault file: schema, migrations, history
-│   ├── qv-sync/           # HLC, record merge, sync protocol types + client
+│   ├── qv-protocol/       # sync/auth wire types shared by client and server
+│   ├── qv-sync/           # HLC, record merge, sync client
 │   ├── qv-core/           # vault sessions, secret handles, locking policy
 │   ├── qv-platform/       # keystore/biometrics, clipboard, autofill glue
 │   ├── qv-server/         # Axum sync server
-│   ├── qv-cli/            # command-line client
+│   ├── qv-cli/            # command-line client (`qvault`)
 │   └── qv-app/            # Dioxus desktop + mobile application
 └── platform/
     ├── android/           # minimal autofill-service stub (if Rust/JNI can't host it alone)
     └── ios/               # credential-provider extension target
 ```
 
-Dependency direction is strictly downward: `qv-crypto` and `qv-model` depend on
-nothing internal; `qv-server` depends only on `qv-sync` protocol types and never
-on `qv-crypto` key material (it cannot decrypt anything anyway).
+Crate dependencies (an arrow means "depends on"):
+
+```mermaid
+flowchart TD
+    app[qv-app] --> core[qv-core]
+    app --> platform[qv-platform]
+    cli[qv-cli] --> core
+    cli --> platform
+    platform -->|"implements core traits: clipboard, keystore"| core
+    core --> sync[qv-sync]
+    core --> store[qv-store]
+    core --> model[qv-model]
+    core --> crypto[qv-crypto]
+    sync --> protocol[qv-protocol]
+    sync --> store
+    sync --> crypto
+    store --> model
+    store --> crypto
+    server[qv-server] --> protocol
+```
+
+Rules:
+- Dependencies point downward only. `qv-crypto` and `qv-model` depend on
+  nothing internal.
+- `qv-core` defines traits for OS services (clipboard, keystore); frontends
+  inject the `qv-platform` implementations. This avoids a cycle between core
+  and platform.
+- `qv-server` depends only on `qv-protocol`. It has no access to `qv-crypto`
+  key handling and could not decrypt anything anyway.
 
 ## 5. The secret boundary
 
@@ -123,24 +148,12 @@ This is an **open design area** and must be revisited before the UI is built.
 
 ## 6. Key hierarchy (summary)
 
-```
-master password ──Argon2id(salt, suite params)──► Master Key (MK)
-                                                     │ HKDF
-                                                     ▼
-                                          Key-Encryption Key (KEK)
-                                                     │ wraps
-device keystore (biometric) ─► Quick-unlock Key ─wraps►│
-                                                     ▼
-recovery phrase (24 words) ◄──BIP-39 encoding──► Vault Key (VK, random 256-bit)
-                                                     │ HKDF (domain-separated)
-                     ┌───────────────────────────────┼─────────────────────┐
-                     ▼                               ▼                     ▼
-             Record Encryption Key          Header MAC Key        Attachment Key
-```
-
-Changing the master password re-wraps VK only. Losing the master password
-*and* the recovery phrase means the data is gone — by design. Details in
-[0002](specs/0002-cryptography.md).
+Master password → Argon2id → KEK → unwraps the **Vault Key (VK)**, a random
+256-bit key. The **recovery phrase is VK itself** in BIP-39 word form. Every
+other key is derived from VK with HKDF, down to one key per record. Changing
+the master password re-wraps VK only. Losing the master password *and* the
+recovery phrase means the data is gone, by design. Diagram and details:
+[0002 §3](specs/0002-cryptography.md).
 
 ## 7. Main flows
 
@@ -151,18 +164,39 @@ Changing the master password re-wraps VK only. Losing the master password
 timestamp) → previous version moved to history → written in one SQLite
 transaction.
 
-**Sync (server).** Push local versions since last cursor, pull remote versions
-since server cursor, three-way merge per field (on a real conflict the newer
-value wins and the other is kept in history), check the vault state
-commitment, advance cursors. The server only appends and serves ciphertext.
+**Sync (server).** Pull remote versions since the cursor, three-way merge per
+field (on a real conflict the newer value wins and the other is kept in
+history), check the vault state commitment, push local versions, advance
+cursors. The server only appends and serves ciphertext.
 
 **Sync (file).** When the vault file was changed externally or a file-sync
 conflict copy appears, open both and run the same merge.
 
-**New device.** The `password` keyslot never leaves a device, so the server
-holds nothing that can be brute-forced. Device generates a hybrid identity key pair, is approved by an
-existing device or by the recovery phrase, and receives VK through a hybrid
-(X25519 + ML-KEM-768) key encapsulation. See [0006](specs/0006-server-authentication.md).
+**New device.** An enrolled device approves it through a QR code and hands
+it VK inside a hybrid (X25519 + ML-KEM-768) encapsulation. With every device
+lost, the recovery phrase proves ownership instead. The server never holds
+anything that can be brute-forced.
+
+### Diagram index
+
+| Flow | Where |
+|------|-------|
+| System overview, crate dependencies | this document, §3–4 |
+| Key hierarchy | [0002 §3](specs/0002-cryptography.md) |
+| Unlocking a vault | [0002 §8](specs/0002-cryptography.md) |
+| Vault file tables | [0004 §2](specs/0004-local-storage.md) |
+| Saving an edit | [0004 §5](specs/0004-local-storage.md) |
+| Three-way field merge | [0005 §2.6](specs/0005-synchronization.md) |
+| Sync round | [0005 §3.2](specs/0005-synchronization.md) |
+| Rollback and freeze detection | [0005 §5](specs/0005-synchronization.md) |
+| **Registration** | [0006 §Registration](specs/0006-server-authentication.md#registration) |
+| Uploading a vault | [0006 §Uploading a vault](specs/0006-server-authentication.md#uploading-a-vault) |
+| **Login**: device session, account login | [0006 §Logging in](specs/0006-server-authentication.md#logging-in) |
+| Adding a device | [0006 §Adding a device](specs/0006-server-authentication.md#adding-a-device) |
+| Recovery with all devices lost | [0006 §Recovery](specs/0006-server-authentication.md#recovery-all-devices-lost) |
+| Master password change | [0006 §Master password changes](specs/0006-server-authentication.md#master-password-changes) |
+| Session lifecycle | [0006 §Sessions and expiry](specs/0006-server-authentication.md#sessions-and-expiry) |
+| Secret boundary (copy and reveal) | [0008 §4](specs/0008-memory-and-side-channels.md) |
 
 ## 8. Technology choices
 

@@ -65,11 +65,22 @@ weak parameters (downgrade attack, see §7).
 
 ### 3. Key hierarchy
 
-```
-master password ──Argon2id(salt)──► MK (32 B)
-MK ──HKDF("qv/v1/kek")──► KEK
-KEK ──AEAD wrap──► VK            (one wrap per unlock method)
-VK ──HKDF(label)──► purpose keys
+```mermaid
+flowchart TD
+    pw["Master password"] -->|"Argon2id (salt, suite parameters)"| mk["Master Key MK"]
+    mk -->|"HKDF qv/v1/kek"| kek["Key-Encryption Key KEK"]
+    kek -->|unwraps| pslot[("password keyslot")]
+    qk["Quick-unlock key, in the OS keystore"] -->|unwraps| qslot[("quick-unlock keyslot")]
+    pslot --> vk["Vault Key VK, random 256 bits"]
+    qslot --> vk
+    phrase["Recovery phrase, 24 words"] <-->|"BIP-39 encoding"| vk
+    vk -->|"HKDF qv/v1/record"| rk["Record key"]
+    vk -->|"HKDF qv/v1/attachment"| ak["Attachment key"]
+    vk -->|"HKDF qv/v1/header-mac"| hk["Header MAC key"]
+    vk -->|"HKDF qv/v1/state-commit"| sk["State-commit key"]
+    vk -->|"HKDF qv/v1/vault-recovery-sign"| rs["Vault recovery signing key"]
+    rk -->|"HKDF with record_id"| prk["Per-record keys (3.6)"]
+    ak -->|"HKDF with attachment_id"| pak["Per-attachment keys"]
 ```
 
 3.1. **Master Key (MK):** Argon2id(password, salt, suite params). The
@@ -89,8 +100,9 @@ human-readable form is the **recovery phrase** (§4). VK is stored only in
 There is no recovery keyslot: the recovery phrase *is* VK (§4).
 
 A keyslot is `AEAD(wrapping_key, nonce, VK, aad = vault_id ‖ slot_type ‖ suite_id)`.
-Which keyslots may leave a device is defined in 0006 §Key custody; the
-`password` keyslot never does.
+Which keyslots may leave a device is defined in 0006 §Key custody: the
+`password` keyslot leaves only inside the VK-encrypted keyslot record, so it
+is never exposed to anyone without VK.
 
 3.3. **Purpose keys** derived from VK with HKDF-SHA-512 and distinct labels:
 
@@ -100,6 +112,7 @@ Which keyslots may leave a device is defined in 0006 §Key custody; the
 | `qv/v1/attachment` | encrypting attachment chunks |
 | `qv/v1/header-mac` | authenticating the vault header |
 | `qv/v1/state-commit` | rollback-detection commitments (0005) |
+| `qv/v1/vault-recovery-sign` | seed of the vault recovery signing key pair (0006 §Recovery) |
 
 New purposes MUST use new labels; labels are never reused.
 
@@ -226,6 +239,49 @@ running the KDF, so a tampered header cannot weaken it.
 `argon2`, `chacha20poly1305`, `hkdf`, `sha2`, `sha3`, `x25519-dalek`,
 `ed25519-dalek`, `ml-kem`, `ml-dsa`, `zeroize`, `subtle`. No custom primitives.
 
+### 8. Unlock flow
+
+8.1. Unlocking is fully local; no network is involved.
+
+8.2. Parameter checks (suite and KDF minimums) MUST happen **before** running
+Argon2id, and the header MAC MUST be verified **after** VK is obtained and
+before any record is trusted (§7.3).
+
+8.3. A failed unlock reports only "wrong password" and never which step
+failed.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant UI as UI or CLI
+    participant Core as qv-core
+    participant DB as Vault file
+    participant KS as OS keystore
+    UI->>Core: open vault
+    Core->>DB: read header and keyslots
+    Core->>Core: suite known, not below min_suite, KDF parameters above hard minimums
+    alt quick unlock enabled and still valid
+        Core->>KS: unwrap VK with the quick-unlock key
+        KS->>U: biometric or PIN prompt
+        U-->>KS: confirmed
+        KS-->>Core: VK
+    else master password
+        U->>UI: master password
+        UI->>Core: password (UI clears its copy immediately)
+        Core->>Core: Argon2id to MK, HKDF to KEK (about 1 s)
+        Core->>Core: unwrap password keyslot to VK
+    end
+    alt unwrap failed
+        Core-->>UI: wrong password (no other detail)
+    else VK obtained
+        Core->>Core: derive purpose keys, verify header MAC
+        Core->>DB: read all records
+        Core->>Core: decrypt into the in-memory index
+        Core-->>UI: unlocked: entry views and handles, no protected values
+    end
+```
+
 ## Security Considerations
 
 - Parameters fixed per suite (rather than calibrated per device) give the same
@@ -261,3 +317,6 @@ running the KDF, so a tampered header cannot weaken it.
   recovery keyslot.
 - 2026-10-14: One master password per vault; Argon2id acceptance criteria.
   Status → Accepted (Argon2id values pending benchmark).
+- 2026-10-14: Key hierarchy as a Mermaid diagram; added the
+  `qv/v1/vault-recovery-sign` label; unlock flow (§8). Amendment, no
+  behaviour change beyond the new label.
