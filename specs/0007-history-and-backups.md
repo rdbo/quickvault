@@ -2,7 +2,7 @@
 
 | Status | Created | Depends on |
 |--------|---------|------------|
-| Draft | 2026-10-14 | 0004, 0005 |
+| Accepted | 2026-10-14 | 0004, 0005 |
 
 ## Summary
 
@@ -61,12 +61,21 @@ every old version of every record stays there until it is cleaned up.
 
 3.3. **Retention: age-based.**
 
-- Local snapshots older than the retention period are deleted. Default
-  **30 days**, configurable in the client settings.
-- On the server, record versions older than the retention period are
-  deleted from the log. Default **30 days**, configurable by the server
-  admin. The **current** version of every record and the current state
-  commitment (0005 §5.2) are never deleted, however old.
+- **Local:** snapshots older than the retention period are deleted. Default
+  **30 days**, configurable in the client settings, including "keep forever".
+  There is **no size cap** on local snapshots: disk usage on the user's own
+  device is the user's choice.
+- **Server:** record versions older than the retention period are deleted
+  from the log. Default **30 days**, set **only by the server admin**; users
+  cannot extend it. The **current** version of every record and the current
+  state commitment (0005 §5.2) are never deleted, however old.
+- **Server size cap:** old versions count toward the account's storage quota
+  (0006 §Quotas). In addition, the admin can set a maximum history size per
+  vault. When a vault exceeds either limit, the server deletes its oldest
+  non-current versions first, before the retention period is over. If the
+  *current* data alone exceeds the quota, new writes are rejected; current
+  data is never deleted to make room. This keeps history from becoming a
+  way around the quotas (0006 §Admission control).
 - Cleanup runs when a snapshot is taken (client) or on a periodic job
   (server). It never needs the app to be running in the background.
 - Independent of this: per-entry history (§1, last N versions) and
@@ -82,10 +91,7 @@ every old version of every record stays there until it is cleaned up.
 
 ## Open Questions
 
-1. Should local snapshots also have a size cap (e.g. a vault with large
-   attachments synced many times a day)?
-2. Should users be able to set a per-vault server retention longer than the
-   admin default (within quota)?
+None currently.
 
 ## Changelog
 
@@ -94,3 +100,6 @@ every old version of every record stays there until it is cleaned up.
   directory.
 - 2026-10-14: Retention is age-based: 30 days by default, configurable on
   client and server (replaces the tiered proposal).
+- 2026-10-14: No local size cap; local retention may be unlimited. Server
+  retention admin-only, history counts toward quota, per-vault history cap.
+  Status → Accepted.

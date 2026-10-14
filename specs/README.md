@@ -13,7 +13,7 @@ what they say, and behaviour changes start with a spec change.
 | [0004](0004-local-storage.md) | Local Storage (Vault File) | Accepted |
 | [0005](0005-synchronization.md) | Synchronization and Conflict Resolution | Draft |
 | [0006](0006-server-authentication.md) | Server Accounts, Authentication and Device Enrollment | Draft |
-| [0007](0007-history-and-backups.md) | History and Backups | Draft |
+| [0007](0007-history-and-backups.md) | History and Backups | Accepted |
 | [0008](0008-memory-and-side-channels.md) | Memory Hygiene and Side Channels | Draft |
 | [0009](0009-clients-and-platforms.md) | Clients and Platforms | Draft |
 

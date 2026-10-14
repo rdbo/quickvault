@@ -44,8 +44,10 @@ In `open` mode (deferred, see §Phasing):
 
 ### Quotas (all modes)
 
-- Max vaults per account, max total bytes per account, max record size, max
-  attachment size (0003 §6.3), max records per vault, upload rate limits.
+- Max vaults per account, max total bytes per account (**including** old
+  versions kept in the server log, 0007 §3.3), max history size per vault,
+  max record size, max attachment size (0003 §6.3), max records per vault,
+  upload rate limits.
 - All quotas MUST be configurable by the server admin (global defaults,
   optionally per account). Default values are deferred to the server
   configuration spec.
