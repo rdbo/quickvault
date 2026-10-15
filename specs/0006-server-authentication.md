@@ -6,593 +6,287 @@
 
 ## Summary
 
-This spec covers three separate problems:
+Devices authenticate sync access with hybrid signatures. A separate OPAQUE
+account password controls account administration. Pairing authenticates both
+devices out of band and transfers vault keys using a complete signed KEM/
+encryption envelope. Device grants are scoped to vault and key generation.
 
-1. **Admission:** who may create an account and store data at all, so the
-   server can't be abused as free file storage (§Admission control).
-2. **Authentication and authorization:** proving that a request comes from
-   the owner of an account, and that the account owns the vault it touches
-   (§Options).
-3. **Key transport:** how a new device gets VK (Option C).
+## Specification
 
-## Admission control
+### Admission control
 
-The server cannot inspect ciphertext, so it can never tell a real vault from
-arbitrary bytes. Abuse is prevented by **who may upload** and **how much**,
-not by looking at the content.
+v1 supports **closed** registration only. An admin creates a pending username
+and a random 128-bit registration code, stored hashed, single-use, expiring
+after 24 hours. Deliver URL, code and server identity fingerprint out of band.
+Consume the code atomically with registration. Invite and hosted/open admission
+require separate specifications; OIDC and proof of work are not v1 dependencies.
 
-### Registration modes (server configuration)
+Apply per-account/IP request limits and configurable account/vault quotas:
+current objects, retained history, staging, record count, bytes, attachment size,
+device count and uploads. Enforce body limits before allocation/storage; reject
+over-budget requests without partial publication. Client safety budgets (0004)
+remain independent. Use SQLite for the first self-hosted server; Postgres support
+is deferred until the transaction/retention behavior is tested on SQLite.
 
-| Mode | Use case | How |
-|------|----------|-----|
-| `closed` | personal / family server | Accounts only created by the admin (CLI on the server) |
-| `invite` | small groups | Admin or existing users generate single-use, expiring invite tokens; registration requires one |
-| `open` | hosted service | Anyone may register; MUST sign in with an external identity provider (OAuth 2.0 / OpenID Connect) **and** solve a proof-of-work challenge |
+### Authentication and authorization
 
-The server MUST default to `closed`. Other modes MUST be enabled explicitly
-in the server configuration.
+A device is an account identity plus a set of per-vault grants
+`(vault_id, key_generation, role)`. v1 role is owner on granted vaults; no sharing
+between users. An account session may administer or revoke devices but MUST NOT
+download vault objects, enroll an unrestricted sync device, or obtain VK.
+Recovery of one vault grants access to that vault only, not all account vaults.
 
-In `open` mode (deferred, see §Phasing):
-- **External identity instead of email verification:** sign-up requires an
-  OpenID Connect login (e.g. Google, GitHub, configurable providers). The
-  server never sends email. The provider is used only to gate admission: it
-  never takes part in vault encryption or device authentication, and it
-  learns only that the user has a QuickVault account.
-- **Proof of work:** registration requires solving a server-issued,
-  single-use, expiring, memory-hard challenge (Argon2id-based). Default
-  difficulty targets roughly 10 s on a mid-range phone; configurable.
+Each request checks account status, device revocation/authentication generation,
+grant and requested vault/generation. A generation change invalidates old grants.
+A malicious server can bypass its own access controls, but does not learn keys;
+client cryptographic trust never comes from the server's device list alone.
 
-### Quotas (all modes)
+### Key custody
 
-- Max vaults per account, max total bytes per account (**including** old
-  versions kept in the server log, 0007 §3.3), max history size per vault,
-  max record size, max attachment size (0003 §6.3), max records per vault,
-  upload rate limits.
-- All quotas MUST be configurable by the server admin (global defaults,
-  optionally per account). Default values are deferred to the server
-  configuration spec.
-- Requests over quota are rejected before the body is stored.
+| Material | Device storage | Server storage |
+|----------|----------------|----------------|
+| VK | Wrapped password/platform slots | No plaintext VK |
+| Password slot | Local slot; inside encrypted keyslot record | Only VK-encrypted record |
+| Quick-unlock slot | Device-bound, excluded from exports | Never |
+| Signing private keys | Encrypted device bundle; see below | Never |
+| Pairing decapsulation key | Ephemeral in protected memory | Never |
+| Pairing transfer | Pending ciphertext until delivered/expired | Encrypted relay, maximum ten minutes |
 
-### Why this is enough
+Device signing bundles are sealed by an authenticated OS wrapper or wrapped
+under a designated local vault's device-storage key, with account/device IDs
+as authenticated context. The device's unlock policy must release both halves
+before signing; no plaintext private-key file or automatic unprotected fallback.
+Registration before any vault exists requires an authenticated OS wrapper or
+an explicitly chosen local device password using password-kdf/1. Rewrap after
+the designated vault rotates and wipe plaintext on lock. Restoring an exported
+vault never restores signing identity. Ordinary local offline use needs no
+device signing identity.
 
-- **No public download:** data can only be read by authenticated devices of
-  the account that owns it. There are no shareable links, so the server can't
-  serve files to anyone else. That makes it useless for distributing files,
-  which is what file-hosting abuse wants.
-- A legitimate account can still put arbitrary bytes in its quota. That's
-  true of any cloud storage and is acceptable.
+Pairing uses a fresh X-Wing key pair per ticket, not a long-lived device KEM key.
+Erase its private key and P after delivery, cancellation or expiry; never persist
+them in backup/state restoration. App restart cancels pairing. Long-term signing
+key compromise therefore does not decrypt recorded pairing transfers.
 
-## Authentication vs. "HMAC over something"
+There is no **vault-master-password verifier** in the server DB. This guarantee
+does not apply to the separate account password: OPAQUE server compromise allows
+offline guessing. Explicit file exports contain an attackable password slot.
 
-"This vault belongs to this person" is two steps:
+### Account password and OPAQUE profile
 
-1. **Authentication:** the request comes from account X (one of its devices).
-2. **Authorization:** the server keeps an access list `vault_id → owner
-   account` and only lets X's sessions read or write X's vaults. This is
-   a plain database check; no crypto is needed once (1) holds.
+The account password is a separate secret from vault passwords; clients MUST
+NOT derive one from the other. Require a strong generated suggestion (0010).
+OPAQUE does not enforce that humans never reuse passwords; explain the separation
+and never claim that reuse preserves this boundary.
 
-The question is how to do (1). A **MAC (e.g. HMAC)** needs the verifier to
-hold the same key as the signer. If the server can check the HMAC, the server
-stores that key, and anyone who steals the server database can forge requests.
-If the key comes from the password, they can also try to crack it. That is
-Option A below.
+Account-auth/1 is RFC 9807 OPAQUE-3DH with ristretto255-SHA512 OPRF and group,
+HKDF-SHA-512, HMAC-SHA-512, SHA-512, and application-selected Argon2id KSF:
+v=0x13, m=262144 KiB, t=3, p=4, output 64 bytes, salt=16 zero bytes, no
+secret/associated-data parameters. The OPRF provides the per-credential salt.
+Context is canonical CBOR of
+`["qv/account-auth/v1", server_identity_fingerprint, account_auth_profile]`.
+Credential/client identity is the canonical username's UTF-8 bytes; server
+identity is its full application-key fingerprint. Username canonicalization is
+ASCII lowercase with a fixed [a-z0-9._-] alphabet and length 1–64; reject other
+forms rather than applying locale-dependent transformations.
 
-A **signature** separates the two: the device keeps the private key, the
-server stores only the public key. A stolen server database lets nobody
-impersonate the user. That is Option C. HMACs still have their place
-*inside* the vault (integrity between the user's own devices, 0005 §5.2), where
-the verifier knows the key anyway.
+Pin this application profile; never use a crate's identity KSF or allow the
+server to negotiate weaker work factors. Keep OPRF seed in secret server
+configuration, separate from the records DB; database-plus-seed compromise
+permits offline guessing as described in
+[RFC 9807](https://www.rfc-editor.org/rfc/rfc9807.html#section-10.11).
+Use the RFC's fake-record path for unknown users, equivalent work classes,
+rate limits and generic errors. The server necessarily knows which accounts
+exist. OPAQUE is a documented classical exception to hybrid vault-key transport.
 
-## Requirements
+### Server identity
 
-- R1. Multiple users per server, multiple vaults per user, self-hosted or hosted.
-- R2. The server never receives the master password, VK, or anything that
-  allows decrypting vault data.
-- R3. The server MUST NOT store anything that allows guessing the vault
-  master password offline. In particular, the `password` keyslot is never
-  uploaded except inside a record encrypted under VK (§Key custody).
-- R4. An attacker who learns *only* the account password SHOULD NOT be able to
-  download ciphertext (keeps them from starting an offline attack).
-- R5. Asymmetric crypto MUST be hybrid classical + PQ (0002 §6).
-- R6. Online guessing is rate-limited; account existence is not revealed
-  (no user enumeration through responses or timing).
+TLS 1.3 uses hybrid X25519MLKEM768. Disable 0-RTT for authenticated operations.
+qv-server terminates this TLS connection; proxies may forward opaque TCP but
+MUST NOT substitute client-supplied exporter headers.
 
-## What the attacker wants
+The application server identity is a separate Ed25519 + ML-DSA-65 public-key
+pair. Its fingerprint is SHA-256 of canonical
+`["qv/server-key/v1", signature_profile, ed25519_public, mldsa_public]`, displayed
+as the full grouped hexadecimal digest or a QR code. Registration requires
+comparison with the admin's out-of-band fingerprint. Pairing obtains it from
+the approving device's QR. TOFU without verification is explicitly unverified;
+do not describe it as protection from first-contact MITM.
 
-| Attacker | Goal | Main defence |
-|----------|------|--------------|
-| T2 server DB thief | Crack the password offline from stored auth data | Don't store a password-equivalent (B, C) |
-| T2 malicious operator | Trick the client into revealing key material | Client never sends keys; enrollment verified out-of-band |
-| T3 MITM | Steal session or credentials, harvest-now-decrypt-later | TLS 1.3 hybrid + app-level hybrid KEM for key transport |
-| T4 online guesser | Guess the account password | Rate limiting, device-bound auth (C) |
-| Phisher | Get the user to log in on a fake server | PAKE doesn't reveal the password to a fake server (B) |
-
-## Options
-
-### Option A — Derived auth token (Bitwarden-style)
-
-Client derives `auth_key = HKDF(MK, "qv/auth")` and sends a hash of it; the
-server stores `Argon2id(auth_hash, server_salt)`.
-
-- ✅ Simple, well understood.
-- ❌ A server DB thief can run an offline dictionary attack on the master password
-  (at Argon2id cost). It also requires the account password to be the same as, or
-  derived from, the vault password.
-- ❌ A fake/phishing server receives a password-derived value.
-
-### Option B — OPAQUE (asymmetric PAKE, RFC 9807)
-
-The client and server run a protocol in which the server never sees the
-password or a value derived from it in a guessable form. Crate: `opaque-ke`.
-
-- ✅ Server DB theft still allows offline guessing only *after* the theft (no
-  precomputation), and a fake server learns nothing useful.
-- ✅ Produces a shared session key → can bind the session.
-- ❌ Not post-quantum (based on OPRF over elliptic curves). The danger is
-  limited: a future quantum attacker with recorded transcripts could mount an
-  offline guessing attack on the account password, not decrypt the vault.
-- ❌ More complex; must use the configuration from the RFC exactly.
-
-### Option C — Device enrollment ("pre-established handshake")
-
-Each device generates a **hybrid identity key pair** (Ed25519 + ML-DSA-65 for
-signing, X-Wing for KEM). The server only accepts requests signed by an
-enrolled device (challenge–response for each session).
-
-New device enrollment: an already-enrolled device approves the new one and
-encapsulates VK to its X-Wing public key; the server only relays. The first
-device is enrolled at registration; with every device lost, the recovery
-phrase is used. Full flows with diagrams: §Flows.
-
-- ✅ Meets R4: password alone downloads nothing. Fully hybrid PQ (R5).
-- ✅ Matches the "client and server do a handshake before syncing" idea.
-- ✅ Also solves *key transport*: VK reaches new devices end-to-end encrypted.
-- ❌ Adding a device needs an existing device or the recovery phrase.
-- ❌ Requires a device-management UI (list, revoke).
-
-### Option D — Combination ✅ chosen
-
-- **C** for everything sync-related: device identity, sessions, VK transport.
-- **B (OPAQUE)** as the account password for account-level actions (web
-  account page, billing on a hosted service, emergency device revocation).
-- A device revocation stops future sessions; it does not erase data already
-  on that device. Afterwards the user SHOULD rotate VK (0002 §3.5).
-
-## Decision
-
-**Option D is adopted:** signed device enrollment (C) authenticates all
-sync traffic and transports VK; OPAQUE (B) protects the account password used
-for account-level actions. Options A and B-alone are rejected.
-
-## Key custody
-
-Where copies of VK exist, and in what form:
-
-| Copy of VK | Stored on | Uploaded to server? | Why |
-|------------|-----------|---------------------|-----|
-| `password` keyslot (VK wrapped by Argon2id(master password)) | each device, in the `keyslot` table | **Never in this form** | It's the only copy an attacker could attack by guessing a human-chosen password |
-| **Keyslot record** (the current `password` keyslot, as a normal record encrypted under VK) | devices and server | Yes, like any record | Lets new devices adopt the master password (§Adding a device) and propagates password changes (§Master password changes). To reach the keyslot inside, an attacker needs VK first, and VK already gives everything. |
-| `quick-unlock:<device>` | that device only | Never | Device-bound |
-| Enrollment transfer (VK encapsulated to a new device's X-Wing key) | server, temporarily | Yes, as a relay | Only the target device can open it; deleted once delivered |
-
-The recovery phrase is VK itself (0002 §4) and exists only where the user
-wrote it down. The server never receives the phrase or any usable copy of VK.
-
-Consequence: a stolen server database contains only ciphertext encrypted
-under random 256-bit keys. **There is nothing to brute-force.**
-
-A `.qvault` file, on the other hand, contains the `password` keyslot.
-Syncing it with Dropbox, Syncthing etc. gives that provider something to
-guess against (same as KeePass). Clients MUST mention this when the user sets
-up file-based sync.
-
-## Account password
-
-The account password (username + password, OPAQUE) MUST be a **separate
-secret** from any vault master password. Clients MUST NOT derive one from the
-other. A breach of the server or of the account password therefore never
-touches anything tied to vault encryption.
-
-The account password is needed only for: registration, recovery when all
-devices are lost, account settings, and emergency device revocation.
-Day-to-day sync uses device keys only. The strength rules of 0010 §4.2 apply
-to it as well.
-
-## Server identity
-
-Each server has a long-term **hybrid identity key pair** (Ed25519 + ML-DSA-65),
-separate from its TLS certificate.
-
-1. **Trust on first use:** on first connection the client receives the server
-   identity public key and pins it for that server URL.
-2. **Verification words:** client and server admin both display a fingerprint
-   of the key as a short sequence of words (e.g. 6 words from a fixed list,
-   ~66 bits), like a safety number in an encrypted messenger. The server shows
-   it with `qv-server fingerprint`. The user compares them; the client records
-   whether the key was verified.
-3. **Channel binding:** at session start the server signs the TLS exporter
-   value (RFC 5705/8446 §7.5) with its identity key. A MITM with a different
-   TLS certificate, even one trusted by the system CA store, fails this check.
-   The system CA store is therefore not relied upon.
-4. **Planned rotation:** a new identity key is signed by the old one; clients
-   accept it automatically and show a notice.
-5. **Unexplained change:** if the pinned key changes without a valid rotation
-   signature, the client MUST stop syncing and show a blocking warning until
-   the user verifies the new words.
-
-### If the server identity key is stolen
-
-An attacker with the key and a network position can impersonate the server.
-
-| They can | They cannot |
-|----------|-------------|
-| See metadata (who syncs, when, sizes) | Decrypt any vault (all records are E2E encrypted) |
-| Serve old data or withhold new data (rollback/freeze; detected by 0005 §5) | Obtain VK: it only travels device-to-device, and enrollment is confirmed by the user between their own devices |
-| Make sync fail (denial of service) | Learn the account password (OPAQUE does not reveal it, even to the real server) |
-| | Reuse device-signed requests (each is bound to its session) |
-
-So server-key theft is a **metadata and availability** problem, not a
-confidentiality one. The pairing secret in device enrollment (§Adding a
-device) is the check that keeps vaults end-to-end protected even then.
-
-Mitigations: the identity key is encrypted at rest (optionally kept in a
-TPM/HSM); compromise rotation per point 5; optionally later an offline root
-key that signs short-lived online keys.
-
-## Flows
-
-All diagrams use these names: **User**, **Client** (`qv-core` with its UI or
-CLI), **Server** (`qv-server`), and **Admin** (whoever runs the server).
+Export 32 bytes using TLS exporter label `EXPORTER-QuickVault-v1`, empty context.
+The server signs canonical
+`["qv/server-channel/v1", protocol_version, server_fingerprint, exporter]`
+with both identity keys; verify the pinned fingerprint and both signatures before
+registration, account login or device session creation. Standard certificate/
+hostname validation remains enabled unless the user explicitly configured a
+pinned self-hosted certificate. An unexplained application-key change stops
+sync. Planned rotation binds old/new keys and monotonic identity generation
+in an old-key-signed transcript; a stolen old key cannot authenticate recovery
+from its own compromise, so that recovery needs a new out-of-band comparison.
 
 ### Registration
 
-v1 supports `closed` mode: the admin creates the account, the user finishes
-registration from their device. `invite` and `open` modes (later) differ only
-in where the registration code comes from (an invite token, or an OpenID
-Connect sign-in plus proof of work).
-
-1. The admin runs `qv-server account create <username>`. The server creates a
-   pending account and a **registration code**: 128 random bits, single-use,
-   expires after 24 hours; only its hash is stored.
-2. The admin gives the user, out of band: server URL, registration code and
-   the server's fingerprint words (`qv-server fingerprint`).
-3. On first connection the client pins the server identity key and the user
-   compares the fingerprint words (§Server identity).
-4. The client generates the device's hybrid key pairs and runs **OPAQUE
-   registration**, sending the registration code with the first message.
-   The server only continues if the code is valid for that username.
-5. The final OPAQUE message carries the device's public keys. The server
-   stores the OPAQUE record, enrolls the device, and burns the code. Both
-   OPAQUE messages are tied together by a single-use transaction ID valid for
-   5 minutes.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Admin
-    actor U as User
-    participant C as Client
-    participant S as Server
-    Admin->>S: qv-server account create alice
-    S-->>Admin: registration code (single-use, 24 h)
-    Admin-->>U: server URL, registration code, fingerprint words (out of band)
-    U->>C: register with server URL
-    C->>S: TLS 1.3 handshake (X25519MLKEM768)
-    S-->>C: server identity key + signature over the TLS exporter
-    C->>U: show fingerprint words
-    U->>C: confirm they match the admin's words
-    Note over C: pin server identity key (verified)
-    U->>C: username, registration code, account password
-    C->>C: generate device keys (Ed25519 + ML-DSA-65 signing, X-Wing KEM)
-    C->>S: OPAQUE registration request + username + registration code
-    S->>S: check code (exists, unused, not expired, matches username)
-    S-->>C: OPAQUE registration response + transaction ID
-    C->>S: OPAQUE record + device public keys + device name + transaction ID
-    S->>S: create account, store OPAQUE record, enroll device, burn code
-    S-->>C: account created
-    Note over C,S: the device can now start device sessions
-```
+1. Verify server identity, code and canonical username. Generate signing keys
+   and securely store the device bundle before finalizing registration.
+2. Run OPAQUE registration bound to one random 128-bit transaction ID, username,
+   initial device public keys, server identity and TLS exporter; expires in five
+   minutes. Bind the final submission to this stored transaction, not a caller-
+   supplied replacement device key.
+3. Verify initial device proof of possession: hybrid signature over canonical
+   `["qv/register/v1", transaction_id, account_id, username, device_id,
+   device_public_keys, server_fingerprint, exporter]`.
+4. In one transaction store OPAQUE record, enroll device, consume code and mark
+   transaction complete. Repeating the same operation returns its stored result;
+   replacing the username, keys or body is rejected. The first device has no
+   vault grants until creating a vault.
 
 ### Uploading a vault
 
-A local vault starts syncing when the user links it to their account. The
-server records the vault's **recovery public key**, which later lets the
-recovery phrase prove ownership (§Recovery).
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as Client
-    participant S as Server
-    Note over C: vault unlocked, device session active
-    C->>C: derive vault recovery signing key from VK
-    C->>S: create vault: vault_id, recovery public key, proof signature
-    S->>S: verify proof, set owner to this account
-    S-->>C: vault created
-    C->>S: push all records, keyslot record, state commitment (epoch 1)
-    S-->>C: server_seq (sync cursor)
-```
+An unlocked device with an account device session creates a vault using its
+random vault ID, generation, hybrid recovery public keys, initial checkpoint
+and object references. Require recent account login, device signature and
+recovery-key proof over the same complete create-vault transcript including
+account ID and operation ID. Atomically assign ownership, grant the creating
+device and publish the initial verified state. Subsequent changes use 0005.
 
 ### Logging in
 
-"Logging in" means three different things in QuickVault:
-
-| What | Proves | Secret used | When |
-|------|--------|-------------|------|
-| **Unlocking a vault** | You may decrypt this vault | Master password or quick unlock | Every time you open a vault; fully offline (0002 §8) |
-| **Device session** | This request comes from an enrolled device | Device private keys | Automatically before syncing; invisible to the user |
-| **Account login** | You own this account | Account password (OPAQUE) | Rarely: registration, recovery, account settings, revoking a device |
-
 #### Device session
 
-1. The client asks for a challenge; the server returns 32 random bytes,
-   valid for 60 seconds. Unknown or revoked devices get a response of the
-   same shape and timing (R6).
-2. The device signs `challenge ‖ TLS exporter ‖ device_id` with both of its
-   signing keys (Ed25519 and ML-DSA-65).
-3. The server verifies both signatures against the enrolled public keys and
-   checks that the device is neither revoked nor expired. It returns a
-   session ID and a random 32-byte **session secret**.
-4. **Each request** carries the session ID, a timestamp, a counter and
-   `HMAC(session secret, method ‖ path ‖ body hash ‖ timestamp ‖ counter)`.
-   The server rejects stale timestamps and counters that don't increase.
-
-This avoids a large post-quantum signature on every request while keeping
-sessions bound to a device and a connection. Since the session secret is
-created by the server and short-lived, a MAC is the right tool here (see
-"Authentication vs. HMAC" above).
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as Client
-    participant S as Server
-    C->>S: request challenge (device_id)
-    S-->>C: challenge (32 random bytes, valid 60 s)
-    C->>C: sign challenge, TLS exporter, device_id (Ed25519 and ML-DSA-65)
-    C->>S: both signatures
-    S->>S: verify both, device enrolled, not revoked, synced within 180 days
-    S-->>C: session ID + session secret
-    loop every request
-        C->>S: request + session ID, timestamp, counter, HMAC over the request
-        S->>S: check HMAC, timestamp window, counter increases
-        S-->>C: response
-    end
-```
+1. Request a challenge for an account/device. Return a random 32-byte nonce
+   associated with device, connection exporter and transaction ID, valid for
+   60 seconds. Unknown/revoked failures have the same shape and work class.
+2. The device signs canonical
+   `["qv/device-session/v1", server_fingerprint, account_id, device_id,
+   transaction_id, challenge, exporter, authentication_generation]`.
+3. Verify both signatures, transaction/connection, enrollment and expiry;
+   consume the challenge exactly once before issuing a random 32-byte opaque
+   session token. Store only its hash with scopes and authentication generation.
+4. Use this token as an Authorization bearer on that same TLS connection.
+   Recheck revocation and grants on **every** request. A reconnect creates a
+   new session. TLS protects the complete method, path, query, body and response;
+   there is no custom per-request HMAC/counter protocol.
+5. Tokens remain in memory, never URLs/logs/config. Expire after 15 minutes idle,
+   twelve hours absolute, lock, TLS close, revocation or generation invalidation.
 
 #### Account login
 
-OPAQUE login (RFC 9807): the password never leaves the client, and a wrong
-password and an unknown username look identical to anyone watching,
-including the server.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor U as User
-    participant C as Client
-    participant S as Server
-    U->>C: username + account password
-    C->>S: OPAQUE KE1 (blinded password, nonce, ephemeral key)
-    S->>S: load OPAQUE record (a fake record if the user is unknown)
-    S-->>C: OPAQUE KE2 (OPRF evaluation, envelope, server MAC)
-    C->>C: unblind, open envelope, verify server MAC
-    alt wrong password or unknown user
-        C-->>U: wrong username or password (same message for both)
-    else correct
-        C->>S: OPAQUE KE3 (client MAC)
-        S->>S: verify client MAC
-        S-->>C: account session (valid 5 minutes)
-    end
-```
+Run OPAQUE KE1/KE2/KE3 with the pinned profile, server identity and connection.
+Release a five-minute, administration-only opaque session after verifying KE3.
+Bind it to the same TLS exporter/connection, as for device sessions. Failed
+attempts do not disclose whether username or password was incorrect. Password
+change re-registers through an authenticated account session and invalidates all
+account sessions; it cannot change vault keyslots.
 
 ### Adding a device
 
-The normal case: an already-enrolled device approves the new one and hands
-it VK end-to-end encrypted. The user never types the vault key, and the
-server only relays data it can't read.
+1. A starts from an unlocked vault and device session. The user selects the
+   vaults/generations to grant. Server creates a random single-use ticket,
+   account-bound, ten-minute expiry. A generates random 128-bit pairing secret P.
+2. A displays a QR containing protocol/enrollment profile, URL, server fingerprint,
+   account ID, ticket ID/expiry and A's complete signing-key fingerprint plus P.
+   Manual pairing encodes the same bytes; P is never sent separately to the
+   server. A fingerprint here is SHA-256 of canonical profile/public-key tuple.
+3. B verifies QR expiry and server fingerprint, generates its hybrid signing
+   identity plus fresh ephemeral X-Wing keys, and sends canonical request Q:
+   `["qv/pair-request/v1", server_fingerprint, account_id, ticket_id,
+   expiry, A_fingerprint, B_device_id, B_signing_keys, B_ephemeral_kem_key]`,
+   a hybrid B proof-of-possession signature over Q, and HMAC-SHA-512/32(P, Q).
+4. A checks exact ticket/context, both B signatures, MAC and public-key validity,
+   displays the selected grant list, and obtains explicit user approval.
+5. A creates context T containing Q, A's signing public keys, the selected vault/
+   generation list and checkpoint IDs. Encapsulate to B's ephemeral X-Wing key:
+   `(enc, shared_secret) = XWing.Encapsulate(B_key)`.
+   Derive 32-byte transport key using HKDF-SHA-512 with IKM=shared_secret,
+   salt=SHA256(canonical T), info=`"qv/pair-transfer/v1"`.
+   Encrypt payload with XChaCha20-Poly1305, fresh nonce, AAD=canonical
+   `["qv/pair-transfer/v1", T, enc]`.
+   Payload carries VKs, vault/control-record IDs, generations, portable profiles
+   and A's verified checkpoints. A signs canonical
+   `["qv/pair-approval/v1", T, enc, nonce, ciphertext]` with both signing keys,
+   and MACs the complete approval plus signatures under P.
+6. Server verifies A's current enrollment/grants, B's proof, ticket/expiry and
+   immutable approval body. Atomically consume ticket, enroll B and install only
+   approved per-vault generation grants. Repeated identical approval is
+   idempotent; a different body for a consumed ticket fails.
+7. B independently validates T against Q/QR, A's public-key fingerprint,
+   signatures and P MAC; decapsulates and authenticates payload; checks exact
+   grant list/generation/checkpoints. Server assertions are insufficient.
+   Pull and verify from those checkpoints before exposing data. Adopt only a
+   unique verified password keyslot record; a conflict needs explicit resolution.
+8. B acknowledges by signing approval hash; server deletes relay ciphertext.
+   Both devices erase P, shared secret/transport key and B's ephemeral private
+   key. Expiry/cancellation also erases local secrets and relay data.
 
-1. On device A the user chooses "Add device". A asks the server for an
-   **enrollment ticket** (single-use, 10 minutes).
-2. A generates a random 128-bit **pairing secret P** and shows a QR code
-   containing: server URL, server fingerprint, ticket ID and P. Devices without
-   a camera type the same data as words instead.
-3. New device B reads it. It pins the server key from the QR code, so no
-   separate fingerprint check is needed. B generates its device keys and sends
-   them with `HMAC(P, public keys)`.
-4. The server relays this to A. A checks the HMAC: only someone who saw A's
-   screen knows P, so the server can't slip in its own keys.
-5. The user approves on A. A signs the approval and encapsulates the VK of
-   each vault to B's X-Wing key.
-6. The server enrolls B and relays the encapsulated keys. B decapsulates
-   them, syncs, adopts the **keyslot record**, and the user unlocks B with the
-   usual master password.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor U as User
-    participant A as Device A (enrolled)
-    participant S as Server
-    participant B as New device B
-    U->>A: add a device
-    A->>S: request enrollment ticket (device session)
-    S-->>A: ticket ID (single-use, 10 min)
-    A->>A: generate pairing secret P
-    A->>U: QR code: server URL, server fingerprint, ticket ID, P
-    U->>B: scan the QR code (or type the words)
-    B->>B: pin server key from the QR code, generate device keys
-    B->>S: ticket ID, B public keys, HMAC(P, B public keys)
-    S->>A: relay B public keys + HMAC
-    A->>A: verify HMAC with P
-    A->>U: approve new device "B"?
-    U->>A: approve
-    A->>A: sign approval, encapsulate each vault's VK to B (X-Wing)
-    A->>S: approval + encapsulated VKs
-    S->>S: verify A's signature, enroll B
-    S->>B: approval + encapsulated VKs
-    B->>B: decapsulate VKs
-    B->>S: device session, pull records (including the keyslot record)
-    B->>B: adopt keyslot record as local password keyslot
-    B->>U: unlock with your usual master password
-```
+Every received array has exact field order and bounded types; no omitted context
+or variable-length string concatenation. Wrong ticket/account/server/recipient/
+profile, replay and modified ciphertext MUST fail. This composition needs the
+release validation in 0012; selecting reviewed primitives is not a protocol audit.
 
 ### Recovery (all devices lost)
 
-The account password gets you into the account, but **not** the data (R4).
-The recovery phrase proves you own the vault.
-
-1. Account login (OPAQUE) gives a 5-minute account session.
-2. The client generates new device keys. The user enters the vault's
-   recovery phrase, which decodes to VK.
-3. The client derives the vault recovery signing key from VK (HKDF seed,
-   label `qv/v1/vault-recovery-sign`) and signs `challenge ‖ vault_id ‖ new
-   device public keys`.
-4. The server verifies it against the vault's stored recovery public key
-   (§Uploading a vault) and enrolls the device.
-5. The client syncs and decrypts the records with VK. If the user still
-   knows the master password, the keyslot record is adopted as usual;
-   otherwise the user sets a new one, which is a password change.
-
-Losing all devices **and** the recovery phrase means the data is gone, even
-though the server still has the ciphertext (0001 SG8).
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor U as User
-    participant B as New device
-    participant S as Server
-    U->>B: username + account password
-    B->>S: OPAQUE login (see Account login)
-    S-->>B: account session (5 min)
-    B->>B: generate device keys
-    U->>B: recovery phrase (24 words)
-    B->>B: decode phrase to VK, derive vault recovery signing key
-    B->>S: request challenge for vault_id
-    S-->>B: challenge
-    B->>S: device public keys + recovery signature over challenge, vault_id, keys
-    S->>S: verify against the vault's recovery public key, enroll device
-    S-->>B: enrolled
-    B->>S: device session, pull records
-    B->>B: decrypt records with VK
-    alt user remembers the master password
-        B->>B: adopt keyslot record
-        B->>U: unlock with your master password
-    else master password forgotten
-        U->>B: choose a new master password
-        B->>B: new keyslot, new keyslot record (password change)
-        B->>S: push keyslot record
-    end
-```
+Account login permits listing only vault IDs, generations and recovery public
+keys needed for recovery, not encrypted manifests/objects or password slots.
+Account login alone provides no ciphertext access. For each vault being
+recovered, decode its phrase to VK and derive the independent hybrid recovery
+keys (0002). Issue a random single-use 60-second challenge tied to account session,
+connection, vault ID and current generation. The recovery signature covers
+`["qv/recover/v1", server_fingerprint, account_id, vault_id, key_generation,
+transaction_id, challenge, exporter, new_device_id, new_signing_keys]`.
+Verify against stored recovery public keys, consume challenge, enroll the device
+and grant **only that vault/generation**, atomically and idempotently.
+With no trusted checkpoint, mark the initial state as an unverified freshness
+baseline. Verify manifest integrity regardless. Adopt the password slot or create
+a new one after explicit user choice. Losing the account password too requires
+a separately specified admin reset; a recovery phrase is not an account reset.
 
 ### Master password changes
 
-Because `password` keyslots are local, a change on one device has to reach
-the others through the keyslot record.
+Create a new salt/slot and encrypted keyslot-record version as one local
+transaction with updated header MAC and manifest. Other devices may use their
+old password offline. On verified sync adopt a unique descendant keyslot
+atomically, update the local header MAC and invalidate quick unlock.
+A concurrent keyslot conflict preserves the working local password slot and
+requires user resolution; configuration candidates remain encrypted in the
+record. Pending local slot changes do not participate in verification of the
+remote manifest. Never combine salt, KDF profile or wrapped VK from different
+versions. A compromised old slot requires VK rotation for future-data protection.
 
-1. The changing device creates a new `password` keyslot (new salt, VK
-   wrapped by the new KEK), replaces its local one, and writes a new
-   **keyslot record** with an increased epoch.
-2. Another device keeps unlocking with the **old** password while offline.
-   After its next sync (while unlocked), it replaces its local keyslot with
-   the one from the record. From then on only the new password works there.
-   The user doesn't have to type the new password on each device.
-3. Quick-unlock keyslots on all devices are invalidated (0002 §5.3).
+### Revocation, sessions and expiry
 
-Accepted risk: a device that never syncs keeps accepting the old password.
-An attacker would need that device's vault file anyway.
+Revocation is one transaction: mark the device revoked, increase its
+authentication generation, revoke all associated sessions/grants and pending
+tickets/transfers, and append an audit event. Check session generation on every
+read and immediately before a write commits. Cancel active streams and prevent
+later chunks/publications after revocation; bytes already delivered cannot be
+recalled. All sessions, including already-open sessions, become unusable.
+A session that raced revocation may only finish if its authorization/publication
+linearized before revocation; no later state may be committed.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor U as User
-    participant A as Device A
-    participant S as Server
-    participant B as Device B (offline)
-    U->>A: change master password (old, new)
-    A->>A: new salt, Argon2id(new password), wrap VK, replace local keyslot
-    A->>A: write keyslot record (epoch n+1), encrypted with VK
-    A->>S: sync: push keyslot record
-    Note over S: just one more opaque record
-    Note over B: still offline, unlocks with the OLD password
-    B->>S: sync (while unlocked)
-    S-->>B: keyslot record (epoch n+1)
-    B->>B: replace local keyslot, drop quick-unlock keyslot
-    Note over B: from now on only the NEW password works
-```
+Device enrollment expires after 180 days without sync (admin-configurable).
+Expiration uses the same invalidation path. It is not tombstone garbage
+collection. A revoked holder of VK retains already obtained data and forging
+ability for that generation; rotate VK and reapprove trusted devices.
+An honest server keeps audit events for grant/enrollment/revocation/rotation;
+a malicious server can hide its own audit history, so it is not an independent
+transparency witness.
 
-## Sessions and expiry
+## Security Considerations
 
-| Credential | Expires | User action needed |
-|------------|---------|--------------------|
-| Session secret | 15 min idle / 12 h absolute / on lock | None (a new device session starts automatically) |
-| Device enrollment | When revoked, or after **180 days** without any sync (configurable by the server admin) | Add the device again from another device, or recover with the recovery phrase |
-| Account session (account settings, revocation) | 5 minutes | Re-enter the account password |
-
-Session secrets live only in memory on both sides.
-
-```mermaid
-stateDiagram-v2
-    [*] --> NoSession
-    NoSession --> Active: device signs a challenge
-    Active --> Active: request (resets idle timer)
-    Active --> NoSession: 15 min idle, 12 h absolute, or vault locked
-    NoSession --> Rejected: device revoked, or 180 days without sync
-    Rejected --> [*]: add the device again or recover
-```
-
-## Phasing
-
-| Phase | Included |
-|-------|----------|
-| v1 | Username + password (OPAQUE), device enrollment, sessions, server identity (TOFU + words), `closed` registration, configurable quotas |
-| Later | `invite` mode |
-| Hosted service | `open` mode: OpenID Connect sign-up + proof of work |
-
-## Transport
-
-- TLS 1.3 only, hybrid `X25519MLKEM768` key exchange (rustls supports it).
-- App-level: VK and other key material are transported only inside X-Wing
-  encapsulations between devices, never through the TLS layer alone.
-
-## Server-side hardening (applies to all options)
-
-- Rate limiting per account and per IP; exponential backoff.
-- Constant-shape responses for unknown accounts (OPAQUE supports fake records
-  for non-existent users).
-- Audit log of enrollments/revocations visible to the user.
+Account compromise can deny service through administrative actions but does not
+alone reveal VK. Server compromise permits account-password guessing and fork/
+freeze attacks within 0005's documented limits. Rate-limit expensive operations
+and bound challenges/tickets/staging. Authentication policy never substitutes
+for client verification of vault contents or out-of-band key distribution.
 
 ## Open Questions
 
-1. Fingerprint encoding: word list (BIP-39 English?) and number of words.
-2. Proof-of-work exact parameters (deferred to the hosted-service phase).
-3. Which OpenID Connect providers to support (deferred).
-
-Next step: write a concrete protocol spec (messages, state machines,
-endpoints) for enrollment, sessions and revocation.
+1. Hosted admission and Postgres are deferred. These are not substitutes for
+   client resource budgets or the release gates in 0012.
 
 ## Changelog
 
-- 2026-10-14: Initial exploratory version.
-- 2026-10-14: Split into admission / authentication / key transport; added
-  registration modes and quotas; explained MAC vs. signature.
-- 2026-10-14: Adopted option D; `closed` registration by default; `open`
-  mode requires email verification + proof of work; quotas configurable.
-  Status → Draft.
-- 2026-10-14: Account password separate from vault password; server identity
-  via TOFU + verification words + TLS channel binding; session proposal;
-  `open` mode uses OpenID Connect instead of email; v1 is username + password.
-- 2026-10-14: Key custody: `password` keyslot never leaves the device;
-  `recovery` keyslot stored on the server; recovery-phrase device enrollment.
-- 2026-10-14: Expiry table accepted.
-- 2026-10-14: Session design accepted, expiry proposal; password change via
-  a VK-encrypted keyslot record.
-- 2026-10-14: Recovery phrase is VK itself; no recovery keyslot anywhere.
-  The server stores only a public recovery verification key per vault.
-- 2026-10-14: Added §Flows with Mermaid diagrams (registration, vault upload,
-  device session, account login, adding a device, recovery, password change)
-  and a session state diagram. Registration via admin-issued registration
-  code; device pairing via QR code with a pairing secret; the current
-  password keyslot is synced as a VK-encrypted keyslot record so new devices
-  adopt the master password.
+- 2026-10-14: Device enrollment plus separate OPAQUE account password adopted.
+- 2026-10-15: Pin OPAQUE profile; replace per-request HMAC with TLS-bound opaque
+  sessions; invalidate active sessions on revocation; define scoped grants,
+  encrypted signing storage, ephemeral authenticated key transport, checkpoint
+  handoff and strict recovery/rotation context. Defer hosted admission/second DB.

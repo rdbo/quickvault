@@ -6,115 +6,117 @@
 
 ## Summary
 
-Rules for keeping secrets out of places they don't belong: freed memory, swap,
-core dumps, logs, clipboard history, screenshots, keyboards, and timing.
-Includes the **secret boundary** design between Rust core and the webview UI.
+Minimize plaintext lifetime and copies, prevent application-created plaintext
+files, and state the OS protections required against a locked-device disk image.
+UI handles minimize exposure; they are not isolation from compromised frontend code.
 
 ## Specification
 
-### 1. Memory
+### 1. Memory and locked-device protection
 
-1.1. All key material and decrypted secret values MUST be held in types that
-zeroize on drop (`zeroize`, `secrecy::SecretBox`). `Debug`/`Display` on these
-types MUST print redacted placeholders.
+1.1. Keys, passwords, plaintext payloads, metadata and serialization/normalization
+buffers use zeroizing allocations with redacted Debug/Display. Audit library
+intermediates, error paths, panics, cloning and reallocation; a final SecretBox
+does not erase preceding copies. Core dumps and debugger attachment MUST be
+disabled where supported before reading secrets; report unsupported protection.
 
-1.2. Long-lived key material (VK, purpose keys) SHOULD be in memory locked
-against swapping (`mlock` / `VirtualLock`), via one small `unsafe` module
-(`qv-crypto::locked`). Failure to lock MUST be logged (without secrets) and
-not be fatal.
+1.2. Lock keys and short-lived protected-value buffers before filling them,
+through a small reviewed memory module. Prefer no-access/guarded allocations
+where supported. A locking failure MUST be surfaced as reduced protection,
+never merely buried in logs. Do not claim that zeroizing RAM erases swap.
+Keep protected values encrypted when idle. Wipe decrypted record buffers after
+building metadata views or completing an edit; do not build a plaintext password
+search index. Metadata is confidential even when marked non-protected.
 
-1.3. Avoid hidden copies: no `String` reallocation for secrets (pre-sized
-buffers), no cloning of secret types.
+1.3. The locked-device full-disk-image guarantee requires encrypted OS storage,
+swap and hibernation with keys unavailable to the thief in the relevant locked
+or powered-off state. Memory locking alone does not protect hibernation or
+garbage-collected webview copies. Detect/report known configuration gaps; where
+the platform cannot establish these prerequisites, require explicit reduced-
+protection acknowledgement before persistent secret use and expose that mode
+in security settings. Do not infer that a screen lock necessarily seals all
+disk-encryption keys. This limitation is part of 0001, not an unlocked-malware
+exception.
 
-1.4. Processes SHOULD disable core dumps and debugger attachment where the OS
-allows (`prctl(PR_SET_DUMPABLE, 0)` on Linux, equivalents elsewhere).
-
-1.5. On lock: zeroize the in-memory index, purpose keys and VK; drop
-UI-held revealed values.
+1.4. Lock on inactivity, OS screen lock/sleep, and mobile background expiry.
+Cancel in-flight operations, invalidate session-scoped handles and network
+credentials, close authenticated TLS connections, clear clipboard if still
+owned, zeroize keys/metadata/buffers and
+destroy revealed UI state. Late responses must not repopulate a locked session.
+Do not persist plaintext for OS state restoration, search indexing, recent
+documents, accessibility caches or crash restoration.
 
 ### 2. Timing
 
-2.1. Secret-dependent comparisons MUST use constant-time operations
-(`subtle`). Crypto crates used MUST be constant-time implementations.
-
-2.2. Server: responses for unknown accounts/devices MUST be indistinguishable
-in content and timing from failed attempts on existing ones.
-
-2.3. Search over decrypted data is in memory and is not considered
-timing-sensitive (attacker would need code on the device, out of scope).
+Use constant-time cryptographic comparisons and implementations. Unknown
+account/device failures must match existing-credential failures in shape and
+work class with rate limits and fake OPAQUE records. Do not claim the server
+cannot distinguish its own registered account database. Vault search is local;
+network content is not generated from protected-value searches.
 
 ### 3. OS leaks
 
 | Channel | Rule |
 |---------|------|
-| Clipboard | Copy marks the content as sensitive (Android `ClipDescription.EXTRA_IS_SENSITIVE`, Windows `ExcludeClipboardContentFromMonitorProcessing` / no-history formats, KDE `x-kde-passwordManagerHint`). Auto-clear after 20 s (configurable), only if the clipboard still holds our value. |
-| Screenshots / recents | Android `FLAG_SECURE`; hide content in app switcher on iOS/macOS/Windows where possible. |
-| Keyboard | Secret inputs use no-personalized-learning / password input types (Android `IME_FLAG_NO_PERSONALIZED_LEARNING`). |
-| Logs & crash reports | Never contain secrets; secret types are redacted by construction (1.1). |
-| Temp files | Never write plaintext to disk. Export writes directly to the user-chosen path. |
-| Auto-lock | On inactivity timeout, system sleep, screen lock, and (mobile) going to background after a grace period. All configurable. |
+| Clipboard | Use sensitive/no-history flags, clear after 20 seconds only if still owned; flags cannot force all clipboard managers to comply |
+| Screenshots/recents | Android FLAG_SECURE; hide previews where supported; no universal desktop screenshot-prevention claim |
+| Keyboard | Password/no-learning input types; native secure input for master password, recovery phrase and edited protected values |
+| Logs/crash reports | No plaintext, keys, recovery phrases, tokens or secret-bearing URLs; redact at type boundaries |
+| Temp files | No plaintext; explicit plaintext export is a separately confirmed operation to a user-selected path |
+| Autofill | Match verified app identity/web origin, not display labels or URL substrings; require choosing conflicted credentials |
 
-### 4. The secret boundary (UI)
+### 4. Frontend boundary and webview contract
 
-Dioxus desktop/mobile renders in a webview; anything rendered there is a
-JavaScript value outside Rust's control.
+4.1. The trusted client includes Rust crypto/model/store/sync code, platform
+adapters and any frontend that handles secret input or can request reveal.
+qv-core owns authorization/session policy, not every allocation of plaintext.
+Handles are scoped to one unlocked session and unforgeable outside its bridge;
+they expire on lock. They reduce copies but do not prevent malicious UI code
+from invoking an allowed reveal operation.
 
-4.1. `qv-core` exposes data to frontends as **views** with non-secret
-metadata and **handles** for protected fields (0003 §5 `protected`).
+4.2. Bundle all executable UI assets locally. Enforce restrictive CSP with no
+remote scripts, eval or inline executable code. Block navigation, frames,
+popups and remote subresources; no remote favicon fetching. Render vault text
+as escaped text, never raw HTML or executable markdown. Permit explicit http/
+https external links only after parsing; reject javascript/data/file and
+unregistered custom schemes. External pages never receive the privileged bridge.
 
-4.2. Protected values reach the UI only on an explicit, user-initiated
-**reveal**, for a limited time (auto-hide, default 30 s), and are cleared from
-the UI state afterwards.
+4.3. Bridge methods are allowlisted, typed, bounded and checked in Rust for
+current session, vault, field and operation. Never expose arbitrary filesystem,
+shell, SQL, network or crypto functions. Protected reveal requires an explicit
+UI action, expires after 30 seconds and is cleared on lock. Copy/autofill goes
+Rust directly to the OS. A compromised authorized webview remains a compromise
+of the trusted client; do not advertise handles as an XSS defense.
 
-4.3. **Copy** and **autofill** do not go through the UI: the UI sends
-`copy(field_handle)` and Rust writes directly to the OS clipboard / autofill
-response.
+4.4. GUI master password/recovery/protected-value editing uses native secure-input
+controls owned by the platform layer; the CLI uses non-echoing OS TTY input.
+The webview receives completion/cancel
+signals, not input text. Native reveal is preferred; if the supported frontend
+cannot provide secure input, that path MUST NOT ship with a stronger memory
+claim. Native controls also require zeroizing bridge buffers and OS protection;
+they cannot promise immunity to a compromised OS.
 
-4.4. Password **input** (master password, editing a secret) is unavoidably
-typed into the webview. Keep it to the shortest time possible, clear inputs
-immediately after use.
+### 5. Local files and testing
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor U as User
-    participant W as Webview UI
-    participant Core as qv-core (Rust)
-    participant OS as OS clipboard
-    W->>Core: list entries
-    Core-->>W: views: title, username, URL, field IDs (protected values left out)
-    U->>W: click Copy password
-    W->>Core: copy(field ID)
-    Core->>OS: write the value, marked sensitive
-    Note over W: the value never enters the webview
-    Core->>Core: start the 20 s timer
-    Core->>OS: clear, if the clipboard still holds our value
-    U->>W: click Reveal
-    W->>Core: reveal(field ID)
-    Core-->>W: value, temporarily
-    Note over W: shown for 30 s, then dropped from UI state
-```
-
-> **Open design area.** Revisit before UI work starts. Options include a
-> native (non-webview) secure input widget, Dioxus native rendering (Blitz)
-> once mature, or accepting the webview exposure as within the "unlocked
-> device" boundary of 0001.
+Private app state, signing bundles and anchors use owner-only permissions and
+atomic durable updates. Symlink/path replacement must not redirect writes.
+Test lock during sync/reveal/autofill, all secret-input error paths, redacted
+logging, malicious HTML/URLs, blocked navigation/bridge access, swap/hibernation
+configuration reporting and clipboard ownership races on each supported target.
 
 ## Security Considerations
 
-Much of this is best-effort: garbage-collected webview memory, OS keyboard
-caches and compositor buffers cannot be fully controlled. The rules above
-reduce the window and number of copies; they do not defend against T-out-of-
-scope malware on an unlocked device (0001).
+Best-effort UI/OS cleanup is not proof of physical erasure. The locked-device
+guarantee is conditional on §1.3; unlocked malware and a compromised OS remain
+out of scope. Remotely supplied parser/rendering inputs remain in scope.
 
 ## Open Questions
 
-1. The secret boundary (§4) — accept, refine or replace.
-2. Linux: no standard way to mark clipboard content sensitive outside KDE —
-   what's the fallback on GNOME/wlroots?
+1. Validate native input and OS protection detection per supported platform.
+   Unsupported protection must be visible and cannot silently inherit claims.
 
 ## Changelog
 
-- 2026-10-14: Initial draft.
-- 2026-10-14: CLI prints secrets only with `--reveal` (0009 §3).
-- 2026-10-14: Secret boundary as a Mermaid diagram.
+- 2026-10-14: Initial memory/webview proposal.
+- 2026-10-15: Specify OS prerequisites, lazy protected-value handling, native
+  input, mandatory webview/bridge hardening and lock-time operation cancellation.

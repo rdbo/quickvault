@@ -6,190 +6,168 @@
 
 ## Summary
 
-A vault is a single SQLite database file (`*.qvault`) whose rows are
-individually encrypted with application-level AEAD. The file is
-self-contained: master password (or recovery phrase) + file = full access.
+A vault is a SQLite database of encrypted immutable objects and an authenticated
+manifest. A closed consistent export is self-contained for decryption. Rollback
+detection also needs an external remembered anchor. The active DB is private
+application storage, not a file-sync target.
 
 ## Specification
 
-### 1. File
+### 1. Files and opening
 
-1.1. Extension `.qvault`. SQLite `application_id` set to a QuickVault-specific
-constant; `user_version` holds the schema version.
+1.1. Extension `.qvault`; fixed `application_id` and `user_version`.
+Use owner-only file permissions (0600, private 0700 directory on Unix;
+equivalent ACLs elsewhere). Reject symlinks, nonregular files and unexpected
+path replacement. Export destinations are explicit user choices; new exports
+and restored snapshots MUST NOT overwrite existing paths.
 
-1.2. Required pragmas: `secure_delete = ON`, `temp_store = MEMORY`,
-`foreign_keys = ON`. Journal mode: `DELETE` (not WAL), so that a vault is a
-single file safe to copy or sync with file-sync tools.
+1.2. Set `secure_delete=ON`, `temp_store=MEMORY`, `foreign_keys=ON`,
+`journal_mode=DELETE`, `synchronous=FULL`, `trusted_schema=OFF`, `mmap_size=0`.
+Disable extensions, triggers, views and unused virtual-table features; enable
+SQLite defensive mode. Register no secret-bearing application SQL functions.
+Required hardening failures abort opening. Run bounded `quick_check` and
+validate the exact released schema before reading vault tables. Unexpected
+triggers, views, expression indexes or schema versions are errors.
+See [SQLite security guidance](https://www.sqlite.org/security.html).
 
-1.3. The client MUST hold an exclusive lock while writing and MUST detect
-external modification (mtime + content hash of header row) before writing.
+1.3. Serialize writers with a private per-vault process lock plus SQLite
+transactions. Re-read the manifest head inside `BEGIN IMMEDIATE`; an unexpected
+head requires reload/merge before editing. Track file identity and reject
+external replacement. Modification time and header hashes are not concurrency
+or integrity checks. Local locks do not make external live copying safe.
 
-### 2. Schema (logical)
+### 2. Logical schema
 
-```sql
--- exactly one row
-CREATE TABLE header (
-  format_version   INTEGER NOT NULL,
-  vault_id         BLOB    NOT NULL,   -- 16 bytes
-  min_suite        INTEGER NOT NULL,
-  kdf_suite        INTEGER NOT NULL,
-  kdf_salt         BLOB    NOT NULL,
-  header_mac       BLOB    NOT NULL    -- 0002 §7.3
-);
+Released DDL MUST implement these constraints and be validated on opening.
+Fixed-length IDs, singleton counts and uniqueness are checked independently
+of attacker-supplied SQL constraints.
 
-CREATE TABLE keyslot (
-  slot_id      BLOB PRIMARY KEY,
-  slot_type    TEXT NOT NULL,          -- password | quick-unlock
-                                       -- rows are never synced; the current
-                                       -- password keyslot travels only inside
-                                       -- the VK-encrypted keyslot record (0006)
-  device_id    BLOB,                   -- quick-unlock only; never synced
-  suite        INTEGER NOT NULL,
-  wrapped_vk   BLOB NOT NULL
-);
+| Table | Key | Contents |
+|-------|-----|----------|
+| `header` | exactly one row | format, vault ID, key generation, data profile, minimum profiles, header MAC |
+| `keyslot` | slot ID | type, device binding, KDF profile/salt, wrapping profile, wrapped VK |
+| `object` | (key generation, object ID) | type, record/attachment ID, version ID or chunk index, profile, ciphertext |
+| `manifest` | manifest hash | generation, profile, nonce and encrypted manifest |
+| `head` | exactly one row | current manifest hash |
+| `sync_state` | remote ID | encrypted verified remote base, cursor and pending publication |
+| `anchor_update` | old anchor digest | authenticated complete anchor transition pending external durability |
 
--- current version of every record
-CREATE TABLE record (
-  record_id    BLOB PRIMARY KEY,       -- 16 bytes
-  suite        INTEGER NOT NULL,
-  ciphertext   BLOB NOT NULL           -- nonce ‖ AEAD output
-);
+2.1. A record may have several active versions. The manifest defines active,
+historical and suppressed versions; a single record-ID primary key or upload
+order cannot do so. Logical version IDs remain stable across reencryption.
+Causality does not require retained historical payloads (0005). Object IDs are
+random 128-bit IDs. A changed attachment chunk gets a new object ID.
 
--- previous versions (0007)
-CREATE TABLE record_history (
-  record_id    BLOB NOT NULL,
-  version_id   BLOB NOT NULL,          -- random
-  suite        INTEGER NOT NULL,
-  ciphertext   BLOB NOT NULL,
-  PRIMARY KEY (record_id, version_id)
-);
+2.2. Plaintext routing data is limited to random IDs, profiles, key generation,
+sizes and local keyslot type/device binding. Header/keyslot metadata is MAC'd.
+Kinds, clocks, names, dates, deletions and reference roles are encrypted. Public
+server reference lists reveal object liveness as accepted leakage (0001).
 
-CREATE TABLE attachment_chunk (
-  attachment_id BLOB NOT NULL,
-  idx           INTEGER NOT NULL,
-  suite         INTEGER NOT NULL,
-  ciphertext    BLOB NOT NULL,
-  PRIMARY KEY (attachment_id, idx)
-);
+### 3. Encoding and encryption
 
--- per-remote sync bookkeeping (0005); contents encrypted
-CREATE TABLE sync_state (
-  remote_id    BLOB PRIMARY KEY,
-  ciphertext   BLOB NOT NULL
-);
-```
+3.1. Use RFC 8949 core deterministic CBOR: shortest encodings, definite lengths,
+integer map keys in deterministic order, valid UTF-8, no floats/tags/duplicate
+keys. Reject noncanonical encodings. Preserve unknown optional payload keys
+within budgets; unknown required features or security/control kinds fail closed.
+Transcripts and hashes use exact canonical bytes, not ambiguous concatenation.
 
-```mermaid
-erDiagram
-    HEADER {
-        INTEGER format_version
-        BLOB vault_id
-        INTEGER min_suite
-        INTEGER kdf_suite
-        BLOB kdf_salt
-        BLOB header_mac
-    }
-    KEYSLOT {
-        BLOB slot_id PK
-        TEXT slot_type "password or quick-unlock"
-        BLOB device_id "quick-unlock only"
-        INTEGER suite
-        BLOB wrapped_vk
-    }
-    RECORD {
-        BLOB record_id PK
-        INTEGER suite
-        BLOB ciphertext "nonce and AEAD output"
-    }
-    RECORD_HISTORY {
-        BLOB record_id PK, FK
-        BLOB version_id PK
-        INTEGER suite
-        BLOB ciphertext
-    }
-    ATTACHMENT_CHUNK {
-        BLOB attachment_id PK, FK
-        INTEGER idx PK
-        INTEGER suite
-        BLOB ciphertext
-    }
-    SYNC_STATE {
-        BLOB remote_id PK
-        BLOB ciphertext "cursor, epoch"
-    }
-    HEADER ||--|{ KEYSLOT : "unlocked through"
-    RECORD ||--o{ RECORD_HISTORY : "previous versions"
-    RECORD ||--o{ ATTACHMENT_CHUNK : "attachment_meta record owns"
-```
+3.2. A record plaintext is
+`{ kind, version_id, clock, modified_at, deleted, payload }`.
+Pad with Padmé and authenticate framing with the original plaintext length;
+validate that length against the decrypted buffer and decoding budget.
+Encrypt under the per-record key with a fresh 24-byte nonce and canonical AAD
+`["qv/record/v1", vault_id, key_generation, record_id, version_id,
+object_id, data_profile]`. Routing fields must match the envelope.
+An object ID is immutable within a key generation.
 
-2.1. Only IDs, suite numbers and slot types are plaintext. Timestamps, HLCs,
-kinds and tombstone flags live inside the ciphertext.
+3.3. Chunks use the attachment key and AAD
+`["qv/chunk/v1", vault_id, key_generation, attachment_id, object_id,
+chunk_index, data_profile]`. Attachment metadata names ordered chunk objects,
+total length and SHA-256 content hash. Verify each chunk's AEAD before release
+and complete length/hash before accepting the attachment as complete.
+Changed content uses new objects.
 
-### 3. Record encryption
+3.4. Encrypt each manifest with the VK-derived manifest key, fresh nonce and AAD
+`["qv/manifest/v1", vault_id, key_generation, data_profile]`.
+Its plaintext names sorted active (record ID, version ID, clock) heads,
+retained history, permanent tombstones, history suppression frontiers, and
+a sorted object reference list:
+`[object_id, object_type, data_profile, ciphertext_length, SHA256(ciphertext)]`.
+Each role resolves uniquely to a reference with matching authenticated routing.
+Include a digest of portable header configuration (format, vault ID, generation
+and stored-data/derivation minima). Password-slot descriptors are authenticated
+inside complete keyslot records; local operational slot selection and quick
+slots are bound by the local header MAC, not a remote configuration digest.
+Local sync state uses a separate purpose key and is excluded from exports.
+Manifests, checkpoints, sync state and anchors are not ordinary records.
 
-3.1. Plaintext envelope (CBOR):
-`{ kind, hlc, device_id, deleted, payload, prev_version_hash }`.
+3.5. `manifest_hash = SHA256(canonical manifest envelope including ciphertext)`.
+`reference_digest = SHA256(canonical sorted reference list)`; publish the list
+to the server for retention, and compare it to the decrypted manifest.
+The manifest excludes itself, its checkpoint and local-only tables.
+On unlock/import/sync verify exact reference membership, duplicates, lengths
+and hashes. Ignore unreferenced objects. Authenticate all active record AEADs
+before exposing views. Check retained history/chunk ciphertext completeness
+immediately and their AEADs on use.
 
-3.2. The envelope is padded with **Padmé** padding before encryption to hide
-exact sizes (bounded overhead ≤ 12 %).
+### 4. Resource budgets
 
-3.3. `ciphertext = nonce(24) ‖ XChaCha20-Poly1305(record_key(record_id), nonce, padded, aad)`
-using the per-record key from 0002 §3.6,
-with `aad = "qv/record" ‖ vault_id ‖ record_id ‖ suite`.
+4.1. Enforce bounds before allocating from untrusted lengths. Initial limits:
+1 MiB padded record ciphertext; 128 KiB chunk ciphertext; 32 MiB manifest;
+CBOR nesting 32; 4,096 fields per entry; 256 writers per clock; 256 concurrent
+heads per record; 100,000 record IDs including tombstones; 1,000,000 referenced
+objects; 1 GiB total referenced ciphertext; 10 MiB per attachment; 256 KiB per
+text/byte field. Header/keyslot metadata is at most 64 KiB with at most 64 slots.
+Apply SQLite length, column, expression, page-count and execution-step limits.
+Stream object hashes; never load total ciphertext or all attachments into RAM.
 
-### 4. In-memory index
+4.2. Network pages are at most 8 MiB and aggregate upload/download staging
+2 GiB; per-object limits also apply. Checkpoint pages contain at most 1,024
+links. Group traversal is iterative, bounded by record count. Check counter
+arithmetic. Known KDF profiles select exact work factors; unknown profiles fail
+before any KDF. The server cannot supply arbitrary work factors.
 
-4.1. On unlock, all `record` rows are decrypted into an in-memory index
-(search, tree) held by `qv-core`. Search never touches disk in plaintext.
+4.3. Limits are local safety policy, not server-controlled values. A user may
+explicitly select a documented larger local policy before retrying. Limits
+fail without replacing accepted state or dropping causal metadata.
 
-4.2. On lock, the index MUST be zeroized and dropped (0008).
+### 5. Unlock and writes
 
-### 5. Writes
+5.1. Validate SQLite, header bounds and profiles; unwrap VK; verify header MAC;
+authenticate manifest, completeness and external anchor; verify active versions;
+then build bounded metadata/search views. Protected values stay encrypted when
+idle and are decrypted only into short-lived zeroizing buffers on demand.
+Metadata and intermediate decoding buffers are confidential too (0008).
 
-5.1. Every mutation is one SQLite transaction: move the current version to
-`record_history`, write the new version, enforce history limits (0007).
+5.2. Each mutation is one transaction: store immutable objects, update
+active/history references and suppression metadata, store the new manifest,
+update head, persist outbox and anchor transition, then prune by references.
+Commit durably, advance external anchor (0005 §5.4), then report success.
+Integrity failure aborts the whole candidate; never silently omit a bad record.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant UI as UI or CLI
-    participant Core as qv-core
-    participant DB as Vault file (SQLite)
-    UI->>Core: edit entry (handle, changes)
-    Core->>Core: new envelope: payload, new HLC, device_id, prev_version_hash
-    Core->>Core: Padmé padding, encrypt with the per-record key and a fresh nonce
-    Core->>DB: BEGIN IMMEDIATE
-    Core->>DB: check the file was not changed by another program
-    Core->>DB: copy the current row to record_history
-    Core->>DB: write the new row to record
-    Core->>DB: prune history beyond N versions (conflict versions kept 30 days)
-    Core->>DB: COMMIT
-    Core->>Core: update the in-memory index, schedule a sync
-    Core-->>UI: updated entry view
-```
-
-5.2. Plaintext MUST NEVER be written to the database, temp files, logs or
-crash reports.
+5.3. Never write plaintext to DB pages, journals, temp files, logs or crash
+reports. SQLite backup exports contain portable manifest, referenced objects
+and password slot; remove local sync state, writer identity, anchors, sessions
+and quick slots, then recompute the export header MAC. Export normalization
+uses a private writable backup copy before validation and publication (0005 §4).
 
 ## Security Considerations
 
-- `secure_delete` overwrites freed pages, but filesystems with copy-on-write
-  or SSD wear-leveling may keep old ciphertext. That is acceptable because
-  old pages are ciphertext only.
-- The header is authenticated after unlock; KDF minimums are enforced before
-  the KDF runs (0002 §7.3).
-- A tampered file (T5) can only cause a decryption failure, which MUST abort
-  the operation for that record and be reported, never silently ignored.
+AEAD alone does not detect missing rows. Manifests detect omission relative to
+an authenticated state; external anchors detect known rollback with the limits
+in 0005. Physical deletion is not secure erasure on SSDs, copy-on-write storage
+or backups. SQLite/CBOR are hostile parsers before authentication.
+Ordinary active-file copying is unsupported
+([SQLite warning](https://www.sqlite.org/howtocorrupt.html)).
 
 ## Open Questions
 
-1. Is decrypting the whole vault at unlock acceptable for large vaults
-   (10k+ entries) on mobile, or do we need lazy decryption?
-2. Should attachments live in the same file (simple, portable) or in a
-   sidecar (smaller main file for file-sync tools)? Current choice: same file.
+1. Benchmark budgets on supported mobile devices before freezing the first
+   format. Changes require documented policy/version updates.
 
 ## Changelog
 
-- 2026-10-14: Initial draft.
-- 2026-10-14: Status → Accepted.
-- 2026-10-14: Schema and write path as Mermaid diagrams (no behaviour change).
+- 2026-10-14: Initial accepted encrypted-row design.
+- 2026-10-15: Amendment: immutable multi-head objects, canonical manifests,
+  external anchors, parser budgets, SQLite hardening and safe exports. Replace
+  header/mtime checks and eager protected-value indexing.

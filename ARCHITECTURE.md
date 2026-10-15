@@ -1,254 +1,175 @@
 # QuickVault Architecture
 
 QuickVault is an offline-first, end-to-end encrypted password manager with
-optional synchronization. This document gives the high-level picture. The
-normative details live in [`specs/`](specs/README.md); when this document and a
-spec disagree, the spec wins.
+optional synchronization. The normative specifications are in
+[specs/](specs/README.md). This repository currently specifies the design;
+it does not yet contain production clients or a server.
 
-## 1. Goals
+## 1. Goals and scope
 
-| # | Goal | Primary spec |
-|---|------|--------------|
-| G1 | Store any kind of secret data, organised in nested groups (KeePassXC-like) | [0003](specs/0003-data-model.md) |
-| G2 | Fully functional offline; sync is optional | [0004](specs/0004-local-storage.md), [0005](specs/0005-synchronization.md) |
-| G3 | Desktop (Linux, Windows, macOS, maybe BSD), mobile (Android, iOS) and CLI clients | [0009](specs/0009-clients-and-platforms.md) |
-| G4 | State-of-the-art, upgradable cryptography, hybrid post-quantum where asymmetric crypto is used | [0002](specs/0002-cryptography.md) |
-| G5 | Zero-knowledge server: it never learns secrets or keys | [0005](specs/0005-synchronization.md), [0006](specs/0006-server-authentication.md) |
-| G6 | Side-channel awareness (memory, timing, clipboard, screen, OS leaks) | [0008](specs/0008-memory-and-side-channels.md) |
-| G7 | Recoverable history: undo deletions and bad syncs | [0007](specs/0007-history-and-backups.md) |
-| G8 | Multi-user, multi-vault server, self-hosted or hosted | [0006](specs/0006-server-authentication.md) |
-| G9 | Strong, unbiased password and passphrase generation | [0010](specs/0010-password-generator.md) |
-| G10 | Scriptable CLI as the first client | [0011](specs/0011-cli.md) |
+Store generic secrets in nested groups, work fully offline, provide recoverable
+edits and explicit conflicts, and optionally sync through an untrusted server.
+Linux CLI comes first, followed by desktop and mobile clients. Security includes
+metadata confidentiality, hostile-input handling and practical OS integration.
 
-**Non-goals (v1):** sharing vaults between users, browser extension,
-auto-type, key files, hardware tokens. The design must not *preclude* them.
+v1 excludes cross-user sharing, a browser extension, auto-type, key files,
+hardware-token authentication and hosted open registration. These are separate
+future designs, not requirements to prebuild into every subsystem.
 
-## 2. Guiding principles
+## 2. Design decisions
 
-1. **The server is untrusted storage.** It sees only random IDs, ciphertext,
-   sizes and timing. Everything else is encrypted client-side.
-2. **The vault file is self-contained.** A vault is one SQLite file that can be
-   copied, backed up or synced by any file-sync tool, and opened with only the
-   master password.
-3. **Crypto agility through versioned suites.** Every ciphertext and every
-   key-derivation record carries a suite identifier. Algorithms and parameters
-   are fixed *per suite*, and upgrading means introducing a new suite and
-   migrating, never silently changing an existing one.
-4. **Hybrid asymmetric crypto.** Wherever a public-key primitive is used, it is
-   a classical + post-quantum hybrid (e.g. X25519 + ML-KEM-768). Symmetric
-   primitives with 256-bit keys are already considered PQ-safe.
-5. **Secrets live in Rust, behind one boundary.** Decrypted secret values stay
-   inside `qv-core`; frontends work with handles and request plaintext
-   explicitly (see §5).
-6. **One merge algorithm everywhere.** Server sync, file-based sync and
-   importing an old backup all reduce to merging two sets of versioned records.
-7. **Audited building blocks only.** RustCrypto / well-reviewed crates, no
-   home-grown primitives, `#![forbid(unsafe_code)]` everywhere except one small
-   reviewed module for memory locking.
+1. **Untrusted storage.** Server data is ciphertext plus the random references,
+   liveness, sizes, generations and timing needed to store it. Clients verify
+   authenticated manifests; TLS and server authorization are not vault integrity.
+2. **Private active DB, immutable exchange.** A vault is SQLite with encrypted
+   objects. Export through the backup API into new immutable files for Dropbox/
+   Syncthing exchange. Never synchronize or replace the actively opened DB.
+   A consistent export plus its password or recovery phrase decrypts the data;
+   rollback detection also requires separately remembered checkpoints.
+3. **Independent immutable crypto profiles.** KDF, data, wrapping, signatures
+   and account authentication evolve separately. Changing KDF cost does not
+   require migrating unrelated protocols. Data migration creates a new key
+   generation with an explicit resumable transition.
+4. **Causal whole-record conflicts.** Merge maximal version-vector heads without
+   creating synthetic edits. Preserve concurrent credentials intact and require
+   explicit resolution. HLCs/dates are display data, not replay protection.
+5. **Exact references and honest guarantees.** Manifests cover active versions,
+   retained history, chunks and permanent tombstones. Checkpoint ancestry and
+   external anchors detect known regressions. Isolated server forks or freezes
+   need independent checkpoint comparison; automatic global freshness is not
+   promised.
+6. **Minimize plaintext.** qv-core owns session/authorization policy; the trusted
+   client includes the Rust subsystems, platform adapters and privileged frontend.
+   Protected values stay encrypted when idle, native secure controls collect
+   secret input, and clipboard/autofill bypass the webview. Handles reduce copies
+   but do not isolate secrets from a compromised authorized UI.
+7. **Reviewed building blocks and compositions.** Use reviewed implementations,
+   recorded versions/audits and vectors. The pairing/session/migration protocols
+   still require independent review. Memory safety and encryption do not replace
+   hostile SQLite/CBOR/rendering-input defenses.
 
-## 3. System overview
+## 3. Components and trust boundaries
+
+These are logical subsystems; split physical crates as interfaces stabilize
+rather than creating unused workspace scaffolding.
+
+| Component | Responsibility |
+|-----------|----------------|
+| qv-crypto | Profiles, key hierarchy, encryption, signature verification, protected memory |
+| qv-model | Canonical payloads, atomic records, deterministic tree projection |
+| qv-store | Hardened SQLite, immutable objects, manifests, transactions, backup exports |
+| qv-protocol | Bounded canonical wire types, contexts and version registry |
+| qv-sync | Causal merge, remote candidate state and publication orchestration |
+| qv-core | Session policy, handles, lock cancellation, mutation authorization |
+| qv-platform | Native secure input, keystore, clipboard, verified OS autofill |
+| qv-cli / qv-app | Explicit user actions and views; no unrestricted crypto/file/SQL bridge |
+| qv-server | Accounts, grants, sessions, opaque objects, atomic checkpoint publication |
+
+Frontends call qv-core. Core injects platform traits and orchestrates model,
+store, crypto and sync. Crypto/model have no dependency on frontends. Server
+uses protocol types and public-key verification libraries; its inability to
+decrypt rests on key custody, not a missing Cargo dependency.
 
 ```mermaid
 flowchart TB
-    subgraph device["Client device"]
-        app["qv-app: Dioxus UI"]
-        cli["qv-cli: qvault command"]
-        shims["qv-platform: autofill, keystore, clipboard"]
-        core["qv-core: vault sessions, secret boundary, auto-lock"]
-        model["qv-model: entries, groups, CBOR"]
-        crypto["qv-crypto: suites, keys, wrap and unwrap"]
-        store["qv-store: SQLite vault file"]
-        sync["qv-sync: HLC, merge, sync client"]
-        file[("vault.qvault, one SQLite file")]
-        app -->|"views and handles"| core
-        cli --> core
-        shims --> core
-        core --> model
-        core --> crypto
-        core --> store
-        core --> sync
-        store --> file
-    end
-    fsync["File-sync tools: Syncthing, Dropbox"]
-    server["qv-server (Axum): accounts, devices, encrypted record log, retention"]
-    sdb[("Postgres or SQLite")]
-    file <--> fsync
-    sync <-->|"HTTPS, TLS 1.3 with hybrid PQ key exchange"| server
-    server --> sdb
+    ui["CLI / local UI + native secure input"] --> core["qv-core: policy and sessions"]
+    core --> rust["trusted Rust: model, crypto, store, sync"]
+    core --> platform["platform: keystore, clipboard, autofill"]
+    rust --> db[("private active SQLite vault")]
+    db -->|"SQLite backup API"| snapshot["immutable encrypted exports"]
+    snapshot <-->|"file exchange"| files["Dropbox / Syncthing"]
+    rust <-->|"TLS 1.3 hybrid; authenticate remote before merge"| server["untrusted server"]
+    anchor[("private external anchors")] <--> core
 ```
 
-## 4. Repository layout
+No plaintext or device-bound credentials go into exports. Explicit self-contained
+exports do contain a password slot, so their provider can attempt offline guessing.
+The native/OS memory conditions of 0008 qualify locked-device protection.
 
-A single Cargo workspace:
+## 4. Key hierarchy and lifecycle
 
-```
-quickvault/
-├── ARCHITECTURE.md
-├── specs/                 # RFC-style specifications (normative)
-├── crates/
-│   ├── qv-crypto/         # primitives, suites, key hierarchy, padding
-│   ├── qv-model/          # plaintext data model + CBOR (de)serialization
-│   ├── qv-store/          # SQLite vault file: schema, migrations, history
-│   ├── qv-protocol/       # sync/auth wire types shared by client and server
-│   ├── qv-sync/           # HLC, record merge, sync client
-│   ├── qv-core/           # vault sessions, secret handles, locking policy
-│   ├── qv-platform/       # keystore/biometrics, clipboard, autofill glue
-│   ├── qv-server/         # Axum sync server
-│   ├── qv-cli/            # command-line client (`qvault`)
-│   └── qv-app/            # Dioxus desktop + mobile application
-└── platform/
-    ├── android/           # minimal autofill-service stub (if Rust/JNI can't host it alone)
-    └── ios/               # credential-provider extension target
-```
+Each vault has a random 256-bit VK, encoded directly as a 24-word recovery
+phrase. Argon2id derives a password KEK that wraps VK. Independently derived
+purpose keys protect records, attachments, manifests, headers, checkpoints and
+local state. Platform quick-unlock envelopes use supported OS algorithms rather
+than requiring XChaCha hardware support.
 
-Crate dependencies (an arrow means "depends on"):
+Changing the master password replaces a complete keyslot but does not revoke
+a copied old slot or rotate VK. Compromise recovery creates a new VK/generation,
+reencrypts retained data, changes recovery verification keys, invalidates old
+grants, and requires fresh out-of-band approval of remaining devices. It cannot
+erase secrets already copied. See [0002](specs/0002-cryptography.md).
 
-```mermaid
-flowchart TD
-    app[qv-app] --> core[qv-core]
-    app --> platform[qv-platform]
-    cli[qv-cli] --> core
-    cli --> platform
-    platform -->|"implements core traits: clipboard, keystore"| core
-    core --> sync[qv-sync]
-    core --> store[qv-store]
-    core --> model[qv-model]
-    core --> crypto[qv-crypto]
-    sync --> protocol[qv-protocol]
-    sync --> store
-    sync --> crypto
-    store --> model
-    store --> crypto
-    server[qv-server] --> protocol
-```
+## 5. Main flows
 
-Rules:
-- Dependencies point downward only. `qv-crypto` and `qv-model` depend on
-  nothing internal.
-- `qv-core` defines traits for OS services (clipboard, keystore); frontends
-  inject the `qv-platform` implementations. This avoids a cycle between core
-  and platform.
-- `qv-server` depends only on `qv-protocol`. It has no access to `qv-crypto`
-  key handling and could not decrypt anything anyway.
+**Unlock:** harden/validate SQLite and enforce resource/profile limits; unwrap
+VK; verify header, complete manifest and external anchor; expose bounded
+metadata views and session handles. Protected values are decrypted on demand.
 
-## 5. The secret boundary
+**Edit:** create an immutable causal version; persist objects, manifest, history
+suppression, outbox and pending anchor transition in one transaction. Advance
+the external anchor durably before reporting success.
 
-Dioxus desktop and mobile render through a webview. Anything handed to the UI
-becomes a JavaScript string that Rust cannot zeroize or lock in memory.
-Therefore (proposal, see [0008 §4](specs/0008-memory-and-side-channels.md)):
+**Sync:** stage and verify the remote state against the remembered remote
+checkpoint, excluding unpublished local edits. Merge into a candidate, preserve
+complete concurrent heads, and publish through atomic idempotent compare-and-swap.
+Current reference lists pin data during server garbage collection.
 
-- `qv-core` exposes **handles** (`EntryId`, `FieldId`) and non-secret metadata
-  (titles, URLs, usernames are configurable as non-protected).
-- Protected values are given to the UI only on explicit **reveal**, and are
-  never placed there for copy/autofill: copy goes Rust → OS clipboard directly.
-- A future native renderer (Dioxus Blitz) could remove the webview from the
-  picture; the boundary keeps that switch cheap.
+**File exchange:** publish unique consistent encrypted exports; verify private
+copies of incoming files and merge same-generation versions. Tombstones never
+expire and old files cannot reintroduce suppressed history.
 
-This is an **open design area** and must be revisited before the UI is built.
+**Device pairing:** scan a QR with a pairing secret and approving-key fingerprint.
+Use a fresh ephemeral X-Wing recipient key, encrypt the complete vault-key payload,
+authenticate the full transcript, and convey trusted checkpoints. Grant only
+explicitly approved vault generations.
 
-## 6. Key hierarchy (summary)
+**Revocation:** invalidate existing sessions, grants and pending transfers
+atomically; check revocation on every operation and before publication. Rotate
+VK if the departed device may hold it.
 
-Master password → Argon2id → KEK → unwraps the **Vault Key (VK)**, a random
-256-bit key. The **recovery phrase is VK itself** in BIP-39 word form. Every
-other key is derived from VK with HKDF, down to one key per record. Changing
-the master password re-wraps VK only. Losing the master password *and* the
-recovery phrase means the data is gone, by design. Diagram and details:
-[0002 §3](specs/0002-cryptography.md).
+**Server-only recovery:** requires the separate account login plus a matching
+vault recovery phrase. Without a trusted checkpoint, freshness starts unverified.
+A vault master password alone cannot bootstrap a new device from the server.
 
-## 7. Main flows
+## 6. Technology choices
 
-**Unlock.** Read header → enforce suite minimums → Argon2id → KEK → unwrap VK
-→ verify header MAC → decrypt records into the in-memory index.
+| Concern | Choice |
+|---------|--------|
+| Language | Stable Rust |
+| UI | Dioxus for main UI, native secure-input/OS adapters |
+| Server | Axum/Tokio; SQLite first, Postgres deferred |
+| Local storage | rusqlite, encrypted immutable objects and manifests |
+| Serialization | Bounded RFC 8949 deterministic CBOR |
+| Data encryption | XChaCha20-Poly1305 |
+| Password KDF / derivation | Argon2id / HKDF-SHA-512 |
+| Enrollment | Pinned X-Wing draft-11 plus authenticated encryption/transcript |
+| Application signatures | Ed25519 + ML-DSA-65, both required |
+| Transport | TLS 1.3, X25519MLKEM768, pinned application server identity |
+| Account authentication | Pinned RFC 9807 OPAQUE application profile |
+| CLI / license | clap / AGPL-3.0-or-later |
 
-**Edit.** Mutation in `qv-core` → new record version (fresh nonce, new HLC
-timestamp) → previous version moved to history → written in one SQLite
-transaction.
+OPAQUE and ordinary TLS certificates are explicit classical exceptions.
+TLS-bound opaque sessions replace custom per-request HMAC/counter signing.
+KDF benchmarks and protocol review are release requirements, not completed work.
 
-**Sync (server).** Pull remote versions since the cursor, three-way merge per
-field (on a real conflict the newer value wins and the other is kept in
-history), check the vault state commitment, push local versions, advance
-cursors. The server only appends and serves ciphertext.
-
-**Sync (file).** When the vault file was changed externally or a file-sync
-conflict copy appears, open both and run the same merge.
-
-**New device.** An enrolled device approves it through a QR code and hands
-it VK inside a hybrid (X25519 + ML-KEM-768) encapsulation. With every device
-lost, the recovery phrase proves ownership instead. The server never holds
-anything that can be brute-forced.
-
-### Diagram index
-
-| Flow | Where |
-|------|-------|
-| System overview, crate dependencies | this document, §3–4 |
-| Key hierarchy | [0002 §3](specs/0002-cryptography.md) |
-| Unlocking a vault | [0002 §8](specs/0002-cryptography.md) |
-| Vault file tables | [0004 §2](specs/0004-local-storage.md) |
-| Saving an edit | [0004 §5](specs/0004-local-storage.md) |
-| Three-way field merge | [0005 §2.6](specs/0005-synchronization.md) |
-| Sync round | [0005 §3.2](specs/0005-synchronization.md) |
-| Rollback and freeze detection | [0005 §5](specs/0005-synchronization.md) |
-| **Registration** | [0006 §Registration](specs/0006-server-authentication.md#registration) |
-| Uploading a vault | [0006 §Uploading a vault](specs/0006-server-authentication.md#uploading-a-vault) |
-| **Login**: device session, account login | [0006 §Logging in](specs/0006-server-authentication.md#logging-in) |
-| Adding a device | [0006 §Adding a device](specs/0006-server-authentication.md#adding-a-device) |
-| Recovery with all devices lost | [0006 §Recovery](specs/0006-server-authentication.md#recovery-all-devices-lost) |
-| Master password change | [0006 §Master password changes](specs/0006-server-authentication.md#master-password-changes) |
-| Session lifecycle | [0006 §Sessions and expiry](specs/0006-server-authentication.md#sessions-and-expiry) |
-| Secret boundary (copy and reveal) | [0008 §4](specs/0008-memory-and-side-channels.md) |
-
-## 8. Technology choices
-
-| Concern | Choice | Notes |
-|---|---|---|
-| Language | Rust (stable) | |
-| UI | Dioxus (desktop + mobile) | webview caveat, §5 |
-| Server | Axum + Tokio | |
-| Server DB | sqlx with Postgres (hosted) / SQLite (small self-hosted) | open question |
-| Local storage | SQLite via rusqlite, app-level encrypted rows | no SQLCipher |
-| Serialization | CBOR (integer keys) | forward-compatible fields |
-| AEAD | XChaCha20-Poly1305 | |
-| Password KDF | Argon2id | parameters per suite |
-| Subkey KDF | HKDF-SHA-512 | |
-| KEM | X-Wing (X25519 + ML-KEM-768) | hybrid |
-| Signatures | Ed25519 + ML-DSA-65 (hybrid) | device identities |
-| Transport | TLS 1.3 (rustls), `X25519MLKEM768` group | |
-| CLI | clap | |
-| License | AGPL-3.0-or-later | |
-
-## 9. Platform priority
-
-1. Linux (desktop + CLI)
-2. Android
-3. Windows
-4. iOS
-5. macOS
-6. BSDs (evaluate later)
-
-## 10. Roadmap (proposal)
-
-Deliver in thin, usable slices; each phase is useful on its own.
+## 7. Delivery and validation
 
 | Phase | Deliverable |
 |-------|-------------|
-| 1 | `qv-crypto`, `qv-model`, `qv-store`, `qv-core` + **CLI on Linux**: fully offline vault, history, recovery phrase |
-| 2 | **Desktop app on Linux** (Dioxus), secret boundary, clipboard, auto-lock; file-based sync merge |
-| 3 | **Server + sync**: username/password (OPAQUE), device enrollment, server identity, `closed` registration |
-| 4 | **Android app**: quick unlock, then autofill |
-| 5 | **Windows** |
-| Later | Import/export, `invite` mode, hosted service (`open` mode), iOS, macOS, browser extension, BSDs |
+| 1 | Offline Linux CLI: encrypted vault, manifests, anchors, bounded history/recovery |
+| 2 | Linux desktop, hardened webview/native input, immutable snapshot exchange and conflicts |
+| 3 | Closed self-hosted server, device grants/sessions, pairing/recovery and generation rotation |
+| 4 | Android, verified quick unlock and autofill |
+| 5 | Windows |
+| Later | Third-party import/export, hosted admission, iOS/macOS, extensions and BSD |
 
-## 11. Open questions (cross-cutting)
+Future implementations must satisfy the acceptance criteria in
+[0012 — Security Validation](specs/0012-security-validation.md).
+These are specification requirements; no implementation or security validation
+has been completed by documenting them.
 
-Each spec lists its own; these affect the overall shape:
-
-1. **Secret boundary vs. webview** — is handle-and-reveal enough? (0008)
-2. ~~Server authentication model~~ — decided: signed device enrollment +
-   OPAQUE account password; `closed` registration by default. (0006)
-3. ~~Account credential vs. vault password~~ — decided: separate secrets. (0006)
-4. **Snapshot retention** — periodic, fixed count, or tiered. (0007)
-5. **Mobile autofill packaging** — how much can be pure Rust (JNI / static lib)
-   and how thin the platform glue can be. (0009)
-6. ~~Rollback/freeze protection~~ — decided: per-record HLC + authenticated
-   vault state commitment; new devices can't fully verify. (0005)
+Remaining implementation work includes KDF/mobile-budget benchmarks, reviewed
+platform-wrap backends, native-input lifecycle validation, and independent
+protocol review. A witness service is optional future work; v1's documented
+fork/freeze limits do not depend on pretending it exists.

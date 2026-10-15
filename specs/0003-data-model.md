@@ -21,11 +21,21 @@ display them.
 ### 2. Records
 
 2.1. Everything stored in a vault is a **record**: `{ id, kind, payload }`,
-where `kind ∈ { vault_meta, group, entry, attachment_meta }`. The `kind` is
+where `kind ∈ { vault_meta, group, entry, attachment_meta, password_keyslot }`. The `kind` is
 part of the encrypted payload, so the server cannot tell groups from entries.
 
-2.2. Payloads are serialized as **CBOR with integer keys**. Unknown keys MUST
-be preserved when reading and re-writing a record (forward compatibility).
+2.2. Payloads use deterministic CBOR with integer keys and budgets (0004).
+Preserve unknown optional keys when rewriting. Unknown required features or
+control kinds MUST fail closed. Manifests/checkpoints are separate containers,
+not ordinary records. Whole-record causal versions are defined in 0005.
+
+2.3. The manifest names exactly one vault metadata record, one password-keyslot
+record and one root group. Root identity is fixed at vault creation and is not
+changed by a metadata conflict. A password-keyslot payload contains an atomic
+slot descriptor (KDF profile, salt, wrapping profile, nonce, wrapped VK and
+portable slot ID); never merge its individual fields. Kind is immutable for a
+record ID. Root, vault metadata and password-keyslot records cannot be deleted;
+reject invalid control transitions rather than guessing replacements.
 
 ### 3. Vault metadata (one per vault)
 
@@ -47,11 +57,17 @@ be preserved when reading and re-writing a record (forward compatibility).
 | order | text | fractional index for stable manual ordering under concurrent edits |
 | deleted_at | timestamp? | soft delete → trash (0007) |
 
-4.1. Groups nest arbitrarily. Clients MUST detect cycles (possible after a
-merge) and re-parent the offending group under the root group.
+4.1. Project group representatives (0005) into a display tree without writing
+synthetic edits. Set the root parent to null; re-parent every non-root with a
+missing/deleted parent to root. In each remaining directed parent cycle,
+re-parent the lexicographically smallest group ID to root. Iterate in sorted
+ID order, using bounded iterative traversal. Recompute from source versions on
+every merge; traversal order must not affect the result.
 
-4.2. If a group's parent is missing after a merge, the group is re-parented
-under the root group ("orphan rescue"); nothing is dropped.
+4.2. Entries with missing/deleted groups appear in a recovered-items view under
+root. Conflicted/deleted groups remain inspectable with their original parent
+values. Display repair never deletes or rewrites source records. Depth-related
+UI limits collapse presentation rather than dropping groups.
 
 ### 5. Entry
 
@@ -93,14 +109,18 @@ Clients generate codes locally.
 
 ### 6. Attachments
 
-6.1. `attachment_meta` record: `{ entry, name, mime, size, chunk_count, content_hash }`.
+6.1. `attachment_meta` record: `{ entry, name, mime, size, chunk_count,
+chunk_object_ids, content_hash }`. Chunk IDs are an exact ordered list and
+content_hash is SHA-256 of the complete plaintext content.
 
 6.2. Content is stored as encrypted chunks of 64 KiB (0004), each
 authenticated with its index and the attachment ID, so chunks cannot be
 reordered or swapped.
 
-6.3. Maximum attachment size: 10 MiB (configurable per server for hosted
-deployments).
+6.3. Initial client maximum is 10 MiB. Server limits may be lower; they cannot
+raise the client's local safety budget (0004). Filename/MIME are untrusted
+metadata: sanitize explicit save paths, do not execute/open attachments or fetch
+external resources automatically.
 
 ### 7. Tags
 
@@ -124,3 +144,6 @@ Not in v1. Nested groups cover organization. The CBOR model leaves room to add
 
 - 2026-10-14: Initial draft.
 - 2026-10-14: Protected-field defaults (§5.3). Status → Accepted.
+
+- 2026-10-15: Amendment: causal atomic records, keyslot control kind, canonical
+  CBOR, deterministic nonmutating tree projection and exact attachment references.

@@ -59,7 +59,11 @@ passwords. Patching a missing class into a random position is forbidden
 because it skews the distribution.
 
 2.1.3. At least one class MUST be enabled, and the final alphabet MUST have
-at least 10 characters.
+at least 10 characters. With require_each_class, every enabled class after
+exclusions MUST be nonempty and length MUST cover the number of required classes.
+Reject unsatisfiable settings before consuming RNG. Bound whole-password
+rejection to 10,000 attempts; on exhaustion return an error, never a biased
+patched result. Revalidate synced defaults at use, not only in the settings UI.
 
 #### 2.2 Passphrase
 
@@ -67,7 +71,7 @@ at least 10 characters.
 |--------|--------|---------|
 | `words` | 3–20 | **6** |
 | `wordlist` | `eff-large` (7,776 words, ≈12.9 bits/word) | `eff-large` |
-| `separator` | any single printable ASCII character, or none | `-` |
+| `separator` | one printable ASCII character absent from the word list | `-` |
 | `capitalize` | none / first letter of each word | none |
 | `append_digit` | add one random digit to one random word | off |
 
@@ -78,7 +82,11 @@ at least 10 characters.
 be checked in a unit test against the published list, so a corrupted or
 modified list fails the build.
 
-2.2.3. **English only** in v1. Other languages are out of scope for now;
+2.2.3. A nonempty separator absent from all words is required, so output encoding
+is injective and the entropy formula remains valid. Append a digit uniformly
+to a chosen word; the word list contains no digits, keeping this choice unambiguous.
+
+2.2.4. **English only** in v1. Other languages are out of scope for now;
 they could be added later as new `wordlist` values.
 
 #### 2.3 PIN
@@ -173,7 +181,9 @@ may never have been used.
 - Tests that `require_each_class` output contains every class, and that its
   distribution matches uniform sampling restricted to valid passwords.
 - Word list hash test (2.2.2).
-- Boundary tests for every option (min/max lengths, empty alphabet).
+- Boundary tests for every option, including a required class emptied by
+  exclusions, too few positions, rare acceptance, retry exhaustion and ambiguous
+  separators. Invalid synced settings must fail before RNG sampling.
 
 ## Open Questions
 
@@ -185,3 +195,6 @@ None currently.
 - 2026-10-14: Weak master password: inline warning (Fair), confirmation
   dialog with 5 s cooldown (Weak). English-only word list confirmed.
 - 2026-10-14: No generator history (§6.3). Status → Accepted.
+
+- 2026-10-15: Amendment: reject impossible constraints, bound rejection sampling,
+  validate synced profiles and require unambiguous passphrase separators.

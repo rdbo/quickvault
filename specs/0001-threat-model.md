@@ -6,77 +6,116 @@
 
 ## Summary
 
-Defines the assets QuickVault protects, the adversaries it considers, and what
-is explicitly out of scope. Every other spec's *Security Considerations*
-section is judged against this document.
+Defines protected assets, adversaries, operating-system prerequisites and the
+limits of integrity/freshness guarantees. Every other spec is judged against
+this document; valid encryption alone is not proof of freshness or availability.
 
-## Assets
+## Specification
+
+### Assets
 
 | ID | Asset | Notes |
 |----|-------|-------|
-| A1 | Secret contents of entries (passwords, notes, attachments, TOTP seeds) | Highest value |
-| A2 | Vault metadata (titles, usernames, URLs, group structure) | Also confidential |
-| A3 | Master password and all derived keys | Compromise ⇒ A1, A2 |
-| A4 | Recovery phrase | Equivalent to A3 |
-| A5 | Integrity of the vault (no undetected modification, rollback, or deletion) | |
-| A6 | Availability of the user's data (history, backups) | |
-| A7 | Usage metadata (number of entries, edit times, devices) | Best effort |
+| A1 | Passwords, notes, attachments and TOTP seeds | Confidential |
+| A2 | Titles, usernames, URLs and group structure | Confidential even when UI-visible |
+| A3 | Master password, VK and derived keys | Compromise exposes vault data |
+| A4 | Recovery phrase | Encodes VK |
+| A5 | Vault integrity and remembered checkpoints | Subject to explicit rollback/fork limits |
+| A6 | Availability, retained history and backups | Requires independent copies |
+| A7 | Usage metadata | Accepted leakage below |
 
-## Adversaries in scope
+### Adversaries in scope
 
 | ID | Adversary | Capabilities |
 |----|-----------|-------------|
-| T1 | **Device thief** | Physical access to a *locked* or powered-off device; full disk image, including swap, hibernation file, temp files, old SQLite pages. |
-| T2 | **Compromised server / malicious operator** | Full read/write access to the server database and code: can read, modify, drop, reorder, replay or withhold any stored data; can serve malicious responses. |
-| T3 | **Network attacker** | Passive recording (incl. *harvest now, decrypt later* with a future quantum computer) and active MITM. |
-| T4 | **Online guesser** | Talks to the server API, tries passwords, enumerates accounts. |
-| T5 | **Malicious sync peer / tampered file** | Supplies a crafted vault file or records via file-sync tools. |
-| T6 | **Timing/side-channel observer** | Measures response times of the server or local operations; observes clipboard history, screenshots, recent-apps thumbnails, keyboard learning. |
-| T7 | **Future cryptanalysis** | Weakening of one primitive (classical or post-quantum). |
+| T1 | Device thief | Locked/powered-off device; full disk image including swap, hibernation, temporary files and old SQLite pages |
+| T2 | Compromised server/operator | Read/write server code, DB and responses; forge server-side authorization, reorder/drop/replay/withhold data and isolate device histories |
+| T3 | Network attacker | Passive recording including future quantum analysis; active MITM |
+| T4 | Online guesser | API access, credential guessing and account enumeration |
+| T5 | Malicious file/peer | Crafted SQLite, ciphertext, CBOR, old snapshots or protocol messages |
+| T6 | Side-channel observer | Timing, clipboard history, screenshots, keyboard learning |
+| T7 | Future cryptanalysis | Weakening of a classical or PQ component |
 
-## Out of scope
+### Prerequisites and limits
 
-- Malware running as the user (or with higher privileges) **while the vault is
-  unlocked**: keyloggers, memory readers, screen scrapers.
-- Compromised operating system, firmware, or hardware.
-- An attacker who knows the master password or recovery phrase.
-- Physical/electromagnetic side channels (power analysis, EM emanation, cold
-  boot beyond what memory hygiene in [0008](0008-memory-and-side-channels.md)
-  mitigates).
-- Denial of service against the server (handled operationally, not
-  cryptographically).
+T1 protection against plaintext persisted by the OS requires protected storage,
+swap and hibernation whose keys are unavailable in the relevant device state
+(0008). Screen lock alone is not proof. Unsupported/unverifiable configurations
+must be reported as reduced protection and require explicit acknowledgement.
+Zeroizing RAM and locking selected pages do not erase previous OS copies.
 
-## Security goals
+Rollback detection requires a remembered checkpoint outside replaceable vault
+exports. Restoring both vault and external state can defeat it. A malicious
+server may freeze a device at its last valid checkpoint or maintain isolated
+valid forks. Detection requires cross-device checkpoint comparison or an
+independent witness; v1 does not promise automatic global freshness/fork
+detection. A new recovery without a trusted checkpoint has an unverified baseline.
 
-- **SG1 Confidentiality:** T1–T5 learn nothing about A1/A2 beyond sizes
-  (padded) and timing.
-- **SG2 Integrity:** any modification of stored or transmitted data by T1, T2,
-  T3 or T5 is detected; the client never accepts unauthenticated data.
-- **SG3 Offline-attack resistance:** T1 and T2 can only attack the master
-  password by offline guessing at full Argon2id cost per guess. T4 cannot do
-  better than rate-limited online guessing.
-- **SG4 Rollback awareness:** a client detects a server or file serving an
-  older state than the client has already seen (see [0005](0005-synchronization.md)).
-- **SG5 Crypto agility:** any single primitive can be replaced without
-  redesign ([0002](0002-cryptography.md)).
-- **SG6 Hybrid PQ:** breaking *either* the classical or the post-quantum half
-  of an asymmetric construction alone does not compromise A1–A4.
-- **SG7 No silent data loss:** sync conflicts and deletions are recoverable
-  from history ([0007](0007-history-and-backups.md)).
-- **SG8 Intentional unrecoverability:** without the master password or the
-  recovery phrase, nobody (including the QuickVault project and server
-  operators) can recover the data.
-- **SG9 Nothing to brute-force on the server:** the server never stores a
-  value that allows offline guessing of the master password
-  ([0006](0006-server-authentication.md) §Key custody).
+Malicious SQLite/CBOR/rendering inputs are in scope even while the vault is
+unlocked. Excluding malware does not exclude remote code execution introduced
+through the application's own parsers or UI.
 
-## Accepted leakage
+### Out of scope
 
-The server learns: account identifiers, number of vaults, number of records
-per vault and their padded sizes, timing of syncs and edits, device count, IP
-addresses. Reducing this further is a non-goal for v1.
+- Malware independently running as the user while unlocked.
+- A compromised OS, firmware or hardware.
+- An attacker already holding the master password or recovery phrase; compromise
+  recovery still follows the operational rotation requirements in 0002.
+- Physical/EM side channels beyond memory hygiene's stated mitigations.
+- Server denial of service prevention. Clients still bound hostile resource use
+  and detect missing referenced data; cryptography cannot restore deleted data.
+
+### Security goals
+
+- **SG1 Confidentiality:** A1/A2 remain confidential against T1–T5 under the
+  prerequisites above, apart from accepted leakage.
+- **SG2 Integrity:** reject forged/substituted objects and incomplete manifests
+  before acceptance; do not silently omit failed records. This does not imply
+  that every valid old snapshot or isolated fork can be identified.
+- **SG3 Guessing resistance:** local file master-password guesses cost the fixed
+  password KDF. The server has no vault-password verifier. A compromised OPAQUE
+  server can guess the separate account password offline; online APIs rate-limit
+  attempts on an honest server.
+- **SG4 Rollback awareness:** detect regression against an intact remembered
+  manifest/checkpoint and detect incompatible histories when compared (0005).
+- **SG5 Crypto agility:** replace independent purpose profiles through explicit
+  migrations, without conflating KDF, storage and authentication changes.
+- **SG6 Hybrid vault transport:** breaking only one half of the hybrid key
+  transport/application signatures does not expose VK. OPAQUE and ordinary TLS
+  certificates are documented classical exceptions; account compromise alone
+  does not grant VK.
+- **SG7 No silent conflict loss:** preserve concurrent complete versions and
+  deletion knowledge; retained history follows bounded policy (0007).
+- **SG8 Intentional unrecoverability:** no project/server backdoor. Access needs
+  a usable wrapped key plus its unlock method, recovery phrase plus data, or
+  approved key transfer. Server-only recovery additionally needs account access.
+- **SG9 No server vault-password verifier:** never upload a password keyslot
+  except under VK encryption. User-selected file-sync exports do not have this
+  property and expose a password-guessing target to their provider.
+
+### Accepted leakage
+
+The server learns account IDs, vault/device counts, random object IDs and
+references, liveness/retention changes, padded sizes, timing, key generations,
+IP addresses and grants. Explicit backup providers see the SQLite export's
+public structure and wrapped password slot. No ORAM or traffic-hiding promise.
+Views containing titles/usernames/URLs are confidential A2 data, not public data.
+
+## Security Considerations
+
+Claims must preserve these conditions in product text and tests. A successful
+sync does not establish global freshness; encryption does not guarantee
+availability or secure erasure. Compromise recovery and session revocation are
+separate lifecycle operations, not consequences of changing a password.
+
+## Open Questions
+
+None in this model. Platform verification and independent protocol review are
+required implementation evidence under 0012.
 
 ## Changelog
 
-- 2026-10-14: Initial version, agreed in design discussion.
-- 2026-10-14: Added SG9.
+- 2026-10-14: Initial accepted threat model; added SG9.
+- 2026-10-15: Amendment: conditional OS persistence guarantees; honest limits
+  for rollback, freeze, forks and availability; distinguish account guessing
+  from vault-password verification and document reference-list leakage.
