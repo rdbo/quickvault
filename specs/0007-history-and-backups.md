@@ -62,10 +62,12 @@ snapshots, rotation, manifests and the resource budget.
 
 ### 3. Local snapshots
 
-3.1. Use SQLite's backup API and safe export normalization (0004/0005).
-Snapshots contain a password slot, not device-local quick slots, signing keys,
-session tokens or external anchors. They open with the password valid at their
-creation. Store in a private application directory, outside exchange directories.
+3.1. Snapshots are archives (0004 §6) written from verified local objects.
+They never contain device-local quick slots, signing keys, session tokens,
+sync state or external anchors. Local snapshots are self-contained archives:
+they carry the password slot valid at their creation and open with that
+password or the recovery phrase (see Open Questions). Store in a private
+application directory, outside exchange directories.
 
 3.2. Take a recovery snapshot before explicit file imports, whole-state recovery,
 profile/generation migrations and bulk deletion; at most one ordinary snapshot
@@ -101,11 +103,11 @@ invalidate a published manifest.
 4.2. Default unreferenced-object retention is 30 days; quotas may shorten it.
 An authenticated explicit purge requests immediate logical removal of released
 objects, after checking that no pinned state references them. Publish references
-and the purge result atomically/idempotently. Checkpoint links survive payload
-compaction (0005). The server cannot inspect encrypted timestamps/deletion flags
+and the purge result atomically/idempotently. The server cannot inspect
+encrypted timestamps/deletion flags
 to implement client retention policy on its own.
 
-4.3. Clients track per-remote purge acknowledgement and local snapshot status.
+4.3. Clients track remote purge acknowledgement and local snapshot status.
 Offline devices and exported/backed-up copies may retain secrets; show these
 limits. Other clients apply suppression floors before importing old histories.
 No mechanism can force a malicious server, independent backup or departed device
@@ -128,7 +130,15 @@ reference set. Purge acknowledgements must not imply independent copies vanished
 
 ## Open Questions
 
-None currently.
+1. **Password slots in local snapshots.** A self-contained snapshot keeps
+   opening with the password current at its creation, so after a password
+   change made *because the old password leaked*, up to 30 days of snapshots
+   still yield VK to a thief holding that old password. Alternative: local
+   snapshots carry no slot (like exchange archives) and open with the active
+   vault's VK or the recovery phrase; cost: if the active vault's keyslot is
+   lost and the recovery phrase is unavailable, snapshots are unusable.
+   Recommendation: no slot by default, plus offering to delete pre-change
+   snapshots on password change. Undecided.
 
 ## Changelog
 
@@ -136,3 +146,5 @@ None currently.
 - 2026-10-15: Amendment: permanent tombstones, monotonic history suppression,
   bounded/coalesced snapshots and reference-based server retention. Define purge
   propagation and avoid claims of cryptographic erasure.
+- 2026-10-15: Security review amendment: snapshots use the authenticated
+  archive format instead of SQLite backup copies; no checkpoint-chain retention.

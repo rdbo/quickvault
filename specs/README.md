@@ -21,7 +21,10 @@ what they say, and behaviour changes start with a spec change.
 | [0012](0012-security-validation.md) | Security Validation and Release Gates | Accepted |
 
 The 2026-10-15 amendments replace HLC/field merging, active-file sync and
-unconditional freshness claims. Accepted designs still require their applicable
+unconditional freshness claims. The follow-up security review replaces SQLite
+exports with authenticated archives, removes server-visible record linkage,
+simplifies anchors and remote acceptance, and hardens pairing and password
+slots. Accepted designs still require their applicable
 validation gates before release; specification acceptance is not an audit.
 
 This repository is specification-only. Validation scenarios describe acceptance

@@ -19,25 +19,29 @@ future designs, not requirements to prebuild into every subsystem.
 ## 2. Design decisions
 
 1. **Untrusted storage.** Server data is ciphertext plus the random references,
-   liveness, sizes, generations and timing needed to store it. Clients verify
+   liveness, sizes, generations and timing needed to store it; object routing
+   data cannot link objects to records or histories. Clients verify
    authenticated manifests; TLS and server authorization are not vault integrity.
-2. **Private active DB, immutable exchange.** A vault is SQLite with encrypted
-   objects. Export through the backup API into new immutable files for Dropbox/
-   Syncthing exchange. Never synchronize or replace the actively opened DB.
-   A consistent export plus its password or recovery phrase decrypts the data;
-   rollback detection also requires separately remembered checkpoints.
+2. **Private active DB, immutable archives.** A vault is SQLite with encrypted
+   objects. Snapshots, backups and Dropbox/Syncthing exchange use one simple
+   archive format, authenticated before parsing; attacker-supplied files never
+   reach the SQLite parser. Never synchronize or replace the actively opened DB.
+   Exchange archives carry no password slot and open only with VK (another
+   device or the recovery phrase); rollback detection also requires a
+   separately remembered anchor.
 3. **Independent immutable crypto profiles.** KDF, data, wrapping, signatures
    and account authentication evolve separately. Changing KDF cost does not
    require migrating unrelated protocols. Data migration creates a new key
    generation with an explicit resumable transition.
 4. **Causal whole-record conflicts.** Merge maximal version-vector heads without
    creating synthetic edits. Preserve concurrent credentials intact and require
-   explicit resolution. HLCs/dates are display data, not replay protection.
+   explicit resolution. Dates are display data, not replay protection.
 5. **Exact references and honest guarantees.** Manifests cover active versions,
-   retained history, chunks and permanent tombstones. Checkpoint ancestry and
-   external anchors detect known regressions. Isolated server forks or freezes
-   need independent checkpoint comparison; automatic global freshness is not
-   promised.
+   retained history, chunks and permanent tombstones. A remote state must
+   causally contain the remembered one ("the remote never forgets"), and a
+   one-step local anchor detects known local regressions. Isolated server forks
+   or freezes need independent checkpoint comparison; automatic global freshness
+   is not promised.
 6. **Minimize plaintext.** qv-core owns session/authorization policy; the trusted
    client includes the Rust subsystems, platform adapters and privileged frontend.
    Protected values stay encrypted when idle, native secure controls collect
@@ -57,7 +61,7 @@ rather than creating unused workspace scaffolding.
 |-----------|----------------|
 | qv-crypto | Profiles, key hierarchy, encryption, signature verification, protected memory |
 | qv-model | Canonical payloads, atomic records, deterministic tree projection |
-| qv-store | Hardened SQLite, immutable objects, manifests, transactions, backup exports |
+| qv-store | Hardened SQLite, immutable objects, manifests, transactions, archives |
 | qv-protocol | Bounded canonical wire types, contexts and version registry |
 | qv-sync | Causal merge, remote candidate state and publication orchestration |
 | qv-core | Session policy, handles, lock cancellation, mutation authorization |
@@ -76,15 +80,16 @@ flowchart TB
     core --> rust["trusted Rust: model, crypto, store, sync"]
     core --> platform["platform: keystore, clipboard, autofill"]
     rust --> db[("private active SQLite vault")]
-    db -->|"SQLite backup API"| snapshot["immutable encrypted exports"]
+    db -->|"build from verified objects"| snapshot["immutable authenticated archives"]
     snapshot <-->|"file exchange"| files["Dropbox / Syncthing"]
     rust <-->|"TLS 1.3 hybrid; authenticate remote before merge"| server["untrusted server"]
-    anchor[("private external anchors")] <--> core
+    anchor[("private external anchor")] <--> core
 ```
 
-No plaintext or device-bound credentials go into exports. Explicit self-contained
-exports do contain a password slot, so their provider can attempt offline guessing.
-The native/OS memory conditions of 0008 qualify locked-device protection.
+No plaintext or device-bound credentials go into archives. Only an explicitly
+self-contained backup carries a password slot, so whoever holds that file can
+attempt offline guessing. The native/OS memory conditions of 0008 qualify
+locked-device protection.
 
 ## 4. Key hierarchy and lifecycle
 
@@ -107,20 +112,24 @@ VK; verify header, complete manifest and external anchor; expose bounded
 metadata views and session handles. Protected values are decrypted on demand.
 
 **Edit:** create an immutable causal version; persist objects, manifest, history
-suppression, outbox and pending anchor transition in one transaction. Advance
-the external anchor durably before reporting success.
+suppression, outbox and the next authenticated local head in one transaction.
+Advance the external anchor durably before reporting success; a crash between
+the two is recovered because the head names the anchor's digest.
 
 **Sync:** stage and verify the remote state against the remembered remote
-checkpoint, excluding unpublished local edits. Merge into a candidate, preserve
+base (no lower sequence; every remembered head, tombstone and floor still
+covered), excluding unpublished local edits. v1 has one server per vault. Merge
+into a candidate, preserve
 complete concurrent heads, and publish through atomic idempotent compare-and-swap.
 Current reference lists pin data during server garbage collection.
 
-**File exchange:** publish unique consistent encrypted exports; verify private
-copies of incoming files and merge same-generation versions. Tombstones never
+**File exchange:** publish unique immutable archives; authenticate private
+copies of incoming archives and merge same-generation versions. Tombstones never
 expire and old files cannot reintroduce suppressed history.
 
 **Device pairing:** scan a QR with a pairing secret and approving-key fingerprint.
-Use a fresh ephemeral X-Wing recipient key, encrypt the complete vault-key payload,
+Both screens show a comparison code; one request per ticket. Use a fresh
+ephemeral X-Wing recipient key, encrypt the complete vault-key payload,
 authenticate the full transcript, and convey trusted checkpoints. Grant only
 explicitly approved vault generations.
 
@@ -173,3 +182,9 @@ Remaining implementation work includes KDF/mobile-budget benchmarks, reviewed
 platform-wrap backends, native-input lifecycle validation, and independent
 protocol review. A witness service is optional future work; v1's documented
 fork/freeze limits do not depend on pretending it exists.
+
+Open design decisions recorded for the owner (not yet decided):
+whether per-device signing identities are worth their complexity
+([0006](specs/0006-server-authentication.md) OQ2), webview versus native Rust UI
+([0008](specs/0008-memory-and-side-channels.md) OQ2), and password slots in local
+snapshots ([0007](specs/0007-history-and-backups.md) OQ1).

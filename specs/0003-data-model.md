@@ -21,8 +21,10 @@ display them.
 ### 2. Records
 
 2.1. Everything stored in a vault is a **record**: `{ id, kind, payload }`,
-where `kind ∈ { vault_meta, group, entry, attachment_meta, password_keyslot }`. The `kind` is
-part of the encrypted payload, so the server cannot tell groups from entries.
+where `kind ∈ { vault_meta, group, entry, attachment_meta, password_keyslot }`.
+The `kind` is part of the encrypted payload, and object envelopes carry no
+record ID, version or role (0004 §2.2), so the server can neither tell groups
+from entries nor link objects to the same record.
 
 2.2. Payloads use deterministic CBOR with integer keys and budgets (0004).
 Preserve unknown optional keys when rewriting. Unknown required features or
@@ -115,7 +117,7 @@ content_hash is SHA-256 of the complete plaintext content.
 
 6.2. Content is stored as encrypted chunks of 64 KiB (0004), each
 authenticated with its index and the attachment ID, so chunks cannot be
-reordered or swapped.
+reordered or swapped. The final chunk is padded to full size.
 
 6.3. Initial client maximum is 10 MiB. Server limits may be lower; they cannot
 raise the client's local safety budget (0004). Filename/MIME are untrusted
@@ -147,3 +149,4 @@ Not in v1. Nested groups cover organization. The CBOR model leaves room to add
 
 - 2026-10-15: Amendment: causal atomic records, keyslot control kind, canonical
   CBOR, deterministic nonmutating tree projection and exact attachment references.
+- 2026-10-15: Security review: unlinkable object envelopes; padded final chunk.

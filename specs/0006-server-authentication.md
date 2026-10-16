@@ -53,14 +53,16 @@ client cryptographic trust never comes from the server's device list alone.
 | Pairing transfer | Pending ciphertext until delivered/expired | Encrypted relay, maximum ten minutes |
 
 Device signing bundles are sealed by an authenticated OS wrapper or wrapped
-under a designated local vault's device-storage key, with account/device IDs
-as authenticated context. The device's unlock policy must release both halves
+under the device-storage key of **each** local vault that syncs through this
+account, with account/device IDs as authenticated context. Any one of those
+unlocked vaults can therefore release the identity; syncing one vault never
+requires unlocking a different one. The unlock policy must release both halves
 before signing; no plaintext private-key file or automatic unprotected fallback.
-Registration before any vault exists requires an authenticated OS wrapper or
-an explicitly chosen local device password using password-kdf/1. Rewrap after
-the designated vault rotates and wipe plaintext on lock. Restoring an exported
-vault never restores signing identity. Ordinary local offline use needs no
-device signing identity.
+Registration happens from an unlocked local vault (offline-first: create the
+vault, then register), so there is no separate device password. Rewrap a
+vault's copy when that vault rotates, delete it when the vault is removed, and
+wipe plaintext on lock. Restoring an archive never restores signing identity.
+Ordinary local offline use needs no device signing identity.
 
 Pairing uses a fresh X-Wing key pair per ticket, not a long-lived device KEM key.
 Erase its private key and P after delivery, cancellation or expiry; never persist
@@ -69,7 +71,8 @@ key compromise therefore does not decrypt recorded pairing transfers.
 
 There is no **vault-master-password verifier** in the server DB. This guarantee
 does not apply to the separate account password: OPAQUE server compromise allows
-offline guessing. Explicit file exports contain an attackable password slot.
+offline guessing. Only explicitly self-contained archives contain an
+attackable password slot (0004 §6.4).
 
 ### Account password and OPAQUE profile
 
@@ -100,7 +103,7 @@ exist. OPAQUE is a documented classical exception to hybrid vault-key transport.
 
 ### Server identity
 
-TLS 1.3 uses hybrid X25519MLKEM768. Disable 0-RTT for authenticated operations.
+TLS 1.3 uses hybrid X25519MLKEM768 (0002 §6.3). 0-RTT is disabled.
 qv-server terminates this TLS connection; proxies may forward opaque TCP but
 MUST NOT substitute client-supplied exporter headers.
 
@@ -125,8 +128,9 @@ from its own compromise, so that recovery needs a new out-of-band comparison.
 
 ### Registration
 
-1. Verify server identity, code and canonical username. Generate signing keys
-   and securely store the device bundle before finalizing registration.
+1. From an unlocked local vault, verify server identity, code and canonical
+   username. Generate signing keys and securely store the device bundle
+   before finalizing registration.
 2. Run OPAQUE registration bound to one random 128-bit transaction ID, username,
    initial device public keys, server identity and TLS exporter; expires in five
    minutes. Bind the final submission to this stored transaction, not a caller-
@@ -173,26 +177,42 @@ device and publish the initial verified state. Subsequent changes use 0005.
 Run OPAQUE KE1/KE2/KE3 with the pinned profile, server identity and connection.
 Release a five-minute, administration-only opaque session after verifying KE3.
 Bind it to the same TLS exporter/connection, as for device sessions. Failed
-attempts do not disclose whether username or password was incorrect. Password
-change re-registers through an authenticated account session and invalidates all
-account sessions; it cannot change vault keyslots.
+attempts do not disclose whether username or password was incorrect.
+
+Account password change re-registers through an account session **plus** either
+a current enrolled device's hybrid signature or a vault recovery-key signature
+over canonical `["qv/account-password-change/v1", server_fingerprint,
+account_id, transaction_id, exporter]`. A phished or guessed account password
+alone therefore cannot lock the owner out of server recovery. Change invalidates
+all account sessions; it cannot change vault keyslots.
 
 ### Adding a device
 
 1. A starts from an unlocked vault and device session. The user selects the
    vaults/generations to grant. Server creates a random single-use ticket,
    account-bound, ten-minute expiry. A generates random 128-bit pairing secret P.
-2. A displays a QR containing protocol/enrollment profile, URL, server fingerprint,
-   account ID, ticket ID/expiry and A's complete signing-key fingerprint plus P.
-   Manual pairing encodes the same bytes; P is never sent separately to the
-   server. A fingerprint here is SHA-256 of canonical profile/public-key tuple.
+2. A displays a QR containing protocol/enrollment profile, URL, server
+   fingerprint, account ID, ticket ID/expiry and A's complete signing-key
+   fingerprint plus P. Manual pairing encodes the same bytes; P is never sent
+   separately to the server. A fingerprint here is SHA-256 of canonical
+   profile/public-key tuple.
 3. B verifies QR expiry and server fingerprint, generates its hybrid signing
    identity plus fresh ephemeral X-Wing keys, and sends canonical request Q:
    `["qv/pair-request/v1", server_fingerprint, account_id, ticket_id,
    expiry, A_fingerprint, B_device_id, B_signing_keys, B_ephemeral_kem_key]`,
-   a hybrid B proof-of-possession signature over Q, and HMAC-SHA-512/32(P, Q).
-4. A checks exact ticket/context, both B signatures, MAC and public-key validity,
-   displays the selected grant list, and obtains explicit user approval.
+   a hybrid B proof-of-possession signature over Q, and MAC/1(K_req, Q).
+   P is never used directly as a key: `K_req` and `K_appr` are 32-byte
+   HKDF-SHA-512 outputs with IKM=P, salt=ticket ID and info `"qv/pair-req-mac/v1"`
+   or `"qv/pair-appr-mac/v1"`. Before sending Q, B displays the account username
+   and server name from the QR and requires the user to confirm them, so a
+   victim scanning an attacker's QR does not silently join the attacker's vault.
+4. A accepts exactly one request per ticket; a second distinct request
+   cancels the ticket and warns that the QR may have been observed. A checks
+   exact ticket/context, both B signatures, MAC and public-key validity.
+   Both devices display a six-digit comparison code derived from
+   SHA-256(canonical ["qv/pair-sas/v1", Q]); A shows it with the selected grant
+   list and obtains explicit user approval that the codes match. This catches an
+   attacker who photographed the QR and raced B.
 5. A creates context T containing Q, A's signing public keys, the selected vault/
    generation list and checkpoint IDs. Encapsulate to B's ephemeral X-Wing key:
    `(enc, shared_secret) = XWing.Encapsulate(B_key)`.
@@ -203,19 +223,25 @@ account sessions; it cannot change vault keyslots.
    Payload carries VKs, vault/control-record IDs, generations, portable profiles
    and A's verified checkpoints. A signs canonical
    `["qv/pair-approval/v1", T, enc, nonce, ciphertext]` with both signing keys,
-   and MACs the complete approval plus signatures under P.
+   and MACs canonical `["qv/pair-approval-mac/v1", approval, signatures]` with
+   `K_appr` (MAC/1).
 6. Server verifies A's current enrollment/grants, B's proof, ticket/expiry and
    immutable approval body. Atomically consume ticket, enroll B and install only
    approved per-vault generation grants. Repeated identical approval is
    idempotent; a different body for a consumed ticket fails.
 7. B independently validates T against Q/QR, A's public-key fingerprint,
-   signatures and P MAC; decapsulates and authenticates payload; checks exact
-   grant list/generation/checkpoints. Server assertions are insufficient.
-   Pull and verify from those checkpoints before exposing data. Adopt only a
-   unique verified password keyslot record; a conflict needs explicit resolution.
+   signatures and `K_appr` MAC; decapsulates and authenticates payload; checks
+   exact grant list/generation/checkpoints. Server assertions are insufficient.
+   Fetch the manifest named by A's checkpoint (still retained under 0007 §4.2),
+   verify its hash and adopt it as B's remote base; then pull the current state
+   and apply 0005 §5.3 before exposing data. If that manifest is unavailable,
+   pairing fails closed rather than starting from an unverified base. Adopt only
+   a unique verified password keyslot record; a conflict needs explicit
+   resolution.
 8. B acknowledges by signing approval hash; server deletes relay ciphertext.
-   Both devices erase P, shared secret/transport key and B's ephemeral private
-   key. Expiry/cancellation also erases local secrets and relay data.
+   Both devices erase P, `K_req`, `K_appr`, shared secret/transport key and
+   B's ephemeral private key. Expiry/cancellation also erases local secrets and
+   relay data.
 
 Every received array has exact field order and bounded types; no omitted context
 or variable-length string concatenation. Wrong ticket/account/server/recipient/
@@ -228,16 +254,17 @@ Account login permits listing only vault IDs, generations and recovery public
 keys needed for recovery, not encrypted manifests/objects or password slots.
 Account login alone provides no ciphertext access. For each vault being
 recovered, decode its phrase to VK and derive the independent hybrid recovery
-keys (0002). Issue a random single-use 60-second challenge tied to account session,
-connection, vault ID and current generation. The recovery signature covers
-`["qv/recover/v1", server_fingerprint, account_id, vault_id, key_generation,
-transaction_id, challenge, exporter, new_device_id, new_signing_keys]`.
-Verify against stored recovery public keys, consume challenge, enroll the device
-and grant **only that vault/generation**, atomically and idempotently.
-With no trusted checkpoint, mark the initial state as an unverified freshness
-baseline. Verify manifest integrity regardless. Adopt the password slot or create
-a new one after explicit user choice. Losing the account password too requires
-a separately specified admin reset; a recovery phrase is not an account reset.
+keys (0002). Issue a random single-use 60-second challenge tied to account
+session, connection, vault ID and current generation. The recovery signature
+covers `["qv/recover/v1", server_fingerprint, account_id, vault_id,
+key_generation, transaction_id, challenge, exporter, new_device_id,
+new_signing_keys]`. Verify against stored recovery public keys, consume
+challenge, enroll the device and grant **only that vault/generation**,
+atomically and idempotently. With no trusted checkpoint, mark the initial state
+as an unverified freshness baseline. Verify manifest integrity regardless. Adopt
+the password slot or create a new one after explicit user choice. Losing the
+account password too requires a separately specified admin reset; a recovery
+phrase is not an account reset.
 
 ### Master password changes
 
@@ -282,6 +309,15 @@ for client verification of vault contents or out-of-band key distribution.
 
 1. Hosted admission and Postgres are deferred. These are not substitutes for
    client resource budgets or the release gates in 0012.
+2. **Is the full device-identity layer worth its weight?** The server only
+   controls availability of ciphertext; every VK holder can already forge
+   vault state, and revoking a VK holder requires rotation anyway. A simpler
+   alternative is a per-vault, per-generation access credential derived from
+   VK (a hybrid key pair like the recovery keys) plus the OPAQUE account for
+   administration, removing per-device signing bundles, their storage rules
+   and device-session challenges. The cost is losing honest-server per-device
+   revocation and audit. Recommendation: evaluate before the phase-3 protocol
+   freeze; keep the current design until decided.
 
 ## Changelog
 
@@ -290,3 +326,8 @@ for client verification of vault contents or out-of-band key distribution.
   sessions; invalidate active sessions on revocation; define scoped grants,
   encrypted signing storage, ephemeral authenticated key transport, checkpoint
   handoff and strict recovery/rotation context. Defer hosted admission/second DB.
+- 2026-10-15: Security review amendment: derive separate pairing MAC keys from P
+  (replacing the ambiguous `HMAC-SHA-512/32`); add comparison code, one request
+  per ticket and recipient-side account confirmation; require a device or
+  recovery signature for account password change; wrap the device bundle per
+  synced vault and drop the separate device password; disable 0-RTT entirely.

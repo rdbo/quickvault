@@ -8,7 +8,8 @@
 
 Minimize plaintext lifetime and copies, prevent application-created plaintext
 files, and state the OS protections required against a locked-device disk image.
-UI handles minimize exposure; they are not isolation from compromised frontend code.
+UI handles minimize exposure; they are not isolation from compromised frontend
+code.
 
 ## Specification
 
@@ -114,6 +115,14 @@ out of scope. Remotely supplied parser/rendering inputs remain in scope.
 
 1. Validate native input and OS protection detection per supported platform.
    Unsupported protection must be visible and cannot silently inherit claims.
+2. **Webview UI or native Rust UI?** Most of §4 (CSP, navigation blocking,
+   bridge allowlist, native secure-input overlays inside a webview, GC'd
+   plaintext copies) exists only because the UI is a webview. A native Rust
+   toolkit renders vault text without an HTML/JS engine and keeps secret
+   input and metadata in zeroizable Rust memory, removing that attack surface
+   and the overlay engineering. Cost: a different framework than Dioxus and
+   possibly separate mobile UI work. Recommendation: decide during the phase-2
+   spike together with 0009 Open Question 3; undecided.
 
 ## Changelog
 

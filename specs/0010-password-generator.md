@@ -71,7 +71,7 @@ patched result. Revalidate synced defaults at use, not only in the settings UI.
 |--------|--------|---------|
 | `words` | 3–20 | **6** |
 | `wordlist` | `eff-large` (7,776 words, ≈12.9 bits/word) | `eff-large` |
-| `separator` | one printable ASCII character absent from the word list | `-` |
+| `separator` | one printable ASCII character absent from the word list | `.` |
 | `capitalize` | none / first letter of each word | none |
 | `append_digit` | add one random digit to one random word | off |
 
@@ -80,11 +80,18 @@ patched result. Revalidate synced defaults at use, not only in the settings UI.
 
 2.2.2. The EFF large word list is embedded in the binary. Its SHA-256 MUST
 be checked in a unit test against the published list, so a corrupted or
-modified list fails the build.
+modified list fails the build. The published `eff_large_wordlist.txt`
+(dice-number TAB word, 7,776 lines) has SHA-256
+`addd35536511597a02fa0a9ff1e5284677b8883b83e986e43f15a3db996b903e`.
 
 2.2.3. A nonempty separator absent from all words is required, so output encoding
-is injective and the entropy formula remains valid. Append a digit uniformly
-to a chosen word; the word list contains no digits, keeping this choice unambiguous.
+is injective and the entropy formula remains valid. The EFF large list contains
+four hyphenated words (`drop-down`, `felt-tip`, `t-shirt`, `yo-yo`), so `-` is
+**not** a valid separator for `eff-large`; the list's alphabet is `a–z` plus `-`.
+The validity check derives the forbidden set from the embedded list, not from a
+hard-coded assumption. Append a digit uniformly
+to a chosen word; the word list contains no digits, keeping this choice
+unambiguous.
 
 2.2.4. **English only** in v1. Other languages are out of scope for now;
 they could be added later as new `wordlist` values.
@@ -198,3 +205,5 @@ None currently.
 
 - 2026-10-15: Amendment: reject impossible constraints, bound rejection sampling,
   validate synced profiles and require unambiguous passphrase separators.
+- 2026-10-15: Fix: the previous default separator `-` occurs in four EFF words
+  and violated §2.2.3; default is now `.`. Record the word list hash.

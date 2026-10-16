@@ -35,6 +35,7 @@ this document; valid encryption alone is not proof of freshness or availability.
 | T5 | Malicious file/peer | Crafted SQLite, ciphertext, CBOR, old snapshots or protocol messages |
 | T6 | Side-channel observer | Timing, clipboard history, screenshots, keyboard learning |
 | T7 | Future cryptanalysis | Weakening of a classical or PQ component |
+| T8 | Supply-chain tampering | Malicious or compromised dependency, build input or release artifact |
 
 ### Prerequisites and limits
 
@@ -44,12 +45,13 @@ swap and hibernation whose keys are unavailable in the relevant device state
 must be reported as reduced protection and require explicit acknowledgement.
 Zeroizing RAM and locking selected pages do not erase previous OS copies.
 
-Rollback detection requires a remembered checkpoint outside replaceable vault
-exports. Restoring both vault and external state can defeat it. A malicious
-server may freeze a device at its last valid checkpoint or maintain isolated
-valid forks. Detection requires cross-device checkpoint comparison or an
-independent witness; v1 does not promise automatic global freshness/fork
-detection. A new recovery without a trusted checkpoint has an unverified baseline.
+Rollback detection requires a remembered anchor/checkpoint outside the vault
+file and its archives. Restoring both vault and external state can defeat it. A
+malicious server may freeze a device at its last valid checkpoint or maintain
+isolated valid forks. Detection requires cross-device checkpoint comparison or
+an independent witness; v1 does not promise automatic global freshness/fork
+detection. A new recovery without a trusted checkpoint has an unverified
+baseline.
 
 Malicious SQLite/CBOR/rendering inputs are in scope even while the vault is
 unlocked. Excluding malware does not exclude remote code execution introduced
@@ -90,15 +92,22 @@ through the application's own parsers or UI.
   a usable wrapped key plus its unlock method, recovery phrase plus data, or
   approved key transfer. Server-only recovery additionally needs account access.
 - **SG9 No server vault-password verifier:** never upload a password keyslot
-  except under VK encryption. User-selected file-sync exports do not have this
-  property and expose a password-guessing target to their provider.
+  except under VK encryption. Exchange archives carry no password slot either;
+  only an explicitly self-contained backup exposes a guessing target to
+  whoever holds it.
+- **SG10 Release integrity:** releases come from locked, reviewed dependencies
+  and verifiable signed artifacts (0012 §3). This reduces, but cannot remove,
+  T8 risk; a compromised maintainer signing key is outside what users can
+  detect without reproducible builds.
 
 ### Accepted leakage
 
-The server learns account IDs, vault/device counts, random object IDs and
-references, liveness/retention changes, padded sizes, timing, key generations,
-IP addresses and grants. Explicit backup providers see the SQLite export's
-public structure and wrapped password slot. No ORAM or traffic-hiding promise.
+The server learns account IDs, vault/device counts, random object IDs,
+liveness/retention changes, padded sizes, timing, key generations, IP addresses
+and grants. It does not learn which objects belong to the same record,
+attachment or history (0004 §2.2). File-sync providers see archive sizes,
+vault ID, generation and creation times; a wrapped password slot only in an
+explicitly self-contained backup. No ORAM or traffic-hiding promise.
 Views containing titles/usernames/URLs are confidential A2 data, not public data.
 
 ## Security Considerations
@@ -119,3 +128,5 @@ required implementation evidence under 0012.
 - 2026-10-15: Amendment: conditional OS persistence guarantees; honest limits
   for rollback, freeze, forks and availability; distinguish account guessing
   from vault-password verification and document reference-list leakage.
+- 2026-10-15: Security review: add T8/SG10 supply chain; no record linkage in
+  server-visible routing data; exchange archives carry no password slot.
