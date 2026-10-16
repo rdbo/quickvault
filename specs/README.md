@@ -44,6 +44,8 @@ criteria for future development, not completed implementation tests.
   MAY are used as described in RFC 2119 / RFC 8174.
 - **Every spec has:** a metadata header, Summary, Specification, Security
   Considerations, Open Questions and Changelog.
+- **Implementation** of accepted specs is planned and reviewed in
+  [plans/](../plans/README.md); see [AGENTS.md](../AGENTS.md).
 
 ## Template
 

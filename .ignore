@@ -1,0 +1,3 @@
+# Paths that ripgrep-based search tools (and agents) should skip.
+# Large, irrelevant to design work: the license is AGPL-3.0-or-later.
+LICENSE

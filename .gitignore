@@ -1,0 +1,5 @@
+# Rust build output
+/target/
+
+# Personal Claude Code settings
+/.claude/settings.local.json

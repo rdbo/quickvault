@@ -4,6 +4,8 @@ QuickVault is an offline-first, end-to-end encrypted password manager with
 optional synchronization. The normative specifications are in
 [specs/](specs/README.md). This repository currently specifies the design;
 it does not yet contain production clients or a server.
+Contributor and agent workflow (plans, reviews, documentation duties) is in
+[AGENTS.md](AGENTS.md); repository-level changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## 1. Goals and scope
 
