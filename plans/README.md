@@ -39,4 +39,4 @@ plan, or a new plan that names the one it supersedes.
 
 | # | Title | Status |
 |---|-------|--------|
-| — | No plans yet | — |
+| [0001](0001-offline-first-sync/PLAN.md) | Offline-first sync direction (spec amendment) | Reviewed |

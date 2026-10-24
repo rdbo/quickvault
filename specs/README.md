@@ -11,7 +11,7 @@ what they say, and behaviour changes start with a spec change.
 | [0002](0002-cryptography.md) | Cryptography and Key Hierarchy | Accepted |
 | [0003](0003-data-model.md) | Data Model | Accepted |
 | [0004](0004-local-storage.md) | Local Storage (Vault File) | Accepted |
-| [0005](0005-synchronization.md) | Synchronization and Conflict Resolution | Draft |
+| [0005](0005-synchronization.md) | Synchronization and Conflict Resolution (LAN and Remote) | Draft |
 | [0006](0006-server-authentication.md) | Server Accounts, Authentication and Device Enrollment | Draft |
 | [0007](0007-history-and-backups.md) | History and Backups | Accepted |
 | [0008](0008-memory-and-side-channels.md) | Memory Hygiene and Side Channels | Draft |
@@ -19,6 +19,17 @@ what they say, and behaviour changes start with a spec change.
 | [0010](0010-password-generator.md) | Password Generator | Accepted |
 | [0011](0011-cli.md) | Command-Line Interface | Accepted |
 | [0012](0012-security-validation.md) | Security Validation and Release Gates | Accepted |
+
+The 2026-10-24 direction amendment makes local vault use independent of accounts
+and network access, with two optional sync modes: direct account-free LAN sync
+and account-based remote server sync. Either mode, both or neither may be used
+on a vault. 0005 defines their shared causal merge and separate lifecycle state;
+0006 applies only to the remote mode. Archive exchange remains a backup/import/
+export utility. Initial LAN and remote sync is manually initiated; automatic
+sync and background retries are deferred. LAN discovery, enrollment, sessions,
+peer-state persistence, listening lifecycle and peer removal remain explicit
+Open Questions; this amendment does not select a wire protocol or promote any
+Draft spec to Accepted.
 
 The 2026-10-15 amendments replace HLC/field merging, active-file sync and
 unconditional freshness claims. The follow-up security review replaces SQLite

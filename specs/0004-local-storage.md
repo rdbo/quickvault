@@ -58,6 +58,13 @@ of attacker-supplied SQL constraints.
 | `local_head` | exactly one row | authenticated local state (§5.4 of 0005): sequence, previous digest, manifest hash, remote checkpoint |
 | `sync_state` | remote ID | encrypted verified remote base, cursor and pending publication |
 
+Server checkpoint fields and `sync_state` rows are optional server-mode state.
+Creating or operating an offline or LAN-only vault MUST NOT require a server
+identity, account, checkpoint or dummy server row. LAN exchanges use the same
+verified objects/manifests and local commit/anchor path; the local-only peer
+authorization/session-state schema remains to be specified with 0005 §6 and
+MUST NOT be inferred from the server `sync_state` layout.
+
 2.1. A record may have several active versions. The manifest defines active,
 historical and suppressed versions; a single record-ID primary key or upload
 order cannot do so. Logical version IDs remain stable across reencryption.
@@ -244,6 +251,8 @@ is unsupported ([SQLite warning](https://www.sqlite.org/howtocorrupt.html)).
 
 ## Changelog
 
+- 2026-10-24: Make server sync state optional for offline/LAN-only vaults;
+  preserve local transaction/anchor requirements without selecting peer-state DDL.
 - 2026-10-14: Initial accepted encrypted-row design.
 - 2026-10-15: Amendment: immutable multi-head objects, canonical manifests,
   external anchors, parser budgets, SQLite hardening and safe exports. Replace

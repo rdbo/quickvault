@@ -8,10 +8,53 @@
 
 Sync exchanges authenticated snapshots of immutable versions. A record is an
 atomic unit: concurrent versions remain explicit conflicts until resolved by
-the user. Server sync and snapshot exchange use the same causal merge.
+the user. Direct LAN sync and optional account-based remote sync use the same
+causal merge, also used by archive import/export utilities.
 Wall-clock time never proves that an edit has already been seen.
 
 ## Specification
+
+### 0. Offline-first operating model
+
+0.1. A local vault MUST support creation, unlock, reads, edits, history and
+recovery without an account, server or network access. Local mutations commit
+durably before any optional synchronization; they MUST NOT depend on remote
+acknowledgement. Sync failure, account expiry or server unavailability MUST NOT
+prevent local use of an otherwise valid vault.
+
+0.2. The two network sync modes are:
+
+| Mode | Connection | Requirements |
+|------|------------|--------------|
+| LAN (§6) | Direct device-to-device on the same network | Explicitly approved peers with access to the same vault/generation; no account, remote server or Internet access |
+| Remote (§3, 0006) | Devices exchange encrypted state through a server | Account, enrolled device and grant for the vault/generation |
+
+A vault MAY use neither, either or both modes. Enabling remote sync MUST NOT
+be a prerequisite for LAN sync. Every enrolled device with the required grant
+MUST be able to initiate remote sync; there is no designated primary device.
+Account login alone does not distribute vault keys (0006).
+
+0.3. Both modes preserve the same logical version IDs, clocks, conflicts,
+tombstones and history suppression. Receiving a version over one mode and
+later another MUST deduplicate it without creating an edit. LAN receipt MUST
+NOT advance a server sequence, replace a verified server base or acknowledge
+pending server publication. LAN-received changes remain eligible for normal
+server publication, and server-received changes for later LAN exchange.
+
+0.4. Archive exchange (§4) remains a backup/import/export interoperability
+utility. It is not a third live network sync mode; safe archive handling does
+not require building a server or selecting a LAN wire protocol.
+
+0.5. **Manual sync first.** In the initial release of each network mode, a
+sync operation MUST start through an explicit user action selecting that mode
+(CLI command or client action). Unlocking, editing, account login, discovering
+a peer, timer expiry or restored connectivity MUST NOT automatically start a
+sync round. Automatic synchronization is deferred to a future amendment.
+Bounded retries within the same user-initiated operation are allowed while
+unlocked; after completion, failure, cancellation or process exit, pending
+changes wait for the next explicit sync operation. Do not schedule background
+retries. This does not select LAN discovery or receiver-listening mechanics
+(Open Questions 3–5).
 
 ### 1. Versions and causality
 
@@ -82,9 +125,11 @@ suppression frontiers are joined monotonically under 0007.
 
 ### 3. Server sync
 
-3.1. v1 supports at most **one server remote per vault**; file exchange (§4)
-has no remote chain. `remote_id` stays in checkpoints so later versions can add
-remotes without a format change. Maintain separate states:
+3.1. This section applies only when remote sync is configured. v1 supports at
+most **one server remote per vault**; this limit does not restrict LAN peers.
+LAN sync (§6) and file exchange (§4) have no server remote chain. `remote_id`
+stays in checkpoints so later versions can add remotes without a format change.
+Maintain separate states:
 
 | State | Meaning |
 |-------|---------|
@@ -129,10 +174,14 @@ checkpoints. Expired cursors return `resync_required` plus the full current
 manifest; acceptance is still judged against the remembered base (§5.3).
 Upload order cannot determine active versions.
 
-3.5. Sync runs only while unlocked: on unlock, debounced after edits, every
-five minutes, or on demand. Lock cancels work and invalidates handles used by
-staged responses. The durable outbox survives crashes and remains pending
-until an accepted remote state covers it. Revocation is specified in 0006.
+3.5. For a vault with remote sync enabled, server sync runs only while unlocked
+and as part of an explicitly user-initiated operation (§0.5). Lock cancels work
+and invalidates handles used by staged responses. The durable outbox survives
+crashes and remains pending until an accepted remote state covers it. Remote
+failures leave local changes
+usable and pending; another enrolled device need not be online during this
+round. Server revocation is specified in 0006; it does not authorize or revoke
+LAN sessions.
 
 ### 4. File-based exchange
 
@@ -226,8 +275,8 @@ permissions as the DB detects accidental restores and sync-tool rollback of a
 vault at a user-chosen path; an attacker able to replace both files defeats it
 (§5.6).
 
-5.5. Pairing transfers the approving device's verified remote base inside the
-protected key transfer (0006). Users may also compare (sequence, checkpoint ID)
+5.5. Server pairing transfers the approving device's verified remote base inside
+the protected key transfer (0006). Users may also compare (sequence, checkpoint ID)
 pairs between devices. Different IDs at the same sequence are fork evidence.
 If the other device reports a higher sequence, sync: a server that still serves
 the lower sequence is demonstrably freezing this device, and a higher state
@@ -242,10 +291,69 @@ an explicitly unverified baseline. Restoring both DB and external state can
 defeat rollback detection. Detection cannot restore data deleted by a server;
 independent backups remain necessary.
 
+### 6. Direct LAN sync
+
+6.1. Two devices on the same local network MUST be able to synchronize directly
+without contacting a QuickVault server or using server accounts, grants,
+registration, OPAQUE or server enrollment tickets. Both participating vaults
+MUST be unlocked for the exchange. Neither device is an authoritative primary;
+the initiator/receiver distinction MUST NOT affect the logical merge result.
+
+6.2. Same-network presence, discovery advertisements, hostnames and IP addresses
+MUST NOT be treated as authentication or permission to receive keys or data.
+The user must explicitly approve linking the intended devices for the selected
+vault/generation, through an authenticated out-of-band enrollment design.
+New-device setup MUST protect VK and bind the intended peers, vault, generation
+and protocol profile. Merely logging in to an account MUST NOT authorize a LAN
+peer. The exact peer identity, key-transfer and session protocol is undecided;
+0006's server-bound transcripts MUST NOT be reused by simply omitting their
+account/server fields.
+
+6.3. The LAN session MUST provide peer authentication, confidentiality,
+integrity and replay protection under a reviewed protocol consistent with 0002;
+VK and plaintext vault contents MUST NOT be sent in cleartext. For approved
+peers holding the same vault and generation, the exchange MUST authenticate
+a complete manifest and its referenced immutable objects
+before merging (§2, §5.1 and 0004 §3.6). Enforce 0004 resource budgets before
+allocation and treat even authenticated peer content as hostile. Never send,
+open or replace the active SQLite file over LAN. Device-local quick slots,
+private signing bundles, session tokens and external anchors are not exchange
+data. Unknown required profiles/features fail closed.
+
+6.4. A peer's snapshot is a merge input, not a replacement for local state or
+a globally ordered server head. Older snapshots may contribute unseen concurrent
+edits; retain locally known heads, permanent tombstones and suppression floors
+under §2. The server sequence acceptance test (§5.3) is not a LAN ordering rule.
+Different vaults or key generations MUST NOT merge automatically; generation
+recovery follows 0002 §3.5. LAN pairing and exchange do not establish a verified
+server base; server bootstrap/checkpoint trust remains governed by §5 and 0006.
+
+6.5. Each device commits accepted merged state through the local transaction
+and anchor rules (0004 §5, §5.4 above). Network loss, retries, process exit or
+lock MUST NOT lose preexisting edits, accept a partial manifest or imply that
+the other device committed. Lock cancels work and invalidates staged-response
+handles. A complete local commit may survive failure to acknowledge the peer;
+repeating the exchange must be idempotent. Report local acceptance separately
+from confirmed peer receipt; no distributed atomic commit is promised.
+
+6.6. LAN exchanges do not create server checkpoints or publish to the server.
+Already trusted server checkpoints may be independently compared (§5.5), but
+such comparison is evidence only and MUST NOT overwrite verified server state
+or discharge its outbox. Ordinary LAN merging cannot prove global freshness,
+identify every isolated fork or erase a departed peer's copy of VK. Disabling
+remote sync or losing account access MUST NOT disable existing LAN use.
+
+6.7. These are product and security requirements, not an implementable wire
+specification. Resolve Open Questions 3–6, specify bounded messages, peer-state
+durability and failure transitions, and satisfy 0012's LAN gates before shipping
+LAN synchronization. No new crypto profile or message layout is selected here.
+
 ## Security Considerations
 
 Possession of VK allows forging vault objects and checkpoint MACs. Device
-revocation only controls an honest server; rotate VK after compromise (0002).
+revocation only controls an honest server; it does not revoke LAN access.
+Rotate VK after compromise (0002). Local networks are untrusted; discovery is
+not authorization, and approved VK holders can forge same-generation content.
 Resource budgets and transactional acceptance apply even to authenticated data.
 
 ## Testing Requirements
@@ -267,6 +375,21 @@ Resource budgets and transactional acceptance apply even to authenticated data.
 - §5.4: crash between DB commit and anchor update opens; a DB two steps ahead,
   an older DB, or a DB from another installation is an integrity error.
 - Import data older than 180 days: covered deletions remain deleted.
+- With Internet access blocked and no account/server configuration, create and
+  edit a vault, link two LAN devices through the future approved protocol and
+  synchronize concurrent edits in both initiation directions.
+- Spoof discovery/peer identity and substitute vault/generation/profile: reject
+  without releasing keys or changing accepted state. Lock or interrupt at each
+  transfer/commit boundary; retry without losing edits or duplicating versions.
+- Exercise offline-only, LAN-only, remote-only and combined configurations.
+  Deliver the same edit over LAN and server in both orders; converge without
+  rewriting versions, acknowledging unpublished server work or resetting the
+  verified server base. Server outage/revocation must not disable local/LAN use.
+- For each network mode, unlock, edit, log in, discover peers, advance timers
+  and restore connectivity without requesting sync: no round starts. Explicit
+  sync performs the selected exchange; after failure, cancellation, process exit
+  or restart, pending changes wait for another explicit sync. Bounded retries
+  within an active user-initiated operation preserve idempotency and stop on lock.
 
 ## Open Questions
 
@@ -276,9 +399,39 @@ Resource budgets and transactional acceptance apply even to authenticated data.
    the maximum budgets). Segmenting the manifest into immutable referenced
    pages would reduce bandwidth for large vaults; deferred until benchmarks show
    typical vaults need it.
+3. **LAN discovery and addressing:** manual endpoint entry, local discovery, or
+   both? Recommendation: retain a manual path that works without discovery;
+   treat every discovered address as untrusted. Not yet selected.
+4. **LAN trust and session protocol:** choose authenticated out-of-band peer
+   enrollment, hybrid key transfer/session protection, peer identity and durable
+   peer-state storage. Specify new-device initialization and crash recovery;
+   decide which existing profiles can be safely reused after protocol review.
+   Recommendation: reuse reviewed building blocks and the causal data model,
+   without depending on the account-bound protocol in 0006. Not yet selected.
+5. **LAN listening lifecycle:** initial synchronization is manually initiated
+   in both modes (§0.5; owner direction 2026-10-24); automatic scheduling is
+   deferred. Decide how an unlocked approved peer becomes available to receive
+   a user-initiated exchange, discovery visibility and platform permissions.
+   Recommendation: make receiving availability explicit and bounded; do not
+   introduce a background service for initial delivery. Listening mechanics
+   remain undecided; manual initiation does not choose discovery/addressing.
+6. **LAN peer removal and generation transitions:** choose how each replica
+   stores/revokes peer approval and how remaining peers learn a removal. Server
+   revocation alone cannot enforce it; a VK holder retains same-generation
+   decryption/forging ability. Recommendation: distinguish local peer blocking
+   from compromise recovery, requiring VK rotation and fresh independent
+   approval for the latter (0002 §3.5). Not yet selected.
 
 ## Changelog
 
+- 2026-10-24: Follow-up direction: manual initiation first for both LAN and
+  remote sync. Remove unlock/edit/timer triggers, defer automatic scheduling
+  and background retries, and retain LAN discovery/listening as open decisions.
+- 2026-10-24: Make offline use independent of accounts/network access; define
+  direct account-free LAN and optional account-based remote sync as the two
+  network modes. Preserve shared causal merge and separate server publication
+  state; add LAN trust/lifecycle requirements and explicitly open protocol
+  decisions. Keep archive exchange as a backup/interoperability utility.
 - 2026-10-14: Initial HLC/three-way-merge proposal.
 - 2026-10-15: Replace HLC arbitration with causal whole-record conflicts;
   separate remote verification and local edits; define manifests, checkpoint

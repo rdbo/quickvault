@@ -24,6 +24,27 @@ Which clients exist, in what order, and how platform-specific features
 1.1. All clients use `qv-core` as the only way to touch vaults. No client
 reads the vault file or calls `qv-crypto` directly.
 
+1.2. Every client is a local vault client first: account creation, login and
+network access MUST NOT be prerequisites for local creation, unlock, reads,
+edits or recovery. Sync is an optional capability exposed through `qv-core`.
+
+1.3. The two network sync modes are direct LAN peer-to-peer sync (0005 §6)
+and account-based remote server sync (0005 §3, 0006). Support neither, either
+or both on a vault; enabling LAN MUST NOT require remote account setup. Present
+local save status separately from LAN peer receipt and server publication.
+Account/session failures must leave local access and approved LAN use available.
+
+1.4. Delivery follows ARCHITECTURE.md §7: complete offline Linux CLI first,
+then LAN sync with Linux desktop in phase 2, then optional remote service in
+phase 3. Each later platform inherits these independent modes subject to its
+own validation gates. LAN discovery/enrollment/session choices remain open in
+0005; platform APIs and permissions must be validated before enabling them.
+
+1.5. Initial LAN and remote sync MUST be initiated by an explicit user action
+for the selected mode (0005 §0.5). Unlocking, editing, login, timers and network
+availability MUST NOT trigger a round. Pending changes remain local until
+the user requests sync; automatic sync and background retries are deferred.
+
 ### 2. Platform priority
 
 1. Linux 2. Android 3. Windows 4. iOS 5. macOS 6. BSDs (evaluate; the CLI is
@@ -93,6 +114,11 @@ does not establish secure input, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-10-24: Follow-up: initial LAN and remote sync is manually initiated;
+  defer automatic triggers and background retries across clients.
+- 2026-10-24: Make local use independent of login/network setup; expose LAN and
+  remote sync as independent optional modes with separate status, and align LAN
+  delivery before the optional remote server.
 - 2026-10-14: Initial draft.
 - 2026-10-14: CLI v1 prompts per command; `--reveal` required to print secrets.
 

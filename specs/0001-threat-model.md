@@ -9,6 +9,9 @@
 Defines protected assets, adversaries, operating-system prerequisites and the
 limits of integrity/freshness guarantees. Every other spec is judged against
 this document; valid encryption alone is not proof of freshness or availability.
+The model covers standalone offline vaults, direct LAN peers and optional
+account-based remote sync. Accounts and server availability are not prerequisites
+for local or LAN operation.
 
 ## Specification
 
@@ -30,7 +33,7 @@ this document; valid encryption alone is not proof of freshness or availability.
 |----|-----------|-------------|
 | T1 | Device thief | Locked/powered-off device; full disk image including swap, hibernation, temporary files and old SQLite pages |
 | T2 | Compromised server/operator | Read/write server code, DB and responses; forge server-side authorization, reorder/drop/replay/withhold data and isolate device histories |
-| T3 | Network attacker | Passive recording including future quantum analysis; active MITM |
+| T3 | Network attacker | Passive recording including future quantum analysis; active MITM on LAN or remote links, spoofed discovery and peer endpoints |
 | T4 | Online guesser | API access, credential guessing and account enumeration |
 | T5 | Malicious file/peer | Crafted SQLite, ciphertext, CBOR, old snapshots or protocol messages |
 | T6 | Side-channel observer | Timing, clipboard history, screenshots, keyboard learning |
@@ -52,6 +55,12 @@ isolated valid forks. Detection requires cross-device checkpoint comparison or
 an independent witness; v1 does not promise automatic global freshness/fork
 detection. A new recovery without a trusted checkpoint has an unverified
 baseline.
+
+A local network is untrusted. Discovering a device does not
+authorize it for a vault or permit key transfer. Approved peers holding VK can
+decrypt and forge that generation's vault contents; server revocation does not
+remove their LAN access or erase their copies. Compromise recovery requires
+rotation and fresh approval under 0002, even for LAN-only vaults.
 
 Malicious SQLite/CBOR/rendering inputs are in scope even while the vault is
 unlocked. Excluding malware does not exclude remote code execution introduced
@@ -110,6 +119,13 @@ vault ID, generation and creation times; a wrapped password slot only in an
 explicitly self-contained backup. No ORAM or traffic-hiding promise.
 Views containing titles/usernames/URLs are confidential A2 data, not public data.
 
+On LAN, network observers can see communicating addresses, connection timing
+and traffic sizes; enabled discovery may also expose service presence. Exact
+advertisements and enrollment metadata remain to be specified in 0005; they
+MUST NOT expose vault secrets or confidential A2 metadata. An approved peer
+receives the shared vault's contents and authenticated causal metadata. LAN
+sync makes no traffic-hiding or protection-from-an-approved-VK-holder claim.
+
 ## Security Considerations
 
 Claims must preserve these conditions in product text and tests. A successful
@@ -124,6 +140,9 @@ required implementation evidence under 0012.
 
 ## Changelog
 
+- 2026-10-24: Cover direct LAN sync and standalone use explicitly; reject
+  network presence as trust, distinguish server revocation from LAN/key access,
+  and document LAN traffic/discovery leakage.
 - 2026-10-14: Initial accepted threat model; added SG9.
 - 2026-10-15: Amendment: conditional OS persistence guarantees; honest limits
   for rollback, freeze, forks and availability; distinguish account guessing

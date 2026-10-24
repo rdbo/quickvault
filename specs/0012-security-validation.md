@@ -16,6 +16,13 @@ cryptographic audit or platform validation have been completed here.
 
 | Finding | Design requirement | Required validation |
 |---------|--------------------|---------------------|
+| Unrequested synchronization | 0005 §0.5, 0009 §1.5: manual initiation first | For both modes, unlock/edit/login/discovery/timers/reconnection start no round; explicit sync exchanges data; failure/cancellation/restart leaves pending work until the next explicit sync; bounded in-operation retries stop on lock |
+| Implicit server prerequisite | 0005 §0, 0009: complete offline use | With no account/configured server and networking blocked, create/unlock/edit/recover a local vault; server outage or account expiry does not disable it |
+| Account-dependent LAN sync | 0005 §6: direct account-free exchange | With Internet access blocked and no server deployed, link two same-network devices through the selected approved protocol and sync from either device |
+| LAN discovery mistaken for trust | 0001, 0005 §6: authenticate/approve intended peers | Spoof addresses/advertisements, race enrollment, substitute vault/generation/profile; no key release or accepted-state change |
+| LAN partial acceptance | 0004 §5, 0005 §6: bounded verification and local durable commit | Interrupt, lock, duplicate and retry at transfer/commit/acknowledgement boundaries; preserve local edits/anchor and reject incomplete manifests |
+| Mixed-mode state confusion | 0005 §0.3: shared versions, separate server base | Deliver edits via LAN then server and vice versa, preserve conflicts/tombstones/floors, deduplicate, and never let LAN receipt clear remote publication or advance its checkpoint |
+| Server revocation overclaim | 0002 §3.5, 0006 scope | Server-revoked devices lose remote access, retain copied-key capability; independent local/LAN operation remains possible; test selected LAN peer-removal policy separately |
 | Isolated forks/freeze | 0001, 0005: limited claims, checkpoint comparison | Both forks can pass in isolation; comparison detects incompatibility; frozen head not labeled globally fresh |
 | Old-date concurrent edits | 0005: vector causality | Preserve a concurrent edit despite older time |
 | Order-dependent merges | 0005: maximal whole-record versions | All permutations, regrouping and duplicate delivery converge |
@@ -69,11 +76,40 @@ KDF and resource budgets on the supported targets. Test transaction/anchor crash
 points, permissions, disk-full behavior, malformed SQLite/CBOR and redacted
 errors.
 
-Before sync/pairing release, publish byte-level interoperation vectors for every
-message, canonical transcript and error transition. Review the complete KEM/
-AEAD/signature composition independently, including context binding and ephemeral
-secret lifecycle. Test idempotency, compare-and-swap, reference-based GC, scope
-checks, generation rotation, challenge consumption and TLS exporter integration.
+Before **LAN sync release**, resolve 0005 OQ3–OQ6 and specify peer discovery/
+addressing, authenticated out-of-band enrollment, session protection, local peer
+authorization persistence, initialization, removal and generation transitions.
+Publish byte-level interoperation vectors for every message, transcript and
+error transition; independently review the complete key-transfer/session
+composition and ephemeral-secret lifecycle. Test hostile unauthenticated peers,
+allocation/work limits, discovery privacy, rejected context substitutions,
+lock/cancellation, interrupted/repeated exchanges, local commit/anchor crash
+points and both initiation directions. Demonstrate LAN-only operation without
+Internet access, account state or a server. No LAN release is authorized by
+requirements text alone; the protocol remains Draft until explicitly accepted.
+
+Before **remote server sync release**, publish byte-level interoperation vectors
+for every server/account/enrollment message, canonical transcript and error
+transition. Independently review the complete KEM/AEAD/signature composition,
+including context binding and ephemeral-secret lifecycle. Test idempotency,
+compare-and-swap, reference-based GC, grants, generation rotation, challenge
+consumption, revocation and TLS exporter integration. Each authorized enrolled
+device must be able to initiate sync without another device online. Account
+login alone must not release VK. Exercise account/server failure while local
+vault use and already approved LAN sync remain available.
+
+Before releasing **combined LAN and remote use**, exercise both delivery orders,
+concurrent/offline edits, deletion/history suppression and generation mismatches.
+Verify that LAN receipt cannot advance a server checkpoint, reset the verified
+server base, or acknowledge its outbox; a later remote round must publish
+LAN-received edits through normal CAS. Shared-merge convergence alone does not
+validate the separate transport and lifecycle boundaries.
+
+These gates apply to the feature being released: offline release does not wait
+for LAN or server protocols, and LAN release does not require the remote service.
+For either initial sync release, demonstrate that synchronization starts only
+on explicit user request and that no background retries resume it after the
+operation ends. Automatic scheduling is deferred, not a gate for initial sync.
 Do not ship an unreviewed custom protocol merely because its primitives are
 reviewed. Unknown required protocol features fail closed.
 
@@ -107,6 +143,11 @@ implementation evidence, not claims that this repository already has them.
 
 ## Changelog
 
+- 2026-10-24: Follow-up: validate manual initiation and absence of automatic
+  triggers/background retries for both initial sync releases.
+- 2026-10-24: Add offline independence, account-free LAN, hostile-peer,
+  interruption, mixed-mode and revocation-scope scenarios; split offline, LAN,
+  remote and combined-mode release evidence without claiming completed tests.
 - 2026-10-15: Initial accepted validation matrix and release requirements.
 - 2026-10-15: Keep validation as specification acceptance criteria; remove the
   standalone executable model and claims of completed regression testing.

@@ -71,8 +71,8 @@ application directory, outside exchange directories.
 
 3.2. Take a recovery snapshot before explicit file imports, whole-state recovery,
 profile/generation migrations and bulk deletion; at most one ordinary snapshot
-per hour plus one on first unlock each day. Normal server causal merges use
-ordinary snapshot coalescing, not a full mandatory copy on every poll. Local
+per hour plus one on first unlock each day. Normal LAN and server causal merges
+use ordinary snapshot coalescing, not a full mandatory copy on every poll. Local
 edits between snapshots still have record history. Mandatory pre-operation
 recovery snapshots may bypass the hourly interval. Only one serialized recovery
 operation may pin a snapshot; after confirmed completion its copy becomes an
@@ -92,6 +92,12 @@ merge with an existing device preserves that device's deletion/suppression
 knowledge. A restore never proves that the snapshot is the latest global state.
 
 ### 4. Server retention and purge acknowledgements
+
+This section applies only to configured remote server sync. Offline and LAN-only
+vaults require no server purge acknowledgement. Local history suppression and
+snapshot budgets apply in every mode; LAN peers merge suppression frontiers
+under 0005 and may retain independent copies. A peer's receipt is not a server
+purge acknowledgement and does not prove erasure.
 
 4.1. The current checkpoint's manifest and every referenced object are pinned,
 including retained history, unresolved versions, tombstones and chunks. An honest
@@ -142,6 +148,9 @@ reference set. Purge acknowledgements must not imply independent copies vanished
 
 ## Changelog
 
+- 2026-10-24: Apply ordinary snapshot coalescing to LAN and server merges;
+  scope server retention/purge acknowledgements to optional remote sync and
+  preserve suppression/independent-copy limits for LAN-only use.
 - 2026-10-14: Initial accepted history/trash/snapshot policy.
 - 2026-10-15: Amendment: permanent tombstones, monotonic history suppression,
   bounded/coalesced snapshots and reference-based server retention. Define purge

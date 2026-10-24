@@ -124,27 +124,33 @@ and replacement of external credentials whose old values may already be known.
    and verify the full manifest. Require confirmation of the new phrase (or an
    explicit recovery warning) and a successful replacement-password unlock before
    publication. No plaintext or unwrapped new VK is journaled.
-3. For a synced vault require recent account authentication and the initiating
-   enrolled device's hybrid signature over old checkpoint, new generation,
+3. For a vault configured for **remote server sync**, require recent account
+   authentication and the initiating enrolled device's hybrid signature over
+   old checkpoint, new generation,
    new recovery public keys and new checkpoint. Compare-and-swap the server
    generation, recovery keys and full reference set as one publication.
    Retire pending old-generation publications/grants and install only the
    initiating device's new-generation grant. An ambiguous outcome
    is queried by operation ID; do not resume old-generation writes blindly.
 4. Locally install the verified replacement with a durable recovery journal
-   recording the old and new local-head digests and the publication operation
-   ID, never plaintext keys. Advance the external
+   recording the old and new local-head digests and, for a server transition,
+   the publication operation ID, never plaintext keys. Advance the external
    anchor before reporting success. Restart resumes or rolls back only through
-   this journal and the server publication status; retain the old DB until the
-   transition is confirmed. Recovery may require unlocking both retained copies
+   this journal and, when remote sync is configured, the server publication
+   status; retain the old DB until the transition is confirmed. Recovery may
+   require unlocking both retained copies
    with their respective credentials; never guess that a server timeout means
    rollback succeeded. The anchor accepts the generation change as one ordinary
    step (0005 §5.4): the replacement's first local head carries the new
-   generation and names the old head's digest. An offline vault skips only the
-   server step.
-5. Invalidate every old quick slot and per-vault device grant. Reapprove each
-   remaining device through a fresh out-of-band pairing (0006). Authenticate the
-   generation and approving device independently of old VK. NEVER wrap new VK
+   generation and names the old head's digest. Vaults without remote sync,
+   including LAN-only vaults, skip the server step and do not require account
+   authentication. A configured remote transition still requires its server
+   protocol; LAN receipt alone never proves that publication completed.
+5. Invalidate every old quick slot and applicable per-vault device grant or LAN
+   peer approval. Reapprove each remaining device through a fresh out-of-band
+   pairing: 0006 for server enrollment, the separately specified 0005 §6
+   enrollment protocol for LAN peers. Authenticate the generation and approving
+   device independently of old VK. NEVER wrap new VK
    solely with old VK or automatically send it to the server's device list.
 6. Old-generation peers stop normal sync. Salvaging their offline edits requires
    separately unlocking a private old copy and explicit user-selected import as
@@ -156,6 +162,11 @@ protects the new generation, not the secrecy of historical copies. If account
 or device signing keys were also compromised, replace those credentials and
 server trust before distributing new VK. Missing trusted device approval uses
 recovery plus out-of-band verification; no automatic old-key-only transition.
+
+For LAN peers, propagation of approval removal and generation transitions is
+an open protocol decision (0005 OQ6). This amendment removes the account
+prerequisite for LAN-only rotation; it does not select that peer protocol or
+make server revocation effective on LAN.
 
 3.6. Derive record keys from the record purpose key with HKDF-SHA-512,
 salt=vault ID, 32-byte output, info=`["qv/record-key/v1", record_id]`.
@@ -277,6 +288,9 @@ password guessing and device compromise are separate from vault encryption.
 
 ## Changelog
 
+- 2026-10-24: Restrict account authentication and server publication during
+  rotation to vaults configured for remote sync; require fresh independent
+  approval for LAN peers without assuming a server enrollment protocol.
 - 2026-10-14: Initial accepted key hierarchy and recovery design.
 - 2026-10-15: Amendment: independent profile namespaces, pinned X-Wing and MAC
   definitions, full generation rotation lifecycle, platform-specific wrapping,

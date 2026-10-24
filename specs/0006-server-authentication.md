@@ -6,12 +6,34 @@
 
 ## Summary
 
-Devices authenticate sync access with hybrid signatures. A separate OPAQUE
-account password controls account administration. Pairing authenticates both
+For optional remote server sync, devices authenticate access with hybrid
+signatures. A separate OPAQUE account password controls account administration.
+Pairing authenticates both
 devices out of band and transfers vault keys using a complete signed KEM/
 encryption envelope. Device grants are scoped to vault and key generation.
 
 ## Specification
+
+### Scope: optional remote sync only
+
+This spec governs accounts, device authorization and enrollment for the remote
+sync mode of 0005 §3. A local vault and direct LAN synchronization (0005 §6)
+MUST NOT require an account, registration, server identity, OPAQUE login, server
+device session or server enrollment ticket. The pairing protocol below binds
+server/account context and is not an account-free LAN pairing specification.
+
+For remote sync, every enrolled device with a grant for the vault/generation
+may initiate a synchronization round; no primary device or simultaneous online
+presence of another client is required. Login to an account is distinct from
+unlocking a vault or obtaining its keys. An administration-only login must be
+followed by approved enrollment or recovery before the device can sync a vault.
+Existing local vaults can opt into remote sync through Registration and
+Uploading a vault below; creating an account does not create or replace VK.
+
+Server outage, account/session expiry or server-side revocation affects remote
+access only, not otherwise authorized local vault use or LAN synchronization.
+Server revocation MUST NOT be presented as LAN peer removal or cryptographic
+revocation of copied VK (0002 §3.5, 0005 OQ6).
 
 ### Admission control
 
@@ -321,6 +343,10 @@ for client verification of vault contents or out-of-band key distribution.
 
 ## Changelog
 
+- 2026-10-24: Scope accounts and server-bound pairing to optional remote sync;
+  require initiation by any authorized enrolled device and separate account
+  login from vault key access. Local use and LAN sync need no server identity,
+  enrollment or account, and server revocation does not revoke LAN/key access.
 - 2026-10-14: Device enrollment plus separate OPAQUE account password adopted.
 - 2026-10-15: Pin OPAQUE profile; replace per-request HMAC with TLS-bound opaque
   sessions; invalidate active sessions on revocation; define scoped grants,

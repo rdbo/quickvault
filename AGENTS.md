@@ -60,7 +60,7 @@ token use proportional to the task:
 | Crypto profiles §1, migration §2, key hierarchy / password slots §3, recovery phrase §4, quick unlock §5, hybrid KEM/signatures §6, general rules §7, unlock §8 | `0002` cryptography |
 | Identifiers, records, vault metadata, groups, entries, attachments, tags | `0003` data model |
 | Vault files §1, SQLite schema §2, encoding/encryption §3, resource budgets §4, unlock & writes §5, archive format §6 | `0004` local storage |
-| Versions/causality §1, merge §2, server sync §3, file exchange §4, manifests/checkpoints/anchors §5 | `0005` synchronization |
+| Offline-first modes §0, versions/causality §1, merge §2, remote server sync §3, file exchange §4, manifests/checkpoints/anchors §5, direct LAN sync §6 | `0005` synchronization |
 | Admission, auth, key custody, OPAQUE, server identity, registration, login, adding a device (pairing), recovery, password change, revocation | `0006` server auth |
 | Entry history §1, trash §2, local snapshots §3, server retention §4 | `0007` history & backups |
 | Memory §1, timing §2, OS leaks §3, webview boundary §4, local files & testing §5 | `0008` memory & side channels |
