@@ -1,0 +1,30 @@
+# Fuzz targets (cargo-fuzz). Not part of the shipped workspace: the root
+# workspace excludes this directory and it keeps its own Cargo.lock. Run with
+# `cargo +nightly fuzz run <target>`; CI pins the nightly (see ci.yml).
+
+[package]
+name = "qv-encoding-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+qv-encoding = { path = "../crates/qv-encoding", version = "=0.0.0" }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "cbor_decode"
+path = "fuzz_targets/cbor_decode.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = 1

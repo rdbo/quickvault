@@ -253,7 +253,7 @@ exact files.
 
 #### Phase 1.2 — Bounded deterministic CBOR
 
-- [ ] **Do:** Write the strict RFC 8949 deterministic codec: shortest-form
+- [x] **Plan:** [0004](../0004-canonical-cbor/PLAN.md). **Do:** Write the strict RFC 8949 deterministic codec: shortest-form
   integers, definite lengths, sorted integer map keys, no floats/tags/duplicates,
   valid UTF-8, nesting ≤ 32, length checks before allocation, and noncanonical
   input rejected. Add an API for preserving unknown optional keys and a
@@ -817,7 +817,7 @@ exact files.
 
 - [x] `CHANGELOG.md` — Unreleased entry for the roadmap
 - [x] `ARCHITECTURE.md` — §7: a one-line pointer to this roadmap
-- [ ] `ARCHITECTURE.md` — §3 row for `qv-encoding` (phase 1.2, when the crate is created)
+- [x] `ARCHITECTURE.md` — §3 row for `qv-encoding` (phase 1.2, when the crate is created)
 - [ ] Specs — no change by this plan; amendments happen in the phases named above
 - [x] `AGENTS.md` — per-phase session protocol in *Agent workflow*; D1–D4 recorded in *Engineering conventions*
 - [ ] `plans/README.md` — index row (done)
@@ -831,3 +831,5 @@ exact files.
 
 - 2026-10-25: Roadmap approved. Next: phase 1.1 in a new session ("next phase").
 - 2026-10-25: Phase 1.1 implemented as plan 0003 (standing approval). Workspace, toolchain pin, lints, `cargo deny`/`cargo vet`, SPDX check, CI, and `qv-crypto` (protected memory, process hardening, fail-closed RNG). All gates green locally; the first hosted CI run is pending the owner's push. Not reviewed yet: the next session reviews it first. Next: phase 1.2 ("next phase").
+- 2026-10-25: Phase 1.1 reviewed (plan 0003, [REVIEW.md](../0003-workspace-bootstrap/REVIEW.md)): Approved, no fixes, nothing escalated. Hosted CI run still to be confirmed by the owner.
+- 2026-10-25: Phase 1.2 implemented as plan 0004 (standing approval). New crate `qv-encoding`: allocation-free validator, borrowing decoder, `RawValue` for unknown entries, canonical-only zeroizing encoder, `encode_array`. 14 rejection tests (exact errors), 4 proptest properties, `cbor_decode` fuzz target plus a CI job (pinned nightly). New dev-only dependency `proptest`; fuzz-only `libfuzzer-sys` outside the workspace. All gates, `cargo deny` and `cargo vet` green locally; 60 s local fuzz run clean (musl needs `-use_cmp=0`, CI doesn't). The first hosted fuzz run is pending the owner's push. Not reviewed yet: the next session reviews it first. Next: phase 1.3 ("next phase").

@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# Fuzz targets have their own workspace and lockfile (fuzz/Cargo.toml).
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.0.0"
@@ -12,6 +14,7 @@ publish = false
 
 [workspace.dependencies]
 getrandom = "=0.4.3"
+proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
 region = "=4.0.1"
 rustix = { version = "=1.1.5", default-features = false, features = ["std", "process"] }
 zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }

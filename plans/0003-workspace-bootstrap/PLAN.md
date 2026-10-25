@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-10-25 | 2026-10-25 | 0008 §1, 0002 §7.1, 0012 §3 |
+| Reviewed | 2026-10-25 | 2026-10-25 | 0008 §1, 0002 §7.1, 0012 §3 |
 
 ## Intent
 
@@ -437,3 +437,5 @@ None.
   it", while the workspace lint is `forbid`. A plan that allows `unsafe` must
   also relax the lint for that crate (`forbid` can't be overridden by
   `#[allow]`). Left for the plan that first needs it.
+- 2026-10-25: Reviewed (fresh session, roadmap 0002 step 2): **Approved**, no
+  fixes needed. Two low findings noted, nothing escalated. See [REVIEW.md](REVIEW.md).

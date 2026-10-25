@@ -84,6 +84,7 @@ rather than creating unused workspace scaffolding.
 
 | Component | Responsibility |
 |-----------|----------------|
+| qv-encoding | Bounded deterministic CBOR (0004 §3.1): validates hostile input before typed reads, encodes only canonical items, builds AAD/info/transcript arrays; depends on no other qv crate |
 | qv-crypto | Profiles, key hierarchy, encryption, signature verification, protected memory |
 | qv-model | Canonical payloads, atomic records, deterministic tree projection |
 | qv-store | Hardened SQLite, immutable objects, manifests, transactions, archives |
@@ -94,7 +95,8 @@ rather than creating unused workspace scaffolding.
 | qv-cli / qv-app | Explicit user actions and views; no unrestricted crypto/file/SQL bridge |
 | qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
 
-Implemented so far: `qv-crypto` (protected memory, process hardening, OS RNG).
+Implemented so far: `qv-encoding` (canonical CBOR codec, fuzzed in CI) and
+`qv-crypto` (protected memory, process hardening, OS RNG).
 Other components are planned and are created by the roadmap phase that first
 needs them.
 

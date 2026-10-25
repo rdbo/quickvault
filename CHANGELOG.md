@@ -9,6 +9,17 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-25: Canonical CBOR (roadmap phase 1.2, plan 0004): new crate
+  `qv-encoding` implementing the spec 0004 §3.1 profile of RFC 8949
+  deterministic CBOR. It validates the whole input without allocating before
+  any typed read, and rejects every noncanonical form, tags, floats, other
+  simple values, invalid UTF-8, non-integer, duplicate or misordered map keys,
+  nesting deeper than 32 and lengths beyond the input. The encoder can only
+  emit canonical items (sorted maps, exact counts) and wipes its buffers.
+  `RawValue` preserves unknown map entries byte for byte, and `encode_array`
+  builds AAD/info/transcripts. Property tests (`proptest`, dev-only) and a
+  `cbor_decode` fuzz target (`fuzz/`, cargo-fuzz) with a new CI job.
+
 - 2026-10-25: Cargo workspace and tooling (roadmap phase 1.1, plan 0003):
   pinned Rust 1.98.1, workspace lints (no `unsafe`, no `unwrap`/`expect`
   outside tests), `cargo deny` and `cargo vet` configuration, SPDX header

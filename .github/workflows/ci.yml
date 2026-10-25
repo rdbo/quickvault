@@ -46,3 +46,27 @@ jobs:
         run: cargo deny check
       - name: cargo vet
         run: cargo vet --locked
+      # fuzz/ is a CI-only tool outside the shipped workspace: no license or
+      # vet policy (libfuzzer-sys includes NCSA-licensed libFuzzer), but
+      # advisories, bans and sources still apply.
+      - name: cargo deny (fuzz crate)
+        run: cargo deny --manifest-path fuzz/Cargo.toml check advisories bans sources
+
+  fuzz:
+    runs-on: ubuntu-latest
+    env:
+      NIGHTLY: nightly-2026-10-01
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchains (rust-toolchain.toml and pinned nightly)
+        run: |
+          rustup toolchain install
+          rustup toolchain install "$NIGHTLY" --profile minimal
+      - name: Install cargo-fuzz
+        run: cargo install --locked cargo-fuzz --version 0.13.2
+      - name: Format (fuzz crate)
+        run: cargo fmt --check --manifest-path fuzz/Cargo.toml
+      - name: Fuzz cbor_decode (60 s)
+        run: cargo +"$NIGHTLY" fuzz run cbor_decode -- -max_total_time=60

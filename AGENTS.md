@@ -10,9 +10,10 @@ optional sync, written in stable Rust (AGPL-3.0-or-later). Development is
 **spec-first**: the specs in `specs/` are normative and code implements them.
 
 **Current state:** early implementation (roadmap 0002). The Cargo workspace,
-CI and supply-chain tooling exist; `qv-crypto` has protected memory, process
-hardening and the OS RNG. Most specs are not implemented yet. `tests/` is an
-empty placeholder. Do not assume code exists; check with `git ls-files <path>`.
+CI and supply-chain tooling exist; `qv-encoding` has the canonical CBOR codec;
+`qv-crypto` has protected memory, process hardening and the OS RNG. Most specs
+are not implemented yet. `tests/` is an empty placeholder. Do not assume code
+exists; check with `git ls-files <path>`.
 
 ## Ground rules
 
@@ -81,8 +82,9 @@ token use proportional to the task:
 | `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `clippy.toml` | Virtual workspace, lockfile, pinned toolchain, clippy test exemptions |
 | `crates/<name>/` | Workspace crates (`ARCHITECTURE.md` §3) |
 | `deny.toml`, `supply-chain/` | `cargo deny` policy and `cargo vet` audits/exemptions |
+| `fuzz/` | cargo-fuzz targets; own workspace and lockfile, outside the shipped workspace; pinned nightly in CI |
 | `scripts/` | Repository checks (`check-spdx.sh`) |
-| `.github/workflows/` | CI (gates + supply chain), actions pinned by SHA |
+| `.github/workflows/` | CI (gates, supply chain, fuzzing), actions pinned by SHA |
 | `.agents/skills/` | Agent skills (source of truth) |
 | `.claude/skills` | Symlink to `../.agents/skills` for Claude Code |
 | `tests/` | Placeholder for future integration tests |
