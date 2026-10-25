@@ -9,6 +9,14 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-25: Cargo workspace and tooling (roadmap phase 1.1, plan 0003):
+  pinned Rust 1.98.1, workspace lints (no `unsafe`, no `unwrap`/`expect`
+  outside tests), `cargo deny` and `cargo vet` configuration, SPDX header
+  check, GitHub Actions CI. New crate `qv-crypto` with zeroizing, page-locked,
+  unprintable and non-cloneable secret buffers (`SecretBytes`, `SecretArray`),
+  reduced-protection reporting when locking fails, core-dump/debugger-attach
+  hardening on Linux/Android, and a fail-closed OS RNG.
+
 - 2026-10-25: Development roadmap (`plans/0002-roadmap/`): 37 phases across
   the four milestones of `ARCHITECTURE.md` §7, one phase per session. Records
   the owner's decisions on toolchain/MSRV, CI, SPDX headers, workspace layout,

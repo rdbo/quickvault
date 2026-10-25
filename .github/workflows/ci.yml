@@ -1,0 +1,48 @@
+# Standard gates (AGENTS.md) and supply-chain checks (spec 0012 §3).
+# Actions are pinned by commit SHA; tools by exact version.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: SPDX headers
+        run: sh scripts/check-spdx.sh
+      - name: Toolchain (from rust-toolchain.toml)
+        run: rustup toolchain install
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --locked
+
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain (from rust-toolchain.toml)
+        run: rustup toolchain install
+      - name: Install cargo-deny and cargo-vet
+        run: |
+          cargo install --locked cargo-deny --version 0.20.2
+          cargo install --locked cargo-vet --version 0.10.3
+      - name: cargo deny
+        run: cargo deny check
+      - name: cargo vet
+        run: cargo vet --locked

@@ -9,9 +9,10 @@ QuickVault is an offline-first, end-to-end encrypted password manager with
 optional sync, written in stable Rust (AGPL-3.0-or-later). Development is
 **spec-first**: the specs in `specs/` are normative and code implements them.
 
-**Current state:** specification only. There is no Cargo workspace, no code and
-no CI yet. `tests/` is an empty placeholder. Do not assume code exists; check
-with `git ls-files <path>`.
+**Current state:** early implementation (roadmap 0002). The Cargo workspace,
+CI and supply-chain tooling exist; `qv-crypto` has protected memory, process
+hardening and the OS RNG. Most specs are not implemented yet. `tests/` is an
+empty placeholder. Do not assume code exists; check with `git ls-files <path>`.
 
 ## Ground rules
 
@@ -77,6 +78,11 @@ token use proportional to the task:
 | `specs/` | Normative RFC-style specs (`NNNN-title.md`, numbers never reused) |
 | `plans/` | Implementation plans and reviews (`NNNN-slug/PLAN.md`, `REVIEW.md`) |
 | `CHANGELOG.md` | Repository-level change log |
+| `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `clippy.toml` | Virtual workspace, lockfile, pinned toolchain, clippy test exemptions |
+| `crates/<name>/` | Workspace crates (`ARCHITECTURE.md` §3) |
+| `deny.toml`, `supply-chain/` | `cargo deny` policy and `cargo vet` audits/exemptions |
+| `scripts/` | Repository checks (`check-spdx.sh`) |
+| `.github/workflows/` | CI (gates + supply chain), actions pinned by SHA |
 | `.agents/skills/` | Agent skills (source of truth) |
 | `.claude/skills` | Symlink to `../.agents/skills` for Claude Code |
 | `tests/` | Placeholder for future integration tests |
@@ -122,8 +128,13 @@ Applies once code exists (from the specs and `ARCHITECTURE.md`):
   needs them — no empty scaffolding.
 - Dependency direction: frontends → `qv-core`; crypto and model never depend on
   frontends.
-- Gates for every change: `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`,
-  `cargo test --locked`. Commit `Cargo.lock`.
+- Gates for every change: `sh scripts/check-spdx.sh`, `cargo fmt --check`,
+  `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`.
+  Commit `Cargo.lock`. Crates opt into the workspace lints (`[lints] workspace = true`):
+  `unsafe_code` is forbidden and `unwrap`/`expect`/`panic!` are denied outside tests.
+- Secrets live only in `qv_crypto::{SecretBytes, SecretArray}`; access is via
+  `expose_secret*`. Lock and hardening failures are status values that callers
+  must surface, not errors to swallow.
 - Dependency changes: justify in the plan, run `cargo deny` and `cargo vet`
   (0012 §3), keep security-critical crates to a reviewed minimum.
 - Never implement cryptographic primitives; use reviewed crates pinned to the

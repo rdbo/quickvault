@@ -1,0 +1,20 @@
+[package]
+name = "qv-crypto"
+description = "QuickVault cryptography and protected memory"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+getrandom.workspace = true
+region.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+rustix.workspace = true
+
+[lints]
+workspace = true

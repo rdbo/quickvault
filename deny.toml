@@ -1,0 +1,32 @@
+# cargo-deny configuration (spec 0012 §3): advisories, licenses, bans, sources.
+
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+unmaintained = "all"
+unsound = "all"
+ignore = []
+
+[licenses]
+# Only what the current dependency tree needs; extend deliberately.
+allow = [
+    "Apache-2.0",
+    "MIT",
+]
+confidence-threshold = 0.93
+
+[licenses.private]
+# Our own crates are `publish = false` and AGPL-3.0-or-later.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

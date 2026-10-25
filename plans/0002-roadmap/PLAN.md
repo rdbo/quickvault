@@ -236,7 +236,7 @@ exact files.
 
 #### Phase 1.1 — Workspace bootstrap and protected memory
 
-- [ ] **Do:** Create the virtual workspace,
+- [x] **Plan:** [0003](../0003-workspace-bootstrap/PLAN.md). **Do:** Create the virtual workspace,
   `rust-toolchain.toml`, workspace lints (`unsafe_code = "forbid"` by default,
   `clippy::unwrap_used`/`expect_used` denied outside tests), `deny.toml`,
   `cargo vet init`, the CI workflow and SPDX checks. Create `qv-crypto` with its
@@ -830,3 +830,4 @@ exact files.
 ## Execution log
 
 - 2026-10-25: Roadmap approved. Next: phase 1.1 in a new session ("next phase").
+- 2026-10-25: Phase 1.1 implemented as plan 0003 (standing approval). Workspace, toolchain pin, lints, `cargo deny`/`cargo vet`, SPDX check, CI, and `qv-crypto` (protected memory, process hardening, fail-closed RNG). All gates green locally; the first hosted CI run is pending the owner's push. Not reviewed yet: the next session reviews it first. Next: phase 1.2 ("next phase").

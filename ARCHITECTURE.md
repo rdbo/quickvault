@@ -94,6 +94,10 @@ rather than creating unused workspace scaffolding.
 | qv-cli / qv-app | Explicit user actions and views; no unrestricted crypto/file/SQL bridge |
 | qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
 
+Implemented so far: `qv-crypto` (protected memory, process hardening, OS RNG).
+Other components are planned and are created by the roadmap phase that first
+needs them.
+
 Frontends call qv-core. Core injects platform traits and orchestrates model,
 store, crypto and sync. Crypto/model have no dependency on frontends. Server
 uses protocol types and public-key verification libraries; its inability to
@@ -199,7 +203,8 @@ A vault master password alone cannot bootstrap a new device from the server.
 
 | Concern | Choice |
 |---------|--------|
-| Language | Stable Rust |
+| Language | Stable Rust; toolchain pinned to 1.98.1 (`rust-toolchain.toml`), which is the MSRV |
+| Build / CI | Cargo virtual workspace (`crates/<name>/`); GitHub Actions with SHA-pinned actions running the gates, `cargo deny` and `cargo vet` |
 | UI | Shared Dioxus app/UI for Android and Linux, subject to early framework validation; native secure-input/OS adapters; iOS later |
 | Optional remote server | Axum/Tokio; SQLite first, Postgres deferred |
 | Local storage | rusqlite, encrypted immutable objects and manifests |
