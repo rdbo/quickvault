@@ -35,20 +35,31 @@ the specs (e.g. 0011 §4 phase markers) always means milestone 1.
 
 ## Session protocol
 
-Every phase runs this sequence in a **fresh session**:
+Each phase runs in a **fresh session** started with **"next phase"**. The
+session then works without further prompting:
 
-1. **Review the previous phase** (`quickvault-reviewer`, "review plan NNNN"),
-   unless it is already `Reviewed`. A fresh context makes the review independent.
-   If the review escalates problems, fix them before step 2, or re-plan them as
-   their own phase.
-2. **Plan this phase** (`quickvault-architect`, "plan phase N.M of roadmap
-   0002"). The architect reads this roadmap's phase entry, the cited spec
-   sections and the code that already exists, then writes `plans/NNNN-slug/PLAN.md`.
-3. **Owner approves** the phase plan in the same session, or adjusts it.
-4. **Implement** (`quickvault-developer`, "implement plan NNNN") until the plan
-   is `Implemented` and all gates are green.
-5. **Update this roadmap**: tick the phase, fill in its plan number and append
-   an *Execution log* entry. Commit.
+0. **Check the tree.** If `git status` shows uncommitted work from the previous
+   phase, stop and ask the owner to commit it first, so each phase stays a
+   separate commit. Sessions never commit, push or branch; the owner does.
+1. **Find the phase:** the first unticked phase below whose *Depends on* items
+   are done.
+2. **Review the previous phase** (`quickvault-reviewer`) unless its plan is
+   already `Reviewed`. A fresh context makes the review independent. If the
+   review escalates problems, stop and report them.
+3. **Plan this phase** (`quickvault-architect`): read the phase entry, the cited
+   spec sections and the existing code, and write `plans/NNNN-slug/PLAN.md`.
+4. **Standing approval.** The plan is approved without asking the owner
+   (status `Approved`, logged as "standing approval, roadmap 0002") unless it:
+   - has an unresolved item under *Decisions needed* (a roadmap D-item or a new one);
+   - amends a spec;
+   - adds a dependency not in this roadmap's candidate table, or uses `unsafe`;
+   - deviates from this roadmap's phase entry (scope, crates, order).
+   In those cases, stop with a summary and wait for the owner.
+5. **Implement** (`quickvault-developer`) until the plan is `Implemented` and
+   all gates are green. The developer's stop conditions still apply.
+6. **Update this roadmap:** tick the phase, fill in its plan number and append
+   an *Execution log* entry. End with a short summary for the owner: what was
+   built, gate results and anything deferred. Leave all changes uncommitted.
 
 If a phase is too large for one session, the architect splits it into
 N.Ma/N.Mb (as a dated *Revisions* entry here) instead of cramming it in. A
@@ -235,9 +246,10 @@ exact files.
 - **Specs:** 0008 §1 (D5), 0002 §7.1, 0012 §3.
 - **Depends on:** D1–D5.
 - **Files:** `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `deny.toml`, `supply-chain/`, CI config, `crates/qv-crypto/`, `AGENTS.md`.
-- **Done when:** CI is green on a push. Secret types cannot be printed or cloned
+- **Done when:** the CI workflow's commands pass locally (the first hosted run
+  is confirmed after the owner pushes). Secret types cannot be printed or cloned
   implicitly (compile-fail tests). A lock failure surfaces as a reduced-protection status.
-- **Verify:** standard gates; `cargo deny check`; `cargo vet`; CI run link in the log.
+- **Verify:** standard gates; `cargo deny check`; `cargo vet`; the CI workflow's commands run locally.
 
 #### Phase 1.2 — Bounded deterministic CBOR
 
@@ -813,7 +825,8 @@ exact files.
 ## Revisions
 
 - 2026-10-25: Approved by the owner with D1–D6 and D9 accepted as recommended. D1–D4 were recorded in `AGENTS.md` at approval, not in phase 1.1.
+- 2026-10-25: Owner direction: one prompt ("next phase") per session, with standing approval of phase plans except under the stop conditions in *Session protocol* step 4. Sessions never commit; the owner commits each phase.
 
 ## Execution log
 
-- 2026-10-25: Roadmap approved. Next: phase 1.1 in a new session ("plan phase 1.1 of roadmap 0002").
+- 2026-10-25: Roadmap approved. Next: phase 1.1 in a new session ("next phase").

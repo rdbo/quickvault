@@ -91,6 +91,12 @@ Ask them to approve or adjust. Don't start implementing. Once they approve, set
 the status to `Approved`, record the date in the table, and point them to
 `quickvault-developer`.
 
+**Exception: roadmap phases.** A phase plan written under the *Session
+protocol* of `plans/0002-roadmap/PLAN.md` uses that roadmap's standing
+approval rule: if none of its stop conditions apply, set `Approved` yourself,
+log "standing approval, roadmap 0002", and continue straight to
+`quickvault-developer` without asking.
+
 ## Revising a plan
 
 - `Proposed` or `Approved`: edit in place and note the change under *Revisions*.

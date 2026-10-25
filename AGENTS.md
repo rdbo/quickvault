@@ -97,9 +97,11 @@ needs no thinker. Anything touching cryptography, storage or wire formats,
 protocols or secret handling always goes through architect → developer → reviewer.
 
 **Roadmap:** development follows `plans/0002-roadmap/PLAN.md`, one phase per
-fresh session: review the previous phase's plan (if not yet `Reviewed`), plan
-the current phase ("plan phase N.M of roadmap 0002"), get owner approval,
-implement it, then tick the phase and log it in the roadmap.
+fresh session started with "next phase". Follow its *Session protocol*: review
+the previous phase, plan the current one, approve it under the standing
+approval rule (stop for the owner only on the listed conditions), implement,
+then update the roadmap. **Never commit, push or branch: the owner commits.**
+If the previous phase is still uncommitted, ask the owner to commit it first.
 
 ## Documentation duties
 
