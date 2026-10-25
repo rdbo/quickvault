@@ -34,21 +34,38 @@ or both on a vault; enabling LAN MUST NOT require remote account setup. Present
 local save status separately from LAN peer receipt and server publication.
 Account/session failures must leave local access and approved LAN use available.
 
-1.4. Delivery follows ARCHITECTURE.md §7: complete offline Linux CLI first,
-then LAN sync with Linux desktop in phase 2, then optional remote service in
-phase 3. Each later platform inherits these independent modes subject to its
-own validation gates. LAN discovery/enrollment/session choices remain open in
-0005; platform APIs and permissions must be validated before enabling them.
+1.4. Delivery follows ARCHITECTURE.md §7: develop the shared offline Rust core,
+an early Linux CLI and Android/Linux framework feasibility work in phase 1.
+Deliver usable offline Android and Linux apps plus manual LAN sync in phase 2;
+the optional remote service follows in phase 3. Android work MUST NOT wait for
+completion of the full CLI or implementation of the remote server. Each later
+platform inherits the independent sync modes subject to its own gates. LAN
+discovery/enrollment/session choices remain open in 0005; platform APIs and
+permissions must be validated before enabling them.
 
 1.5. Initial LAN and remote sync MUST be initiated by an explicit user action
 for the selected mode (0005 §0.5). Unlocking, editing, login, timers and network
 availability MUST NOT trigger a round. Pending changes remain local until
 the user requests sync; automatic sync and background retries are deferred.
 
+1.6. `qv-app` MUST use a shared cross-platform application and UI codebase for
+Android and Linux: reuse screens, navigation, state and vault workflows, with
+layouts adapted for touch and desktop. The shared Rust core remains responsible
+for vault behavior. Isolate necessary OS-specific secure input, key storage,
+biometrics, lifecycle, clipboard and autofill integration in `qv-platform` and
+minimal packaging/entry-point glue. Framework APIs and reviewed libraries MAY
+implement these adapters where they satisfy the security contract. Do not
+duplicate the application per OS or claim that cross-platform rendering alone
+implements OS security and autofill integration.
+
 ### 2. Platform priority
 
-1. Linux 2. Android 3. Windows 4. iOS 5. macOS 6. BSDs (evaluate; the CLI is
-the likely first target there).
+Android is the primary mobile target and Linux is its initial desktop companion;
+both participate in initial development and the first usable app milestone.
+Windows follows. iOS is desirable later, followed by macOS; evaluate BSDs with
+the CLI as the likely first target. Initial Android/Linux delivery MUST NOT
+depend on iOS packaging or feature parity, and mobile MUST NOT be deferred
+behind the remote service.
 
 ### 3. CLI (v1)
 
@@ -99,6 +116,30 @@ custom scheme. Require choosing an unresolved credential version before filling.
 - Quick unlock: only a validated backend with the authentication and backup
   behavior specified in 0002 §5; unavailable backends remain disabled.
 
+### 6. Early cross-platform framework validation
+
+Dioxus is the planned shared UI framework, subject to the existing renderer/
+framework decision (0008 OQ2). Validate it on Android and Linux during phase 1,
+before building the full application. Demonstrate shared vault-list and
+entry-editing flows against the same core, offline persistence, required native
+secure-input integration and lifecycle locking/cancellation on an Android
+device. Check access to keystore/biometrics, clipboard and the autofill service
+entry point; identify required adapter/packaging work and benchmark unlock and
+memory budgets. A successful empty app build is insufficient evidence of fit.
+Feature-specific release gates still apply; this feasibility work does not
+require shipping every adapter or implementing iOS first.
+
+If the planned framework cannot meet the security contract, document the gap
+and seek an explicit framework/renderer decision; do not silently weaken native
+secret handling or create separate Android/Linux UI implementations.
+
+The [Dioxus mobile guide](https://dioxuslabs.com/learn/0.7/guides/platforms/mobile/)
+describes Android/iOS support with a WebView renderer and experimental rendering
+alternatives. Android's [autofill service requirements](https://developer.android.com/identity/autofill/autofill-services)
+and Apple's [credential-provider extension requirements](https://developer.apple.com/documentation/authenticationservices/ascredentialproviderviewcontroller)
+remain OS integration work. These sources establish platform mechanisms, not
+QuickVault implementation readiness or validation (consulted 2026-10-24).
+
 ## Security Considerations
 
 OS entry points and native adapters are part of the trusted client, with bounded
@@ -110,10 +151,16 @@ does not establish secure input, keystore enforcement or autofill-origin trust.
 
 1. CLI agent process (post-v1): design and IPC security.
 2. Minimum native secure-input/autofill glue and lifecycle integration per OS.
-3. Dioxus mobile maturity for Android: needs a spike before committing.
+3. Validate the planned Dioxus framework for the Android-first shared app in
+   phase 1 (§6), including required platform adapters; coordinate the existing
+   renderer/framework choice with 0008 OQ2. No replacement is selected here.
 
 ## Changelog
 
+- 2026-10-24: Prioritize Android alongside Linux for initial app development,
+  ahead of the remote server; defer iOS. Require shared cross-platform app/UI
+  code with isolated platform adapters and early Android/Linux framework
+  validation, preserving the open renderer choice and security requirements.
 - 2026-10-24: Follow-up: initial LAN and remote sync is manually initiated;
   defer automatic triggers and background retries across clients.
 - 2026-10-24: Make local use independent of login/network setup; expose LAN and

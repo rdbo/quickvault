@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Reviewed | 2026-10-24 | 2026-10-24 (requested spec amendment) | 0001, 0002 §3.5, 0004 §2, 0005, 0006, 0007 §3–4, 0009, 0011 §4, 0012 |
+| Reviewed | 2026-10-24 | 2026-10-24 (requested spec amendment) | 0001, 0002 §3.5, 0004 §2, 0005, 0006, 0007 §3–4, 0008, 0009, 0011 §4, 0012 |
 
 ## Intent
 
@@ -130,6 +130,23 @@ and mismatched generations. No new CLI exit codes or error wire encodings.
 - **Verify:** `git diff --check`; local Markdown checks; targeted search for
   obsolete automatic triggers and review of scheduling acceptance criteria.
 
+### Step 6 — Prioritize Android and shared cross-platform UI
+
+- [x] **Do:** Bring Android into initial framework validation and the first
+  usable app milestone alongside Linux, before the remote server; keep iOS
+  later. Require shared application/UI code with bounded platform adapters.
+  Retain Dioxus as the planned framework subject to early validation and leave
+  the existing renderer/framework question open. Preserve secret-input rules.
+- **Files:** `ARCHITECTURE.md`, `specs/0008-memory-and-side-channels.md`,
+  `specs/0009-clients-and-platforms.md`, `specs/0012-security-validation.md`,
+  `specs/README.md`, `CHANGELOG.md`, this plan, `REVIEW.md`, `plans/README.md`.
+- **Done when:** Android is a primary initial app target; Linux CLI is an early
+  interface without requiring all CLI work to finish before mobile begins.
+  One shared app/UI and isolated OS integration are explicit; iOS is deferred,
+  not a prerequisite. Framework fit is tested on Android/Linux early.
+- **Verify:** `git diff --check`; local Markdown links, spec status and roadmap
+  consistency checks; verify secret-handling requirements are unchanged.
+
 ## Test plan
 
 - Unit and property tests: not applicable; no implementation exists.
@@ -160,6 +177,12 @@ and mismatched generations. No new CLI exit codes or error wire encodings.
 
 ## Revisions
 
+- 2026-10-24: Owner prioritizes Android, permits iOS later and wants a shared
+  cross-platform framework to minimize platform-specific work. Add step 6;
+  move Android validation to phase 1 and usable Android apps to phase 2 ahead
+  of remote sync. No framework replacement or security-policy relaxation is
+  authorized. Reviewed official Dioxus mobile guidance and Android/Apple autofill
+  documentation to distinguish shared UI support from OS entry-point work.
 - 2026-10-24: Owner follow-up: "I'm thinking about manual sync first also."
   Apply this refinement to both LAN and remote modes. Add step 5 without
   rewriting completed steps; automatic synchronization is deferred. The
@@ -205,3 +228,12 @@ and mismatched generations. No new CLI exit codes or error wire encodings.
   for consistency; document links/fences/whitespace and targeted trigger checks
   passed, as did `git diff --check`. No Cargo workspace exists; no code/tests
   were added and no Draft status was promoted.
+- 2026-10-24: Step 6 complete. Android/Linux validation starts in phase 1 and
+  usable shared-UI apps move to phase 2 before the remote service; iOS remains
+  later. Updated shared-app/platform-adapter requirements, moved the existing
+  renderer question earlier, and recorded feasibility evidence requirements.
+  Dioxus remains planned; no renderer replacement was chosen. Documentation
+  checks and `git diff --check` passed; original memory/secret-handling text
+  and spec statuses are unchanged. Reviewed the document diff and recorded the
+  follow-up review. No code/dependencies or security validation claims added;
+  Cargo gates remain inapplicable without a workspace.

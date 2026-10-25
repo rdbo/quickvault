@@ -121,11 +121,15 @@ out of scope. Remotely supplied parser/rendering inputs remain in scope.
    toolkit renders vault text without an HTML/JS engine and keeps secret
    input and metadata in zeroizable Rust memory, removing that attack surface
    and the overlay engineering. Cost: a different framework than Dioxus and
-   possibly separate mobile UI work. Recommendation: decide during the phase-2
-   spike together with 0009 Open Question 3; undecided.
+   possibly separate mobile UI work. Recommendation: evaluate during the early
+   phase-1 Android/Linux framework work with 0009 §6 and Open Question 3;
+   preserve the shared app/UI requirement. Renderer/framework choice undecided.
 
 ## Changelog
 
+- 2026-10-24: Move renderer/framework evaluation to early Android/Linux work
+  in phase 1 to reflect mobile priority and shared UI intent; preserve native
+  secure-input requirements and leave the framework decision open.
 - 2026-10-14: Initial memory/webview proposal.
 - 2026-10-15: Specify OS prerequisites, lazy protected-value handling, native
   input, mandatory webview/bridge hardening and lock-time operation cancellation.

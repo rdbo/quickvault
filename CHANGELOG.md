@@ -17,6 +17,11 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Specs
 
+- 2026-10-24: Prioritize Android alongside Linux before the optional server;
+  retain iOS as later work. Specify shared cross-platform app/UI code, isolated
+  OS adapters and early Android/Linux framework validation. Preserve Dioxus as
+  the planned framework, the open renderer decision and existing security gates.
+
 - 2026-10-24: Follow-up direction: start both LAN and remote sync with manual
   user initiation. Remove automatic unlock/edit/timer triggers, defer background
   scheduling/retries, and align client/CLI requirements and acceptance criteria.

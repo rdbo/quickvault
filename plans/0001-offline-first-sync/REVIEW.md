@@ -82,3 +82,24 @@ whitespace, follow-up Changelogs and obsolete-trigger checks passed, as did
 `git diff --check`. Cargo gates remain inapplicable without a workspace.
 Verdict: Approved for this specification follow-up; no implementation or
 independent security review is claimed.
+
+## Follow-up review — Android priority and shared UI (2026-10-24)
+
+Step 6 matches the owner's Android priority and cross-platform reuse intent.
+Android participates in phase-1 framework validation and phase-2 usable apps
+with Linux, ahead of the remote server; iOS remains later. Shared application/UI
+code and isolated OS adapters are explicit. Existing Dioxus/renderer questions
+remain open and are evaluated earlier; no framework replacement was selected.
+
+The architecture, 0009, validation matrix and spec index agree on delivery order
+and platform boundaries. The original memory/secret-handling requirements in
+0008 before Open Questions are unchanged, as are spec metadata statuses.
+Official Dioxus and Android/Apple autofill documentation supports the distinction
+between UI portability and OS integration; it is not evidence that QuickVault
+already implements or validates those features.
+
+`git diff --check`, local Markdown links/fences/whitespace, roadmap ordering,
+amendment Changelogs and unchanged-security-text checks passed. No Cargo
+workspace exists, so implementation gates remain inapplicable. Verdict:
+Approved for the specification follow-up; no implementation or independent
+security audit is claimed.

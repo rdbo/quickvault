@@ -31,6 +31,13 @@ peer-state persistence, listening lifecycle and peer removal remain explicit
 Open Questions; this amendment does not select a wire protocol or promote any
 Draft spec to Accepted.
 
+The Android-priority follow-up brings Android and Linux into initial shared-core
+and UI validation, with usable offline apps before the remote server. iOS stays
+a later target. 0009 requires shared cross-platform app/UI code with isolated
+OS adapters; Dioxus remains the planned framework subject to early validation
+and the open renderer decision in 0008. Framework reuse does not waive
+platform-specific secure-input, keystore, lifecycle or autofill validation.
+
 The 2026-10-15 amendments replace HLC/field merging, active-file sync and
 unconditional freshness claims. The follow-up security review replaces SQLite
 exports with authenticated archives, removes server-visible record linkage,

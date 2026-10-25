@@ -16,6 +16,7 @@ cryptographic audit or platform validation have been completed here.
 
 | Finding | Design requirement | Required validation |
 |---------|--------------------|---------------------|
+| Mobile deferred behind shared-UI claims | 0009 §1.4, §1.6, §6: Android-first shared app with isolated OS adapters | Early Android/Linux shared-flow evidence, real-device native input/lifecycle, keystore/autofill entry-point feasibility and unlock/memory benchmarks; neither remote server nor iOS is a prerequisite |
 | Unrequested synchronization | 0005 §0.5, 0009 §1.5: manual initiation first | For both modes, unlock/edit/login/discovery/timers/reconnection start no round; explicit sync exchanges data; failure/cancellation/restart leaves pending work until the next explicit sync; bounded in-operation retries stop on lock |
 | Implicit server prerequisite | 0005 §0, 0009: complete offline use | With no account/configured server and networking blocked, create/unlock/edit/recover a local vault; server outage or account expiry does not disable it |
 | Account-dependent LAN sync | 0005 §6: direct account-free exchange | With Internet access blocked and no server deployed, link two same-network devices through the selected approved protocol and sync from either device |
@@ -118,6 +119,13 @@ wrapping, locked-device prerequisites, lifecycle cancellation, verified autofill
 matching and clipboard limitations on that actual platform. Disable unsupported
 features rather than shipping untested equivalent-security claims.
 
+Framework feasibility evidence (0009 §6) belongs in initial Android/Linux
+development, before investing in the full UI; it does not replace each target's
+release evidence. A shared codebase or successful cross-compilation alone does
+not demonstrate OS secure input, lifecycle, keystore or autofill correctness.
+Android's offline release is independent of the remote service and later iOS
+support. Keep unvalidated optional quick unlock/autofill disabled.
+
 Record pinned dependencies, applicable audit reports, known limitations and test
 results with each release. Supply chain: commit `Cargo.lock`; build with
 `--locked`; run `cargo deny` (advisories, licenses, sources) and `cargo vet` (or
@@ -143,6 +151,9 @@ implementation evidence, not claims that this repository already has them.
 
 ## Changelog
 
+- 2026-10-24: Require early Android/Linux shared-UI and platform-adapter
+  feasibility evidence; preserve per-platform release gates and keep Android
+  independent of remote-server/iOS delivery.
 - 2026-10-24: Follow-up: validate manual initiation and absence of automatic
   triggers/background retries for both initial sync releases.
 - 2026-10-24: Add offline independence, account-free LAN, hostile-peer,

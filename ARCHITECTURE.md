@@ -30,8 +30,12 @@ trigger synchronization. Pending changes wait for the next explicit sync;
 bounded retries may occur within an active operation. Automatic sync and
 background retry scheduling are deferred (0005 §0.5).
 
-Linux CLI comes first, followed by desktop and mobile clients. Security includes
-metadata confidentiality, hostile-input handling and practical OS integration.
+Android is a primary app target alongside the Linux companion. Build the shared
+offline Rust core with an early Linux CLI and Android/Linux app validation;
+mobile work does not wait for the full CLI or the remote server. The app uses
+a shared cross-platform UI codebase, with platform integration isolated behind
+adapters. iOS is a later target, not an initial delivery requirement. Security
+includes metadata confidentiality, hostile-input handling and OS integration.
 
 v1 excludes cross-user sharing, a browser extension, auto-type, key files,
 hardware-token authentication and hosted open registration. These are separate
@@ -94,6 +98,14 @@ Frontends call qv-core. Core injects platform traits and orchestrates model,
 store, crypto and sync. Crypto/model have no dependency on frontends. Server
 uses protocol types and public-key verification libraries; its inability to
 decrypt rests on key custody, not a missing Cargo dependency.
+
+`qv-app` shares screens, navigation, application state and vault workflows across
+Android and Linux, with responsive layouts for touch and desktop. `qv-platform`
+isolates OS integration such as secure input, key storage, biometrics, clipboard,
+lifecycle and autofill entry points. Prefer validated framework APIs or reviewed
+libraries where they meet the security contract; keep necessary native glue
+small. A shared framework does not remove platform-specific packaging and
+validation, and does not require separate application implementations per OS.
 
 ```mermaid
 flowchart TB
@@ -188,7 +200,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Concern | Choice |
 |---------|--------|
 | Language | Stable Rust |
-| UI | Dioxus for main UI, native secure-input/OS adapters |
+| UI | Shared Dioxus app/UI for Android and Linux, subject to early framework validation; native secure-input/OS adapters; iOS later |
 | Optional remote server | Axum/Tokio; SQLite first, Postgres deferred |
 | Local storage | rusqlite, encrypted immutable objects and manifests |
 | Serialization | Bounded RFC 8949 deterministic CBOR |
@@ -205,15 +217,20 @@ OPAQUE and ordinary TLS certificates are explicit classical exceptions.
 TLS-bound opaque sessions replace custom per-request HMAC/counter signing.
 KDF benchmarks and protocol review are release requirements, not completed work.
 
+Dioxus remains the planned framework, not a validated password-manager platform.
+Evaluate Android and Linux builds, native secure-input integration, lifecycle,
+keystore/biometric access and autofill entry-point feasibility early (0009 §6).
+The existing webview-versus-native-renderer question remains open; changing the
+framework or relaxing security requirements needs an explicit owner decision.
+
 ## 7. Delivery and validation
 
 | Phase | Deliverable |
 |-------|-------------|
-| 1 | Offline Linux CLI: encrypted vault, manifests, anchors, bounded history/recovery |
-| 2 | Linux desktop, hardened webview/native input, manually initiated direct LAN sync, conflicts and immutable archive exchange; LAN protocol decisions/review required first |
+| 1 | Shared offline Rust core and early Linux CLI: encrypted vault, manifests, anchors, bounded history/recovery; early Android/Linux shared-UI and platform-adapter feasibility work |
+| 2 | Usable offline Android and Linux apps from the shared UI; validated native input/lifecycle, Android quick unlock/autofill as their gates pass, manually initiated direct LAN sync, conflicts and archive exchange; LAN protocol decisions/review required first |
 | 3 | Optional closed self-hosted remote server, manually initiated remote sync, accounts, device grants/sessions, server pairing/recovery and remote generation transitions |
-| 4 | Android, verified quick unlock and autofill |
-| 5 | Windows |
+| 4 | Windows |
 | Later | Automatic sync (separate design), third-party import/export, hosted admission, iOS/macOS, extensions and BSD |
 
 Future implementations must satisfy the acceptance criteria in
@@ -228,6 +245,9 @@ fork/freeze limits do not depend on pretending it exists.
 
 Offline release is independent of both network modes. LAN sync must be usable
 without deploying phase 3; each sync mode has its own release evidence in 0012.
+Android development and its offline release do not depend on the remote server
+or iOS support. Unsupported quick unlock/autofill remains disabled until its
+platform gates pass; do not weaken unlock policy to complete an app milestone.
 
 Open design decisions recorded for the owner (not yet decided):
 whether per-device signing identities are worth their complexity
