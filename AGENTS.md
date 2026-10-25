@@ -11,7 +11,8 @@ optional sync, written in stable Rust (AGPL-3.0-or-later). Development is
 
 **Current state:** early implementation (roadmap 0002). The Cargo workspace,
 CI and supply-chain tooling exist; `qv-encoding` has the canonical CBOR codec;
-`qv-crypto` has protected memory, process hardening and the OS RNG. Most specs
+`qv-crypto` has protected memory, process hardening, the OS RNG, the profile
+registry, the symmetric primitives and the key hierarchy. Most specs
 are not implemented yet. `tests/` is an empty placeholder. Do not assume code
 exists; check with `git ls-files <path>`.
 

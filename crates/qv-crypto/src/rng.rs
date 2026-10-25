@@ -24,6 +24,12 @@ impl fmt::Display for RngError {
 
 impl std::error::Error for RngError {}
 
+/// An `RngError` for tests in other modules.
+#[cfg(test)]
+pub(crate) fn test_error() -> RngError {
+    RngError(())
+}
+
 /// Fills `buf` from the OS CSPRNG.
 ///
 /// On failure `buf` is zeroed and an error is returned, so a partially filled

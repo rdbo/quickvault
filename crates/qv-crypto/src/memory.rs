@@ -423,16 +423,24 @@ mod inject {
     }
 }
 
+/// Every unit test in this crate that allocates secrets holds this lock, so
+/// the page registry's contents can be asserted exactly. The registry tests
+/// below hold it exclusively; tests in other modules hold it shared.
+#[cfg(test)]
+static SECRETS_TEST_LOCK: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+/// Shared guard for tests outside this module that allocate secrets.
+#[cfg(test)]
+pub(crate) fn secrets_test_guard() -> std::sync::RwLockReadGuard<'static, ()> {
+    SECRETS_TEST_LOCK.read().unwrap_or_else(|p| p.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // Every test that allocates secrets holds this, so the registry is only
-    // touched by one test at a time and its contents can be asserted exactly.
-    static SERIAL: Mutex<()> = Mutex::new(());
-
-    fn serial() -> MutexGuard<'static, ()> {
-        SERIAL.lock().unwrap_or_else(|p| p.into_inner())
+    fn serial() -> std::sync::RwLockWriteGuard<'static, ()> {
+        SECRETS_TEST_LOCK.write().unwrap_or_else(|p| p.into_inner())
     }
 
     fn first_page(buf: &[u8]) -> usize {

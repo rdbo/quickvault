@@ -9,6 +9,22 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-25: Crypto profiles and key hierarchy (roadmap phase 1.3, plan
+  0005): `qv-crypto` gains the profile registry (one type per namespace;
+  unknown IDs fail closed; explicit transitions), password-kdf/1 (Argon2id
+  over the NFC master password), the KEK and its constant-time commitment,
+  password slots that report only "wrong password" (with a
+  partitioning-oracle test), HKDF-SHA-512 purpose keys for all nine labels
+  as purpose-typed keys, per-record and per-attachment keys, stored-data/1
+  (XChaCha20-Poly1305 with canonical Padmé framing and budgets checked
+  before decryption), MAC/1, object-hash/1 and the redacted `CryptoError`.
+  Upstream known-answer vectors: RFC 4231, Wycheproof HKDF-SHA-512, FIPS
+  180-4, draft-irtf-cfrg-xchacha-03 and RFC 9106. Development-only
+  QuickVault vectors are cross-checked by a stdlib Python script and by
+  OpenSSL's Argon2id. New dependencies: `chacha20poly1305`, `argon2`, `hkdf`,
+  `hmac`, `sha2` and `unicode-normalization`; `deny.toml` now allows
+  `Unicode-3.0` (Unicode data tables), approved by the owner.
+
 - 2026-10-25: Canonical CBOR (roadmap phase 1.2, plan 0004): new crate
   `qv-encoding` implementing the spec 0004 §3.1 profile of RFC 8949
   deterministic CBOR. It validates the whole input without allocating before

@@ -96,7 +96,8 @@ rather than creating unused workspace scaffolding.
 | qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
 
 Implemented so far: `qv-encoding` (canonical CBOR codec, fuzzed in CI) and
-`qv-crypto` (protected memory, process hardening, OS RNG).
+`qv-crypto` (protected memory, process hardening, OS RNG, profile registry,
+symmetric primitives, key hierarchy and password slots).
 Other components are planned and are created by the roadmap phase that first
 needs them.
 

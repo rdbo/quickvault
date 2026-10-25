@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-10-25 | 2026-10-25 | 0004 §3.1, §4.1; 0002 §7.2; 0008 §1.1; 0012 §1 |
+| Reviewed | 2026-10-25 | 2026-10-25 | 0004 §3.1, §4.1; 0002 §7.2; 0008 §1.1; 0012 §1 |
 
 ## Intent
 
@@ -538,3 +538,4 @@ None.
   suggested publisher trust (cuviper, BurntSushi) is an owner policy choice.
   (3) Locally on musl the fuzzer needs `-use_cmp=0` (libFuzzer interceptor
   bug); CI is unaffected.
+- 2026-10-25: Reviewed ([REVIEW.md](REVIEW.md)): Approved with minor fixes. The reviewer added a `cargo fetch --locked` step for `fuzz/Cargo.lock` to the CI fuzz job. Two low findings are noted and need no change. Status `Reviewed`.

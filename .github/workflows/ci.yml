@@ -68,5 +68,8 @@ jobs:
         run: cargo install --locked cargo-fuzz --version 0.13.2
       - name: Format (fuzz crate)
         run: cargo fmt --check --manifest-path fuzz/Cargo.toml
+      # `cargo fuzz run` has no --locked flag; this fails if fuzz/Cargo.lock is stale.
+      - name: Check fuzz lockfile
+        run: cargo fetch --locked --manifest-path fuzz/Cargo.toml
       - name: Fuzz cbor_decode (60 s)
         run: cargo +"$NIGHTLY" fuzz run cbor_decode -- -max_total_time=60

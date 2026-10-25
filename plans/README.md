@@ -42,4 +42,5 @@ plan, or a new plan that names the one it supersedes.
 | [0001](0001-offline-first-sync/PLAN.md) | Offline-first sync direction (spec amendment) | Reviewed |
 | [0002](0002-roadmap/PLAN.md) | Development roadmap (phases to v1 milestones) | Approved |
 | [0003](0003-workspace-bootstrap/PLAN.md) | Workspace bootstrap and protected memory (roadmap 1.1) | Reviewed |
-| [0004](0004-canonical-cbor/PLAN.md) | Bounded deterministic CBOR, `qv-encoding` (roadmap 1.2) | Implemented |
+| [0004](0004-canonical-cbor/PLAN.md) | Bounded deterministic CBOR, `qv-encoding` (roadmap 1.2) | Reviewed |
+| [0005](0005-crypto-key-hierarchy/PLAN.md) | Crypto profiles, symmetric primitives and key hierarchy (roadmap 1.3) | Implemented |

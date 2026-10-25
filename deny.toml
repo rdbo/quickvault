@@ -14,6 +14,9 @@ ignore = []
 allow = [
     "Apache-2.0",
     "MIT",
+    # Unicode Character Database tables in unicode-normalization (NFC, spec
+    # 0002 §3.1); owner-approved 2026-10-25 (plan 0005).
+    "Unicode-3.0",
 ]
 confidence-threshold = 0.93
 
