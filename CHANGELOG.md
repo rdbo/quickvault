@@ -9,6 +9,12 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-25: Development roadmap (`plans/0002-roadmap/`): 37 phases across
+  the four milestones of `ARCHITECTURE.md` §7, one phase per session. Records
+  the owner's decisions on toolchain/MSRV, CI, SPDX headers, workspace layout,
+  go-ahead for the Draft sections milestone 1 needs, snapshot password slots
+  and CLI attachment commands.
+
 - 2026-10-16: Agent workflow. `AGENTS.md` (with `CLAUDE.md` symlink), skills in
   `.agents/skills/` (`quickvault-thinker`, `quickvault-architect`,
   `quickvault-developer`, `quickvault-reviewer`) symlinked from `.claude/skills`,

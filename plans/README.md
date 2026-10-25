@@ -40,3 +40,4 @@ plan, or a new plan that names the one it supersedes.
 | # | Title | Status |
 |---|-------|--------|
 | [0001](0001-offline-first-sync/PLAN.md) | Offline-first sync direction (spec amendment) | Reviewed |
+| [0002](0002-roadmap/PLAN.md) | Development roadmap (phases to v1 milestones) | Approved |

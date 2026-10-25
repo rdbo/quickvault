@@ -96,6 +96,11 @@ Skip stages when they add nothing: a typo fix needs no plan, and a settled idea
 needs no thinker. Anything touching cryptography, storage or wire formats,
 protocols or secret handling always goes through architect → developer → reviewer.
 
+**Roadmap:** development follows `plans/0002-roadmap/PLAN.md`, one phase per
+fresh session: review the previous phase's plan (if not yet `Reviewed`), plan
+the current phase ("plan phase N.M of roadmap 0002"), get owner approval,
+implement it, then tick the phase and log it in the roadmap.
+
 ## Documentation duties
 
 | When you… | Update |
@@ -127,5 +132,13 @@ Applies once code exists (from the specs and `ARCHITECTURE.md`):
 - `unsafe` only when a plan allows it, with a `// SAFETY:` comment.
 - Commit messages: short, lowercase, imperative (`add sync spec`), matching history.
 
-Not yet decided by the owner (don't assume; ask or propose): MSRV, CI provider,
-SPDX license headers in source files, workspace layout beyond §3 component names.
+Owner decisions (2026-10-25, roadmap 0002 D1–D4):
+
+- Toolchain pinned to Rust `1.98.1` in `rust-toolchain.toml`; that is the MSRV.
+  Bump it deliberately in its own commit.
+- CI: GitHub Actions running the gates above plus `cargo deny`/`cargo vet`;
+  actions pinned by commit SHA.
+- Every source file starts with `// SPDX-License-Identifier: AGPL-3.0-or-later`
+  (checked in CI).
+- Virtual workspace with crates under `crates/<name>/`; bounded deterministic
+  CBOR lives in its own bottom-level crate `qv-encoding`.

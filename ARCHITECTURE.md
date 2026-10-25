@@ -233,6 +233,9 @@ framework or relaxing security requirements needs an explicit owner decision.
 | 4 | Windows |
 | Later | Automatic sync (separate design), third-party import/export, hosted admission, iOS/macOS, extensions and BSD |
 
+The phased implementation roadmap for these milestones is
+[plans/0002-roadmap](plans/0002-roadmap/PLAN.md).
+
 Future implementations must satisfy the acceptance criteria in
 [0012 — Security Validation](specs/0012-security-validation.md).
 These are specification requirements; no implementation or security validation
