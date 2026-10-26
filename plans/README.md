@@ -44,4 +44,5 @@ plan, or a new plan that names the one it supersedes.
 | [0003](0003-workspace-bootstrap/PLAN.md) | Workspace bootstrap and protected memory (roadmap 1.1) | Reviewed |
 | [0004](0004-canonical-cbor/PLAN.md) | Bounded deterministic CBOR, `qv-encoding` (roadmap 1.2) | Reviewed |
 | [0005](0005-crypto-key-hierarchy/PLAN.md) | Crypto profiles, symmetric primitives and key hierarchy (roadmap 1.3) | Reviewed |
-| [0006](0006-recovery-phrase-generator/PLAN.md) | Recovery phrase and password generator (roadmap 1.4) | Implemented |
+| [0006](0006-recovery-phrase-generator/PLAN.md) | Recovery phrase and password generator (roadmap 1.4) | Reviewed |
+| [0007](0007-data-model-merge/PLAN.md) | Data model, version vectors and merge, `qv-model` (roadmap 1.5) | Implemented |

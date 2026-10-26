@@ -98,7 +98,9 @@ rather than creating unused workspace scaffolding.
 Implemented so far: `qv-encoding` (canonical CBOR codec, fuzzed in CI) and
 `qv-crypto` (protected memory, process hardening, OS RNG, profile registry,
 symmetric primitives, key hierarchy, password slots, the recovery phrase and
-the password generator; frontends will reach the generator through `qv-core`).
+the password generator; frontends will reach the generator through `qv-core`)
+and `qv-model` (records and payloads, version vectors, merge, history floors,
+group-tree projection and TOTP).
 Other components are planned and are created by the roadmap phase that first
 needs them.
 

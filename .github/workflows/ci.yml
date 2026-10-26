@@ -73,3 +73,5 @@ jobs:
         run: cargo fetch --locked --manifest-path fuzz/Cargo.toml
       - name: Fuzz cbor_decode (60 s)
         run: cargo +"$NIGHTLY" fuzz run cbor_decode -- -max_total_time=60
+      - name: Fuzz record_decode (60 s)
+        run: cargo +"$NIGHTLY" fuzz run record_decode -- -max_total_time=60

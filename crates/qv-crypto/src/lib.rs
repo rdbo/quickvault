@@ -40,6 +40,11 @@
 //! cache-timing hardened, which matters only for same-user malware while
 //! unlocked (out of scope, 0001).
 //!
+//! **One-time codes** (0003 §5.4): [`hotp`] is RFC 4226 HOTP over HMAC-SHA-1,
+//! -SHA-256 or -SHA-512 ([`OtpAlgorithm`]); `qv-model` parses `otpauth://`
+//! URIs and derives the RFC 6238 time counter. Codes are an [`OtpCode`] in
+//! locked memory.
+//!
 //! **Embedded data**: the BIP-39 English and EFF large word lists are compiled
 //! in byte for byte (`data/README.md`). Each one's SHA-256 is checked before
 //! first use; a mismatch fails closed.
@@ -65,6 +70,7 @@ mod ids;
 mod kat;
 mod keys;
 mod memory;
+mod otp;
 mod password;
 mod phrase;
 mod primitives;
@@ -85,6 +91,7 @@ pub use keys::{
     AeadKey, DataKey, KeyPurpose, MacKey, PurposeKey, VaultKey, mac, purpose, verify_mac,
 };
 pub use memory::{MemoryProtection, SecretArray, SecretBytes, memory_protection};
+pub use otp::{OtpAlgorithm, OtpCode, hotp};
 pub use password::MasterPassword;
 pub use phrase::{PHRASE_WORDS, RecoveryPhrase};
 pub use primitives::{MacTag, ObjectHash, ObjectHasher, object_hash};

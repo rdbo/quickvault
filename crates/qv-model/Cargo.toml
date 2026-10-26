@@ -1,0 +1,20 @@
+[package]
+name = "qv-model"
+description = "QuickVault data model: records, version vectors and merge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+qv-crypto.workspace = true
+qv-encoding.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

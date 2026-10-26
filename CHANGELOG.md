@@ -9,6 +9,24 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-26: Data model, version vectors and merge (roadmap phase 1.5,
+  plan 0007). New crate `qv-model`: random UUIDv4 IDs (validated on decode),
+  the record-version plaintext and the five payload kinds (vault metadata
+  with settings, groups, entries with typed fields, attachment metadata, the
+  password keyslot) as canonical CBOR with an integer-key registry
+  (development values until the 1.16 format freeze), unknown-key
+  preservation and 0004 §4.1 budgets checked before allocation; version
+  vectors with the sorted-pair wire form, join and edit clocks; the
+  maximal-version merge with its integrity checks, head limit, live/trash
+  representatives and record status; history floors as data; the
+  deterministic group-tree projection with a recovered-items view; and
+  `otpauth://totp` parsing with RFC 6238 codes. `qv-crypto` gains `hotp`
+  (RFC 4226 over the pinned HMAC crates; RFC 4226 and RFC 6238 vectors) and
+  the new dependency `sha1`. Property tests cover merge commutativity,
+  associativity and idempotence over generated histories and the 0012 rows
+  for old-date edits, mixed credentials and deleted-entry resurrection. New
+  `record_decode` fuzz target with a canonical round-trip oracle, run in CI.
+
 - 2026-10-25: Recovery phrase and password generator (roadmap phase 1.4,
   plan 0006). `qv-crypto` encodes VK as 24 BIP-39 English words (entropy
   encoding only, not the wallet seed) and decodes it back with
@@ -27,6 +45,7 @@ Dates are ISO 8601. Newest first within each section.
   by the owner instead of `subtle`, whose `BSD-3-Clause` licence is outside the
   allow-list. `zxcvbn` estimates for typed passwords come with the CLI
   (phase 1.10).
+
 - 2026-10-25: Review fix (plan 0005): other crates could read raw AEAD/MAC
   key bytes through the sealed key-use traits; the accessors now require a
   crate-private token, with compile-fail tests.

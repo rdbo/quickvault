@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9d60e6279bbcc899d886b3a71843312bc9308112ed7a4757104e2f1ab04ef2df # shrinks to h = [Tv { id: VersionId([11, 0, 0, 0, 0, 0, 64, 0, 128, 0, 0, 0, 0, 0, 0, 0]), clock: Clock { pairs: [(WriterId([0, 0, 0, 0, 0, 0, 64, 0, 128, 0, 0, 0, 0, 0, 0, 0]), 1)] }, deletion: Live, content: 0 }, Tv { id: VersionId([48, 0, 0, 0, 0, 0, 64, 0, 128, 0, 0, 0, 0, 0, 0, 0]), clock: Clock { pairs: [(WriterId([0, 0, 0, 0, 0, 0, 64, 0, 128, 0, 0, 0, 0, 0, 0, 0]), 2)] }, deletion: Live, content: 1 }]
+cc 20e6d3fe300e03dd8cfd9b7d17f909789deb9817027a49c3cce536eded683ba0 # shrinks to h = [Tv { id: VersionId([11, 0, 0, 0, 0, 0, 64, 0, 128, 0, 0, 0, 0, 0, 0, 0]), clock: Clock { pairs: [(WriterId([0, 0, 0, 0, 0, 0, 64, 0, 128, 0, 0, 0, 0, 0, 0, 0]), 1)] }, deletion: Live, content: 0 }, Tv { id: VersionId([48, 0, 0, 0, 0, 0, 64, 0, 128, 0, 0, 0, 0, 0, 0, 0]), clock: Clock { pairs: [(WriterId([0, 0, 0, 0, 0, 0, 64, 0, 128, 0, 0, 0, 0, 0, 0, 0]), 2)] }, deletion: Live, content: 1 }]

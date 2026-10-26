@@ -15,6 +15,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "=0.4.13"
 qv-encoding = { path = "../crates/qv-encoding", version = "=0.0.0" }
+qv-model = { path = "../crates/qv-model", version = "=0.0.0" }
 
 [workspace]
 members = ["."]
@@ -22,6 +23,13 @@ members = ["."]
 [[bin]]
 name = "cbor_decode"
 path = "fuzz_targets/cbor_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "record_decode"
+path = "fuzz_targets/record_decode.rs"
 test = false
 doc = false
 bench = false
