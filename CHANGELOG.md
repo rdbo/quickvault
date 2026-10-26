@@ -7,6 +7,16 @@ Dates are ISO 8601. Newest first within each section.
 
 ## Unreleased
 
+### Changed
+
+- 2026-10-26: Agent guidance now loads spec/layout navigation on demand in
+  `.agents/README.md` and uses the architecture and plans index for current
+  implementation status. Skills describe targeted roadmap reading, focused
+  step verification and full final gates with preserved exit status; review
+  checks remain independent. Shorter skill descriptions reduce discovery
+  context. Spec/security requirements, approval rules and required gates are
+  retained; the specs index no longer calls the repository specification-only.
+
 ### Added
 
 - 2026-10-26: `scripts/setup-android.sh`: installs the Android command-line

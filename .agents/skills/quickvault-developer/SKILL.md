@@ -1,6 +1,6 @@
 ---
 name: quickvault-developer
-description: Executes an approved QuickVault plan (plans/NNNN-slug/PLAN.md) step by step. Writes the code, tests and docs the plan calls for, keeps the plan's execution log current, and stops to ask instead of improvising when a step is unsound, under-specified, insecure or contradicts the specs. Use when the user says to implement, build, execute, continue or resume a plan or a plan step ("implement plan 0002", "do step 3", "keep going"). For non-trivial work that has no plan yet, hand off to quickvault-architect.
+description: Implement, build, execute, continue or resume an approved QuickVault plan or step. Write code, tests and docs, keep the execution log current, and stop on unresolved design or security issues. Non-trivial work without a plan uses quickvault-architect.
 ---
 
 # QuickVault Developer
@@ -12,7 +12,8 @@ that ships late.
 
 `AGENTS.md` (auto-loaded) holds the conventions, the documentation duties and
 the context budget rules. Read the plan, the files it names and the spec
-sections it cites. Don't explore beyond that.
+sections it cites. Follow relevant callers and cross-references when needed
+for correctness; avoid unrelated exploration.
 
 ## Before you start
 
@@ -20,7 +21,9 @@ sections it cites. Don't explore beyond that.
    `plans/README.md` for plans that are `Approved` or `In progress`. If there's
    more than one candidate, ask which one.
 2. **Read `PLAN.md` fully**, including *Revisions* and the *Execution log* when
-   resuming.
+   resuming. This is the active implementation plan; use `.agents/README.md`
+   for targeted reading of the separate roadmap. Reuse unchanged context
+   within the session; after a handoff recheck the current plan and tree.
 3. **Check the status:**
    - `Approved` or `In progress`: proceed.
    - `Proposed`: if the user explicitly told you to implement this plan, treat
@@ -44,9 +47,13 @@ than a couple of files, needs a plan. Send it to `quickvault-architect`.
 1. Re-read the step's **Do / Files / Done when / Verify**.
 2. Implement the minimum that satisfies it, in the style of the surrounding code.
    Write tests along with the code, including rejection and error paths.
-3. Run the step's **Verify** commands plus the gates from `AGENTS.md`
-   (`fmt`, `clippy -D warnings`, `test --locked`) once a workspace exists.
-   Trim the output.
+3. Run the step's **Verify** commands. Use focused tests while iterating;
+   broaden checks when shared interfaces, dependencies or security invariants
+   change. All `AGENTS.md` gates remain required on the final tree. If an
+   approved plan explicitly requires full gates per step, follow it unless
+   the owner authorizes changing that requirement.
+   Keep verbose output in a temporary log; surface failures and preserve exit
+   status when trimming it. Record command, scope and result in the log.
 4. Tick the step's checkbox and append a dated entry to the *Execution log*:
    what you did, anything that differed from the plan and why, and anything you
    noticed but deliberately left alone ("Found, not fixed: …").
@@ -95,7 +102,11 @@ How to ask:
 
 ## Finishing
 
-1. All steps are ticked and the gates pass on the final tree.
+1. All steps are ticked and all `AGENTS.md` gates pass on the final tree,
+   including SPDX and deny/vet when dependencies changed. A check already run
+   in this session need not be repeated if its inputs are unchanged; record
+   that evidence. After edits, rerun checks whose inputs changed. Never reuse
+   historical gate results as proof of the current tree.
 2. Do the plan's **Documentation** section: a `CHANGELOG.md` entry, plus
    `ARCHITECTURE.md`, specs and `AGENTS.md` as listed. Set a spec to
    `Implemented` only if the code now fully matches it. Partial coverage goes in

@@ -35,8 +35,12 @@ the specs (e.g. 0011 §4 phase markers) always means milestone 1.
 
 ## Session protocol
 
-Each phase runs in a **fresh session** started with **"next phase"**. The
-session then works without further prompting:
+Each phase runs in a **fresh session** started with **"next phase"**.
+For context selection, use the roadmap reading guide in
+[.agents/README.md](../../.agents/README.md#efficient-reading-without-losing-evidence).
+Read the approval rules, decisions, cross-phase constraints and relevant
+revisions; unrelated future phase bodies need not be loaded.
+The session then works without further prompting:
 
 0. **Check the tree.** If `git status` shows uncommitted work from the previous
    phase, stop and ask the owner to commit it first, so each phase stays a
@@ -834,6 +838,8 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
 
 ## Revisions
 
+- 2026-10-26: Added targeted context-reading guidance for agent efficiency;
+  phase scope/order, standing approval and fresh-context review are unchanged.
 - 2026-10-25: Approved by the owner with D1–D6 and D9 accepted as recommended. D1–D4 were recorded in `AGENTS.md` at approval, not in phase 1.1.
 - 2026-10-25: Owner direction: one prompt ("next phase") per session, with standing approval of phase plans except under the stop conditions in *Session protocol* step 4. Sessions never commit; the owner commits each phase.
 - 2026-10-25 (phase 1.4, plan 0006): 0010 §3.2 (`zxcvbn` for user-typed passwords) and §4.2 (master-password acceptance) land with their first consumer, phase 1.10 (`init`/`passwd`/`recover`), not in 1.4. `zxcvbn` is not in the candidate table, so 1.10 needs the owner's approval for it. The generator lives in `qv-crypto`; `qv-core` exposes it from 1.8.

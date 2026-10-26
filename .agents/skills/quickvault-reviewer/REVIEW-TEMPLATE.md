@@ -32,10 +32,12 @@ Out-of-scope changes: <None | list>
 
 | Check | Result |
 |-------|--------|
+| `sh scripts/check-spdx.sh` | |
 | `cargo fmt --check` | pass / fail / n/a (no workspace) |
 | `cargo clippy --all-targets --locked -- -D warnings` | |
 | `cargo test --locked` | |
 | `cargo deny check` (if deps changed) | |
+| `cargo vet --locked` (if deps changed) | |
 
 ## Documentation
 

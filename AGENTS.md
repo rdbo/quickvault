@@ -1,170 +1,95 @@
 # AGENTS.md
 
-Instructions for AI agents (and humans) working in this repository.
-`CLAUDE.md` is a symlink to this file; edit this file only.
-
-## What this repository is
-
+Instructions for agents and humans. `CLAUDE.md` links here; edit this file only.
 QuickVault is an offline-first, end-to-end encrypted password manager with
-optional sync, written in stable Rust (AGPL-3.0-or-later). Development is
-**spec-first**: the specs in `specs/` are normative and code implements them.
+optional sync, stable Rust, AGPL-3.0-or-later. **Specs are normative.**
 
-**Current state:** early implementation (roadmap 0002). The Cargo workspace,
-CI and supply-chain tooling exist; `qv-encoding` has the canonical CBOR codec;
-`qv-crypto` has protected memory, process hardening, the OS RNG, the profile
-registry, the symmetric primitives, the key hierarchy, the recovery phrase,
-the password generator and HOTP; `qv-model` has the records, version vectors,
-merge, group-tree projection and TOTP; `qv-store` has the hardened vault
-file, its header and keyslots, objects, manifests, the local head and
-anchor, creation, verified unlock and the write path; `qv-core` has
-sessions, lock and cancellation, handles, the metadata index and search,
-on-demand decryption, entry/group edits, the trash with final deletion and
-the vault settings; `qv-cli` (`qvault`) has the CLI foundation and `init`,
-`info`, `ls`, `search`, `show`, `totp`, `generate`. Most specs
-are not implemented yet. `tests/` is an empty placeholder. Do not assume code
-exists; check with `git ls-files <path>`.
+## Non-negotiable rules
 
-## Ground rules
+- Behaviour changes start with a spec amendment. Implement `Accepted` specs;
+  `Draft`/`Exploratory` behaviour requires the owner's explicit go-ahead.
+  Status meanings: `specs/README.md`; roadmap approvals may cover named sections.
+- Do not decide open questions for the owner. Keep recommendations in spec
+  *Open Questions* or an `Exploratory` spec until confirmed. Owner-level open
+  decisions are at the end of `ARCHITECTURE.md` and in the active plan/roadmap.
+- Plan before non-trivial code; record work in `plans/`. Cryptography, storage
+  or wire formats, protocols and secret handling always require
+  architect → developer → reviewer. A typo or local doc wording fix needs no plan.
+- Document every change (table below). Never claim a spec or passing tests prove
+  security; follow `specs/0012-security-validation.md`.
+- **Never commit, push or branch: the owner commits.**
 
-1. **Specs are normative.** Behaviour changes start with a spec change.
-   Status meanings are in `specs/README.md`: implement `Accepted` specs;
-   `Draft`/`Exploratory` behaviour needs the owner's explicit go-ahead.
-2. **Don't decide open questions for the owner.** Undecided points stay listed
-   under a spec's *Open Questions* (or as an `Exploratory` spec) with your
-   recommendation, until the owner confirms. Current owner-level open decisions
-   are listed at the end of `ARCHITECTURE.md`.
-3. **Plan before non-trivial code.** Work flows through the skills below and
-   is recorded in `plans/`.
-4. **Document every change** (see *Documentation duties*).
-5. **Security claims must be honest.** Writing a spec or test is not evidence
-   that something is secure; see `specs/0012-security-validation.md`.
+## Load context by task
 
-## Context budget: read only what you need
+This is early implementation, not all specs are implemented. Use
+`ARCHITECTURE.md` §3 for components/current implementation, `plans/README.md`
+for plan status, and `git ls-files <path>` to confirm code exists.
 
-This repo is small but dense, and future builds will add large trees. Keep
-token use proportional to the task:
+- Read the skill for your current role under `.agents/skills/`: unsettled idea
+  → `quickvault-thinker`; plan/design → `quickvault-architect`; execute/resume
+  → `quickvault-developer`; review/audit → `quickvault-reviewer`.
+  Skip stages that add nothing; a settled idea needs no thinker.
+- Use [.agents/README.md](.agents/README.md) **when needed** for task entry
+  points, spec topic map, layout and roadmap reading instructions. Read the
+  actual requirements, relevant Open Questions and owner decisions before
+  acting; navigation and summaries do not replace them.
+- Read only relevant architecture/spec sections. Outline with
+  `rg -n '^#{1,4} ' <file>`, then read selected ranges. Widen to callers,
+  cross-references and tests as needed to establish correctness.
+- Scope searches to selected files/directories. Use `git ls-files <path>`
+  and `rg`; no recursive root sweeps (`find .`, `ls -R`, `grep -r .`, `**/*`).
+  Do not reload unchanged material already in context or spawn search subagents.
+- Never read `LICENSE`, `.git/`, `target/` or `.android-sdk/`. Read `Cargo.lock`
+  only for dependency review. Batch independent reads; keep output bounded.
+- Keep full build/test output in a temporary log and show a short summary or
+  failure excerpt. Preserve the command's exit status (e.g. Bash `pipefail`
+  when piping to `tail`); truncated output must not hide failures.
 
-- **No recursive sweeps of the repo root.** Avoid `grep -r . `, `find .`,
-  `ls -R`, `**/*` globs and "read every spec to get context". Use
-  `git ls-files [path]` for inventory and the topic map below to pick files.
-- **Outline first, then read a section.** For a spec:
-  `grep -n '^#' specs/0005-synchronization.md` and then read only the line
-  range of the section you need.
-- **Scope every search** to a file or directory you've already picked, e.g.
-  `grep -n 'tombstone' specs/0005-*.md specs/0007-*.md`.
-- **Overview = `ARCHITECTURE.md` + `specs/README.md`.** Start there; don't open
-  specs you don't need.
-- **Never read:** `LICENSE` (it's AGPL-3.0-or-later; nothing else in it matters),
-  `.git/`, `target/`, `.android-sdk/` (the Android SDK/NDK from
-  `scripts/setup-android.sh`). Read `Cargo.lock` only for dependency review.
-  `.ignore` keeps ripgrep-based search out of `LICENSE` and `.android-sdk/`,
-  and `.gitignore` covers `target/` and `.android-sdk/`.
-- **Trim command output**: pipe long build/test output through `tail`/`grep`.
-- **Don't spawn search subagents** for this repo; direct, targeted reads are cheaper.
+## Roadmap sessions
 
-## Topic map
-
-| Topic | Where |
-|-------|-------|
-| Goals, components, trust boundaries, flows, tech stack, phases | `ARCHITECTURE.md` |
-| Spec index, statuses, process, spec template | `specs/README.md` |
-| Assets, adversaries, out of scope, security goals, accepted leakage | `0001` threat model |
-| Crypto profiles §1, migration §2, key hierarchy / password slots §3, recovery phrase §4, quick unlock §5, hybrid KEM/signatures §6, general rules §7, unlock §8 | `0002` cryptography |
-| Identifiers, records, vault metadata, groups, entries, attachments, tags | `0003` data model |
-| Vault files §1, SQLite schema §2, encoding/encryption §3, resource budgets §4, unlock & writes §5, archive format §6 | `0004` local storage |
-| Offline-first modes §0, versions/causality §1, merge §2, remote server sync §3, file exchange §4, manifests/checkpoints/anchors §5, direct LAN sync §6 | `0005` synchronization |
-| Admission, auth, key custody, OPAQUE, server identity, registration, login, adding a device (pairing), recovery, password change, revocation | `0006` server auth |
-| Entry history §1, trash §2, local snapshots §3, server retention §4 | `0007` history & backups |
-| Memory §1, timing §2, OS leaks §3, webview boundary §4, local files & testing §5 | `0008` memory & side channels |
-| Clients, platform priority, CLI scope, mobile autofill, desktop | `0009` clients & platforms |
-| Randomness, modes, strength, warnings, settings, secret handling | `0010` password generator |
-| CLI general, addressing, secret-handling rules, commands, output, exit codes | `0011` CLI |
-| Validation matrix §1, acceptance scenarios §2, release gates & supply chain §3 | `0012` security validation |
-
-## Repository layout
-
-| Path | Purpose |
-|------|---------|
-| `ARCHITECTURE.md` | High-level design; kept in sync with specs and code structure |
-| `specs/` | Normative RFC-style specs (`NNNN-title.md`, numbers never reused) |
-| `plans/` | Implementation plans and reviews (`NNNN-slug/PLAN.md`, `REVIEW.md`) |
-| `CHANGELOG.md` | Repository-level change log |
-| `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `clippy.toml` | Virtual workspace, lockfile, pinned toolchain, clippy test exemptions |
-| `.cargo/config.toml` | Build environment: compile options of the bundled SQLite (checked by a `qv-store` test) |
-| `crates/<name>/` | Workspace crates (`ARCHITECTURE.md` §3) |
-| `deny.toml`, `supply-chain/` | `cargo deny` policy and `cargo vet` audits/exemptions |
-| `fuzz/` | cargo-fuzz targets; own workspace and lockfile, outside the shipped workspace; pinned nightly in CI |
-| `scripts/` | Repository checks (`check-spdx.sh`); Android SDK/NDK and Rust Android targets setup (`setup-android.sh`, versions pinned inside) |
-| `.github/workflows/` | CI (gates, supply chain, fuzzing), actions pinned by SHA |
-| `.agents/skills/` | Agent skills (source of truth) |
-| `.claude/skills` | Symlink to `../.agents/skills` for Claude Code |
-| `tests/` | Placeholder for future integration tests |
-
-## Agent workflow and skills
-
-Skills live in `.agents/skills/<name>/SKILL.md`. Typical flow:
-
-```
-quickvault-thinker  → idea explored; outcome recorded as Exploratory spec / Open Question
-quickvault-architect → plans/NNNN-slug/PLAN.md (status Proposed → owner approves)
-quickvault-developer → implements the plan, keeps its execution log (→ Implemented)
-quickvault-reviewer  → REVIEW.md, minor fixes, escalates the rest (→ Reviewed)
-```
-
-Skip stages when they add nothing: a typo fix needs no plan, and a settled idea
-needs no thinker. Anything touching cryptography, storage or wire formats,
-protocols or secret handling always goes through architect → developer → reviewer.
-
-**Roadmap:** development follows `plans/0002-roadmap/PLAN.md`, one phase per
-fresh session started with "next phase". Follow its *Session protocol*: review
-the previous phase, plan the current one, approve it under the standing
-approval rule (stop for the owner only on the listed conditions), implement,
-then update the roadmap. **Never commit, push or branch: the owner commits.**
-If the previous phase is still uncommitted, ask the owner to commit it first.
+Development follows `plans/0002-roadmap/PLAN.md`, one phase per fresh session
+started with “next phase”. Its **Session protocol** governs: check the tree,
+review the previous phase unless already Reviewed, plan the current phase,
+apply standing approval only when no listed stop condition applies, implement,
+then update the roadmap. If the previous phase is uncommitted, ask the owner
+to commit it first. Preserve the fresh-context review requirement.
 
 ## Documentation duties
 
-| When you… | Update |
-|-----------|--------|
-| Change normative behaviour | The spec's text **and** its *Changelog*; status if it changed; `specs/README.md` index |
-| Add/rename/split a component, crate or trust boundary | `ARCHITECTURE.md` §3 (and the diagram if affected) |
-| Change tech choices or phases | `ARCHITECTURE.md` §6 / §7 |
-| Finish any user-visible or repo-level change | `CHANGELOG.md` under *Unreleased* |
-| Fully implement a spec | Set its status to `Implemented` (only when the code matches it fully) |
-| Change agent workflow, layout or conventions | This file, and the affected skill |
+| Change | Update |
+|--------|--------|
+| Normative behaviour | Spec text + Changelog, status if changed; `specs/README.md` index |
+| Component/crate/trust boundary added, renamed or split | `ARCHITECTURE.md` §3 and diagram if affected |
+| Technology or phases | `ARCHITECTURE.md` §6 / §7 |
+| User-visible or repo-level change | `CHANGELOG.md` under Unreleased |
+| Spec fully implemented | Status `Implemented` only when code matches it fully |
+| Agent workflow/layout/conventions | `AGENTS.md`, affected skill; `.agents/README.md` if navigation changes |
 
-## Engineering conventions
+## Engineering and verification
 
-Applies once code exists (from the specs and `ARCHITECTURE.md`):
-
-- Stable Rust. Create crates from `ARCHITECTURE.md` §3 only when an interface
-  needs them — no empty scaffolding.
-- Dependency direction: frontends → `qv-core`; crypto and model never depend on
-  frontends.
-- Gates for every change: `sh scripts/check-spdx.sh`, `cargo fmt --check`,
-  `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`.
-  Commit `Cargo.lock`. Crates opt into the workspace lints (`[lints] workspace = true`):
-  `unsafe_code` is forbidden and `unwrap`/`expect`/`panic!` are denied outside tests.
-- Secrets live only in `qv_crypto::{SecretBytes, SecretArray}`; access is via
-  `expose_secret*`. Lock and hardening failures are status values that callers
-  must surface, not errors to swallow.
-- Dependency changes: justify in the plan, run `cargo deny` and `cargo vet`
-  (0012 §3), keep security-critical crates to a reviewed minimum.
-- Never implement cryptographic primitives; use reviewed crates pinned to the
-  profiles in 0002.
-- Secrets: zeroize, no `Debug`/`Display`, never in logs, errors, panics or argv
-  (0008, 0011 §3). Untrusted input: bounded before allocation, authenticated
-  before parsing (0004 §4, §6). No `unwrap`/`expect` on untrusted data.
-- `unsafe` only when a plan allows it, with a `// SAFETY:` comment.
-- Commit messages: short, lowercase, imperative (`add sync spec`), matching history.
-
-Owner decisions (2026-10-25, roadmap 0002 D1–D4):
-
-- Toolchain pinned to Rust `1.98.1` in `rust-toolchain.toml`; that is the MSRV.
-  Bump it deliberately in its own commit.
-- CI: GitHub Actions running the gates above plus `cargo deny`/`cargo vet`;
-  actions pinned by commit SHA.
-- Every source file starts with `// SPDX-License-Identifier: AGPL-3.0-or-later`
-  (checked in CI).
-- Virtual workspace with crates under `crates/<name>/`; bounded deterministic
-  CBOR lives in its own bottom-level crate `qv-encoding`.
+- Stable Rust; MSRV pinned to **1.98.1** in `rust-toolchain.toml` (owner D1).
+  Bump deliberately in its own commit. Virtual workspace, `crates/<name>/`;
+  create crates from architecture §3 only when an interface needs them.
+  Bounded deterministic CBOR is bottom-level `qv-encoding` (D4).
+- Frontends → `qv-core`; crypto/model never depend on frontends.
+- **Required gates for every change:** `sh scripts/check-spdx.sh`,
+  `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`,
+  `cargo test --locked`. Run focused checks while editing, then all gates on
+  the final tree before handoff. Repeat affected checks after further edits;
+  old logs are not current evidence. Do not weaken tests to save tokens.
+- Dependency changes: justify in the plan, run `cargo deny check` and
+  `cargo vet --locked` (0012 §3), retain `Cargo.lock` changes for owner commit,
+  minimize security-critical crates. CI uses GitHub Actions, actions pinned
+  by SHA, with gates plus deny/vet (D2).
+- Every source starts with `// SPDX-License-Identifier: AGPL-3.0-or-later`
+  (shell scripts use `#`, after the shebang); CI checks headers (D3).
+- Crates opt into workspace lints (`[lints] workspace = true`): `unsafe_code`
+  forbidden; `unwrap`/`expect`/`panic!` denied outside tests. `unsafe` requires
+  plan permission and a `// SAFETY:` comment.
+- Secrets live only in `qv_crypto::{SecretBytes, SecretArray}`, accessed via
+  `expose_secret*`; zeroize, no `Debug`/`Display`, never in logs, errors, panics
+  or argv (0008, 0011 §3). Surface lock/hardening failure status values.
+- Never implement crypto primitives; use reviewed crates pinned to 0002
+  profiles. Bound untrusted input before allocating, authenticate before parsing
+  (0004 §4, §6); no `unwrap`/`expect` on untrusted data.
+- Commit message convention for the owner: short, lowercase, imperative.

@@ -1,6 +1,6 @@
 ---
 name: quickvault-reviewer
-description: Reviews QuickVault work against its plan, the specs and security practice. Applies small, obviously correct fixes itself and escalates everything else to the user: work not done as asked, spec violations, security issues, or bugs too big to fix without planning. Writes plans/NNNN-slug/REVIEW.md. Use when the user asks to review, check, audit or verify an implemented plan, a step, a diff or a branch ("review plan 0003", "did the developer do it right", "check my changes").
+description: Review, check, audit or verify a QuickVault plan, step, diff or branch against specs and security requirements. Write REVIEW.md, apply small obvious fixes, and escalate incomplete work, spec violations, security issues and bugs needing re-planning.
 ---
 
 # QuickVault Reviewer
@@ -12,6 +12,8 @@ real issues in style nitpicks.
 
 `AGENTS.md` (auto-loaded) holds the conventions and the context budget rules.
 Review the **diff** and the code it touches, not the whole codebase.
+Follow affected callers, tests and spec cross-references as needed to establish
+correctness. Use `.agents/README.md` for navigation, not as review evidence.
 
 ## Inputs
 
@@ -50,10 +52,13 @@ Review the **diff** and the code it touches, not the whole codebase.
    - Nothing reaches the server that could link records (0004 §2.2).
 5. **Are the tests real?** Tests exist, exercise rejected inputs and crash paths
    (0012 §2), cover the matrix rows the plan claims, and haven't been weakened.
-6. **Do the gates pass?** Run `cargo fmt --check`,
-   `cargo clippy --all-targets --locked -- -D warnings` and `cargo test --locked`,
-   plus `cargo deny check` if dependencies changed. If no workspace exists yet,
-   say so instead of claiming the gates passed.
+6. **Do the gates pass?** Run all gates from `AGENTS.md`, including SPDX and
+   deny/vet when dependencies changed. Run them once on the final reviewed
+   tree, after any fixes; use focused checks while investigating. Keep full
+   output in temporary logs with exit status preserved, and record commands,
+   scope and results. Developer logs guide review but do not replace the
+   reviewer's own checks. If no workspace exists yet, say so instead of
+   claiming the Rust gates passed.
 7. **Is it documented?** Check the `CHANGELOG.md` entry, `ARCHITECTURE.md` if
    the structure changed, accurate spec statuses and Changelogs, the plan's
    ticks and log, and the `plans/README.md` row.

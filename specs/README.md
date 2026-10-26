@@ -45,8 +45,9 @@ simplifies anchors and remote acceptance, and hardens pairing and password
 slots. Accepted designs still require their applicable
 validation gates before release; specification acceptance is not an audit.
 
-This repository is specification-only. Validation scenarios describe acceptance
-criteria for future development, not completed implementation tests.
+Implementation is partial; see [ARCHITECTURE.md §3](../ARCHITECTURE.md#3-components-and-trust-boundaries)
+and the [plans index](../plans/README.md) for current coverage. Validation
+scenarios are acceptance criteria, not evidence of completed validation.
 
 ## Process
 

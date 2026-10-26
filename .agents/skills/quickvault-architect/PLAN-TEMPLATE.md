@@ -72,6 +72,8 @@ open item here.>
 
 ## Test plan
 
+- Final verification: all `AGENTS.md` gates; step checks above are focused
+  unless explicitly stated otherwise.
 - Unit and property tests:
 - Rejection, malformed-input and crash-path tests:
 - Vectors (golden files, known-answer tests):
