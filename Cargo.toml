@@ -22,7 +22,9 @@ hmac = { version = "=0.13.0", features = ["zeroize"] }
 proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
 qv-crypto = { path = "crates/qv-crypto", version = "=0.0.0" }
 qv-encoding = { path = "crates/qv-encoding", version = "=0.0.0" }
+qv-model = { path = "crates/qv-model", version = "=0.0.0" }
 region = "=4.0.1"
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled", "hooks", "limits"] }
 rustix = { version = "=1.1.5", default-features = false, features = ["std", "process"] }
 sha1 = { version = "=0.11.0", default-features = false, features = ["zeroize"] }
 sha2 = { version = "=0.11.1", default-features = false, features = ["zeroize"] }

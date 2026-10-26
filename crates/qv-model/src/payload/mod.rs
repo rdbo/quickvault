@@ -13,6 +13,7 @@ pub(crate) mod vault_meta;
 use qv_encoding::{Decoder, EncodeError, Encoder};
 
 use crate::error::ModelError;
+use crate::ids::is_v4;
 use crate::record::RecordKind;
 
 pub use attachment::{AttachmentMeta, CHUNK_SIZE, MAX_ATTACHMENT_BYTES};
@@ -60,6 +61,18 @@ impl Payload {
 
     /// Cross-field checks shared by encode and decode.
     pub(crate) fn check(&self) -> Result<(), ModelError> {
+        // The qv-crypto IDs have public fields, so a caller can build one
+        // without the v4 bits; refuse to encode what decode would reject.
+        let ids_ok = match self {
+            Self::VaultMeta(m) => is_v4(&m.root_group.0),
+            Self::Group(g) => g.parent.is_none_or(|p| is_v4(&p.0)),
+            Self::Entry(e) => is_v4(&e.group.0),
+            Self::AttachmentMeta(a) => is_v4(&a.entry.0),
+            Self::PasswordKeyslot(k) => is_v4(&k.slot.slot_id.0),
+        };
+        if !ids_ok {
+            return Err(ModelError::Malformed);
+        }
         match self {
             Self::Entry(e) => entry::check(e),
             Self::AttachmentMeta(a) => attachment::check(a),

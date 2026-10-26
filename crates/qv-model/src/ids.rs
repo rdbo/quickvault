@@ -3,14 +3,16 @@
 //! Random UUIDv4 identifiers (spec 0003 §1.1, 0005 §1.1).
 //!
 //! Every model ID is 16 random bytes with the RFC 9562 version (4) and
-//! variant (`10`) bits set. That is a type invariant: [`RandomId::generate`]
-//! sets the bits and [`RandomId::from_bytes`] rejects IDs without them, so a
-//! time-ordered ID (UUIDv7) never enters the model. IDs are not secrets.
+//! variant (`10`) bits set. [`RandomId::generate`] sets the bits and
+//! [`RandomId::from_bytes`] rejects IDs without them, so a time-ordered ID
+//! (UUIDv7) never enters the model. IDs are not secrets.
 //!
 //! The model's own IDs have private fields: [`RandomId`] is the only way to
-//! build one. The IDs that also enter key derivation ([`VaultId`],
-//! [`RecordId`], [`AttachmentId`], [`SlotId`]) live in `qv-crypto` and get
-//! the same trait here.
+//! build one, so the v4 bits are a type invariant. The IDs that also enter
+//! key derivation ([`VaultId`], [`RecordId`], [`AttachmentId`], [`SlotId`])
+//! live in `qv-crypto` with public fields and get the same trait here; for
+//! them the invariant is enforced where they cross the model boundary: on
+//! decode, and by the payload checks before every encode.
 
 use qv_crypto::random_array;
 pub use qv_crypto::{AttachmentId, RecordId, SlotId, VaultId};

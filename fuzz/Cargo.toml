@@ -16,6 +16,7 @@ cargo-fuzz = true
 libfuzzer-sys = "=0.4.13"
 qv-encoding = { path = "../crates/qv-encoding", version = "=0.0.0" }
 qv-model = { path = "../crates/qv-model", version = "=0.0.0" }
+qv-store = { path = "../crates/qv-store", version = "=0.0.0" }
 
 [workspace]
 members = ["."]
@@ -30,6 +31,13 @@ bench = false
 [[bin]]
 name = "record_decode"
 path = "fuzz_targets/record_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "vault_open"
+path = "fuzz_targets/vault_open.rs"
 test = false
 doc = false
 bench = false

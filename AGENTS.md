@@ -14,7 +14,8 @@ CI and supply-chain tooling exist; `qv-encoding` has the canonical CBOR codec;
 `qv-crypto` has protected memory, process hardening, the OS RNG, the profile
 registry, the symmetric primitives, the key hierarchy, the recovery phrase,
 the password generator and HOTP; `qv-model` has the records, version vectors,
-merge, group-tree projection and TOTP. Most specs
+merge, group-tree projection and TOTP; `qv-store` has the hardened vault
+file, its header and keyslots, creation and unlock. Most specs
 are not implemented yet. `tests/` is an empty placeholder. Do not assume code
 exists; check with `git ls-files <path>`.
 
@@ -83,6 +84,7 @@ token use proportional to the task:
 | `plans/` | Implementation plans and reviews (`NNNN-slug/PLAN.md`, `REVIEW.md`) |
 | `CHANGELOG.md` | Repository-level change log |
 | `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `clippy.toml` | Virtual workspace, lockfile, pinned toolchain, clippy test exemptions |
+| `.cargo/config.toml` | Build environment: compile options of the bundled SQLite (checked by a `qv-store` test) |
 | `crates/<name>/` | Workspace crates (`ARCHITECTURE.md` §3) |
 | `deny.toml`, `supply-chain/` | `cargo deny` policy and `cargo vet` audits/exemptions |
 | `fuzz/` | cargo-fuzz targets; own workspace and lockfile, outside the shipped workspace; pinned nightly in CI |

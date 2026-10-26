@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Trim the bundled SQLite (rusqlite `bundled`, libsqlite3-sys) to what the
+# vault file needs (spec 0004 §1.2; plan 0008): no FTS3/FTS5/R-Tree/dbstat
+# virtual tables, no extension loading, no JSON, no URI filenames, no
+# double-quoted string literals, temp storage always in memory, secure delete
+# by default. `crates/qv-store` checks the result at test time
+# (`compile_options` test), so a build that lost these flags fails CI.
+[env]
+LIBSQLITE3_FLAGS = "-USQLITE_ENABLE_FTS3 -USQLITE_ENABLE_FTS3_PARENTHESIS -USQLITE_ENABLE_FTS5 -USQLITE_ENABLE_RTREE -USQLITE_ENABLE_DBSTAT_VTAB -USQLITE_ENABLE_LOAD_EXTENSION -USQLITE_ENABLE_COLUMN_METADATA -USQLITE_SOUNDEX -USQLITE_USE_URI -DSQLITE_OMIT_LOAD_EXTENSION -DSQLITE_OMIT_JSON -DSQLITE_DQS=0 -DSQLITE_TEMP_STORE=3 -DSQLITE_SECURE_DELETE"

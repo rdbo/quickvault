@@ -21,11 +21,15 @@
 use qv_crypto::{MacTag, PasswordKdfProfile, PasswordSlot, PasswordWrapProfile};
 use qv_encoding::{Decoder, EncodeError, Encoder};
 
+use zeroize::Zeroizing;
+
 use crate::codec::{
-    keep, put_bytes, put_ext, put_id, put_uint, read_array, read_id, read_map_len, read_u16, req,
+    encode_item, keep, put_bytes, put_ext, put_id, put_uint, read_array, read_id, read_map_len,
+    read_u16, req,
 };
 use crate::error::ModelError;
-use crate::text::Extensions;
+use crate::ids::is_v4;
+use crate::text::{Extensions, MAX_RECORD_BYTES};
 
 /// The password-keyslot record's payload.
 pub struct Keyslot {
@@ -37,6 +41,29 @@ pub struct Keyslot {
 
 // A slot enables offline guessing; it is not printed (0004 §6.4).
 crate::redacted_debug!(Keyslot);
+
+impl Keyslot {
+    /// The bare descriptor map: the same bytes as the payload of a keyslot
+    /// record version. The vault file stores local slots in this encoding.
+    pub fn encode(&self) -> Result<Zeroizing<Vec<u8>>, ModelError> {
+        if !is_v4(&self.slot.slot_id.0) {
+            return Err(ModelError::Malformed);
+        }
+        encode_item(|e| encode(self, e))
+    }
+
+    /// Decodes a bare descriptor map strictly: canonical, no trailing bytes,
+    /// known profiles only ([`ModelError::Unsupported`] otherwise).
+    pub fn decode(input: &[u8]) -> Result<Keyslot, ModelError> {
+        if input.len() > MAX_RECORD_BYTES {
+            return Err(ModelError::LimitExceeded);
+        }
+        let mut d = Decoder::new(input)?;
+        let slot = decode(&mut d)?;
+        d.finish()?;
+        Ok(slot)
+    }
+}
 
 pub(crate) fn decode(d: &mut Decoder<'_>) -> Result<Keyslot, ModelError> {
     let (mut id, mut kdf, mut salt, mut wrap, mut commit, mut nonce, mut wrapped) =

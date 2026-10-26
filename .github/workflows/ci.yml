@@ -75,3 +75,5 @@ jobs:
         run: cargo +"$NIGHTLY" fuzz run cbor_decode -- -max_total_time=60
       - name: Fuzz record_decode (60 s)
         run: cargo +"$NIGHTLY" fuzz run record_decode -- -max_total_time=60
+      - name: Fuzz vault_open (60 s)
+        run: cargo +"$NIGHTLY" fuzz run vault_open -- -max_total_time=60 -max_len=65536

@@ -100,7 +100,8 @@ Implemented so far: `qv-encoding` (canonical CBOR codec, fuzzed in CI) and
 symmetric primitives, key hierarchy, password slots, the recovery phrase and
 the password generator; frontends will reach the generator through `qv-core`)
 and `qv-model` (records and payloads, version vectors, merge, history floors,
-group-tree projection and TOTP).
+group-tree projection and TOTP) and `qv-store` (the hardened vault file with
+its header and local keyslots, creation and unlock to VK).
 Other components are planned and are created by the roadmap phase that first
 needs them.
 
@@ -213,7 +214,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Build / CI | Cargo virtual workspace (`crates/<name>/`); GitHub Actions with SHA-pinned actions running the gates, `cargo deny` and `cargo vet` |
 | UI | Shared Dioxus app/UI for Android and Linux, subject to early framework validation; native secure-input/OS adapters; iOS later |
 | Optional remote server | Axum/Tokio; SQLite first, Postgres deferred |
-| Local storage | rusqlite, encrypted immutable objects and manifests |
+| Local storage | rusqlite with bundled SQLite 3.53.2 and trimmed compile options (`.cargo/config.toml`), encrypted immutable objects and manifests |
 | Serialization | Bounded RFC 8949 deterministic CBOR |
 | Data encryption | XChaCha20-Poly1305 |
 | Password KDF / derivation | Argon2id / HKDF-SHA-512 |

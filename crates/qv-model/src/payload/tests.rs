@@ -532,3 +532,96 @@ proptest! {
         check_canonical(&b)?;
     }
 }
+
+fn keyslot_map() -> Vec<(i64, Vec<u8>)> {
+    vec![
+        (0, bytes(&v4(0x03))),
+        (1, uint(1)),
+        (2, bytes(&[0x11; 32])),
+        (3, uint(1)),
+        (4, bytes(&[0x22; 32])),
+        (5, bytes(&[0x33; 24])),
+        (6, bytes(&[0x44; 48])),
+    ]
+}
+
+#[test]
+fn payload_non_v4_crypto_ids_are_not_encoded() {
+    // The qv-crypto IDs have public fields; encode must refuse what decode
+    // would reject (review 0007 finding 1).
+    let bad = qv_crypto::RecordId([0; 16]);
+    let vault_meta = map(&[(0, text("V")), (2, bytes(&v4(0x02))), (3, map(&[]))]);
+    let cases: Vec<(u64, Vec<u8>)> = vec![
+        (0, vault_meta),
+        (1, map(&group_payload(Some(v4(0x20))))),
+        (2, map(&entry_payload(vec![]))),
+        (3, map(&attachment_payload(0, &[]))),
+        (4, map(&keyslot_map())),
+    ];
+    for (kind, payload) in cases {
+        let mut v = round_trip(&map(&envelope(kind, false, Some(payload))));
+        let RecordBody::Live(p) = &mut v.body else {
+            panic!("not live");
+        };
+        match p {
+            Payload::VaultMeta(m) => m.root_group = bad,
+            Payload::Group(g) => g.parent = Some(bad),
+            Payload::Entry(e) => e.group = bad,
+            Payload::AttachmentMeta(a) => a.entry = bad,
+            Payload::PasswordKeyslot(k) => k.slot.slot_id = qv_crypto::SlotId([0; 16]),
+        }
+        assert_eq!(v.encode().err(), Some(ModelError::Malformed), "kind {kind}");
+    }
+    // A root group (parent null) still encodes.
+    round_trip(&map(&envelope(1, false, Some(map(&group_payload(None))))));
+}
+
+#[test]
+fn payload_keyslot_standalone_codec() {
+    let bytes_in = map(&keyslot_map());
+    let k = Keyslot::decode(&bytes_in).unwrap();
+    assert_eq!(k.encode().unwrap().as_slice(), bytes_in.as_slice());
+    // The same bytes as the payload inside a keyslot record version.
+    let record = map(&envelope(4, false, Some(bytes_in.clone())));
+    let v = round_trip(&record);
+    let RecordBody::Live(Payload::PasswordKeyslot(inner)) = &v.body else {
+        panic!("not a keyslot");
+    };
+    assert_eq!(inner.encode().unwrap().as_slice(), bytes_in.as_slice());
+    assert!(record.ends_with(&bytes_in));
+
+    // Unknown keys survive.
+    let with_ext = map(&with(&keyslot_map(), 9, text("x")));
+    let k = Keyslot::decode(&with_ext).unwrap();
+    assert_eq!(k.ext.len(), 1);
+    assert_eq!(k.encode().unwrap().as_slice(), with_ext.as_slice());
+
+    // Rejections.
+    let mut trailing = bytes_in.clone();
+    trailing.push(0x00);
+    assert_eq!(
+        Keyslot::decode(&trailing).err(),
+        Some(ModelError::Malformed)
+    );
+    let unknown_kdf = map(&with(&keyslot_map(), 1, uint(2)));
+    assert_eq!(
+        Keyslot::decode(&unknown_kdf).err(),
+        Some(ModelError::Unsupported)
+    );
+    for key in 0..7 {
+        let missing = map(&without(&keyslot_map(), key));
+        assert_eq!(
+            Keyslot::decode(&missing).err(),
+            Some(ModelError::Malformed),
+            "key {key}"
+        );
+    }
+    let too_big = vec![0u8; crate::text::MAX_RECORD_BYTES + 1];
+    assert_eq!(
+        Keyslot::decode(&too_big).err(),
+        Some(ModelError::LimitExceeded)
+    );
+    let mut k = Keyslot::decode(&bytes_in).unwrap();
+    k.slot.slot_id = qv_crypto::SlotId([0; 16]);
+    assert_eq!(k.encode().err(), Some(ModelError::Malformed));
+}

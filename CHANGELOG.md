@@ -9,6 +9,24 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-26: Vault file: hardened SQLite, schema, header and keyslots
+  (roadmap phase 1.6, plan 0008). New crate `qv-store`: owner-only vault
+  files (symlinks, nonregular files, unsafe modes and unsafe parent
+  directories refused), a `flock` process lock, file-identity tracking and
+  sync-folder/network/removable location warnings; SQLite opened with every
+  0004 §1.2 setting read back (defensive mode, no triggers/views/extensions,
+  limits, an execution-step budget, a 2 GiB size cap), bounded
+  `quick_check` and exact-schema validation; the header and the local
+  password slot under the header MAC; atomic `create` (temp file and
+  no-replace rename) and `open` → `unlock` to VK, with wrong password and
+  integrity failures kept distinct. Formats are development values until
+  phase 1.16. New dependency `rusqlite` with bundled SQLite 3.53.2, whose
+  compile options `.cargo/config.toml` trims (no FTS, R-Tree, dbstat, JSON,
+  extension loading or URI filenames; checked by a test); `rustix` gains its
+  `fs` feature. New `vault_open` fuzz target, run in CI, plus tamper and
+  second-process lock suites. `qv-model` gains a public keyslot-descriptor
+  codec.
+
 - 2026-10-26: Data model, version vectors and merge (roadmap phase 1.5,
   plan 0007). New crate `qv-model`: random UUIDv4 IDs (validated on decode),
   the record-version plaintext and the five payload kinds (vault metadata
@@ -96,6 +114,13 @@ Dates are ISO 8601. Newest first within each section.
   `quickvault-developer`, `quickvault-reviewer`) symlinked from `.claude/skills`,
   the `plans/` directory, this changelog, and search guards (`.ignore`,
   `.gitignore`, `.claude/settings.json`).
+
+### Fixed
+
+- 2026-10-26: `qv-model` no longer encodes a record whose embedded
+  `qv-crypto` ID (root group, group parent, entry group, attachment entry,
+  slot ID) lacks the UUIDv4 bits, which decode would reject (review of
+  plan 0007).
 
 ### Specs
 
