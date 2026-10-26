@@ -15,7 +15,7 @@ use crate::rng::RngError;
 ///
 /// | Variant | Exit code |
 /// |---------|-----------|
-/// | [`WrongPassword`](Self::WrongPassword) | 3 |
+/// | [`WrongPassword`](Self::WrongPassword), [`WrongPhrase`](Self::WrongPhrase) | 3 |
 /// | [`Integrity`](Self::Integrity) | 7 |
 /// | [`LimitExceeded`](Self::LimitExceeded) | 9 |
 /// | [`UnknownProfile`](Self::UnknownProfile), [`InvalidPassword`](Self::InvalidPassword), [`Rng`](Self::Rng), [`Internal`](Self::Internal) | 1 |
@@ -25,6 +25,9 @@ pub enum CryptoError {
     /// The KEK commitment or the password-slot AEAD failed (0002 §8). With
     /// the commitment, this reveals nothing about other candidate passwords.
     WrongPassword,
+    /// The recovery phrase is not 24 BIP-39 English words with a valid
+    /// checksum (0002 §4.1).
+    WrongPhrase,
     /// Authenticated data failed verification: AEAD tag, MAC or framing.
     Integrity,
     /// A profile ID this build does not know. Fails before any work is done.
@@ -43,6 +46,7 @@ impl fmt::Display for CryptoError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::WrongPassword => "wrong password",
+            Self::WrongPhrase => "wrong recovery phrase",
             Self::Integrity => "integrity check failed",
             Self::UnknownProfile => "unknown cryptographic profile",
             Self::LimitExceeded => "size limit exceeded",
@@ -69,6 +73,7 @@ mod tests {
     fn error_strings_are_fixed() {
         let all = [
             (CryptoError::WrongPassword, "wrong password"),
+            (CryptoError::WrongPhrase, "wrong recovery phrase"),
             (CryptoError::Integrity, "integrity check failed"),
             (CryptoError::UnknownProfile, "unknown cryptographic profile"),
             (CryptoError::LimitExceeded, "size limit exceeded"),

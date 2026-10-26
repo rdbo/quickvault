@@ -170,6 +170,16 @@ impl ObjectHasher {
     }
 }
 
+/// Plain SHA-256 into `out`, for checks that are not object hashes (word-list
+/// integrity, the BIP-39 checksum). `out` may be a locked secret buffer.
+pub(crate) fn sha256(data: &[u8], out: &mut [u8; 32]) {
+    let mut h = Sha256::new();
+    h.update(data);
+    let mut digest = h.finalize();
+    out.copy_from_slice(&digest);
+    digest.as_mut_slice().zeroize();
+}
+
 #[cfg(test)]
 pub(crate) fn hmac_sha512_full(key: &[u8], msg: &[u8]) -> Vec<u8> {
     let mut mac = <Hmac<Sha512> as KeyInit>::new_from_slice(key).unwrap();

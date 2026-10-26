@@ -1,0 +1,2 @@
+# Embedded data whose SHA-256 is checked (plan 0006): never convert line endings.
+crates/qv-crypto/data/*.txt -text

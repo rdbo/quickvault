@@ -286,7 +286,7 @@ exact files.
 
 #### Phase 1.4 — Recovery phrase and password generator
 
-- [ ] **Do:** Encode and decode VK as 24 BIP-39 words (entropy encoding, not
+- [x] **Plan:** [0006](../0006-recovery-phrase-generator/PLAN.md). **Do:** Encode and decode VK as 24 BIP-39 words (entropy encoding, not
   the wallet seed; checksum). Implement the 0010 generator: unbiased selection,
   character/passphrase/PIN modes, feasibility checks and bounded retries,
   entropy/strength, warnings, the embedded EFF large word list with its build-time
@@ -826,6 +826,8 @@ exact files.
 
 - 2026-10-25: Approved by the owner with D1–D6 and D9 accepted as recommended. D1–D4 were recorded in `AGENTS.md` at approval, not in phase 1.1.
 - 2026-10-25: Owner direction: one prompt ("next phase") per session, with standing approval of phase plans except under the stop conditions in *Session protocol* step 4. Sessions never commit; the owner commits each phase.
+- 2026-10-25 (phase 1.4, plan 0006): 0010 §3.2 (`zxcvbn` for user-typed passwords) and §4.2 (master-password acceptance) land with their first consumer, phase 1.10 (`init`/`passwd`/`recover`), not in 1.4. `zxcvbn` is not in the candidate table, so 1.10 needs the owner's approval for it. The generator lives in `qv-crypto`; `qv-core` exposes it from 1.8.
+- 2026-10-25 (phase 1.4, plan 0006): owner approved `ctutils` (RustCrypto, already in the build via `hmac`) as the constant-time crate instead of the candidate-table `subtle`, whose `BSD-3-Clause` licence is outside the allow-list.
 
 ## Execution log
 
@@ -835,3 +837,5 @@ exact files.
 - 2026-10-25: Phase 1.2 implemented as plan 0004 (standing approval). New crate `qv-encoding`: allocation-free validator, borrowing decoder, `RawValue` for unknown entries, canonical-only zeroizing encoder, `encode_array`. 14 rejection tests (exact errors), 4 proptest properties, `cbor_decode` fuzz target plus a CI job (pinned nightly). New dev-only dependency `proptest`; fuzz-only `libfuzzer-sys` outside the workspace. All gates, `cargo deny` and `cargo vet` green locally; 60 s local fuzz run clean (musl needs `-use_cmp=0`, CI doesn't). The first hosted fuzz run is pending the owner's push. Not reviewed yet: the next session reviews it first. Next: phase 1.3 ("next phase").
 - 2026-10-25: Phase 1.2 reviewed (plan 0004, [REVIEW.md](../0004-canonical-cbor/REVIEW.md)): Approved with minor fixes. The CI fuzz job now checks `fuzz/Cargo.lock` with `cargo fetch --locked`. Nothing escalated. The hosted CI and fuzz runs still need the owner to confirm them.
 - 2026-10-25: Phase 1.3 implemented as plan 0005 (standing approval; one stop for the owner: allow `Unicode-3.0` for `unicode-normalization`, approved). `qv-crypto` now has the profile registry, password-kdf/1 with NFC, the KEK and constant-time commitment, password slots (partitioning-oracle test), the nine purpose keys typed by purpose, record and attachment keys, stored-data/1 with canonical Padmé framing, MAC/1, object-hash/1 and `CryptoError`. Upstream KATs pass (RFC 4231, Wycheproof HKDF-SHA-512, FIPS 180-4, XChaCha draft §A.3.1, RFC 9106). The development vectors are independently computed by a stdlib Python script, and the Argon2id vector by OpenSSL. New dependencies are from the candidate table, with 19 vet exemptions (no imported audits for the new RustCrypto majors). All gates, deny and vet green. Notes for later phases are in plan 0005's log (local-state key dual use before 1.7; Padmé's 1 MiB boundary; sequential Argon2 lanes for 1.9/1.16). Not reviewed yet: the next session reviews it first. Next: phase 1.4 ("next phase").
+- 2026-10-25: Phase 1.3 reviewed (plan 0005, [REVIEW.md](../0005-crypto-key-hierarchy/REVIEW.md)): Approved with minor fixes. The sealed key-use traits leaked raw key bytes to other crates; a crate-private access token now closes this, with compile-fail doctests. Nothing escalated.
+- 2026-10-25: Phase 1.4 implemented as plan 0006 (standing approval; one stop for the owner: `subtle` is `BSD-3-Clause`, outside the allow-list, so the owner chose `ctutils` instead, which is already in the build via `hmac`). `qv-crypto` now has the recovery phrase (VK ↔ 24 BIP-39 words, constant-time lookups and checksum, `confirm_word`; Trezor vectors) and the 0010 generator (characters, passphrase, PIN; validation before any RNG use; rejection sampling; ≤ 10,000 whole-password attempts; exact entropy, labels and warning; deterministic chi-square tests). Both word lists are embedded, with their SHA-256 checked at first use and in tests. `zxcvbn` (0010 §3.2/§4.2) moves to 1.10 (see *Revisions*). All gates, deny and vet green. Not reviewed yet: the next session reviews it first. Next: phase 1.5 ("next phase").

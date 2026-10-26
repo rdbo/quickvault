@@ -9,6 +9,28 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-25: Recovery phrase and password generator (roadmap phase 1.4,
+  plan 0006). `qv-crypto` encodes VK as 24 BIP-39 English words (entropy
+  encoding only, not the wallet seed) and decodes it back with
+  constant-time word lookups and checksum checks; `RecoveryPhrase::confirm_word`
+  supports confirmation at vault creation. Trezor BIP-39 vectors pass. The
+  spec 0010 generator covers random characters, passphrases (EFF large list)
+  and PINs. Every setting is validated before any randomness is used,
+  selection is unbiased rejection sampling, `require_each_class` regenerates
+  whole passwords (at most 10,000 attempts) and never patches them, and
+  entropy, strength labels and the 64-bit warning are exact. Deterministic
+  chi-square tests cover every sampling path. Both word lists are embedded
+  byte for byte, and their SHA-256 is checked at first use and in tests
+  (sources and licences in `crates/qv-crypto/data/README.md`; `.gitattributes`
+  keeps their line endings). New `CryptoError::WrongPhrase` (exit code 3).
+  New direct dependency `ctutils` (already in the build via `hmac`), approved
+  by the owner instead of `subtle`, whose `BSD-3-Clause` licence is outside the
+  allow-list. `zxcvbn` estimates for typed passwords come with the CLI
+  (phase 1.10).
+- 2026-10-25: Review fix (plan 0005): other crates could read raw AEAD/MAC
+  key bytes through the sealed key-use traits; the accessors now require a
+  crate-private token, with compile-fail tests.
+
 - 2026-10-25: Crypto profiles and key hierarchy (roadmap phase 1.3, plan
   0005): `qv-crypto` gains the profile registry (one type per namespace;
   unknown IDs fail closed; explicit transitions), password-kdf/1 (Argon2id

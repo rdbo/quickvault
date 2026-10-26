@@ -27,6 +27,23 @@
 //! ([`mac`]/[`verify_mac`]: HMAC-SHA-512 truncated to 32 bytes), object-hash/1
 //! ([`object_hash`]: SHA-256). Known-answer vectors are in `tests/vectors/`.
 //!
+//! **Recovery phrase** (0002 §4): [`RecoveryPhrase`] encodes VK as 24 BIP-39
+//! English words (entropy encoding, not the wallet seed);
+//! [`VaultKey::from_recovery_phrase`] decodes it. Word lookups and the
+//! checksum are constant time (`ctutils`).
+//!
+//! **Password generator** (0010): [`generate`] and [`estimate`] over
+//! [`GeneratorSettings`] (characters, passphrase, PIN). Settings are validated
+//! before any randomness is used; selection is rejection sampling from the
+//! OS CSPRNG; [`Generated`] values are locked and redacted, and nothing is
+//! kept after use. Its table lookups are indexed by secret draws and are not
+//! cache-timing hardened, which matters only for same-user malware while
+//! unlocked (out of scope, 0001).
+//!
+//! **Embedded data**: the BIP-39 English and EFF large word lists are compiled
+//! in byte for byte (`data/README.md`). Each one's SHA-256 is checked before
+//! first use; a mismatch fails closed.
+//!
 //! **Errors**: [`CryptoError`] carries no data. "Wrong password" and
 //! "integrity failure" are distinct, and the slot reports only the former
 //! (0002 §8).
@@ -42,26 +59,34 @@
 //! wiped after use but too large to lock.
 
 mod error;
+mod generator;
 mod ids;
 #[cfg(test)]
 mod kat;
 mod keys;
 mod memory;
 mod password;
+mod phrase;
 mod primitives;
 mod process;
 mod profile;
 mod rng;
 mod slot;
 mod stored_data;
+mod wordlist;
 
 pub use error::CryptoError;
+pub use generator::{
+    Capitalization, CharacterSettings, Estimate, Generated, GeneratorError, GeneratorSettings,
+    PassphraseSettings, PinSettings, Strength, WARN_BELOW_BITS, WordListId, estimate, generate,
+};
 pub use ids::{AttachmentId, KeyGeneration, RecordId, SlotId, VaultId};
 pub use keys::{
     AeadKey, DataKey, KeyPurpose, MacKey, PurposeKey, VaultKey, mac, purpose, verify_mac,
 };
 pub use memory::{MemoryProtection, SecretArray, SecretBytes, memory_protection};
 pub use password::MasterPassword;
+pub use phrase::{PHRASE_WORDS, RecoveryPhrase};
 pub use primitives::{MacTag, ObjectHash, ObjectHasher, object_hash};
 pub use process::{Hardening, ProcessHardening, harden_process};
 pub use profile::{

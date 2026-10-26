@@ -16,6 +16,7 @@
 
 use crate::error::CryptoError;
 use crate::keys::AeadKey;
+use crate::keys::sealed::TOKEN;
 use crate::memory::SecretBytes;
 use crate::primitives::{NONCE_LEN, TAG_LEN, xchacha_open_in_place, xchacha_seal_in_place};
 use crate::profile::StoredDataProfile;
@@ -70,7 +71,7 @@ pub fn seal(
         return Err(CryptoError::LimitExceeded);
     }
     let nonce = random_array::<NONCE_LEN>()?;
-    seal_framed(key.aead_key(), nonce, aad, plaintext, total)
+    seal_framed(key.aead_key(TOKEN), nonce, aad, plaintext, total)
 }
 
 /// Frames and encrypts with a given nonce; `total` is `sealed_len(L)`.
@@ -130,7 +131,13 @@ pub fn open(
     let tag: &[u8; TAG_LEN] = tag.try_into().map_err(|_| CryptoError::Integrity)?;
     let mut buf = SecretBytes::zeroed(body_len);
     buf.expose_secret_mut().copy_from_slice(body);
-    xchacha_open_in_place(key.aead_key(), nonce, aad, buf.expose_secret_mut(), tag)?;
+    xchacha_open_in_place(
+        key.aead_key(TOKEN),
+        nonce,
+        aad,
+        buf.expose_secret_mut(),
+        tag,
+    )?;
     unframe(buf.expose_secret())
 }
 
@@ -167,7 +174,7 @@ pub(crate) fn seal_with_nonce(
     plaintext: &[u8],
 ) -> Sealed {
     let total = sealed_len(plaintext.len()).unwrap();
-    seal_framed(key.aead_key(), nonce, aad, plaintext, total).unwrap()
+    seal_framed(key.aead_key(TOKEN), nonce, aad, plaintext, total).unwrap()
 }
 
 #[cfg(test)]
@@ -186,7 +193,7 @@ mod tests {
     /// Encrypts an arbitrary (possibly malformed) framed buffer.
     fn seal_raw(key: &TestKey, nonce: [u8; 24], aad: &[u8], framed: &[u8]) -> Vec<u8> {
         let mut buf = framed.to_vec();
-        let tag = xchacha_seal_in_place(key.aead_key(), &nonce, aad, &mut buf).unwrap();
+        let tag = xchacha_seal_in_place(key.aead_key(TOKEN), &nonce, aad, &mut buf).unwrap();
         buf.extend_from_slice(&tag);
         buf
     }

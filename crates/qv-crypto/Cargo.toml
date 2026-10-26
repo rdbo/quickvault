@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 argon2.workspace = true
 chacha20poly1305.workspace = true
+ctutils.workspace = true
 getrandom.workspace = true
 hkdf.workspace = true
 hmac.workspace = true

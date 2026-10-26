@@ -78,7 +78,7 @@ fn wrap_vk(
     nonce: [u8; NONCE_LEN],
 ) -> Result<[u8; 32 + TAG_LEN], CryptoError> {
     let mut buf = SecretArray::<32>::try_init(|b| {
-        *b = *vk.expose_secret();
+        b.copy_from_slice(vk.expose_secret());
         Ok::<(), CryptoError>(())
     })?;
     let tag = xchacha_seal_in_place(

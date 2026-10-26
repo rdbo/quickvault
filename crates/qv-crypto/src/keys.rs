@@ -84,6 +84,27 @@
 //! let b = qv_crypto::MacTag::from_bytes([0; 32]);
 //! assert_eq!(a.as_bytes(), b.as_bytes());
 //! ```
+//!
+//! Other crates cannot read key bytes through the key-use traits, not even
+//! through a generic bound:
+//!
+//! ```compile_fail
+//! fn leak<K: qv_crypto::AeadKey>(k: &K) -> [u8; 32] {
+//!     *k.aead_key()
+//! }
+//! ```
+//!
+//! ```compile_fail
+//! fn leak<K: qv_crypto::MacKey>(k: &K) -> [u8; 32] {
+//!     *k.mac_key()
+//! }
+//! ```
+//!
+//! ```
+//! fn use_key<K: qv_crypto::AeadKey>(k: &K) -> Result<qv_crypto::Sealed, qv_crypto::CryptoError> {
+//!     qv_crypto::seal(k, qv_crypto::StoredDataProfile::V1, b"", b"x", 1 << 20)
+//! }
+//! ```
 
 use core::fmt;
 use core::marker::PhantomData;
@@ -104,14 +125,22 @@ pub(crate) mod sealed {
     /// Seals [`super::KeyPurpose`].
     pub trait SealedPurpose {}
 
+    /// Proof of crate-internal access. Other crates cannot name or build it,
+    /// so they cannot call the byte accessors below, not even through a
+    /// generic `K: AeadKey` or `K: MacKey` bound.
+    pub struct Token(());
+
+    /// The only way to obtain a [`Token`].
+    pub(crate) const TOKEN: Token = Token(());
+
     /// Crate-internal access to an AEAD key's bytes.
     pub trait AeadKeyBytes: Sealed {
-        fn aead_key(&self) -> &[u8; 32];
+        fn aead_key(&self, _: Token) -> &[u8; 32];
     }
 
     /// Crate-internal access to a MAC key's bytes.
     pub trait MacKeyBytes: Sealed {
-        fn mac_key(&self) -> &[u8; 32];
+        fn mac_key(&self, _: Token) -> &[u8; 32];
     }
 }
 
@@ -341,7 +370,7 @@ impl PurposeKey<purpose::Attachment> {
 
 impl sealed::Sealed for DataKey {}
 impl sealed::AeadKeyBytes for DataKey {
-    fn aead_key(&self) -> &[u8; 32] {
+    fn aead_key(&self, _: sealed::Token) -> &[u8; 32] {
         self.0.expose_secret()
     }
 }
@@ -352,7 +381,7 @@ impl<P: KeyPurpose> sealed::Sealed for PurposeKey<P> {}
 macro_rules! aead_purposes {
     ($($p:ident),+) => {$(
         impl sealed::AeadKeyBytes for PurposeKey<purpose::$p> {
-            fn aead_key(&self) -> &[u8; 32] {
+            fn aead_key(&self, _: sealed::Token) -> &[u8; 32] {
                 self.key.expose_secret()
             }
         }
@@ -363,7 +392,7 @@ macro_rules! aead_purposes {
 macro_rules! mac_purposes {
     ($($p:ident),+) => {$(
         impl sealed::MacKeyBytes for PurposeKey<purpose::$p> {
-            fn mac_key(&self) -> &[u8; 32] {
+            fn mac_key(&self, _: sealed::Token) -> &[u8; 32] {
                 self.key.expose_secret()
             }
         }
@@ -377,7 +406,7 @@ mac_purposes!(HeaderMac, StateCommit);
 /// Computes a MAC under `profile`.
 pub fn mac(key: &impl MacKey, profile: MacProfile, msg: &[u8]) -> Result<MacTag, CryptoError> {
     match profile {
-        MacProfile::V1 => mac1(key.mac_key(), msg),
+        MacProfile::V1 => mac1(key.mac_key(sealed::TOKEN), msg),
     }
 }
 
@@ -389,7 +418,7 @@ pub fn verify_mac(
     tag: &MacTag,
 ) -> Result<(), CryptoError> {
     match profile {
-        MacProfile::V1 => mac1_verify(key.mac_key(), msg, tag),
+        MacProfile::V1 => mac1_verify(key.mac_key(sealed::TOKEN), msg, tag),
     }
 }
 
@@ -399,7 +428,7 @@ pub(crate) mod test_key {
     pub(crate) struct TestKey(pub [u8; 32]);
     impl super::sealed::Sealed for TestKey {}
     impl super::sealed::AeadKeyBytes for TestKey {
-        fn aead_key(&self) -> &[u8; 32] {
+        fn aead_key(&self, _: super::sealed::Token) -> &[u8; 32] {
             &self.0
         }
     }
