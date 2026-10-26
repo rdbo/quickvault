@@ -80,7 +80,7 @@ pub(crate) fn parse_path(s: &str) -> Result<ParsedPath, CliError> {
 
 /// A name with `\` → `\\` and `/` → `\/`.
 pub(crate) fn path_escape(name: &str) -> Zeroizing<String> {
-    let mut s = Zeroizing::new(String::with_capacity(name.len() + 8));
+    let mut s = Zeroizing::new(String::with_capacity(name.len().saturating_mul(2)));
     for c in name.chars() {
         match c {
             '\\' => s.push_str("\\\\"),
@@ -91,47 +91,79 @@ pub(crate) fn path_escape(name: &str) -> Zeroizing<String> {
     s
 }
 
-/// The display path of every group and grouped entry, from one walk of the
-/// tree (paths are confidential metadata, kept in zeroizing strings).
+/// One escaped component. Parent indices avoid recursive traversal and drop.
+struct PathNode {
+    parent: Option<usize>,
+    name: Zeroizing<String>,
+}
+
+/// Shared path components from one walk of the tree. Full paths are built
+/// only on demand, so a chain does not retain every ancestor prefix.
 pub(crate) struct Paths {
-    map: HashMap<ItemHandle, Zeroizing<String>>,
+    map: HashMap<ItemHandle, usize>,
+    nodes: Vec<PathNode>,
 }
 
 impl Paths {
     pub(crate) fn walk(s: &Session) -> Result<Paths, CliError> {
         let root = s.root()?;
-        let mut map = HashMap::new();
-        map.insert(ItemHandle::Group(root), Zeroizing::new(String::new()));
-        let mut queue = vec![root];
-        while let Some(g) = queue.pop() {
-            let base = map
-                .get(&ItemHandle::Group(g))
-                .map(|p| p.as_str().to_owned())
-                .unwrap_or_default();
-            let join = |name: &str| {
-                let mut p = Zeroizing::new(base.clone());
-                if !p.is_empty() {
-                    p.push('/');
-                }
-                p.push_str(&path_escape(name));
-                p
-            };
+        let mut paths = Self {
+            map: HashMap::new(),
+            nodes: Vec::new(),
+        };
+        let root_index = paths.insert(ItemHandle::Group(root), None, "");
+        let mut queue = vec![(root, root_index)];
+        while let Some((g, parent)) = queue.pop() {
             let listing = s.list(g)?;
             for child in &listing.groups {
-                map.insert(ItemHandle::Group(child.handle), join(child.name.expose()));
-                queue.push(child.handle);
+                let index = paths.insert(
+                    ItemHandle::Group(child.handle),
+                    Some(parent),
+                    child.name.expose(),
+                );
+                queue.push((child.handle, index));
             }
             for e in &listing.entries {
-                map.insert(ItemHandle::Entry(e.handle), join(e.title.expose()));
+                paths.insert(ItemHandle::Entry(e.handle), Some(parent), e.title.expose());
             }
         }
-        Ok(Paths { map })
+        Ok(paths)
+    }
+
+    fn insert(&mut self, item: ItemHandle, parent: Option<usize>, name: &str) -> usize {
+        let index = self.nodes.len();
+        self.nodes.push(PathNode {
+            parent,
+            name: path_escape(name),
+        });
+        self.map.insert(item, index);
+        index
     }
 
     /// The item's path (`""` for the root), or `None` if it is not in the
     /// tree (a recovered entry).
-    pub(crate) fn get(&self, item: ItemHandle) -> Option<&str> {
-        self.map.get(&item).map(|p| p.as_str())
+    pub(crate) fn get(&self, item: ItemHandle) -> Option<Zeroizing<String>> {
+        let mut index = *self.map.get(&item)?;
+        let mut components = Vec::new();
+        let mut bytes = 0usize;
+        loop {
+            let node = self.nodes.get(index)?;
+            // The root is an empty component and contributes no separator.
+            let Some(parent) = node.parent else { break };
+            bytes += node.name.len();
+            components.push(node.name.as_str());
+            index = parent;
+        }
+        let mut path = Zeroizing::new(String::with_capacity(
+            bytes + components.len().saturating_sub(1),
+        ));
+        for component in components.into_iter().rev() {
+            if !path.is_empty() {
+                path.push('/');
+            }
+            path.push_str(component);
+        }
+        Some(path)
     }
 }
 
@@ -152,7 +184,8 @@ fn ambiguous(addr: &str, matches: &[ItemHandle], paths: &Paths) -> CliError {
         };
         let path = paths
             .get(*m)
-            .map(escape_str)
+            .as_deref()
+            .map(|p| escape_str(p))
             .unwrap_or_else(|| "(recovered)".into());
         msg.push_str(&format!("\n  @{}  {kind}  {path}", m.id_hex()));
     }
@@ -374,12 +407,150 @@ mod tests {
         );
         assert_eq!(group(s, "Work/Dup").unwrap_err().code, 4);
 
+        let blank = group_in(s, root, "");
+        let below_blank = entry_in(s, blank, "Below");
         let paths = Paths::walk(s).unwrap();
-        assert_eq!(paths.get(ItemHandle::Group(root)), Some(""));
+        // Preserve the previous join behavior for a leading empty name.
         assert_eq!(
-            paths.get(ItemHandle::Entry(mail)),
+            paths.get(ItemHandle::Entry(below_blank)).unwrap().as_str(),
+            "Below"
+        );
+        assert_eq!(
+            paths
+                .get(ItemHandle::Group(root))
+                .as_deref()
+                .map(String::as_str),
+            Some("")
+        );
+        assert_eq!(
+            paths
+                .get(ItemHandle::Entry(mail))
+                .as_deref()
+                .map(String::as_str),
             Some("Work/a\\/b/Mail\\\\box")
         );
         assert_eq!(paths.get(ItemHandle::Entry(gone)), None);
+    }
+
+    #[test]
+    fn deep_paths_and_listing_use_heap_storage() {
+        let f = fixture();
+        let s = &f.session;
+        let root = s.root().unwrap();
+        let item = ItemHandle::Group(root);
+        let depth = 50_000;
+        let mut paths = Paths {
+            map: HashMap::new(),
+            nodes: Vec::new(),
+        };
+        let mut parent = paths.insert(item, None, "");
+        // Synthetic components isolate path construction from durable writes.
+        // Reusing the map key does not change the parent-index chain.
+        for _ in 0..depth {
+            parent = paths.insert(item, Some(parent), "x");
+        }
+        assert_eq!(paths.nodes.len(), depth + 1);
+        assert_eq!(
+            paths.nodes.iter().map(|n| n.name.len()).sum::<usize>(),
+            depth
+        );
+        let path = paths.get(item).unwrap();
+        assert_eq!(path.len(), depth * 2 - 1);
+        assert!(path.starts_with("x/x/x") && path.ends_with("x/x/x"));
+        drop(path);
+        drop(paths); // Parent indices must also avoid recursive destruction.
+
+        let mut calls = 0;
+        let mut groups = Vec::new();
+        let mut entries = Vec::new();
+        // Exercise the production traversal at the model's group budget,
+        // with a synthetic listing source rather than 50,000 SQLite commits.
+        crate::cmd::ls::collect(
+            |_| {
+                calls += 1;
+                Ok(qv_core::Listing {
+                    groups: if calls < depth {
+                        vec![qv_core::GroupSummary {
+                            handle: root,
+                            name: qv_core::Text::new("x").unwrap(),
+                            icon: None,
+                            order: qv_core::Text::new("").unwrap(),
+                            repaired: false,
+                            conflict: false,
+                        }]
+                    } else {
+                        Vec::new()
+                    },
+                    entries: Vec::new(),
+                })
+            },
+            root,
+            true,
+            &mut groups,
+            &mut entries,
+        )
+        .unwrap();
+        assert_eq!(calls, depth);
+        assert_eq!(groups.len(), depth - 1);
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn iterative_listing_preserves_branching_order_and_errors() {
+        let f = fixture();
+        let s = &f.session;
+        let root = s.root().unwrap();
+        let a = group_in(s, root, "A");
+        let b = group_in(s, root, "B");
+        let c = group_in(s, a, "C");
+        let root_entry = entry_in(s, root, "root");
+        let a_entry = entry_in(s, a, "a");
+        let b_entry = entry_in(s, b, "b");
+        let c_entry = entry_in(s, c, "c");
+        let mut groups = Vec::new();
+        let mut entries = Vec::new();
+        crate::cmd::ls::collect(|g| Ok(s.list(g)?), root, true, &mut groups, &mut entries).unwrap();
+        assert_eq!(groups.iter().map(|g| g.0).collect::<Vec<_>>(), [a, c, b]);
+        assert_eq!(
+            entries.iter().map(|e| e.handle).collect::<Vec<_>>(),
+            [c_entry, a_entry, b_entry, root_entry]
+        );
+
+        groups.clear();
+        entries.clear();
+        let mut calls = 0;
+        crate::cmd::ls::collect(
+            |g| {
+                calls += 1;
+                Ok(s.list(g)?)
+            },
+            root,
+            false,
+            &mut groups,
+            &mut entries,
+        )
+        .unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(groups.iter().map(|g| g.0).collect::<Vec<_>>(), [a, b]);
+        assert_eq!(
+            entries.iter().map(|e| e.handle).collect::<Vec<_>>(),
+            [root_entry]
+        );
+
+        let err = crate::cmd::ls::collect(
+            |g| {
+                if g == c {
+                    Err(CliError::new(crate::exit::LIMIT, "test limit"))
+                } else {
+                    Ok(s.list(g)?)
+                }
+            },
+            root,
+            true,
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, crate::exit::LIMIT);
     }
 }

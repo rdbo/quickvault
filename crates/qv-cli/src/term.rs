@@ -271,10 +271,14 @@ fn read_first_line(fd: BorrowedFd<'_>, max: usize) -> Result<Typed, CliError> {
     let mut buf = SecretBytes::zeroed(max + 2);
     let mut len = 0usize;
     let mut b = Zeroizing::new([0u8; 1]);
+    let mut ended_at_lf = false;
     loop {
         match rustix::io::read(fd, &mut b[..]) {
             Ok(0) => break,
-            Ok(_) if b[0] == b'\n' => break,
+            Ok(_) if b[0] == b'\n' => {
+                ended_at_lf = true;
+                break;
+            }
             Ok(_) => {
                 if len > max {
                     return Err(CliError::new(
@@ -289,10 +293,11 @@ fn read_first_line(fd: BorrowedFd<'_>, max: usize) -> Result<Typed, CliError> {
             Err(e) => return Err(io_err(e)),
         }
     }
-    if buf
-        .expose_secret()
-        .get(..len)
-        .is_some_and(|s| s.ends_with(b"\r"))
+    if ended_at_lf
+        && buf
+            .expose_secret()
+            .get(..len)
+            .is_some_and(|s| s.ends_with(b"\r"))
     {
         len -= 1;
         buf.expose_secret_mut()[len] = 0;
@@ -489,6 +494,9 @@ pub(crate) mod tests {
         assert_eq!(line(b"  spaced pw \n", 64).unwrap(), b"  spaced pw ");
         assert_eq!(line(b"crlf\r\nsecond line\n", 64).unwrap(), b"crlf");
         assert_eq!(line(b"no newline", 64).unwrap(), b"no newline");
+        assert_eq!(line(b"ends in cr\r", 64).unwrap(), b"ends in cr\r");
+        assert_eq!(line(b"two cr\r\r", 64).unwrap(), b"two cr\r\r");
+        assert_eq!(line(b"\r", 64).unwrap(), b"\r");
         assert_eq!(line(b"two\n\n", 64).unwrap(), b"two");
         assert_eq!(line(b"cr\r\r\n", 64).unwrap(), b"cr\r");
         assert_eq!(line(b"", 64).unwrap(), b"");
@@ -497,5 +505,13 @@ pub(crate) mod tests {
         let mut crlf = vec![b'a'; 64];
         crlf.extend_from_slice(b"\r\n");
         assert_eq!(line(&crlf, 64).unwrap().len(), 64);
+        // At EOF the CR counts toward the bound; only CR before LF is framing.
+        assert_eq!(line(&crlf[..65], 64).unwrap_err().code, 9);
+        let mut at_limit = vec![b'a'; 63];
+        at_limit.push(b'\r');
+        assert_eq!(line(&at_limit, 64).unwrap(), at_limit);
+        let mut over_limit = vec![b'a'; 65];
+        over_limit.extend_from_slice(b"\r\n");
+        assert_eq!(line(&over_limit, 64).unwrap_err().code, 9);
     }
 }

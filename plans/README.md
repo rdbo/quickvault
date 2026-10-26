@@ -49,4 +49,4 @@ plan, or a new plan that names the one it supersedes.
 | [0008](0008-vault-file-sqlite/PLAN.md) | Vault file: hardened SQLite, schema, header and keyslots, `qv-store` (roadmap 1.6) | Reviewed |
 | [0009](0009-objects-manifest-anchor/PLAN.md) | Objects, manifests, local head, anchor and the write path, `qv-store` (roadmap 1.7) | Reviewed |
 | [0010](0010-core-sessions/PLAN.md) | qv-core sessions and vault operations, `qv-core` (roadmap 1.8) | Reviewed |
-| [0011](0011-cli-foundation-read/PLAN.md) | CLI foundation, vault and read commands, `qv-cli` (roadmap 1.10a) | Implemented |
+| [0011](0011-cli-foundation-read/PLAN.md) | CLI foundation, vault and read commands, `qv-cli` (roadmap 1.10a) | Implemented — review fixes awaiting fresh review |

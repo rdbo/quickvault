@@ -119,7 +119,7 @@ fn whole(
         let mut j = Json::new(&mut out);
         j.begin_obj();
         j.key("id").str(&d.handle.id_hex());
-        j.key("path").opt_str(path);
+        j.key("path").opt_str(path.as_deref().map(String::as_str));
         j.key("title").str(d.title.expose());
         j.key("type").str(d.type_hint.expose());
         j.key("notes").opt_str(d.notes.as_ref().map(|n| n.expose()));
@@ -154,7 +154,7 @@ fn whole(
     out.raw("Title:     ").text(d.title.expose()).raw("\n");
     out.raw("Path:      ");
     match path {
-        Some(p) => out.path(p),
+        Some(p) => out.path(&p),
         None => out.raw("(recovered items)"),
     };
     out.raw("\nID:        @").raw(&d.handle.id_hex()).raw("\n");

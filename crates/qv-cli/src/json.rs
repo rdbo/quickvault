@@ -53,6 +53,11 @@ impl<'a> Json<'a> {
         }
     }
 
+    /// Writes a completed portion without losing container/comma state.
+    pub(crate) fn flush(&mut self) -> Result<(), crate::exit::CliError> {
+        self.out.flush()
+    }
+
     fn sep(&mut self) {
         if self.after_key {
             self.after_key = false;

@@ -11,7 +11,7 @@
 //! deleted, 0003 §4.2), which only `@id` can address.
 
 use clap::ArgMatches;
-use qv_core::{EntrySummary, FieldKind, GroupHandle, ItemHandle, Session};
+use qv_core::{EntrySummary, FieldKind, GroupHandle, ItemHandle};
 
 use crate::address::{self, Paths};
 use crate::cli::Ctx;
@@ -27,7 +27,13 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
     let paths = Paths::walk(&session)?;
     let mut groups = Vec::new();
     let mut entries = Vec::new();
-    collect(&session, group, recursive, &mut groups, &mut entries)?;
+    collect(
+        |g| Ok(session.list(g)?),
+        group,
+        recursive,
+        &mut groups,
+        &mut entries,
+    )?;
     let recovered = if group == session.root()? {
         session.recovered()?
     } else {
@@ -41,20 +47,28 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
         for (g, name) in &groups {
             j.begin_obj();
             j.key("id").str(&g.id_hex());
-            j.key("path").opt_str(paths.get(ItemHandle::Group(*g)));
+            j.key("path").opt_str(
+                paths
+                    .get(ItemHandle::Group(*g))
+                    .as_deref()
+                    .map(String::as_str),
+            );
             j.key("name").str(name.expose());
             j.end_obj();
+            j.flush()?;
         }
         j.end_arr();
         j.key("entries").begin_arr();
         for e in &entries {
             json_entry(&mut j, e, &paths);
+            j.flush()?;
         }
         j.end_arr();
         if group == session.root()? {
             j.key("recovered").begin_arr();
             for e in &recovered {
                 json_entry(&mut j, e, &paths);
+                j.flush()?;
             }
             j.end_arr();
         }
@@ -62,16 +76,19 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
         out.raw("\n");
     } else {
         for (g, _) in &groups {
-            out.path(paths.get(ItemHandle::Group(*g)).unwrap_or_default())
+            out.path(&paths.get(ItemHandle::Group(*g)).unwrap_or_default())
                 .raw("/\n");
+            out.flush()?;
         }
         for e in &entries {
             entry_line(&mut out, e, &paths);
+            out.flush()?;
         }
         if !recovered.is_empty() {
             out.raw("Recovered items (their group is missing or deleted; address them by @id):\n");
             for e in &recovered {
                 entry_line(&mut out, e, &paths);
+                out.flush()?;
             }
         }
     }
@@ -81,21 +98,27 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
 
 /// Groups and entries under `group`, depth first (groups in order, each
 /// followed by its contents with `-r`, then the group's entries).
-fn collect(
-    s: &Session,
+pub(crate) fn collect(
+    mut list: impl FnMut(GroupHandle) -> Result<qv_core::Listing, CliError>,
     group: GroupHandle,
     recursive: bool,
     groups: &mut Vec<(GroupHandle, qv_core::Text)>,
     entries: &mut Vec<EntrySummary>,
 ) -> Result<(), CliError> {
-    let listing = s.list(group)?;
-    for g in listing.groups {
-        groups.push((g.handle, g.name));
-        if recursive {
-            collect(s, g.handle, true, groups, entries)?;
+    let listing = list(group)?;
+    let mut stack = vec![(listing.groups.into_iter(), listing.entries)];
+    while let Some((children, pending_entries)) = stack.last_mut() {
+        if let Some(g) = children.next() {
+            groups.push((g.handle, g.name));
+            if recursive {
+                let listing = list(g.handle)?;
+                stack.push((listing.groups.into_iter(), listing.entries));
+            }
+        } else {
+            entries.append(pending_entries);
+            stack.pop();
         }
     }
-    entries.extend(listing.entries);
     Ok(())
 }
 
@@ -123,7 +146,7 @@ pub(crate) fn columns(e: &EntrySummary) -> (Option<&str>, Option<&str>) {
 pub(crate) fn entry_line(out: &mut Out, e: &EntrySummary, paths: &Paths) {
     match paths.get(ItemHandle::Entry(e.handle)) {
         Some(p) => {
-            out.path(p);
+            out.path(&p);
         }
         None => {
             out.raw("@")
@@ -149,8 +172,12 @@ pub(crate) fn json_entry(j: &mut Json<'_>, e: &EntrySummary, paths: &Paths) {
     let (user, url) = columns(e);
     j.begin_obj();
     j.key("id").str(&e.handle.id_hex());
-    j.key("path")
-        .opt_str(paths.get(ItemHandle::Entry(e.handle)));
+    j.key("path").opt_str(
+        paths
+            .get(ItemHandle::Entry(e.handle))
+            .as_deref()
+            .map(String::as_str),
+    );
     j.key("title").str(e.title.expose());
     j.key("type").str(e.type_hint.expose());
     j.key("username").opt_str(user);

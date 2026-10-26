@@ -9,6 +9,10 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-10-26: Fixed CLI password input dropping a final carriage return at EOF.
+  Deep listings now traverse iteratively, share path components and flush
+  output incrementally; listing order and human/JSON formats are preserved.
+
 - 2026-10-26: Agent guidance now loads spec/layout navigation on demand in
   `.agents/README.md` and uses the architecture and plans index for current
   implementation status. Skills describe targeted roadmap reading, focused

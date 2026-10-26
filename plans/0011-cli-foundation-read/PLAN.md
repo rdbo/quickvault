@@ -689,6 +689,47 @@ old. `cargo deny check` and `cargo vet` run in step 9.
 - 2026-10-26: D-7 added (zxcvbn's 64-bit ceiling) and resolved by the owner (option A); 0010 §3.2 amended.
 - 2026-10-26: Approved by the owner (not standing approval: new dependencies, D-5 and the split). D-1 to D-6 accepted as recommended: `zxcvbn`, clap builder API, `signal-hook` (1.10b), `arboard 3.6.1` X11-only with per-crate BSL-1.0 exceptions (1.10b), recovery skip as vault setting key 3, split into 1.10a/1.10b.
 
+
+- 2026-10-26: Owner authorized fixing review findings 1–2 in this session.
+  Architect revision: resume the existing phase; no spec, public API, format,
+  dependency or resource-policy change. Step 4 follows 0011 §3.2 exactly.
+  Step 7 uses iterative traversal and component storage instead of recursive
+  calls or retaining full ancestor prefixes (0011 §2, §4–5; 0008 §1 under D5).
+  `Paths` stores an arena of zeroizing escaped components with parent indices
+  plus an item-to-index map; `get` returns one owned zeroizing path assembled
+  iteratively with precomputed capacity. Indices avoid recursive destruction.
+  Listing/search flush human rows and JSON objects incrementally through Out;
+  Json gains a private flush forwarding method preserving separator state.
+  Output order, schemas, escaping and errors stay the same. An I/O error can
+  leave a partial stream, as with existing descriptor writes. No new byte or
+  depth cutoff is introduced. No unresolved decision is needed.
+
+### Review remediation (owner approved 2026-10-26)
+
+- [x] **R1 — Exact stdin line endings.** Track LF consumption; strip CR only
+  before LF. Keep the existing 1,024-byte bound. Add EOF-CR, repeated CR,
+  CRLF and exact/over-limit tests. Files: `src/term.rs` under `crates/qv-cli`.
+  Done when the previous failing EOF-CR assertion passes and overlong EOF
+  input ending in CR is refused. Verify: `cargo test --locked -p qv-cli term_first_line`.
+- [x] **R2 — Iterative traversal and shared prefixes.** Replace collect's
+  recursive calls with heap frames (child iterator plus pending entries),
+  preserving preorder groups and postorder entries. Use the arena described
+  above for paths; adjust ls/search/show and ambiguity formatting callers.
+  Flush output per row/object; propagate I/O errors. Files: qv-cli
+  `src/{address,json}.rs`, `src/cmd/{ls,search,show}.rs`, `tests/browse.rs`.
+  Done when 50,000 synthetic levels traverse and drop without recursion,
+  deep path storage grows with components, and branching order plus escaping,
+  human/JSON output and missing/recovered paths retain regression coverage.
+  Use production traversal with a synthetic listing source to avoid 50,000
+  durable core writes; existing persisted-vault e2e tests cover integration.
+  Verify: `cargo test --locked -p qv-cli`.
+- [x] **R3 — Gates and handoff.** Update CHANGELOG, this plan, review follow-up,
+  plan index and roadmap log. Run SPDX, fmt, Clippy and full locked tests.
+  No dependency change, so deny/vet are not required anew. Inspect the final
+  diff under reviewer role; leave phase Implemented for a fresh-context
+  approval and preserve the historical Changes requested review. Do not start
+  the next phase or alter the owner's staged changes.
+
 ## Execution log
 
 - 2026-10-26: Approved by the owner; status In progress.
@@ -704,3 +745,32 @@ old. `cargo deny check` and `cargo vet` run in step 9.
 - 2026-10-26: Step 8 done. `cmd/show.rs` (mask, `--reveal`, `--field` escaped on a PTY and verbatim on a pipe, multi-line values and notes indented so they can't fake lines, JSON, `versions`), `cmd/totp.rs`, `cmd/generate.rs` (mode from the options, mixed modes exit 2, vault defaults only without options). E2E: all of the step's *Done when*; exit 6 with a session held by the test, 3 for a wrong password, 9 for a 1,025-byte password on stdin, 7 after the anchor is deleted (with the hint) and after a flipped byte; `AnchorLocation` through the CLI (exit 1). The TOTP code is compared with the core's for the same window instead of a hard-coded RFC vector, because the CLI uses the system clock (the RFC vector itself is tested in `qv-core`/`qv-model`). Exit 8 is covered only by the mapping test: no 1.10a vault can hold a conflict.
 - 2026-10-26: Step 9 done; plan `Implemented`. `tests/offline.rs`: init → `info --full`, `ls -r`, `search`, `generate` with no config and an empty home (passes); the same under `unshare -rn` **skipped here, not a pass** (`unshare: unshare failed: No space left on device`: no user namespaces in this sandbox; it runs where they are available, e.g. CI runners that allow them); the direct dependencies of `qv-cli` are pinned to `clap`, `qv-core`, `rustix`, `zeroize` by a test. Docs: `CHANGELOG.md`, `ARCHITECTURE.md` §3 and §6, `AGENTS.md`, spec 0010 §3.2 (D-7), module docs (JSON schema in `json.rs`). Gates: SPDX, `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked` (453 passed, 0 failed, 2 ignored; the qv-cli suite is 41 tests in about 32 s), `cargo deny check` (advisories, bans, licenses, sources ok; a duplicate-`syn` warning from zxcvbn's wasm32-only tree), `cargo vet` (27 fully audited, 6 partially audited, 75 exempted; `imports.lock` now records the imported audits that cover some new crates), `cargo fetch --locked` on the fuzz workspace.
   Found, not fixed: (1) zxcvbn rates `correct horse battery staple` at its 64-bit ceiling, so under D-7 it counts as Strong; core can't correct zxcvbn's model without its own estimator. (2) Generated passphrases typed back by hand score Fair (only an accepted suggestion uses the exact entropy). (3) arboard is not in yet; `copy`, `totp --copy` and `generate --copy` are 1.10b, which also adds SIGTERM/SIGHUP terminal restore. (4) No colour output; the `color` setting is validated only. (5) `clipboard_timeout` and `--yes` are parsed but unused until 1.10b. (6) The planned unescape round-trip property was replaced by exact expected strings plus a no-control-character property. (7) A vault whose anchor is missing still has no CLI recovery command (raised under *Decisions needed*).
+
+- 2026-10-26: Fresh-session review: **Changes requested**; see [REVIEW.md](REVIEW.md). EOF-terminated stdin strips a password's final CR contrary to 0011 §3.2 (reproduced with a temporary pipe-test assertion); recursive `ls -r` uses depth-dependent stack space over a model allowing 50,000 groups (static finding). No production fix applied. Status remains Implemented. Roadmap session protocol step 2 stops the next phase pending resolution.
+- 2026-10-26: Reviewer final gates: SPDX, fmt, Clippy, tests (453 passed, 2 ignored), deny (temporary advisory-cache path only) and vet passed. Details and logs in REVIEW.md. Networking-blocked scenario remains skipped, not passed.
+
+- 2026-10-26: Owner requested fixes; resumed In progress under the remediation revision. Existing staged review records are preserved; changes are added without staging or committing.
+- 2026-10-26: R1 implemented: CR is removed only when LF ended the first line;
+  EOF-CR and exact/over-limit CR cases are permanent regression assertions.
+  R2 implemented: explicit listing frames, parent-index component arena,
+  on-demand zeroizing paths, incremental human/JSON output and propagated
+  flush failures. Tests cover 50,000 synthetic levels including drop,
+  persisted branching order, non-recursive traversal and loader errors,
+  exact multi-object JSON and `/dev/full` I/O errors. No new resource-policy
+  limit or dependency. Final gates pending.
+- 2026-10-26: R3 complete; status Implemented (fixes await fresh-context
+  review). Final gates passed: `sh scripts/check-spdx.sh`, `cargo fmt --check`,
+  `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`
+  (456 passed, 0 failed, 2 ignored). Full logs:
+  `/tmp/qv-fix-spdx.log`, `/tmp/qv-fix-final-fmt.log`,
+  `/tmp/qv-fix-final-clippy.log`, `/tmp/qv-fix-final-test.log`.
+  Focused CLI suite: 44 passed, with the usual environment-dependent offline
+  networking scenario skipped internally (not counted as isolation evidence);
+  `unshare -rn true` still fails with `No space left on device`
+  (`/tmp/qv-fix-unshare.log`). Dependencies and lockfile unchanged, so no new
+  deny/vet run required. Reviewer-role diff inspection checked LF/EOF/limit
+  branches, traversal order and drop, component/path zeroization, JSON state
+  across flushes and I/O error propagation; it found no further changes
+  needed in this remediation. This is not fresh-context phase approval.
+  Existing staged review records were not staged over or committed; all
+  implementation changes remain unstaged for owner review/commit.

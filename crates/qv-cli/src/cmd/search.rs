@@ -40,8 +40,12 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
                     j.begin_obj();
                     j.key("kind").str("group");
                     j.key("id").str(&g.handle.id_hex());
-                    j.key("path")
-                        .opt_str(paths.get(ItemHandle::Group(g.handle)));
+                    j.key("path").opt_str(
+                        paths
+                            .get(ItemHandle::Group(g.handle))
+                            .as_deref()
+                            .map(String::as_str),
+                    );
                     j.key("name").str(g.name.expose());
                     j.end_obj();
                 }
@@ -54,6 +58,7 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
                     j.end_obj();
                 }
             }
+            j.flush()?;
         }
         j.end_arr().end_obj();
         out.raw("\n");
@@ -61,11 +66,12 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
         for h in &hits {
             match h {
                 SearchHit::Group(g) => {
-                    out.path(paths.get(ItemHandle::Group(g.handle)).unwrap_or_default())
+                    out.path(&paths.get(ItemHandle::Group(g.handle)).unwrap_or_default())
                         .raw("/\n");
                 }
                 SearchHit::Entry(e) => entry_line(&mut out, e, &paths),
             }
+            out.flush()?;
         }
     }
     session.lock();

@@ -186,3 +186,87 @@ fn browse_search() {
     assert_eq!(hits(&"x".repeat(1025)).code, 9);
     assert_eq!(hits(&"x".repeat(1024)).code, 0);
 }
+
+#[test]
+fn browse_streamed_json_keeps_separators_and_reports_write_errors() {
+    let home = Home::new();
+    let s = home.create();
+    let root = s.root().unwrap();
+    let a = group(&s, root, "Branch A");
+    let b = group(&s, root, "Branch B");
+    drop(s);
+    let vault = arg(&home.vault());
+    let password = format!("{PASSWORD}\n");
+    let output = piped(
+        home.qvault(["--password-stdin", "-v", &vault, "ls", "--json"]),
+        password.as_bytes(),
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(
+        output.stdout,
+        format!(
+            "{{\"groups\":[{{\"id\":\"{}\",\"path\":\"Branch A\",\"name\":\"Branch A\"}},{{\"id\":\"{}\",\"path\":\"Branch B\",\"name\":\"Branch B\"}}],\"entries\":[],\"recovered\":[]}}\n",
+            a.id_hex(),
+            b.id_hex()
+        )
+    );
+    let output = piped(
+        home.qvault([
+            "--password-stdin",
+            "-v",
+            &vault,
+            "search",
+            "Branch",
+            "--json",
+        ]),
+        password.as_bytes(),
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(
+        output.stdout,
+        format!(
+            "{{\"hits\":[{{\"kind\":\"group\",\"id\":\"{}\",\"path\":\"Branch A\",\"name\":\"Branch A\"}},{{\"kind\":\"group\",\"id\":\"{}\",\"path\":\"Branch B\",\"name\":\"Branch B\"}}]}}\n",
+            a.id_hex(),
+            b.id_hex()
+        )
+    );
+    // /dev/full refuses every write, including an incremental JSON flush.
+    // Run both human and JSON paths, and check the descriptor error propagates.
+    for command in ["ls", "search"] {
+        for json in [false, true] {
+            use std::io::Write;
+            use std::process::Stdio;
+            let _serial = common::serial();
+            let mut cmd = home.qvault(["--password-stdin", "-v", &vault, command]);
+            if command == "search" {
+                cmd.arg("Branch");
+            }
+            if json {
+                cmd.arg("--json");
+            }
+            let full = std::fs::OpenOptions::new()
+                .write(true)
+                .open("/dev/full")
+                .unwrap();
+            let mut child = cmd
+                .stdin(Stdio::piped())
+                .stdout(full)
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(password.as_bytes())
+                .unwrap();
+            let result = child.wait_with_output().unwrap();
+            assert_eq!(result.status.code(), Some(1));
+            assert!(
+                String::from_utf8(result.stderr)
+                    .unwrap()
+                    .contains("cannot write output")
+            );
+        }
+    }
+}
