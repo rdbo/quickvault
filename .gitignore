@@ -3,3 +3,6 @@
 
 # Personal Claude Code settings
 /.claude/settings.local.json
+
+# Android SDK/NDK installed by scripts/setup-android.sh when $HOME is read-only
+/.android-sdk/

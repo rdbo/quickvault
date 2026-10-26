@@ -101,7 +101,17 @@ symmetric primitives, key hierarchy, password slots, the recovery phrase and
 the password generator; frontends will reach the generator through `qv-core`)
 and `qv-model` (records and payloads, version vectors, merge, history floors,
 group-tree projection and TOTP) and `qv-store` (the hardened vault file with
-its header and local keyslots, creation and unlock to VK).
+its header and local keyslots; unlinkable encrypted objects, the encrypted
+manifest, the authenticated local head and the per-replica external anchor;
+writer state; creation, verified unlock with explicit anchor recovery, and
+the single mutation transaction) and `qv-core` (sessions with lock,
+cancellation and session-scoped handles, mutation authorization, the bounded
+metadata index and search over non-protected fields, on-demand decryption,
+causal entry/group edits, the trash with final tombstones, read-only conflict
+surfacing and vault settings including generator defaults, plus the
+unverified header view and the zxcvbn master-password estimate) and `qv-cli`
+(`qvault` with `init`, `info`, `ls`, `search`, `show`, `totp` and `generate`;
+secret-safe prompts, escaped and JSON output, exit codes).
 Other components are planned and are created by the roadmap phase that first
 needs them.
 
@@ -214,7 +224,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Build / CI | Cargo virtual workspace (`crates/<name>/`); GitHub Actions with SHA-pinned actions running the gates, `cargo deny` and `cargo vet` |
 | UI | Shared Dioxus app/UI for Android and Linux, subject to early framework validation; native secure-input/OS adapters; iOS later |
 | Optional remote server | Axum/Tokio; SQLite first, Postgres deferred |
-| Local storage | rusqlite with bundled SQLite 3.53.2 and trimmed compile options (`.cargo/config.toml`), encrypted immutable objects and manifests |
+| Local storage | rusqlite with bundled SQLite 3.53.2 and trimmed compile options (`.cargo/config.toml`), encrypted immutable objects and manifests; external anchors as per-replica files in the private state directory (`$XDG_STATE_HOME/quickvault/anchors` on Linux; keystore-backed where available later) |
 | Serialization | Bounded RFC 8949 deterministic CBOR |
 | Data encryption | XChaCha20-Poly1305 |
 | Password KDF / derivation | Argon2id / HKDF-SHA-512 |
@@ -223,7 +233,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Remote transport | TLS 1.3, X25519MLKEM768, pinned application server identity |
 | Remote account authentication | Pinned RFC 9807 OPAQUE application profile |
 | Direct LAN discovery / enrollment / transport | Not yet selected; requirements and open decisions in 0005 §6 |
-| CLI / license | clap / AGPL-3.0-or-later |
+| CLI / license | clap (builder API), rustix termios for no-echo prompts, own escaping and JSON writer; `zxcvbn` (in `qv-core`) for typed master passwords / AGPL-3.0-or-later |
 
 OPAQUE and ordinary TLS certificates are explicit classical exceptions.
 TLS-bound opaque sessions replace custom per-request HMAC/counter signing.

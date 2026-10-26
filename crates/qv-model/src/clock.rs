@@ -206,6 +206,19 @@ impl Clock {
         Ok(joined)
     }
 
+    /// Writes the wire form (0005 §1.1) into an existing encoder, for
+    /// containers such as the manifest (`qv-store`).
+    pub fn encode(&self, e: &mut Encoder) -> Result<(), EncodeError> {
+        encode_clock(self, e)
+    }
+
+    /// Reads the wire form from an existing decoder, checking the writer
+    /// count before allocating. The empty clock is accepted; callers that
+    /// need a version clock reject it.
+    pub fn decode(d: &mut Decoder<'_>) -> Result<Clock, ModelError> {
+        decode_clock(d)
+    }
+
     /// The sum of all counters (cannot overflow: at most 256 `u64`s).
     pub(crate) fn total(&self) -> u128 {
         self.pairs.iter().map(|&(_, c)| u128::from(c)).sum()
@@ -326,6 +339,49 @@ mod tests {
         assert_eq!(decode(&expected).unwrap(), c);
         assert_eq!(encode(&Clock::new()), [0x80]);
         assert_eq!(decode(&[0x80]).unwrap(), Clock::new());
+    }
+
+    #[test]
+    fn clock_public_codec() {
+        // Embedded in a container, as the manifest uses it.
+        let c = clock(&[(2, u64::MAX), (1, 1)]);
+        let mut e = Encoder::new();
+        e.array(|a| {
+            c.encode(a)?;
+            a.uint(7);
+            Ok(())
+        })
+        .unwrap();
+        let bytes = e.finish().unwrap().to_vec();
+        let mut d = Decoder::new(&bytes).unwrap();
+        assert_eq!(d.array().unwrap(), 2);
+        assert_eq!(Clock::decode(&mut d).unwrap(), c);
+        assert_eq!(d.uint().unwrap(), 7);
+        d.finish().unwrap();
+
+        let public = |bytes: &[u8]| {
+            let mut d = Decoder::new(bytes)?;
+            let c = Clock::decode(&mut d)?;
+            d.finish()?;
+            Ok::<_, ModelError>(c)
+        };
+        // 257 writers.
+        let mut over = vec![0x99, 0x01, 0x01];
+        for w in 0..=256u16 {
+            let mut b = v4(0);
+            b[0..2].copy_from_slice(&w.to_be_bytes());
+            over.extend(pair_bytes(b, 0x01));
+        }
+        assert_eq!(public(&over), Err(ModelError::LimitExceeded));
+        // A zero counter.
+        let mut zero = vec![0x81];
+        zero.extend(pair_bytes(v4(1), 0x00));
+        assert_eq!(public(&zero), Err(ModelError::Malformed));
+        // Unsorted writers.
+        let mut unsorted = vec![0x82];
+        unsorted.extend(pair_bytes(v4(2), 0x01));
+        unsorted.extend(pair_bytes(v4(1), 0x01));
+        assert_eq!(public(&unsorted), Err(ModelError::Malformed));
     }
 
     #[test]

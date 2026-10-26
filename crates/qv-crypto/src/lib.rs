@@ -92,7 +92,7 @@ pub use keys::{
 };
 pub use memory::{MemoryProtection, SecretArray, SecretBytes, memory_protection};
 pub use otp::{OtpAlgorithm, OtpCode, hotp};
-pub use password::MasterPassword;
+pub use password::{Argon2Params, MasterPassword};
 pub use phrase::{PHRASE_WORDS, RecoveryPhrase};
 pub use primitives::{MacTag, ObjectHash, ObjectHasher, object_hash};
 pub use process::{Hardening, ProcessHardening, harden_process};

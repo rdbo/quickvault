@@ -182,8 +182,8 @@ pub mod purpose {
         Manifest = "manifest";
         /// Remote checkpoint MACs.
         StateCommit = "state-commit";
-        /// Encrypts sync/outbox state and MACs the local head (uses come in
-        /// later phases).
+        /// MACs the local head; encrypting sync/outbox state comes with
+        /// sync (later phases).
         LocalState = "local-state";
         /// Wraps local device signing bundles (uses come in later phases).
         DeviceStorage = "device-storage";
@@ -401,7 +401,7 @@ macro_rules! mac_purposes {
 }
 
 aead_purposes!(Manifest);
-mac_purposes!(HeaderMac, StateCommit);
+mac_purposes!(HeaderMac, StateCommit, LocalState);
 
 /// Computes a MAC under `profile`.
 pub fn mac(key: &impl MacKey, profile: MacProfile, msg: &[u8]) -> Result<MacTag, CryptoError> {
@@ -583,6 +583,15 @@ mod tests {
         );
         assert_eq!(
             verify_mac(&header, MacProfile::V1, b"headex", &tag),
+            Err(CryptoError::Integrity)
+        );
+        let local = vk
+            .purpose_key::<purpose::LocalState>(VAULT, GEN, DerivationProfile::V1)
+            .unwrap();
+        let local_tag = mac(&local, MacProfile::V1, b"header").unwrap();
+        assert_ne!(local_tag.as_bytes(), tag.as_bytes());
+        assert_eq!(
+            verify_mac(&local, MacProfile::V1, b"header", &tag),
             Err(CryptoError::Integrity)
         );
     }

@@ -5,11 +5,20 @@
 //! - The vault file must be a regular file owned by the effective UID with
 //!   no group or other permission bits; a symlink at the path is refused
 //!   (`O_NOFOLLOW`). Permissions are refused, not repaired (plan 0008).
-//! - Its parent directory must be owned by the effective UID or root, must
-//!   not be writable by others unless sticky, and may be group-writable only
-//!   when its group is the effective GID (Android's per-app `files`
-//!   directory is `0771`). Only the parent is checked: it is what lets
-//!   another user replace the path.
+//! - Its parent directory must be owned by the effective UID or root and
+//!   writable by no one else (0004 §1.1, "private 0700 directory"; read and
+//!   search bits are allowed, so `~/Documents` at 0755 works). There is no
+//!   sticky-bit exception: whoever can create entries next to the vault can
+//!   plant SQLite sidecar files (below). The one group-write exception is
+//!   Android, whose per-app `files` directory is `0771` with the app's own
+//!   UID and GID. Only the parent is checked: it is what lets another user
+//!   replace the path or plant files next to it.
+//! - SQLite's sidecar files are checked before SQLite opens the vault
+//!   (plan 0008 review finding 1). SQLite rolls back a hot `-journal` and
+//!   replays a `-wal` before any query runs, and neither is bound to the
+//!   vault. A `-journal` must be a private file like the vault itself (our
+//!   own journal after a crash must still roll back); a `-wal` or `-shm` is
+//!   never ours (`journal_mode=DELETE`) and is refused whatever it is.
 //! - The process lock is `flock(LOCK_EX | LOCK_NB)` on the vault file's own
 //!   descriptor, which also gives the file identity (`st_dev`, `st_ino`).
 //!   **That descriptor must stay open until the SQLite connection is
@@ -29,7 +38,9 @@ use rustix::fs::{
     open, renameat_with, stat,
 };
 use rustix::io::Errno;
-use rustix::process::{getegid, geteuid};
+#[cfg(target_os = "android")]
+use rustix::process::getegid;
+use rustix::process::geteuid;
 
 use crate::error::{StoreError, errno_err};
 use crate::limits::MAX_DB_BYTES;
@@ -38,7 +49,6 @@ use crate::limits::MAX_DB_BYTES;
 const GROUP_OTHER: u32 = 0o077;
 const OTHER_WRITE: u32 = 0o002;
 const GROUP_WRITE: u32 = 0o020;
-const STICKY: u32 = 0o1000;
 
 /// The vault file's descriptor: holds the process lock and the identity.
 pub(crate) struct LockedFile {
@@ -96,9 +106,55 @@ pub(crate) fn check_parent(path: &Path) -> Result<(), StoreError> {
         return Err(StoreError::UnsafeFile);
     }
     let owner_ok = dir.st_uid == geteuid().as_raw() || dir.st_uid == 0;
-    let other_ok = dir.st_mode & OTHER_WRITE == 0 || dir.st_mode & STICKY != 0;
-    let group_ok = dir.st_mode & GROUP_WRITE == 0 || dir.st_gid == getegid().as_raw();
+    let other_ok = dir.st_mode & OTHER_WRITE == 0;
+    let group_ok = dir.st_mode & GROUP_WRITE == 0 || own_group_dir(&dir);
     if owner_ok && other_ok && group_ok {
+        Ok(())
+    } else {
+        Err(StoreError::UnsafeFile)
+    }
+}
+
+/// Android's per-app directory: owned by the app's UID with the app's own
+/// GID, so group write adds no other writer.
+#[cfg(target_os = "android")]
+fn own_group_dir(dir: &Stat) -> bool {
+    dir.st_uid == geteuid().as_raw() && dir.st_gid == getegid().as_raw()
+}
+
+/// Elsewhere a group can have other members: group write is refused.
+#[cfg(not(target_os = "android"))]
+fn own_group_dir(_: &Stat) -> bool {
+    false
+}
+
+/// A regular file owned by `euid` with no group or other bits.
+fn owner_only(kind: FileType, uid: u32, mode: u32, euid: u32) -> bool {
+    kind == FileType::RegularFile && uid == euid && mode & GROUP_OTHER == 0
+}
+
+/// Whether `st` is a regular file owned by the effective UID with no group
+/// or other bits (anchor files).
+pub(crate) fn is_owner_only(st: &Stat) -> bool {
+    owner_only(
+        FileType::from_raw_mode(st.st_mode),
+        st.st_uid,
+        st.st_mode,
+        geteuid().as_raw(),
+    )
+}
+
+/// Checks a private directory of our own (the anchor directory): a real
+/// directory, not a symlink, owned by the effective UID, writable by no one
+/// else (group write only for Android's own-GID directory). Read and search
+/// bits for others are allowed.
+pub(crate) fn check_private_dir(dir: &Path) -> Result<(), StoreError> {
+    let st = lstat(dir).map_err(errno_err)?;
+    let ok = FileType::from_raw_mode(st.st_mode) == FileType::Directory
+        && st.st_uid == geteuid().as_raw()
+        && st.st_mode & OTHER_WRITE == 0
+        && (st.st_mode & GROUP_WRITE == 0 || own_group_dir(&st));
+    if ok {
         Ok(())
     } else {
         Err(StoreError::UnsafeFile)
@@ -107,10 +163,12 @@ pub(crate) fn check_parent(path: &Path) -> Result<(), StoreError> {
 
 /// Checks a just-opened vault file's metadata.
 fn check_file(st: &Stat) -> Result<(), StoreError> {
-    if FileType::from_raw_mode(st.st_mode) != FileType::RegularFile
-        || st.st_uid != geteuid().as_raw()
-        || st.st_mode & GROUP_OTHER != 0
-    {
+    if !owner_only(
+        FileType::from_raw_mode(st.st_mode),
+        st.st_uid,
+        st.st_mode,
+        geteuid().as_raw(),
+    ) {
         return Err(StoreError::UnsafeFile);
     }
     match u64::try_from(st.st_size) {
@@ -139,6 +197,32 @@ pub(crate) fn open_existing(path: &Path) -> Result<LockedFile, StoreError> {
     })?;
     check_file(&fstat(&fd).map_err(errno_err)?)?;
     LockedFile::lock(fd)
+}
+
+/// Checks SQLite's sidecar files next to `path` before SQLite opens it
+/// (see the module docs): a `-journal` must be owner-only like the vault, a
+/// `-wal` or `-shm` must not exist. [`StoreError::UnsafeFile`] otherwise.
+/// Only the owner (or root) can create entries in a parent that passed
+/// [`check_parent`], so the check cannot be raced by another user.
+pub(crate) fn check_sidecars(path: &Path) -> Result<(), StoreError> {
+    match lstat(with_suffix(path, "-journal")) {
+        Ok(st) => {
+            let kind = FileType::from_raw_mode(st.st_mode);
+            if !owner_only(kind, st.st_uid, st.st_mode, geteuid().as_raw()) {
+                return Err(StoreError::UnsafeFile);
+            }
+        }
+        Err(Errno::NOENT) => {}
+        Err(e) => return Err(errno_err(e)),
+    }
+    for suffix in ["-wal", "-shm"] {
+        match lstat(with_suffix(path, suffix)) {
+            Ok(_) => return Err(StoreError::UnsafeFile),
+            Err(Errno::NOENT) => {}
+            Err(e) => return Err(errno_err(e)),
+        }
+    }
+    Ok(())
 }
 
 /// Creates and locks a new, empty temporary file next to `final_path`,
@@ -326,15 +410,27 @@ mod tests {
         assert_eq!(err(open_existing(&p)), StoreError::UnsafeFile);
         assert_eq!(check_parent(&p), Err(StoreError::UnsafeFile));
 
+        // No sticky-bit exception: anyone may create sidecar files there.
         let sticky = d.subdir("sticky", 0o1777);
         let p = sticky.join("v.qvault");
         write_file(&p, b"x", 0o600);
-        assert!(open_existing(&p).is_ok());
+        assert_eq!(err(open_existing(&p)), StoreError::UnsafeFile);
 
-        // Group-writable is fine when the group is our effective GID (new
-        // directories get it).
+        // Group write is refused outside Android, even for our own group
+        // (new directories get it), which can have other members.
         let group = d.subdir("group", 0o770);
         let p = group.join("v.qvault");
+        write_file(&p, b"x", 0o600);
+        assert_eq!(err(open_existing(&p)), StoreError::UnsafeFile);
+        let group_sticky = d.subdir("group-sticky", 0o1770);
+        assert_eq!(
+            check_parent(&group_sticky.join("v.qvault")),
+            Err(StoreError::UnsafeFile)
+        );
+
+        // Group read and search are fine.
+        let group_read = d.subdir("group-read", 0o750);
+        let p = group_read.join("v.qvault");
         write_file(&p, b"x", 0o600);
         assert!(open_existing(&p).is_ok());
 
@@ -449,6 +545,61 @@ mod tests {
         assert_eq!(err(open_existing(&p)), StoreError::LimitExceeded);
         f.set_len(MAX_DB_BYTES).unwrap();
         assert!(open_existing(&p).is_ok());
+    }
+
+    #[test]
+    fn fs_owner_only_rule() {
+        let me = geteuid().as_raw();
+        assert!(owner_only(FileType::RegularFile, me, 0o100600, me));
+        assert!(owner_only(FileType::RegularFile, me, 0o100700, me));
+        // Another owner, even root, with an otherwise private mode.
+        assert!(!owner_only(FileType::RegularFile, me + 1, 0o100600, me));
+        assert!(!owner_only(FileType::RegularFile, 0, 0o100600, me));
+        assert!(!owner_only(FileType::RegularFile, me, 0o100666, me));
+        assert!(!owner_only(FileType::RegularFile, me, 0o100640, me));
+        assert!(!owner_only(FileType::Symlink, me, 0o120600, me));
+        assert!(!owner_only(FileType::Directory, me, 0o040700, me));
+        assert!(!owner_only(FileType::Fifo, me, 0o010600, me));
+    }
+
+    #[test]
+    fn fs_sidecars() {
+        let d = TestDir::new();
+        let p = d.join("v.qvault");
+        write_file(&p, b"x", 0o600);
+        assert_eq!(check_sidecars(&p), Ok(()));
+
+        // Our own journal (as SQLite leaves it after a crash) passes.
+        let journal = d.join("v.qvault-journal");
+        write_file(&journal, b"j", 0o600);
+        assert_eq!(check_sidecars(&p), Ok(()));
+        for mode in [0o666, 0o644, 0o660, 0o604] {
+            std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert_eq!(check_sidecars(&p), Err(StoreError::UnsafeFile), "{mode:o}");
+        }
+        std::fs::remove_file(&journal).unwrap();
+        let target = d.join("target");
+        write_file(&target, b"t", 0o600);
+        symlink(&target, &journal).unwrap();
+        assert_eq!(check_sidecars(&p), Err(StoreError::UnsafeFile));
+        std::fs::remove_file(&journal).unwrap();
+        std::fs::create_dir(&journal).unwrap();
+        assert_eq!(check_sidecars(&p), Err(StoreError::UnsafeFile));
+        std::fs::remove_dir(&journal).unwrap();
+        // A dangling symlink is still an entry.
+        symlink(d.join("absent"), &journal).unwrap();
+        assert_eq!(check_sidecars(&p), Err(StoreError::UnsafeFile));
+        std::fs::remove_file(&journal).unwrap();
+        assert_eq!(check_sidecars(&p), Ok(()));
+
+        // A WAL or shared-memory file is never ours, even when private.
+        for suffix in ["-wal", "-shm"] {
+            let side = with_suffix(&p, suffix);
+            write_file(&side, b"", 0o600);
+            assert_eq!(check_sidecars(&p), Err(StoreError::UnsafeFile), "{suffix}");
+            std::fs::remove_file(&side).unwrap();
+        }
+        assert_eq!(check_sidecars(&p), Ok(()));
     }
 
     #[test]

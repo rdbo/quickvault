@@ -20,7 +20,9 @@ pub use attachment::{AttachmentMeta, CHUNK_SIZE, MAX_ATTACHMENT_BYTES};
 pub use entry::{Entry, Field, FieldKind, MAX_FIELDS};
 pub use group::Group;
 pub use keyslot::Keyslot;
-pub use vault_meta::{DEFAULT_HISTORY_DEPTH, DEFAULT_TRASH_RETENTION_DAYS, Settings, VaultMeta};
+pub use vault_meta::{
+    DEFAULT_HISTORY_DEPTH, DEFAULT_TRASH_RETENTION_DAYS, GeneratorDefaults, Settings, VaultMeta,
+};
 
 /// A live record's payload; its variant determines the record kind.
 pub enum Payload {

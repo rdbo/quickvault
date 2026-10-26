@@ -406,7 +406,7 @@ mod tests {
 
     #[test]
     fn record_unknown_keys_survive_at_every_level() {
-        let settings = map(&[(0, uint(5)), (2, map(&[(0, uint(1))])), (-3, text("s"))]);
+        let settings = map(&[(0, uint(5)), (2, map(&[(0, uint(9))])), (-3, text("s"))]);
         let payload = with(&vault_meta_payload(), 3, settings);
         let payload = with(&payload, 7, bytes(b"pay"));
         let mut env = envelope(0, false, Some(map(&payload)));

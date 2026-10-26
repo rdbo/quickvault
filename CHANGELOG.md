@@ -9,6 +9,83 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-26: `scripts/setup-android.sh`: installs the Android command-line
+  tools (checksum-pinned), platform 35, build-tools 35.0.0, NDK r27
+  (27.3.13750724) and the Rust Android targets; `--print-env` prints the
+  variables for Android builds (minimum API 29). The SDK goes to
+  `$HOME/Android/Sdk`, or to the git-ignored `.android-sdk/` when `$HOME` is
+  read-only.
+
+- 2026-10-26: Spec 0009 §2: the supported Android baseline (arm64, Android
+  10+, at least 4 GB RAM) is the target of the 0002 §1.3 KDF budgets; no named
+  benchmark devices (roadmap D7, owner decision).
+
+- 2026-10-26: CLI foundation, vault and read commands (roadmap phase
+  1.10a, plan 0011). New crate `qv-cli`, binary `qvault`: `init` (a
+  suggested 6-word passphrase, the zxcvbn verdict with the 5-second weak
+  password confirmation, the recovery phrase on the alternate screen, a
+  three-word check or a recorded skip), `info` (the unverified header without
+  a password; `--full` unlocks), `ls`, `search`, `show` (masked unless
+  `--reveal`; `--field` for scripts), `totp` and `generate`. Vault selection
+  by `--vault`, `QVAULT_PATH` or the config file (a strict TOML subset);
+  `--password-stdin`; `--json`; no-echo prompts with the terminal state
+  always restored; all vault text escaped (ANSI/OSC, C1, bidi controls) and
+  written from zeroizing buffers; exit codes per 0011 §6; PTY end-to-end
+  tests. `qv-core` gains the header view, the zxcvbn master-password
+  estimate, the recovery-phrase confirmation positions and recorded skip,
+  `@id` lookup, and refuses a vault stored inside the anchor directory
+  (review of plan 0009). `qv-model` stores the skip at settings key 3, and
+  new generator defaults replace an unreadable stored value (review of plan
+  0010). Spec 0010 §3.2: a zxcvbn estimate at its 64-bit ceiling counts as
+  Strong. New dependencies: `clap` (builder API) and `zxcvbn`.
+
+- 2026-10-26: `qv-core` sessions and vault operations (roadmap phase 1.8,
+  plan 0010). New crate `qv-core`, the single entry point for frontends:
+  `Core` hardens the process and reports reduced protection, creates vaults
+  (returning the recovery phrase once) and unlocks them, including the
+  read-only recovery unlock with `adopt_baseline`. A `Session` serializes
+  calls, and `lock` cancels running work, drops and zeroizes the vault, keys
+  and views, and is final; handles carry a random session tag. The metadata
+  index (64 MiB budget) keeps only non-protected metadata; protected values
+  and notes are decrypted on demand (`entry`, `reveal`, `totp`, drafts).
+  Search covers titles, group names and non-protected text, URL and e-mail
+  fields, with no search index. Listings follow the repaired group tree,
+  with recovered items. Edits, moves and settings go through drafts that
+  carry their base version, as causal versions committed by the store's one
+  transaction. Conflicts are shown, and their records refused for changes
+  until phase 2.2. The trash: a group is deleted with its contents in one
+  transaction and restored with what was deleted with it; final deletion is
+  explicit, leaves a tombstone, drops history, advances the floor and
+  tombstones the entry's attachments; an expiry report lists what the
+  retention period offers and flags clock anomalies. `qv-store`: a final
+  tombstone drops the record's history and advances its floor; manifest
+  types print a redacted `Debug` (review of plan 0009). `qv-model`: password
+  generator defaults in vault settings (key 2).
+
+- 2026-10-26: Objects, manifests, local head, anchor and the write path
+  (roadmap phase 1.7, plan 0009). `qv-store` now stores records as
+  encrypted immutable objects whose plaintext envelope holds only object ID,
+  key generation, profile, nonce and ciphertext; the encrypted manifest
+  (heads, history, floors, chunk lists, sorted references, configuration
+  digest, the three control records) with its envelope hash and reference
+  digest, validated and bounded before allocation; the authenticated local
+  head; per-replica external anchors in a private state directory; and
+  writer IDs with counter reservations in a local-only `replica` row. `create`
+  writes the vault metadata, root group and password-keyslot records;
+  `unlock` verifies the head, manifest, every referenced object row and
+  every head (0004 §3.6) and compares the head with its anchor (0005 §5.4),
+  failing closed on a missing or mismatched anchor, with
+  `unlock_for_recovery` + `adopt_baseline` as the explicit recovery. All
+  writes go through one mutation transaction (head re-read inside
+  `BEGIN IMMEDIATE`, objects, manifest, head, counters, prune, durable
+  commit, anchor, report), checked at every ordering point by a test-only
+  crash-injection harness. New errors `Rollback`, `NoAnchor`, `Changed`,
+  `InvalidEdit`; a full disk is no longer reported as the size budget.
+  Development schema 2. New `manifest_decode` fuzz target, run in CI. The
+  generated worst-case manifest at every budget is 50.0 MiB, inside the
+  64 MiB limit. `qv-crypto`: the `local-state` key MACs; `qv-model`: public
+  clock codec. Spec 0004 amended (below).
+
 - 2026-10-26: Vault file: hardened SQLite, schema, header and keyslots
   (roadmap phase 1.6, plan 0008). New crate `qv-store`: owner-only vault
   files (symlinks, nonregular files, unsafe modes and unsafe parent
@@ -117,12 +194,32 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Fixed
 
+- 2026-10-26: `qv-store`'s `adopt_baseline` now retries a pending anchor
+  update before it commits, as every other write does (review of plan 0009).
+  Before, a recovery after a failed anchor write could leave the database
+  two commits ahead of its anchor, so the next open reported a rollback.
+
+- 2026-10-26: `qv-store` no longer lets a file planted next to the vault
+  rewrite it before validation (review of plan 0008). SQLite rolled back a
+  hot `<vault>-journal` and replayed a `<vault>-wal` before any check ran;
+  a crafted 512-byte journal truncated the vault, and a WAL changed it on
+  disk. A `-journal` must now be owner-only like the vault, and a `-wal` or
+  `-shm` is refused. The parent directory must be writable by no one but
+  the owner (0004 §1.1): the sticky-bit exception is gone, and group write
+  is allowed only for Android's per-app `0771` directory.
+
 - 2026-10-26: `qv-model` no longer encodes a record whose embedded
   `qv-crypto` ID (root group, group parent, entry group, attachment entry,
   slot ID) lacks the UUIDv4 bits, which decode would reject (review of
   plan 0007).
 
 ### Specs
+
+- 2026-10-26: 0004 §4.1/§4.2: an aggregate budget of 1,048,576 clock
+  components per manifest, so that the worst-case manifest fits the 64 MiB
+  limit (256 writers per clock over 250,000 objects did not); history yields
+  to it. 0004 §2: the local-only `replica` row (writer state and the
+  anchor's name). Owner-approved with plan 0009.
 
 - 2026-10-24: Prioritize Android alongside Linux before the optional server;
   retain iOS as later work. Specify shared cross-platform app/UI code, isolated

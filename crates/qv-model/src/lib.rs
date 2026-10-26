@@ -79,7 +79,8 @@ pub use merge::{
 };
 pub use payload::{
     AttachmentMeta, CHUNK_SIZE, DEFAULT_HISTORY_DEPTH, DEFAULT_TRASH_RETENTION_DAYS, Entry, Field,
-    FieldKind, Group, Keyslot, MAX_ATTACHMENT_BYTES, MAX_FIELDS, Payload, Settings, VaultMeta,
+    FieldKind, GeneratorDefaults, Group, Keyslot, MAX_ATTACHMENT_BYTES, MAX_FIELDS, Payload,
+    Settings, VaultMeta,
 };
 pub use record::{Deletion, RecordBody, RecordKind, RecordVersion};
 pub use text::{Extensions, FieldValue, MAX_RECORD_BYTES, MAX_TEXT_BYTES, SecretText, Text};

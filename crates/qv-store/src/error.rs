@@ -19,8 +19,8 @@ use qv_model::ModelError;
 /// |---------|-----------|
 /// | [`WrongPassword`](Self::WrongPassword) | 3 |
 /// | [`NotFound`](Self::NotFound) | 4 |
-/// | [`Locked`](Self::Locked), [`Replaced`](Self::Replaced) | 6 |
-/// | [`Integrity`](Self::Integrity) | 7 |
+/// | [`Locked`](Self::Locked), [`Replaced`](Self::Replaced), [`Changed`](Self::Changed) | 6 |
+/// | [`Integrity`](Self::Integrity), [`Rollback`](Self::Rollback), [`NoAnchor`](Self::NoAnchor) | 7 |
 /// | [`LimitExceeded`](Self::LimitExceeded) | 9 |
 /// | every other variant | 1 |
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,8 +35,23 @@ pub enum StoreError {
     /// The path no longer names the opened file (0004 §1.3).
     Replaced,
     /// Failed integrity: `quick_check`, the exact schema, row checks, the
-    /// header MAC, or a corrupt database.
+    /// header or head MAC, the manifest, a missing or mismatched object, or
+    /// a corrupt database.
     Integrity,
+    /// The local head does not match the external anchor: an older or
+    /// forked database, one more than a commit ahead, or another vault's
+    /// (0005 §5.4). Writes are blocked until an explicit recovery.
+    Rollback,
+    /// There is no external anchor for this vault database (a new
+    /// installation, or a copy from elsewhere). Writes are blocked until an
+    /// explicit recovery; a missing anchor never resets the baseline
+    /// silently (0005 §5.4).
+    NoAnchor,
+    /// The vault changed on disk since it was unlocked (0004 §1.3); reopen.
+    Changed,
+    /// An edit breaks a vault rule (counter, causality, kind or control
+    /// record rules); nothing was written.
+    InvalidEdit,
     /// A size budget (0004 §4.1) would be exceeded; nothing was changed.
     LimitExceeded,
     /// The file is a SQLite database but not a QuickVault vault.
@@ -67,6 +82,10 @@ impl fmt::Display for StoreError {
             Self::Locked => "vault is locked by another process",
             Self::Replaced => "vault file was replaced on disk",
             Self::Integrity => "vault integrity check failed",
+            Self::Rollback => "vault does not match its last known state (possible rollback)",
+            Self::NoAnchor => "no record of this vault's last known state on this device",
+            Self::Changed => "vault changed on disk; reopen it",
+            Self::InvalidEdit => "edit rejected by a vault rule",
             Self::LimitExceeded => "vault size limit exceeded",
             Self::NotAVault => "not a QuickVault vault",
             Self::Unsupported => "unsupported vault format or platform",
@@ -119,6 +138,44 @@ pub(crate) fn sqlite_err(e: &rusqlite::Error) -> StoreError {
         Some(ErrorCode::OperationInterrupted) => StoreError::LimitExceeded,
         Some(ErrorCode::CannotOpen) => StoreError::Io,
         _ => StoreError::Io,
+    }
+}
+
+/// Pages of slack when deciding whether a full database hit its page limit:
+/// b-tree and overflow-page overhead of the write being attempted.
+const FULL_SLACK_PAGES: u64 = 64;
+
+/// Maps a SQLite error from a write of at most `growth` bytes.
+/// `SQLITE_FULL` is both "`max_page_count` reached" and "disk full"; it is
+/// [`StoreError::LimitExceeded`] only when this write would take the file to
+/// its page limit, and [`StoreError::Io`] otherwise (plan 0008 review,
+/// finding 2). Best effort: the page count is read after the failure.
+pub(crate) fn write_err(
+    conn: &rusqlite::Connection,
+    e: &rusqlite::Error,
+    growth: u64,
+) -> StoreError {
+    if e.sqlite_error_code() != Some(rusqlite::ErrorCode::DiskFull) {
+        return sqlite_err(e);
+    }
+    let read = |name: &str| {
+        conn.pragma_query_value(None, name, |r| r.get::<_, i64>(0))
+            .ok()
+            .and_then(|v| u64::try_from(v).ok())
+    };
+    match (read("page_count"), read("max_page_count")) {
+        (Some(pages), Some(max)) => full_err(pages, max, growth),
+        _ => StoreError::Io,
+    }
+}
+
+/// See [`write_err`].
+pub(crate) fn full_err(pages: u64, max_pages: u64, growth: u64) -> StoreError {
+    let needed = (growth / crate::limits::PAGE_SIZE).saturating_add(FULL_SLACK_PAGES);
+    if pages.saturating_add(needed) >= max_pages {
+        StoreError::LimitExceeded
+    } else {
+        StoreError::Io
     }
 }
 
@@ -210,6 +267,42 @@ mod tests {
             sqlite_err(&rusqlite::Error::QueryReturnedNoRows),
             StoreError::Io
         );
+    }
+
+    #[test]
+    fn full_disk_is_not_the_size_budget() {
+        let max = 524_288;
+        assert_eq!(full_err(100, max, 4096), StoreError::Io);
+        assert_eq!(full_err(max - 10, max, 4096), StoreError::LimitExceeded);
+        assert_eq!(full_err(max - 300, max, 1 << 20), StoreError::LimitExceeded);
+        assert_eq!(full_err(max - 400, max, 1 << 20), StoreError::Io);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn full_database_at_page_limit_is_limit_exceeded() {
+        use crate::fs::test_dir::{TestDir, write_file};
+        use crate::sqlite::{StepBudget, harden, open_connection};
+        let d = TestDir::new();
+        let p = d.join("f.qvault");
+        write_file(&p, b"", 0o600);
+        let conn = open_connection(&p).unwrap();
+        harden(&conn, &StepBudget::new()).unwrap();
+        conn.execute_batch("CREATE TABLE t (b BLOB)").unwrap();
+        conn.pragma_update(None, "max_page_count", 20).unwrap();
+        let blob = vec![0u8; 1 << 20];
+        let err = conn
+            .execute("INSERT INTO t VALUES (?1)", [blob.as_slice()])
+            .unwrap_err();
+        assert_eq!(err.sqlite_error_code(), Some(rusqlite::ErrorCode::DiskFull));
+        assert_eq!(sqlite_err(&err), StoreError::LimitExceeded);
+        assert_eq!(write_err(&conn, &err, 1 << 20), StoreError::LimitExceeded);
+        // Other errors keep the ordinary mapping.
+        let busy = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            None,
+        );
+        assert_eq!(write_err(&conn, &busy, 0), StoreError::Locked);
     }
 
     #[cfg(any(target_os = "linux", target_os = "android"))]

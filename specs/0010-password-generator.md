@@ -113,7 +113,11 @@ generator settings, not an estimate:
 - PIN: `length × log2(10)`.
 
 3.2. **User-typed passwords** (master password, manual entries) are
-estimated with `zxcvbn`, because their entropy cannot be computed.
+estimated with `zxcvbn`, because their entropy cannot be computed. The Rust
+`zxcvbn` counts guesses in a saturating 64-bit integer, so its estimate
+never exceeds 64 bits. An estimate at that ceiling (no structure found that
+brings the guesses below 2^64) counts as **Strong**. Generated values always
+use their exact entropy (3.1) and are never passed to `zxcvbn`.
 
 3.3. Labels shown to the user:
 
@@ -207,3 +211,7 @@ None currently.
   validate synced profiles and require unambiguous passphrase separators.
 - 2026-10-15: Fix: the previous default separator `-` occurs in four EFF words
   and violated §2.2.3; default is now `.`. Record the word list hash.
+- 2026-10-26: §3.2: the Rust `zxcvbn` caps estimates at 64 bits (saturating
+  `u64` guesses); an estimate at the cap counts as Strong, so typed passwords
+  can reach the Accepted tier of §4.2. Generated values never go to `zxcvbn`
+  (owner-approved, plan 0011).

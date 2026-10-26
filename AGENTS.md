@@ -15,7 +15,12 @@ CI and supply-chain tooling exist; `qv-encoding` has the canonical CBOR codec;
 registry, the symmetric primitives, the key hierarchy, the recovery phrase,
 the password generator and HOTP; `qv-model` has the records, version vectors,
 merge, group-tree projection and TOTP; `qv-store` has the hardened vault
-file, its header and keyslots, creation and unlock. Most specs
+file, its header and keyslots, objects, manifests, the local head and
+anchor, creation, verified unlock and the write path; `qv-core` has
+sessions, lock and cancellation, handles, the metadata index and search,
+on-demand decryption, entry/group edits, the trash with final deletion and
+the vault settings; `qv-cli` (`qvault`) has the CLI foundation and `init`,
+`info`, `ls`, `search`, `show`, `totp`, `generate`. Most specs
 are not implemented yet. `tests/` is an empty placeholder. Do not assume code
 exists; check with `git ls-files <path>`.
 
@@ -50,9 +55,10 @@ token use proportional to the task:
 - **Overview = `ARCHITECTURE.md` + `specs/README.md`.** Start there; don't open
   specs you don't need.
 - **Never read:** `LICENSE` (it's AGPL-3.0-or-later; nothing else in it matters),
-  `.git/`, `target/`. Read `Cargo.lock` only for dependency review.
-  `.ignore` keeps ripgrep-based search out of `LICENSE`, and `.gitignore` covers
-  `target/`.
+  `.git/`, `target/`, `.android-sdk/` (the Android SDK/NDK from
+  `scripts/setup-android.sh`). Read `Cargo.lock` only for dependency review.
+  `.ignore` keeps ripgrep-based search out of `LICENSE` and `.android-sdk/`,
+  and `.gitignore` covers `target/` and `.android-sdk/`.
 - **Trim command output**: pipe long build/test output through `tail`/`grep`.
 - **Don't spawn search subagents** for this repo; direct, targeted reads are cheaper.
 
@@ -88,7 +94,7 @@ token use proportional to the task:
 | `crates/<name>/` | Workspace crates (`ARCHITECTURE.md` §3) |
 | `deny.toml`, `supply-chain/` | `cargo deny` policy and `cargo vet` audits/exemptions |
 | `fuzz/` | cargo-fuzz targets; own workspace and lockfile, outside the shipped workspace; pinned nightly in CI |
-| `scripts/` | Repository checks (`check-spdx.sh`) |
+| `scripts/` | Repository checks (`check-spdx.sh`); Android SDK/NDK and Rust Android targets setup (`setup-android.sh`, versions pinned inside) |
 | `.github/workflows/` | CI (gates, supply chain, fuzzing), actions pinned by SHA |
 | `.agents/skills/` | Agent skills (source of truth) |
 | `.claude/skills` | Symlink to `../.agents/skills` for Claude Code |

@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use qv_crypto::MasterPassword;
-use qv_store::{StoreError, VaultFile};
+use qv_store::{AnchorDir, StoreError, VaultFile};
 
 const PATH_VAR: &str = "QV_STORE_LOCK_TEST_PATH";
 
@@ -57,7 +57,8 @@ fn second_process_gets_lock_error() {
     std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
     let path = dir.join("v.qvault");
     let pw = MasterPassword::from_utf8(b"lock test password").unwrap();
-    drop(VaultFile::create(&path, &pw).unwrap());
+    let anchors = AnchorDir::open(&dir.join("anchors")).unwrap();
+    drop(VaultFile::create(&path, &pw, "lock", &anchors).unwrap());
 
     let held = VaultFile::open(&path).unwrap();
     assert_eq!(child(&path), LOCKED);

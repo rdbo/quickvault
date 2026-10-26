@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-10-26 | 2026-10-26 | 0004 §1, §2, §4, §5.1 (first half); 0002 §1.4, §3.1–3.3, §7.2, §8; 0008 §5; 0011 §6; 0012 §1 |
+| Reviewed | 2026-10-26 | 2026-10-26 | 0004 §1, §2, §4, §5.1 (first half); 0002 §1.4, §3.1–3.3, §7.2, §8; 0008 §5; 0011 §6; 0012 §1 |
 
 ## Intent
 
@@ -89,15 +89,20 @@ until 1.16, roadmap invariant), documents them in the crate docs, and leaves
 None. These readings follow from the specs and are recorded here so the
 reviewer and owner can see them:
 
-- **"Private directory" for user-selected paths.** The vault's parent
-  directory must be owned by the effective UID or by root. It must not be
-  writable by others unless its sticky bit is set. It may be group-writable
-  only when its group is the process's effective GID; Android's per-app `files`
-  directory is `0771`, owned by the app's own UID and GID. Anything else is
-  `UnsafeFile`. This rule stops other users from replacing the path, which is
-  what 0004 §1.1 protects against. Requiring `0700` for every user-chosen
-  directory (such as `~/Documents`) would make the `--vault` option unusable.
-  Only the parent is checked, not every ancestor.
+- **"Private directory" for user-selected paths** (revised 2026-10-26, see
+  *Revisions*). The vault's parent directory must be owned by the effective
+  UID or by root and writable by no one else: no other-write bit, with no
+  sticky-bit exception, and no group-write bit, except on Android, whose
+  per-app `files` directory is `0771` with the app's own UID and GID. Read
+  and search bits are allowed, so `~/Documents` (0755) works with `--vault`.
+  Anything else is `UnsafeFile`. Only the parent is checked, not every
+  ancestor. *Superseded first reading:* sticky world-writable parents and
+  group-writable parents with the effective GID were accepted; the review
+  showed that lets another user plant SQLite sidecar files.
+- **SQLite sidecar files** (added 2026-10-26). Before SQLite opens the vault
+  (and the temp file in `create`), `<path>-journal`, if present, must be a
+  regular file owned by the effective UID with no group or other bits, and
+  `<path>-wal` and `<path>-shm` must not exist. Otherwise `UnsafeFile`.
 - **Permissions are refused, not repaired.** An existing vault file whose mode
   has any group or other bits, whose owner is not the effective UID, or that is
   not a regular file is `UnsafeFile`. Silently running `chmod` would hide a
@@ -662,7 +667,19 @@ No `unsafe`.
 
 ## Revisions
 
-None.
+- 2026-10-26 (review finding 1, owner decision): the review showed that
+  SQLite rolls back a hot `-journal` and replays a `-wal` next to the vault
+  before any check runs, and that the first parent-directory reading let
+  other users plant them (sticky `/tmp`, shared groups). The owner chose both
+  remedies the review recommended: (a) the parent rule follows 0004 §1.1
+  ("private 0700 directory", read as "writable by no one else"; read bits
+  allowed), and (b) sidecar checks before SQLite opens. The `-wal`/`-shm`
+  refusal goes slightly beyond the journal-only wording of (b): a probe
+  showed that a planted WAL is replayed and written into the vault even
+  though the vault is in rollback-journal mode, and QuickVault never uses
+  WAL. No spec amendment: (a) is the spec's own rule, and the sidecar check
+  implements 0004 §1.1/§1.2 and 0008 §5. The 1.16 format freeze may record
+  the sidecar rule in 0004 §1.
 
 ## Execution log
 
@@ -678,3 +695,7 @@ None.
 - 2026-10-26: Step 8 done. `fuzz/fuzz_targets/vault_open.rs`: a 0700 directory per process under the temp dir; each input is written to `fuzz.qvault` (0600, replacing the previous one) and passed to `VaultFile::open`; any result is accepted. `fuzz/Cargo.toml` gains the `qv-store` path dependency and the `[[bin]]`. In `fuzz/Cargo.lock`, `cc`, `find-msvc-tools` and `smallvec` are pinned to the root lock's versions, so every shared package has the same version (checked by script; the only fuzz-only packages are `arbitrary`, `jobserver`, `libfuzzer-sys` and the fuzz crate). CI: a "Fuzz vault_open (60 s)" step with `-max_len=65536`, run from the repository root so `.cargo/config.toml` applies to the fuzz build too. Deviation in seeding: the plan said to seed with a vault made by `create` and truncations of it. I built an equivalent schema-exact vault with Python's stdlib `sqlite3`: the exact DDL (the stored SQL compared equal to ours), a canonical header body and slot descriptor, and a garbage MAC (open never checks the MAC), so `create` and its Argon2id run were not needed. Plus a one-page and a tail truncation, all in the scratchpad only. Local run (`nightly-2026-10-01`, cargo-fuzz 0.13.2, musl: `-s none`, `-use_cmp=0`): 855,970 runs in 61 s, Rust coverage 597 (bundled SQLite C code is not instrumented), 73 corpus entries, no crash, timeout or leak. `cargo fetch --locked` and `cargo fmt --check` for `fuzz/` pass; `cargo deny --manifest-path fuzz/Cargo.toml check advisories bans sources` passes.
 - 2026-10-26: Step 9 done; plan `Implemented`. Crate docs for `qv-store`: module map with spec sections, the development format values, the tables, the header/slot/MAC layouts, the readings under *Decisions needed*, the error → CLI table, and what is not in this phase. Docs: `CHANGELOG.md` (Added: qv-store; Fixed: qv-model encode-time ID checks), `ARCHITECTURE.md` §3 "Implemented so far" and the §6 local-storage row, `AGENTS.md` (current state; `.cargo/config.toml` in the layout table), roadmap 0002 (1.6 ticked with plan 0008, *Revisions* note, execution log), `plans/README.md`. Specs unchanged: 0004 stays Accepted and is not fully implemented (§2 tables `object`, `manifest`, `local_head`, `sync_state`, §3, §5.1 second half and §5.2–5.3 remain; §6 archives in 1.13); 0002 and 0008 unchanged. Final gates: SPDX ok; `cargo fmt --check` ok (root and `fuzz/`); clippy `-D warnings` clean; `cargo test --locked` 314 passed, 0 failed, 2 ignored (the plan 0005 vector generator and the `lock_helper` child test), qv-store unit tests 3.2 s; `cargo doc` with `-D warnings` ok for qv-store and qv-model; `cargo deny check` ok; `cargo vet --locked` ok (17 audited, 39 exempted); fuzz lockfile ok.
   Found, not fixed: (1) `create` checks the name and the parent, then creates the temp file. Between those steps a same-user process could swap the parent directory, but it could do the same to any of the user's files, and other users are excluded by the parent rule. (2) `LocationWarnings` are heuristics (no network access): a sync client that uses none of the listed names, markers or filesystem types goes unnoticed, so the CLI text should say "may" (1.10). (3) The 2 GiB `MAX_DB_BYTES` and the SQLite limits are development values; 1.7 should confirm `LENGTH` against the manifest envelope, and 1.16 freezes them. (4) A `.tmp-` file can survive a crash during `create` (never a partial vault at the path); a later `create` does not clean it up. Removing stale temp files with our naming is a possible 1.10 `init` nicety. (5) The `unsupported.rs` stub was compiled and tested on Linux only (no other target installed); phase 4.1 compiles it for real.
+- 2026-10-26: Reviewed ([REVIEW.md](REVIEW.md)): **Changes requested**; status stays `Implemented`. Finding 1 (high, escalated): another user who can create `<path>-journal` in the parent directory can make SQLite roll back a crafted hot journal before validation and truncate or overwrite the vault (confirmed with a temporary probe). The parent rule under *Decisions needed* (sticky world-writable and own-GID group-writable parents) is looser than 0004 §1.1's "private 0700 directory". The owner chooses the directory rule; then the fix (parent rule, journal check before SQLite opens, tamper tests) is done within this plan.
+- 2026-10-26: Owner decision on review finding 1: both remedies, (a) and (b). Status `In progress`.
+- 2026-10-26: Review finding 1 fixed (see *Revisions*). `fs.rs`: `check_parent` no longer accepts a sticky world-writable or a group-writable parent; group write is allowed only on Android, for a directory owned by the effective UID with the effective GID (`own_group_dir`, `cfg(target_os = "android")`). New `owner_only` (shared by the vault-file check and the sidecar check) and `check_sidecars`: an existing `-journal` must be a regular, owner-only file of the effective UID (`lstat`, so a symlink, even a dangling one, is refused); any `-wal` or `-shm` entry is refused; all `UnsafeFile`. `vault.rs` calls `check_sidecars` before `open_connection` in `open_locked` and in `build` (the temp file). Docs: `fs` module docs, `lib.rs` readings and module map, `vault` docs. Tests: `fs_parent_rules` now expects `UnsafeFile` for 1777, 0770 and 1770 parents and accepts 0750 (the earlier assertions encoded the superseded reading); new `fs_owner_only_rule` (another owner, root, modes, file types) and `fs_sidecars` (own journal passes; 0666/0644/0660/0604 journals, a symlink, a dangling symlink and a directory are refused; private `-wal` and `-shm` are refused). `tests/tamper.rs`: `tamper_planted_sidecars_are_refused` (the review's truncating journal at 0666, a symlinked journal, a real WAL that zeroes the header MAC, an empty `-shm`; each refused with the vault byte-identical, then the clean vault opens), `tamper_own_hot_journal_is_rolled_back` (a torn page 2 plus a hand-built synced journal with the original page and a valid checksum: open succeeds, the journal is gone and the file equals the original, so crash recovery still works), `tamper_shared_parent_is_refused` (1777 parent). A first version of the hot-journal test copied a journal from the middle of a transaction; with `synchronous=FULL` SQLite writes the journal magic only when it syncs, so that journal was correctly not hot, and the test now builds a synced journal. Mutation check: with `check_sidecars` removed from `open_locked`, `tamper_planted_sidecars_are_refused` fails. Gates: SPDX ok, `cargo fmt --check` ok (root and `fuzz/`), clippy `-D warnings` clean, `cargo test --locked` 319 passed, 0 failed, 2 ignored. No dependency change, so deny and vet were not re-run. Found, not fixed: the Android branch of `own_group_dir` is not compiled here (no Android target installed); phase 1.9 or 2.3 builds it. Status `Implemented`.
+- 2026-10-26: Fix checked against review finding 1 ([REVIEW.md](REVIEW.md), *Follow-up*): Approved; status `Reviewed`.

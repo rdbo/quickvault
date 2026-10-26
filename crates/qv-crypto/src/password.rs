@@ -62,6 +62,12 @@ impl MasterPassword {
     fn as_bytes(&self) -> &[u8] {
         self.buf.expose_secret().get(..self.len).unwrap_or_default()
     }
+
+    /// The NFC-normalized password text, for a strength estimate. It is
+    /// valid UTF-8 by construction.
+    pub fn expose_secret(&self) -> &str {
+        core::str::from_utf8(self.as_bytes()).unwrap_or_default()
+    }
 }
 
 impl core::fmt::Debug for MasterPassword {
@@ -77,12 +83,35 @@ pub(crate) struct MasterKey(SecretArray<32>);
 pub(crate) struct Kek(SecretArray<32>);
 
 /// The exact Argon2 parameters of a password-kdf profile.
-pub(crate) fn params(profile: PasswordKdfProfile) -> Result<Params, CryptoError> {
-    match profile {
-        PasswordKdfProfile::V1 => {
-            Params::new(256 * 1024, 3, 4, Some(32)).map_err(|_| CryptoError::Internal)
+/// The public Argon2id parameters of a password-kdf profile (shown by
+/// `qvault info`; they are not secret).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Argon2Params {
+    /// Memory in KiB.
+    pub memory_kib: u32,
+    /// Passes over memory.
+    pub iterations: u32,
+    /// Lanes.
+    pub parallelism: u32,
+}
+
+impl PasswordKdfProfile {
+    /// This profile's Argon2id parameters (0002 §1).
+    pub fn argon2_params(self) -> Argon2Params {
+        match self {
+            PasswordKdfProfile::V1 => Argon2Params {
+                memory_kib: 256 * 1024,
+                iterations: 3,
+                parallelism: 4,
+            },
         }
     }
+}
+
+pub(crate) fn params(profile: PasswordKdfProfile) -> Result<Params, CryptoError> {
+    let p = profile.argon2_params();
+    Params::new(p.memory_kib, p.iterations, p.parallelism, Some(32))
+        .map_err(|_| CryptoError::Internal)
 }
 
 /// Runs the password KDF. `salt` is the slot's random 32-byte KDF salt.
@@ -282,6 +311,23 @@ mod tests {
             (262_144, 3, 4, Some(32))
         );
         assert_eq!(p.block_count(), 262_144);
+        assert_eq!(
+            PasswordKdfProfile::V1.argon2_params(),
+            Argon2Params {
+                memory_kib: 262_144,
+                iterations: 3,
+                parallelism: 4
+            }
+        );
+    }
+
+    #[test]
+    fn password_expose_secret_is_the_nfc_text() {
+        let _guard = crate::memory::secrets_test_guard();
+        let p = MasterPassword::from_utf8("cafe\u{301} au lait".as_bytes()).unwrap();
+        assert_eq!(p.expose_secret(), "caf\u{e9} au lait");
+        let empty = MasterPassword::from_utf8(b"").unwrap();
+        assert_eq!(empty.expose_secret(), "");
     }
 
     #[test]

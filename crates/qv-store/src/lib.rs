@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The QuickVault vault file (spec 0004 §1–2, §4, §5.1).
+//! The QuickVault vault file (spec 0004 §1–5; 0005 §1.3, §5.1, §5.4).
 //!
 //! A vault is one SQLite database (`.qvault`) owned by this crate. It is
 //! hostile input until authenticated (0004 *Security Considerations*): it is
 //! opened only after owner-only file checks, under a process lock, with
 //! every hardening setting in 0004 §1.2, a size cap, bounded `quick_check`
-//! and exact-schema validation. The header and local keyslots are then
-//! authenticated by the header MAC after the password unlocks VK.
+//! and exact-schema validation. After the password unlocks VK, the header
+//! MAC, the local head MAC, the manifest and every head are verified, and
+//! the head is compared with the external anchor. Records live in
+//! encrypted immutable objects that cannot be linked to records without the
+//! encrypted manifest; every change goes through one mutation transaction.
 //!
 //! Trust boundary: trusted client code. Frontends reach it only through
 //! `qv-core` (`ARCHITECTURE.md` §3).
@@ -16,13 +19,19 @@
 //!
 //! | Module | Contents | Spec |
 //! |--------|----------|------|
-//! | `fs` | owner-only checks, symlink rejection, parent-directory rule, `flock` process lock, file identity, temp file + `RENAME_NOREPLACE` | 0004 §1.1, §1.3; 0008 §5 |
+//! | `fs` | owner-only checks, symlink rejection, parent-directory rule, sidecar checks, `flock` process lock, file identity, temp file + `RENAME_NOREPLACE` | 0004 §1.1, §1.3; 0008 §5 |
 //! | `location` | [`LocationWarnings`] for sync folders, network filesystems, removable media | 0004 §1.1 |
 //! | `sqlite` | open flags, `db_config`, pragmas, limits, step budget, all read back | 0004 §1.2, §4.1 |
-//! | `schema` | DDL, application ID, schema version, `quick_check`, exact schema, row checks | 0004 §1.2, §2, §4.1 |
+//! | `schema` | DDL, application ID, schema version, `quick_check`, exact schema, row checks, object rows | 0004 §1.2, §2, §4.1 |
 //! | `header` | [`Header`] body codec, header-MAC transcript | 0002 §1.4, §3.3, §7.2 |
 //! | `slot` | local password slots (the `qv_model::Keyslot` descriptor) | 0002 §3.2 |
-//! | `vault` | [`VaultFile`] (`create`, `open`, `unlock`) and [`UnlockedVault`] | 0004 §5.1, 0002 §8 |
+//! | `object` | [`ObjectEnvelope`], record AAD, record encryption | 0004 §2.2, §3.2 |
+//! | `manifest` | [`Manifest`]: codec, validation, budgets, digests, encryption, envelope hash | 0004 §3.4–3.5, §4.1–4.2 |
+//! | `head` | the local head, its MAC and digest, the head-versus-anchor table ([`AnchorStatus`]) | 0005 §5.4 |
+//! | `anchor` | [`AnchorDir`]: anchor files, atomic replacement | 0005 §5.4 |
+//! | `vault` | [`VaultFile`] (`create`, `open`, `unlock`, `unlock_for_recovery`) and [`UnlockedVault`] (verification, reads) | 0004 §3.6, §5.1, 0002 §8 |
+//! | `write` | [`Write`]: the mutation transaction, counters, `adopt_baseline` | 0004 §1.3, §5.2; 0005 §1.2–1.3 |
+//! | `crash` | crash-injection points (active in this crate's tests only) | — |
 //! | `unsupported` | the same API failing closed on targets other than Linux/Android | — |
 //!
 //! # Development format (unstable until phase 1.16)
@@ -30,50 +39,95 @@
 //! | Item | Value |
 //! |------|-------|
 //! | `application_id` | `0x5156_4C54` ("QVLT") |
-//! | `user_version` and header `format` | `0x7FFF_0001` |
+//! | `user_version` and header `format` | `0x7FFF_0002` (schema 2) |
+//! | manifest and anchor `format` | `0x7FFF_0001` |
 //! | page size | 4096 |
 //! | [`MAX_DB_BYTES`] | 2 GiB, checked before SQLite opens the file |
 //! | [`MAX_HEADER_BYTES`], [`MAX_SLOTS`] | 64 KiB, 64 (0004 §4.1) |
+//! | manifest budgets | [`MAX_MANIFEST_CIPHERTEXT`] 64 MiB, [`MAX_RECORDS`] 50,000, [`MAX_OBJECTS`] 250,000, [`MAX_TOTAL_CIPHERTEXT`] 1 GiB, [`MAX_CLOCK_COMPONENTS`] 2^20, [`MAX_RECORD_CIPHERTEXT`] 1 MiB, [`MAX_CHUNKS`] 160 |
 //! | initial key generation | 1 |
+//! | labels | `qv/record/v1`, `qv/manifest/v1`, `qv/config/v1`, `qv/local-head/v1`, `qv/header-mac/v1` |
 //!
-//! Tables: `header (id = 1, body, mac)` and `keyslot (slot_id, type, body)`,
-//! both `STRICT`; phase 1.7 adds the object, manifest and local-head tables.
-//! The header body is a canonical CBOR map (see `header`; unknown keys fail
-//! closed). A password slot (type 0) stores the canonical
-//! `qv_model::Keyslot` descriptor. The header MAC is MAC/1 under the
+//! Tables (all `STRICT`; see `schema`): `header`, `keyslot`, `object`,
+//! `manifest`, `local_head`, `replica`. The header MAC is MAC/1 under the
 //! `header-mac` purpose key over `["qv/header-mac/v1", header_body,
-//! [[slot_id, type, body], …]]`, slots sorted by ID, exact stored bytes.
+//! [[slot_id, type, body], …]]`, slots sorted by ID, exact stored bytes. The
+//! manifest, head and anchor layouts are in their modules. A worst-case
+//! manifest at every budget is 52,391,657 bytes (50.0 MiB sealed), inside
+//! the 64 MiB limit (0004 §4.2; test `manifest_worst_case_fits_the_limit`).
 //!
-//! # Readings of the specs (plan 0008)
+//! # Readings of the specs (plans 0008, 0009)
 //!
-//! - The parent directory must be owned by the user or root, not
-//!   other-writable unless sticky, and group-writable only for the user's
-//!   effective group. Only the parent is checked.
+//! - The parent directory must be owned by the user or root and writable by
+//!   no one else: no other-write bit (no sticky exception) and no
+//!   group-write bit, except Android's per-app `0771` directory with the
+//!   app's own UID and GID. Only the parent is checked.
+//! - Before SQLite opens the vault, a `-journal` next to it must be
+//!   owner-only like the vault, and a `-wal` or `-shm` must not exist:
+//!   SQLite rolls them back or replays them before any check runs (plan
+//!   0008 review finding 1).
 //! - Unsafe permissions on the vault file are refused, never repaired.
 //! - Exactly one password slot; unknown slot types are unsupported.
 //! - Before the header MAC is verified, a hostile file can cost one fixed
 //!   Argon2id run, a SQLite parse bounded by the size cap and limits, and at
 //!   most 64 KiB of CBOR decoding.
+//! - Writer state (writer ID, next counter) and the anchor's name (a random
+//!   replica ID) are in the local-only `replica` row, updated in the same
+//!   transaction that uses the counters (0004 §2, plan 0009 D-B). Each DB
+//!   has its own anchor, so a restored copy next to the active vault never
+//!   shares it (0007 §3.4).
+//! - A local edit must dominate every head of its record (0005 §1.2); all
+//!   old heads become history. Concurrent heads arrive only by sync.
+//! - Final tombstones are heads with their own small object. Putting one
+//!   drops the record's whole history and advances its floor over every
+//!   dropped version, in the same manifest (0007 §2.2, §1.3); the vault
+//!   metadata and keyslot records cannot get one.
+//! - The manifest types print a redacted `Debug`: they link records to
+//!   objects (0004 §2.2).
+//! - Exactly one manifest row; the manifest carries the IDs of the three
+//!   control records (0003 §2.3).
+//! - Unlock fails closed on a missing (`NoAnchor`) or mismatched
+//!   (`Rollback`) anchor; `unlock_for_recovery` + `adopt_baseline` is the
+//!   explicit recovery, which always creates a new writer ID.
+//! - If the anchor update after a durable commit fails, the commit returns
+//!   that error and the next write retries the anchor first.
+//! - The `local-state` key MACs the head; encrypting sync state with it
+//!   comes with sync (milestone 3).
 //!
 //! # Errors
 //!
 //! [`StoreError`] carries no data. CLI exit codes (0011 §6):
-//! `WrongPassword` 3, `NotFound` 4, `Locked`/`Replaced` 6, `Integrity` 7,
-//! `LimitExceeded` 9, everything else 1. Only the slot yields
-//! `WrongPassword`; a header-MAC failure is always `Integrity`.
+//! `WrongPassword` 3, `NotFound` 4, `Locked`/`Replaced`/`Changed` 6,
+//! `Integrity`/`Rollback`/`NoAnchor` 7, `LimitExceeded` 9, and 1 for
+//! everything else. Only the slot yields `WrongPassword`; a header-MAC
+//! failure is always `Integrity`. `SQLITE_FULL` is `LimitExceeded` only at
+//! the page limit, otherwise `Io` (a full disk).
 //!
 //! # Not in this phase
 //!
-//! Records, objects, manifests, the local head, the external anchor, writer
-//! state and the mutation transaction (phase 1.7); quick-unlock slots
-//! (2.6); Windows and macOS file safety (4.1 and later).
+//! Metadata and search views (`qv-core`, 1.8); received versions and merges of
+//! concurrent heads (2.2); history retention and purge other than final
+//! deletion (1.12); attachment
+//! chunks (1.11); archives and `verify` (1.13); password change (1.14);
+//! rotation (1.15); sync state, outbox and checkpoints (milestones 2–3);
+//! quick-unlock slots (2.6); keystore-backed anchors (2.3, 2.6); Windows
+//! and macOS file safety (4.1 and later).
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod anchor;
+mod crash;
+#[cfg(test)]
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod crash_tests;
 mod error;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod fs;
+mod head;
 mod header;
 mod limits;
 mod location;
+mod manifest;
+mod object;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod schema;
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -82,20 +136,34 @@ mod slot;
 mod sqlite;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod vault;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod write;
 // Other targets get an API that fails closed; on Linux it is compiled only
 // for its own tests, so its never-called methods are allowed to be unused.
 #[cfg(any(not(any(target_os = "linux", target_os = "android")), test))]
 #[cfg_attr(test, allow(dead_code))]
 mod unsupported;
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub use anchor::{AnchorDir, MAX_ANCHOR_BYTES};
 pub use error::StoreError;
+pub use head::AnchorStatus;
 pub use header::Header;
-pub use limits::{MAX_DB_BYTES, MAX_HEADER_BYTES, MAX_SLOTS, PAGE_SIZE};
+pub use limits::{
+    MAX_CHUNKS, MAX_CLOCK_COMPONENTS, MAX_DB_BYTES, MAX_HEADER_BYTES, MAX_MANIFEST_CIPHERTEXT,
+    MAX_OBJECTS, MAX_RECORD_CIPHERTEXT, MAX_RECORDS, MAX_SLOTS, MAX_TOTAL_CIPHERTEXT, PAGE_SIZE,
+};
 pub use location::LocationWarnings;
+pub use manifest::{MANIFEST_FORMAT, Manifest, ObjectRef, RecordEntry, VersionRef};
+pub use object::ObjectEnvelope;
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
-pub use unsupported::{UnlockedVault, VAULT_EXTENSION, VaultFile};
+pub use unsupported::{
+    AnchorDir, MAX_ANCHOR_BYTES, UnlockedVault, VAULT_EXTENSION, VaultFile, Write,
+};
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use vault::{UnlockedVault, VAULT_EXTENSION, VaultFile};
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub use write::Write;
 
 #[cfg(test)]
 mod tests {

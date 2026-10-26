@@ -57,6 +57,7 @@ of attacker-supplied SQL constraints.
 | `manifest` | manifest hash | generation, profile, nonce and encrypted manifest |
 | `local_head` | exactly one row | authenticated local state (§5.4 of 0005): sequence, previous digest, manifest hash, remote checkpoint |
 | `sync_state` | remote ID | encrypted verified remote base, cursor and pending publication |
+| `replica` | exactly one row | local-only writer state (0005 §1.3): replica ID naming this DB's external anchor, writer ID, next counter; never in archives or sync |
 
 Server checkpoint fields and `sync_state` rows are optional server-mode state.
 Creating or operating an offline or LAN-only vault MUST NOT require a server
@@ -146,7 +147,9 @@ integrity failure, never an empty record.
 1 MiB padded record ciphertext; 64 KiB + framing per chunk ciphertext; 64 MiB
 manifest; CBOR nesting 32; 4,096 fields per entry; 256 writers per clock; 256
 concurrent heads per record; 50,000 record IDs including tombstones; 250,000
-referenced objects; 1 GiB total referenced ciphertext; 10 MiB per attachment;
+referenced objects; 1,048,576 clock components in total across a manifest's
+heads, retained history and history floors; 1 GiB total referenced
+ciphertext; 10 MiB per attachment;
 256 KiB per text/byte field. Header/keyslot metadata is at most 64 KiB with at
 most 64 slots. Apply SQLite length, column, expression, page-count and
 execution-step limits. Stream object hashes; never load total ciphertext or all
@@ -154,7 +157,9 @@ attachments into RAM.
 
 4.2. Budgets MUST be mutually consistent: the worst-case canonical manifest at
 the maximum record, object, head and writer counts must fit the manifest limit.
-History retention (0007) yields to the object budget; active heads, tombstones
+The aggregate clock-component budget, not the per-clock writer limit times the
+object count, bounds the clocks in that worst case. History retention (0007)
+yields to the object and clock-component budgets; active heads, tombstones
 and floors never do. A release gate (0012) checks this with a generated
 worst-case vector.
 
@@ -251,6 +256,10 @@ is unsupported ([SQLite warning](https://www.sqlite.org/howtocorrupt.html)).
 
 ## Changelog
 
+- 2026-10-26: Add an aggregate budget of 1,048,576 clock components per
+  manifest so the §4.2 worst case fits the 64 MiB manifest limit (256 writers
+  per clock over 250,000 objects did not); history yields to it. Add the
+  local-only `replica` row (writer state, anchor name) to §2 (plan 0009).
 - 2026-10-24: Make server sync state optional for offline/LAN-only vaults;
   preserve local transaction/anchor requirements without selecting peer-state DDL.
 - 2026-10-14: Initial accepted encrypted-row design.

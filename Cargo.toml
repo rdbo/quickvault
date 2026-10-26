@@ -15,14 +15,17 @@ publish = false
 [workspace.dependencies]
 argon2 = { version = "=0.6.0", default-features = false, features = ["zeroize"] }
 chacha20poly1305 = { version = "=0.11.0", default-features = false, features = ["zeroize"] }
+clap = { version = "=4.6.7", default-features = false, features = ["std", "help", "usage", "error-context"] }
 ctutils = { version = "=0.4.5", default-features = false }
 getrandom = "=0.4.3"
 hkdf = "=0.13.0"
 hmac = { version = "=0.13.0", features = ["zeroize"] }
 proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
+qv-core = { path = "crates/qv-core", version = "=0.0.0" }
 qv-crypto = { path = "crates/qv-crypto", version = "=0.0.0" }
 qv-encoding = { path = "crates/qv-encoding", version = "=0.0.0" }
 qv-model = { path = "crates/qv-model", version = "=0.0.0" }
+qv-store = { path = "crates/qv-store", version = "=0.0.0" }
 region = "=4.0.1"
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled", "hooks", "limits"] }
 rustix = { version = "=1.1.5", default-features = false, features = ["std", "process"] }
@@ -30,6 +33,7 @@ sha1 = { version = "=0.11.0", default-features = false, features = ["zeroize"] }
 sha2 = { version = "=0.11.1", default-features = false, features = ["zeroize"] }
 unicode-normalization = { version = "=0.1.26", default-features = false }
 zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
+zxcvbn = { version = "=3.1.1", default-features = false }
 
 # Argon2 at the full password-kdf/1 profile (256 MiB, t=3) takes minutes
 # unoptimized; optimize it (and its BLAKE2b) in dev/test builds only.

@@ -46,7 +46,7 @@ const STEP_GRANULARITY: u64 = 1000;
 
 /// Largest string or blob: an encrypted 64 MiB manifest plus framing
 /// (0004 §4.1; phase 1.7 confirms it).
-const MAX_LENGTH: i32 = 64 * 1024 * 1024 + 64 * 1024;
+pub(crate) const MAX_LENGTH: i32 = 64 * 1024 * 1024 + 64 * 1024;
 
 /// Limits applied to every connection, read back after setting.
 const LIMITS: &[(Limit, &str, i32)] = &[

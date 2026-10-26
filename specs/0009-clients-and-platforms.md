@@ -67,6 +67,12 @@ the CLI as the likely first target. Initial Android/Linux delivery MUST NOT
 depend on iOS packaging or feature parity, and mobile MUST NOT be deferred
 behind the remote service.
 
+**Supported Android baseline** (the "supported" devices of 0002 §1.3 and
+0004 OQ1): arm64, Android 10 (API 29) or later, at least 4 GB of RAM, which
+covers ordinary phones from about 2019 on. One such device is the low-end
+target; benchmarks need no named models. Older or smaller devices are not
+supported targets.
+
 ### 3. CLI (v1)
 
 The full command set is specified in [0011](0011-cli.md).
@@ -171,3 +177,6 @@ does not establish secure input, keystore enforcement or autofill-origin trust.
 
 - 2026-10-15: Require native input, verified autofill origins and main-app handoff
   when extensions cannot perform full unlock; prioritize secure OS integration.
+- 2026-10-26: §2: supported Android baseline (arm64, Android 10+, ≥ 4 GB RAM)
+  as the target of 0002 §1.3's KDF budgets; no named benchmark devices
+  (owner decision, roadmap 0002 D7).

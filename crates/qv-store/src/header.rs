@@ -31,7 +31,7 @@ use zeroize::Zeroizing;
 use crate::error::StoreError;
 
 /// The development vault format (also the SQLite `user_version`).
-pub(crate) const FORMAT: u64 = 0x7FFF_0001;
+pub(crate) const FORMAT: u64 = 0x7FFF_0002;
 
 /// The header-MAC transcript label (development value).
 pub(crate) const MAC_LABEL: &str = "qv/header-mac/v1";
@@ -227,7 +227,7 @@ pub(crate) mod tests {
     fn header_golden_bytes() {
         let h = Header::new_vault(VaultId(v4(0x0a)));
         let body = h.encode().unwrap();
-        let mut expected = vec![0xa8, 0x00, 0x1a, 0x7f, 0xff, 0x00, 0x01, 0x01, 0x50];
+        let mut expected = vec![0xa8, 0x00, 0x1a, 0x7f, 0xff, 0x00, 0x02, 0x01, 0x50];
         expected.extend_from_slice(&v4(0x0a));
         expected.extend_from_slice(&[
             0x02, 0x01, 0x03, 0x01, 0x04, 0x01, 0x05, 0x01, 0x06, 0x01, 0x07, 0x01,
