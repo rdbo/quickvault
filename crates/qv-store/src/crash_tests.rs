@@ -97,6 +97,52 @@ fn crash_every_mutation_point() {
 }
 
 #[test]
+fn history_purge_crash_boundaries_preserve_heads_and_atomic_floor() {
+    use CrashPoint::*;
+    for point in [
+        Begun,
+        ManifestWritten,
+        HeadWritten,
+        Pruned,
+        Committed,
+        AnchorTempWritten,
+        AnchorReplaced,
+    ] {
+        let (d, a, s) = (TestDir::new(), TestDir::new(), TestDir::new());
+        let (p, dir) = copy_fixture(&d, &a, "v.qvault");
+        let r = new_record();
+        let (head, before_floor);
+        {
+            let mut u = unlock(&p, &dir, PASSWORD).unwrap();
+            edit(&mut u, r, "old");
+            edit(&mut u, r, "current");
+            let rec = u.manifest().record(r).unwrap();
+            head = rec.heads()[0].clone();
+            before_floor = rec.floor();
+            arm(point, &p, &a.join("anchors"), s.path());
+            let result = (|| {
+                let mut w = u.write()?;
+                w.purge_history(r)?;
+                w.commit()
+            })();
+            assert_eq!(result, Err(StoreError::Internal));
+            assert!(!disarm(), "{point:?}");
+        }
+        let (u, _) = open_snapshot(&s, "v.qvault").unwrap();
+        let rec = u.manifest().record(r).unwrap();
+        assert_eq!(rec.heads(), std::slice::from_ref(&head));
+        let durable = matches!(point, Committed | AnchorTempWritten | AnchorReplaced);
+        assert_eq!(rec.history().len(), usize::from(!durable));
+        if durable {
+            assert!(rec.floor().suppresses(head.clock()));
+        } else {
+            assert_eq!(rec.floor(), before_floor);
+        }
+        u.read_version(r, head.version_id()).unwrap();
+    }
+}
+
+#[test]
 fn crash_spilled_transaction_rolls_back() {
     use qv_model::{Payload, RecordBody, Text};
     // Enough data to spill SQLite's 2 MiB page cache into the vault file

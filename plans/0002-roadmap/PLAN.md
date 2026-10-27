@@ -442,7 +442,7 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
 
 #### Phase 1.12 — Entry history, restore and purge
 
-- [ ] **Do:** Implement history retention (N = 10 under budgets), history
+- [x] **Plan:** [0017](../0017-entry-history/PLAN.md) (Implemented). **Do:** Implement history retention (N = 10 under budgets), history
   floors with componentwise merge and suppression, explicit purge, and restore
   as a new causal edit. Add the CLI commands `history`, `history show`,
   `restore` and `history purge`.
@@ -849,6 +849,11 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
 
 ## Revisions
 
+- 2026-10-27: Owner explicitly requested fixing phase 1.11 review findings,
+  finishing that review and starting phase 1.12 in the same session without an
+  intervening owner commit. This authorizes that specific continuation; future
+  phases retain the usual clean-tree/owner-commit/fresh-context protocol.
+
 - 2026-10-27: Owner approved plan 0014 D1 option A: 1.10b implements editing,
   trash and signal cleanup; 1.10c separately designs and implements clipboard
   commands. Previously approved arboard/license choices are candidates for
@@ -868,6 +873,32 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
 - 2026-10-26 (phase 1.10, plan 0011): the owner approved splitting 1.10 into 1.10a/1.10b and decisions D-1–D-6 of plan 0011 as recommended: `zxcvbn 3.1.1` in `qv-core` (0010 §3.2); `clap 4.6.7` builder API only; for 1.10b, `signal-hook 0.4.5` and `arboard 3.6.1` (X11 only, no image support) with per-crate `BSL-1.0` exceptions for `clipboard-win` and `error-code`; the recovery-phrase skip (0002 §4.2) recorded as vault settings key 3 `recovery_skipped_at` (development value for the 1.16 freeze). These dependencies are now approved for 1.10b's standing approval. Raised, not decided: 0011 has no command to adopt a vault with a missing or mismatched anchor (suggested for 1.13/1.14).
 
 ## Execution log
+
+- 2026-10-27: Phase 1.12 implemented as owner-approved plan 0017. Added safe
+  bounded history retention/floors, authenticated history views and explicit
+  reveal, whole-record causal restore with conflict consent, and floor-only
+  purge preserving active heads/tombstones. CLI history/show/restore/purge and
+  approved 0011 amendment complete. All final gates pass: 510 tests passed,
+  0 failed, 2 ignored, including private-Xvfb integration/doctests. Focused
+  history production tests also pass network-blocked with PTY cancellation/
+  signals; store crash and core lock suites pass. No dependencies or format
+  changes; no secure-erasure/security-proof claim. Changes uncommitted, owner
+  staging preserved. Next session reviews 0017 with fresh context after owner
+  commit, then plans 1.13; do not skip that review.
+
+- 2026-10-27: Phase 1.12 started in architect role; plan 0017 Proposed with six
+  steps for retention/floors, bounded history views, restore and purge. Concrete
+  CLI version selection, JSON/diff attribution and explicit conflict-restoration
+  consent require an 0011 amendment. D1 requests approval of the exact proposal;
+  standing approval does not cover it. No history implementation/spec amendment
+  applied; owner decision needed before development. Phase remains unticked.
+
+- 2026-10-27: Phase 1.11 review findings resolved under owner-requested
+  architect/developer remediation; resumed review approved plan 0016. All
+  reviewer gates pass (490 passed, 2 ignored), including private Xvfb; blocked-
+  network production offline and attachment suites pass. Rust 1.98.1 Cargo/
+  Clippy components restored, no MSRV/dependency changes. Starting phase 1.12
+  per the owner's explicit continuation instruction; no commit/push/branch.
 
 - 2026-10-27: Owner approved plan 0016 D1 and phase 1.11 is Implemented:
   streamed fixed-size authenticated attachment chunks, measured content hashes,
@@ -1051,3 +1082,12 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
   vet exemptions. Core/crypto/model/store APIs and formats unchanged; no spec
   promoted to Implemented. Changes uncommitted. Next fresh session reviews
   plan 0014, then plans 1.10c clipboard integration and its remaining decisions.
+
+- 2026-10-27: Next-phase session began with a clean tree at `b42c5ed`.
+  Fresh-context review of phase 1.11 (plan 0016) requests changes: confidential
+  content-hash comparisons lack a constant-time contract (0008 §2). Independent
+  SPDX passes, but fmt/Clippy/tests cannot start because the pinned Rust 1.98.1
+  musl Cargo component is unavailable following a component-install conflict.
+  See plan 0016 REVIEW.md and /tmp/opencode/qv17-review/ logs. Session protocol
+  step 2 stops progression; phase 1.12 was not planned or started. No product
+  code, dependency or spec changed; no commit, push or branch.

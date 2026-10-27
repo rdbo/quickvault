@@ -448,6 +448,15 @@ fn entry_detail(
     })
 }
 
+pub(crate) fn entry_detail_for_history(
+    ctx: &Ctx<'_>,
+    handle: EntryHandle,
+    version: VersionId,
+    entry: Entry,
+) -> Result<EntryDetail, CoreError> {
+    entry_detail(ctx, handle, version, entry)
+}
+
 fn as_entry(v: RecordVersion) -> Option<Entry> {
     match v.body {
         RecordBody::Live(Payload::Entry(e)) => Some(e),

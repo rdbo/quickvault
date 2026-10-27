@@ -287,7 +287,7 @@ fn load_state(conn: &Connection, header: &Header, vk: &VaultKey) -> Result<State
 /// Reads and decrypts one version for its manifest role. With
 /// `check_hash`, the ciphertext's SHA-256 must match the reference before
 /// AEAD (history reads, 0004 §3.6).
-fn read_role(
+pub(crate) fn read_role(
     reader: &mut ObjectReader<'_>,
     keys: &Keys,
     header: &Header,

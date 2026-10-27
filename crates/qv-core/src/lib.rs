@@ -17,6 +17,7 @@
 //! | `views` | Listings, recovered items, trash, conflicts, search, details, reveal, TOTP, expiry report | 0003 §4–5, 0005 §2.3, 0007 §2.1, 0011 §4 |
 //! | `edit` | Drafts, edits, moves, soft delete, restore, final deletion | 0005 §1.2, §2.5, 0007 §2 |
 //! | `attachment` | Session-bound metadata, streaming import/verify/save and confirmed-by-frontend permanent removal | 0003 §6, 0004 §3.3, 0011 §4 |
+//! | `history` | Authenticated retained-history views/reveal, fresh causal restore and floor-only purge | 0007 §1, 0011 §4 |
 //! | `settings` | Vault settings and the password generator | 0003 §3, 0010 §5 |
 //! | `order` | Fractional ordering keys for new groups | 0003 §4 |
 //! | `strength` | [`password_strength`] (zxcvbn) and [`confirmation_positions`] | 0010 §3.2, §4.2; 0002 §4.2 |
@@ -42,8 +43,9 @@
 //! replica's counter (0005 §1.2), committed through the store's single
 //! mutation transaction (0004 §5.2). Drafts carry their base version, so a
 //! stale draft fails with [`CoreError::StaleHandle`]. A record with
-//! conflicting versions is shown but not changed ([`CoreError::Conflict`]):
-//! resolution comes with merges (phase 2.2).
+//! conflicting versions is shown but ordinary edits are refused
+//! ([`CoreError::Conflict`]). Historical restore alone can explicitly authorize
+//! replacement of all known heads; general resolution comes with phase 2.2.
 //!
 //! **Trash** (0007 §2): soft deletion of a group covers everything shown
 //! under it in one transaction; restoring a group restores what was deleted
@@ -57,10 +59,15 @@
 //! the 10-minute clock-anomaly tolerance, the generator-defaults layout in
 //! `qv-model`.
 //!
-//! **Not in this phase:** conflict resolution and merges (2.2), history
-//! views, restore and retention (1.12), attachments (1.11), path addressing
-//! and the CLI (1.10), the inactivity timer and OS lifecycle hooks (1.9,
-//! 2.3), password change and rotation (1.14, 1.15).
+//! **History:** the store retains a target of ten versions subject to safe
+//! monotonic floors and budgets. Historical capabilities are separate from
+//! current-field handles; purge invalidates them. Restore creates a new causal
+//! version and leaves separate attachments unchanged. Purge is local logical
+//! suppression, never proof of erasure of backups or independent copies.
+//!
+//! **Not yet implemented:** general conflict resolution and merges (2.2),
+//! archives/snapshots (1.13), production inactivity/OS lifecycle hooks (2.3),
+//! password change and rotation (1.14, 1.15).
 //!
 //! **Errors**: [`CoreError`] (its rustdoc maps variants to CLI exit codes)
 //! carries no data.
@@ -68,6 +75,7 @@
 mod attachment;
 mod edit;
 mod error;
+mod history;
 mod index;
 mod order;
 mod session;
@@ -98,9 +106,10 @@ pub use qv_crypto::{
     SecretBytes, Strength, WordListId,
 };
 pub use qv_model::{
-    Entry, Extensions, Field, FieldId, FieldKind, FieldValue, GeneratorDefaults, Group, SecretText,
-    Settings, Text, Timestamp, TotpError, VaultMeta, VersionId,
+    Entry, Extensions, Field, FieldId, FieldKind, FieldValue, GeneratorDefaults, Group, RandomId,
+    SecretText, Settings, Text, Timestamp, TotpError, VaultMeta, VersionId, WriterId,
 };
 pub use qv_store::{AnchorDir, AnchorStatus, LocationWarnings, StoreError, VAULT_EXTENSION};
 
 pub use attachment::{AttachmentHandle, AttachmentSummary};
+pub use history::{HistoryHandle, HistorySummary};

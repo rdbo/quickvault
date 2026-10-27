@@ -105,13 +105,30 @@ fn one_field(
     out.flush()
 }
 
-fn whole(
+pub(crate) fn whole(
     ctx: &Ctx,
     s: &Session,
     d: &EntryDetail,
     versions: usize,
     reveal: bool,
 ) -> Result<(), CliError> {
+    whole_version(ctx, s, d, versions, reveal, None)
+}
+
+pub(crate) fn whole_version(
+    ctx: &Ctx,
+    s: &Session,
+    d: &EntryDetail,
+    versions: usize,
+    reveal: bool,
+    historical: Option<qv_core::HistoryHandle>,
+) -> Result<(), CliError> {
+    let value = |s: &Session, f: &FieldDetail| -> Result<qv_core::FieldValue, CliError> {
+        match historical {
+            Some(h) => Ok(s.reveal_history(h, f.handle.field_id())?),
+            None => value(s, f),
+        }
+    };
     let paths = Paths::walk(s)?;
     let path = paths.get(ItemHandle::Entry(d.handle));
     let mut out = Out::stdout();
@@ -119,6 +136,9 @@ fn whole(
         let mut j = Json::new(&mut out);
         j.begin_obj();
         j.key("id").str(&d.handle.id_hex());
+        if let Some(h) = historical {
+            j.key("version_id").str(&h.version_hex());
+        }
         j.key("path").opt_str(path.as_deref().map(String::as_str));
         j.key("title").str(d.title.expose());
         j.key("type").str(d.type_hint.expose());

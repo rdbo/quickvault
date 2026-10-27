@@ -49,8 +49,9 @@ impl SettingsDraft {
     }
 
     /// The vault metadata, to change. `root_group` must stay as it is
-    /// ([`CoreError::NotAllowed`] on save, 0003 §2.3). `history_depth` is
-    /// stored but not applied before history retention (phase 1.12).
+    /// ([`CoreError::NotAllowed`] on save, 0003 §2.3). `history_depth` remains
+    /// stored for future configurable policy; current retention uses the fixed
+    /// default target of ten versions under suppression/resource constraints.
     pub fn meta_mut(&mut self) -> &mut VaultMeta {
         &mut self.meta
     }

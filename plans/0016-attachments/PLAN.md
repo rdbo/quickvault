@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-10-27 | 2026-10-27 | 0002 §1/§3/§7; 0003 §6; 0004 §3–5; 0007 §2.2; 0008 §1/§5; 0011 §3–6; 0012 §1–3 |
+| Reviewed | 2026-10-27 | 2026-10-27 | 0002 §1/§3/§7; 0003 §6; 0004 §3–5; 0007 §2.2; 0008 §1/§5; 0011 §3–6; 0012 §1–3 |
 
 ## Intent
 
@@ -340,6 +340,29 @@ crash windows. Include boundary lengths 0, 1, 65,535, 65,536, 65,537,
 
 ## Revisions
 
+- 2026-10-27: Owner requested review remediation, review completion and starting
+  the next phase. Architect adds a narrowly scoped remediation step under
+  existing 0008 §2 requirements: expose `SecretArray::ct_eq(&[u8; N]) -> bool`
+  using the existing pinned ctutils CtEq slice implementation (no new
+  dependency), then use it for both confidential attachment digest checks.
+  Additional file: `crates/qv-crypto/src/memory.rs`; keep existing format,
+  mismatch errors and transaction/rollback behavior. Test equal arrays and every
+  mismatch position, plus store digest rejection at first/middle/last positions.
+  No timing test is claimed to prove constant-time execution. Restore missing
+  pinned-toolchain components, run focused tests and all final gates, update
+  CHANGELOG and resume the reviewer role. This is the owner-requested fix of
+  an existing requirement, not a spec amendment or new cryptographic primitive.
+
+### Review remediation step
+
+- [x] **Do:** Implement the constant-time helper and both call sites described
+  above; retain/reinforce rejected-digest tests and restore pinned tooling.
+- **Files:** crypto memory, store attachment/write, CHANGELOG and review records.
+- **Done when:** both digest checks use ctutils; mismatch/error paths remain
+  intact; the pinned-toolchain final gates pass and review is completed.
+- **Verify:** `cargo test --locked -p qv-crypto memory`,
+  `cargo test --locked -p qv-store attachment`, then all AGENTS.md gates.
+
 - 2026-10-27: Include local cleanup of AttachmentMeta.content_hash in the
   existing model: it is an ordinary fixed array today, but real attachment
   content now makes its digest confidential metadata. Add zeroization on drop
@@ -351,6 +374,37 @@ crash windows. Include boundary lengths 0, 1, 65,535, 65,536, 65,537,
   stubs alongside the new store methods; no new target support is claimed.
 
 ## Execution log
+
+- 2026-10-27: Resumed review complete: Approved after owner-requested
+  remediation (REVIEW.md). Reviewer final SPDX/fmt/Clippy/test gates all pass;
+  490 workspace tests pass, 2 ignored, including private-Xvfb integration and
+  doctests. Separate blocked-network production offline (3) and attachment (2)
+  tests pass. Logs /tmp/opencode/qv17-review/reviewer-*.log. Plan Reviewed.
+  Continue to phase 1.12 per the owner's explicit same-session instruction;
+  fixes remain uncommitted and original staged documentation is preserved.
+
+- 2026-10-27: Owner requested fixes, completion of this review and starting the
+  next phase in the same session, with no intervening owner commit. Preserved
+  the owner's staged review records. Architect scoped the remediation above;
+  developer implemented ctutils-backed SecretArray::ct_eq and both store uses,
+  with all-byte helper rejection and first/middle/last digest rejection tests.
+  Restored only missing cargo/clippy components via rustup remove/add; cargo and
+  rustc report 1.98.1. No MSRV, manifest, lockfile or dependency change. Focused
+  memory/store attachment tests pass; all final gates pass (490 passed, 2 ignored
+  workspace tests) in /tmp/opencode/qv17-review/{remediation-*,final-*}.log.
+  Downloaded Xvfb packages into that temporary directory for isolated tests,
+  without accessing a user display. Network namespaces now work: production
+  offline and attachment suites pass with blocked networking. Resumed reviewer
+  role with separate final-gate logs; original fresh-context review is preserved.
+
+- 2026-10-27: Fresh-context next-phase review of committed `b42c5ed` requests
+  changes; see REVIEW.md. Confidential content hashes use ordinary equality in
+  store read verification and staged-metadata validation, contrary to 0008 §2.
+  No product fixes applied. SPDX passes independently; fmt (including retry),
+  Clippy and tests cannot start because the pinned 1.98.1 musl toolchain's Cargo
+  component is unavailable after an installation conflict. Full logs are in
+  /tmp/opencode/qv17-review/. Status remains Implemented, not Reviewed; roadmap
+  phase 1.12 has not started. Resume remediation/review before proceeding.
 
 - 2026-10-27: Clean-tree next-phase session independently reviewed plan 0015:
   Approved, no code fixes/escalations; all independent gates, deny/vet and private

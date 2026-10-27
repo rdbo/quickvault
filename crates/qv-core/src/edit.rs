@@ -98,7 +98,7 @@ pub(crate) fn commit_with(
     if cancelled() {
         return Err(CoreError::Cancelled);
     }
-    let committed = w.commit();
+    let committed = w.commit_cancellable(&|| cancel.check().is_err() || cancelled());
     #[cfg(test)]
     crate::session::hooks::reached(crate::session::hooks::Point::AfterCommit);
     if open.vault.local_seq() != seq {
@@ -109,6 +109,9 @@ pub(crate) fn commit_with(
             ctx.poison = true;
             return Err(CoreError::Internal);
         }
+    }
+    if open.vault.local_seq() == seq && (cancel.check().is_err() || cancelled()) {
+        return Err(CoreError::Cancelled);
     }
     Ok(committed?)
 }

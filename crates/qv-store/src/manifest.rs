@@ -881,6 +881,55 @@ impl Manifest {
         }
         Ok(())
     }
+
+    /// Drops retained history and advances the record floor to its heads.
+    /// Active heads and their references remain present (0007 §1.4).
+    pub(crate) fn purge_history(&mut self, record_id: RecordId) -> Result<(), StoreError> {
+        let i = self
+            .record_index(record_id)
+            .map_err(|_| StoreError::NotFound)?;
+        let r = self.records.get_mut(i).ok_or(StoreError::Internal)?;
+        let mut floor = r.floor.clone();
+        for head in &r.heads {
+            floor = floor.join(head.clock())?;
+        }
+        r.floor = floor;
+        let old = core::mem::take(&mut r.history);
+        let mut dropped = std::collections::BTreeSet::new();
+        for v in old {
+            let ids = core::iter::once(v.object_id).chain(v.chunks.into_iter().flatten());
+            dropped.extend(ids);
+        }
+        self.references.retain(|r| !dropped.contains(&r.object_id));
+        Ok(())
+    }
+
+    /// Applies a monotonic floor and drops only explicitly eligible covered history.
+    pub(crate) fn retain_history(
+        &mut self,
+        record_id: RecordId,
+        floor: Clock,
+        eligible: &std::collections::BTreeSet<VersionId>,
+    ) -> Result<(), StoreError> {
+        let i = self
+            .record_index(record_id)
+            .map_err(|_| StoreError::NotFound)?;
+        let r = self.records.get_mut(i).ok_or(StoreError::Internal)?;
+        r.floor = r.floor.join(&floor)?;
+        let suppressed = HistoryFloor::new(r.floor.clone());
+        let mut dropped = std::collections::BTreeSet::new();
+        r.history.retain(|v| {
+            if eligible.contains(&v.version_id) && suppressed.suppresses(&v.clock) {
+                dropped.insert(v.object_id);
+                dropped.extend(v.chunks.iter().flatten().copied());
+                false
+            } else {
+                true
+            }
+        });
+        self.references.retain(|r| !dropped.contains(&r.object_id));
+        Ok(())
+    }
 }
 
 /// `["qv/manifest/v1", vault_id, key_generation, data_profile]`.
@@ -1099,6 +1148,30 @@ pub(crate) mod tests {
         assert!(back.reference(oid(40)).is_some());
         assert_eq!(back.config_digest(), &config_digest(&header()).unwrap());
         assert_ne!(back.reference_digest().unwrap(), [0; 32]);
+    }
+
+    #[test]
+    fn history_purge_keeps_conflicting_heads_tombstones_and_their_references() {
+        let mut m = sample();
+        let i = m.record_index(rid(4)).unwrap();
+        let second = VersionRef::new(vid(42), clock(&[(1, 10), (2, 2)]), oid(42));
+        m.records[i].heads.push(second);
+        m.insert_reference(reference(oid(42), 100)).unwrap();
+        m.validate().unwrap();
+        let heads = m.records[i].heads.clone();
+        m.purge_history(rid(4)).unwrap();
+        m.validate().unwrap();
+        assert_eq!(m.records[i].heads, heads);
+        assert!(m.records[i].history.is_empty());
+        assert!(
+            heads
+                .iter()
+                .all(|h| m.records[i].floor().suppresses(h.clock()))
+        );
+        assert!(heads.iter().all(|h| m.reference(h.object_id()).is_some()));
+        let floor = m.records[i].floor();
+        m.purge_history(rid(4)).unwrap();
+        assert_eq!(m.records[i].floor(), floor);
     }
 
     #[test]

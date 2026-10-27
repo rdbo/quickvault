@@ -143,7 +143,7 @@ mod platform {
             if cancelled() {
                 return Err(StoreError::Io);
             }
-            if total != meta.size || hash.finalize().expose_secret() != &meta.content_hash {
+            if total != meta.size || !hash.finalize().ct_eq(&meta.content_hash) {
                 return Err(StoreError::Integrity);
             }
             Ok(())

@@ -165,6 +165,22 @@ impl Extensions {
         self.0.is_empty()
     }
 
+    /// Compares canonical extension content through confidential digests.
+    /// Length-delimited fields prevent ambiguous concatenation; digest equality
+    /// uses the reviewed constant-time comparison, and no digest is retained.
+    pub fn content_eq(&self, other: &Self) -> bool {
+        fn hash(ext: &Extensions) -> qv_crypto::SecretArray<32> {
+            let mut hash = qv_crypto::ContentHasher::new();
+            for (key, value) in &ext.0 {
+                hash.update(&key.to_be_bytes());
+                hash.update(&(value.as_bytes().len() as u64).to_be_bytes());
+                hash.update(value.as_bytes());
+            }
+            hash.finalize()
+        }
+        hash(self).ct_eq(hash(other).expose_secret())
+    }
+
     pub(crate) fn push(&mut self, key: i64, value: RawValue) {
         self.0.push((key, value));
     }
@@ -230,5 +246,22 @@ mod tests {
         ext.push(9, RawValue::from_canonical(&[0x61, b'x']).unwrap());
         assert_eq!(format!("{ext:?}"), "Extensions(<redacted>)");
         assert_eq!(ext.len(), 1);
+    }
+
+    #[test]
+    fn history_extensions_confidential_comparison() {
+        let mut a = Extensions::new();
+        let mut b = Extensions::new();
+        assert!(a.content_eq(&b));
+        a.push(100, RawValue::from_canonical(&[0x01]).unwrap());
+        assert!(!a.content_eq(&b));
+        b.push(100, RawValue::from_canonical(&[0x01]).unwrap());
+        assert!(a.content_eq(&b));
+        let mut c = Extensions::new();
+        c.push(101, RawValue::from_canonical(&[0x01]).unwrap());
+        assert!(!a.content_eq(&c));
+        let mut c = Extensions::new();
+        c.push(100, RawValue::from_canonical(&[0x02]).unwrap());
+        assert!(!a.content_eq(&c));
     }
 }

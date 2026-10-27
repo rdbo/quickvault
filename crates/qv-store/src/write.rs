@@ -367,7 +367,7 @@ impl Write<'_> {
         }
         if let Some(staged) = self.staged.get(&record) {
             let matches = matches!(&version.body, RecordBody::Live(Payload::AttachmentMeta(a))
-                if a.size == staged.size && a.chunk_object_ids == staged.chunks && &a.content_hash == staged.hash.expose_secret());
+                if a.size == staged.size && a.chunk_object_ids == staged.chunks && staged.hash.ct_eq(&a.content_hash));
             if !matches {
                 self.poisoned = true;
                 return Err(StoreError::InvalidEdit);
@@ -418,6 +418,19 @@ impl Write<'_> {
             return Err(e);
         }
         Ok(())
+    }
+
+    /// Purges retained history without creating a synthetic record version.
+    pub fn purge_history(&mut self, record: RecordId) -> Result<(), StoreError> {
+        if self.poisoned || self.touched.contains(&record) {
+            self.poisoned = true;
+            return Err(StoreError::InvalidEdit);
+        }
+        let result = self.manifest.purge_history(record);
+        if result.is_err() {
+            self.poisoned = true;
+        }
+        result
     }
 
     /// The `put_local` rules, checked before anything is written.
@@ -478,8 +491,8 @@ impl Write<'_> {
         {
             return invalid;
         }
-        // Chunks are written from phase 1.11; until then an attachment can
-        // name only chunks that already exist.
+        // An attachment can name only encrypted chunk references already in the
+        // candidate manifest, including this transaction's staged chunks.
         if let RecordBody::Live(Payload::AttachmentMeta(a)) = &v.body
             && !a
                 .chunk_object_ids
@@ -503,10 +516,23 @@ impl Write<'_> {
     }
 
     /// Commits the mutation (steps 3–8 of the module docs).
-    pub fn commit(mut self) -> Result<(), StoreError> {
+    pub fn commit(self) -> Result<(), StoreError> {
+        self.commit_cancellable(&|| false)
+    }
+
+    /// Commits while checking cancellation during history scans and immediately
+    /// before durable commit. After durability the actual outcome is reported.
+    pub fn commit_cancellable(mut self, cancelled: &impl Fn() -> bool) -> Result<(), StoreError> {
         if self.poisoned || !self.staged.is_empty() {
             return Err(StoreError::Internal);
         }
+        let candidate_objects: Vec<_> = self
+            .manifest
+            .references()
+            .iter()
+            .map(ObjectRef::object_id)
+            .collect();
+        self.retain_history(cancelled)?;
         let header = self.vault.file.header;
         let sealed = seal_manifest(
             &self.keys.manifest,
@@ -559,16 +585,29 @@ impl Write<'_> {
             .map(ObjectRef::object_id)
             .collect();
         let generation = i64::from(header.key_generation.0);
-        for r in self.vault.state.manifest.references() {
-            if !kept.contains(&r.object_id()) {
-                conn.execute(
-                    "DELETE FROM object WHERE key_generation = ?1 AND object_id = ?2",
-                    rusqlite::params![generation, r.object_id().to_bytes().as_slice()],
-                )
-                .map_err(w)?;
-            }
+        // Includes newly staged objects released by same-transaction retention;
+        // otherwise they would remain as unreferenced rows until a later GC.
+        let removed: BTreeSet<_> = self
+            .vault
+            .state
+            .manifest
+            .references()
+            .iter()
+            .map(ObjectRef::object_id)
+            .chain(candidate_objects)
+            .filter(|id| !kept.contains(id))
+            .collect();
+        for id in removed {
+            conn.execute(
+                "DELETE FROM object WHERE key_generation = ?1 AND object_id = ?2",
+                rusqlite::params![generation, id.to_bytes().as_slice()],
+            )
+            .map_err(w)?;
         }
         point(CrashPoint::Pruned)?;
+        if cancelled() {
+            return Err(StoreError::Io);
+        }
         conn.execute_batch("COMMIT").map_err(w)?;
         // Durable from here: the session follows the database.
         self.finished = true;
@@ -596,11 +635,129 @@ impl Write<'_> {
     }
 }
 
+impl Write<'_> {
+    /// Retention changes only the candidate manifest; any failure rolls back.
+    fn retain_history(&mut self, cancelled: &impl Fn() -> bool) -> Result<(), StoreError> {
+        self.retain_history_with(cancelled, &|manifest| {
+            manifest.validate()?;
+            let plain = manifest.encode()?;
+            if qv_crypto::sealed_len(plain.len())
+                .is_some_and(|n| n <= crate::MAX_MANIFEST_CIPHERTEXT)
+            {
+                Ok(())
+            } else {
+                Err(StoreError::LimitExceeded)
+            }
+        })
+    }
+
+    fn retain_history_with(
+        &mut self,
+        cancelled: &impl Fn() -> bool,
+        fits: &impl Fn(&crate::Manifest) -> Result<(), StoreError>,
+    ) -> Result<(), StoreError> {
+        use crate::schema::ObjectReader;
+        let ids: Vec<_> = self
+            .manifest
+            .records()
+            .iter()
+            .filter(|r| !r.history().is_empty())
+            .map(|r| r.record_id())
+            .collect();
+        let mut histories = BTreeMap::new();
+        let header = self.vault.file.header;
+        for id in &ids {
+            let r = self.manifest.record(*id).ok_or(StoreError::Internal)?;
+            let mut sorted = Vec::with_capacity(r.history().len());
+            for role in r.history() {
+                if cancelled() {
+                    return Err(StoreError::Io);
+                }
+                self.vault.file.budget.reset();
+                let mut reader = ObjectReader::new(&self.vault.file.conn)?;
+                let v = crate::vault::read_role(
+                    &mut reader,
+                    &self.keys,
+                    &header,
+                    &self.manifest,
+                    *id,
+                    role,
+                    true,
+                )?;
+                sorted.push((v.modified_at, v.version_id, v.clock));
+            }
+            sorted.sort_by_key(|(time, version, _)| {
+                (core::cmp::Reverse(*time), core::cmp::Reverse(*version))
+            });
+            histories.insert(*id, sorted);
+        }
+        // Targets decrease only when actual manifest/object/clock budgets fail.
+        let base = self.manifest.clone();
+        for target in (0..=10).rev() {
+            self.manifest = base.clone();
+            for id in &ids {
+                if cancelled() {
+                    return Err(StoreError::Io);
+                }
+                let candidates = histories.get(id).ok_or(StoreError::Internal)?;
+                let old = self
+                    .manifest
+                    .record(*id)
+                    .ok_or(StoreError::Internal)?
+                    .floor();
+                let (floor, eligible) = retention_floor(&old, candidates, target)?;
+                self.manifest.retain_history(*id, floor, &eligible)?;
+            }
+            match fits(&self.manifest) {
+                Ok(()) => return Ok(()),
+                Err(StoreError::LimitExceeded) if target > 0 => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Err(StoreError::LimitExceeded)
+    }
+}
+
+fn retention_floor(
+    old: &qv_model::HistoryFloor,
+    candidates: &[(qv_model::Timestamp, qv_model::VersionId, Clock)],
+    target: usize,
+) -> Result<(Clock, BTreeSet<qv_model::VersionId>), StoreError> {
+    let mut floor = old.clock().clone();
+    let protected: Vec<_> = candidates
+        .iter()
+        .filter(|(_, _, c)| !old.suppresses(c))
+        .take(target)
+        .collect();
+    let eligible: BTreeSet<_> = candidates
+        .iter()
+        .filter(|(_, version, _)| !protected.iter().any(|(_, keep, _)| keep == version))
+        .map(|(_, version, _)| *version)
+        .collect();
+    let mut advances = BTreeSet::new();
+    for (_, version, c) in candidates {
+        if eligible.contains(version) {
+            advances.extend(c.pairs().iter().copied());
+        }
+    }
+    for (writer, counter) in advances {
+        if counter <= floor.get(writer) {
+            continue;
+        }
+        let next = floor.join(&Clock::from_pairs(vec![(writer, counter)])?)?;
+        let test = qv_model::HistoryFloor::new(next.clone());
+        if !protected.iter().any(|(_, _, c)| test.suppresses(c)) {
+            floor = next;
+        }
+    }
+    Ok((floor, eligible))
+}
+
 #[cfg(test)]
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 
-    use qv_model::{Extensions, Group, Text, Timestamp};
+    use qv_model::{Extensions, Group, Text, Timestamp, VersionId};
     use rusqlite::Connection;
 
     use super::*;
@@ -617,6 +774,236 @@ mod tests {
             .conn
             .query_row("SELECT count(*) FROM object", [], |r| r.get(0))
             .unwrap()
+    }
+
+    #[test]
+    fn history_floor_cumulative_join_never_suppresses_protected_history() {
+        let a = WriterId::generate().unwrap();
+        let b = WriterId::generate().unwrap();
+        let clock = |pairs: &[(WriterId, u64)]| {
+            let mut p = pairs.to_vec();
+            p.sort();
+            Clock::from_pairs(p).unwrap()
+        };
+        let keep = VersionId::generate().unwrap();
+        let x = VersionId::generate().unwrap();
+        let y = VersionId::generate().unwrap();
+        let candidates = vec![
+            (Timestamp(3), keep, clock(&[(a, 1), (b, 1)])),
+            (Timestamp(2), x, clock(&[(a, 2)])),
+            (Timestamp(1), y, clock(&[(b, 2)])),
+        ];
+        let old = qv_model::HistoryFloor::default();
+        let (floor, eligible) = retention_floor(&old, &candidates, 1).unwrap();
+        assert!(!qv_model::HistoryFloor::new(floor.clone()).suppresses(&candidates[0].2));
+        assert!(!eligible.contains(&keep));
+        assert!(eligible.contains(&x));
+        assert!(eligible.contains(&y));
+        let (all, _) = retention_floor(&old, &candidates, 0).unwrap();
+        assert!(
+            candidates
+                .iter()
+                .all(|(_, _, c)| qv_model::HistoryFloor::new(all.clone()).suppresses(c))
+        );
+        let (again, _) =
+            retention_floor(&qv_model::HistoryFloor::new(floor.clone()), &candidates, 1).unwrap();
+        assert_eq!(floor.join(&again).unwrap(), again);
+    }
+
+    #[test]
+    fn history_retention_floor_purge_and_old_delivery() {
+        let (d, a) = (TestDir::new(), TestDir::new());
+        let (p, dir) = copy_fixture(&d, &a, "v.qvault");
+        let mut u = unlock(&p, &dir, PASSWORD).unwrap();
+        let r = new_record();
+        let mut versions = Vec::new();
+        for n in 0..15 {
+            let root = u.manifest().root_group_id();
+            let mut w = u.write().unwrap();
+            let c = w.reserve_counter().unwrap();
+            let mut v = entry_version(root, "value", w.writer_id(), c, &w.head_clocks(r));
+            v.modified_at = Timestamp(n);
+            versions.push((v.version_id, v.clock.clone()));
+            w.put_local(r, v).unwrap();
+            w.commit().unwrap();
+        }
+        let rec = u.manifest().record(r).unwrap();
+        assert_eq!(rec.history().len(), 10);
+        let floor = rec.floor();
+        for (id, clock) in &versions[..4] {
+            assert!(floor.suppresses(clock));
+            assert!(rec.version(*id).is_none());
+        }
+        assert_eq!(object_count(&u) as usize, u.manifest().references().len());
+        let head = rec.heads()[0].clone();
+        let counter = u.state.replica.next_counter;
+        let mut w = u.write().unwrap();
+        w.purge_history(r).unwrap();
+        w.commit().unwrap();
+        let rec = u.manifest().record(r).unwrap();
+        assert_eq!(rec.heads(), std::slice::from_ref(&head));
+        assert!(rec.history().is_empty());
+        assert!(rec.floor().suppresses(head.clock()));
+        assert_eq!(u.state.replica.next_counter, counter);
+        assert_eq!(object_count(&u) as usize, u.manifest().references().len());
+        // The same model path used by a later peer/import cannot reintroduce
+        // any covered history; receipt creates no replacement versions.
+        let new = edit(&mut u, r, "new");
+        assert!(u.manifest().record(r).unwrap().history().is_empty());
+        let live = u.read_version(r, new).unwrap();
+        let old_clock = versions[0].1.clone();
+        let tv = |id, clock| qv_model::RecordVersion {
+            version_id: id,
+            clock,
+            modified_at: Timestamp(0),
+            body: RecordBody::Tombstone(RecordKind::Entry),
+            ext: Extensions::new(),
+        };
+        let merged = qv_model::merge_record(vec![
+            tv(live.version_id, live.clock),
+            tv(versions[0].0, old_clock),
+        ])
+        .unwrap();
+        let (retained, suppressed) = merged.split_history(&u.manifest().record(r).unwrap().floor());
+        assert!(retained.is_empty());
+        assert_eq!(suppressed.len(), 1);
+        drop(u);
+        let u = unlock(&p, &dir, PASSWORD).unwrap();
+        assert_eq!(u.manifest().record(r).unwrap().heads()[0].version_id(), new);
+    }
+
+    #[test]
+    fn history_future_old_date_keeps_protected_version_without_floor_regression() {
+        let (d, a) = (TestDir::new(), TestDir::new());
+        let (p, dir) = copy_fixture(&d, &a, "v.qvault");
+        let mut u = unlock(&p, &dir, PASSWORD).unwrap();
+        let r = new_record();
+        let first = edit(&mut u, r, "future-dated original");
+        let original = u.read_version(r, first).unwrap().clock;
+        for n in 0..14 {
+            let root = u.manifest().root_group_id();
+            let mut w = u.write().unwrap();
+            let c = w.reserve_counter().unwrap();
+            let mut v = entry_version(root, "old dated", w.writer_id(), c, &w.head_clocks(r));
+            v.modified_at = Timestamp(n);
+            w.put_local(r, v).unwrap();
+            w.commit().unwrap();
+        }
+        let r = u.manifest().record(r).unwrap();
+        // N is a target: advancing this single writer's floor past an old
+        // eligible edit would also hide the newest-by-date original.
+        assert_eq!(r.history().len(), 14);
+        assert!(!r.floor().suppresses(&original));
+    }
+
+    #[test]
+    fn history_retention_corruption_and_cancellation_keep_accepted_state() {
+        let (d, a) = (TestDir::new(), TestDir::new());
+        let (p, dir) = copy_fixture(&d, &a, "v.qvault");
+        let mut u = unlock(&p, &dir, PASSWORD).unwrap();
+        let r = new_record();
+        let old = edit(&mut u, r, "old");
+        edit(&mut u, r, "new");
+        let before = u.local_seq();
+        let manifest = u.manifest().encode().unwrap();
+        let w = u.write().unwrap();
+        assert_eq!(w.commit_cancellable(&|| true), Err(StoreError::Io));
+        assert_eq!(u.local_seq(), before);
+        assert_eq!(u.manifest().encode().unwrap(), manifest);
+        let oid = u
+            .manifest()
+            .record(r)
+            .unwrap()
+            .version(old)
+            .unwrap()
+            .object_id();
+        u.file
+            .conn
+            .execute(
+                "UPDATE object SET ciphertext=zeroblob(length(ciphertext)) WHERE object_id=?1",
+                [oid.to_bytes().as_slice()],
+            )
+            .unwrap();
+        let w = u.write().unwrap();
+        assert_eq!(w.commit(), Err(StoreError::Integrity));
+        assert_eq!(u.local_seq(), before);
+        assert_eq!(u.manifest().encode().unwrap(), manifest);
+    }
+
+    #[test]
+    fn history_missing_object_is_integrity_not_an_empty_history() {
+        let (d, a) = (TestDir::new(), TestDir::new());
+        let (p, dir) = copy_fixture(&d, &a, "v.qvault");
+        let mut u = unlock(&p, &dir, PASSWORD).unwrap();
+        let r = new_record();
+        let old = edit(&mut u, r, "old");
+        edit(&mut u, r, "new");
+        let before = u.local_seq();
+        let oid = u
+            .manifest()
+            .record(r)
+            .unwrap()
+            .version(old)
+            .unwrap()
+            .object_id();
+        u.file
+            .conn
+            .execute(
+                "DELETE FROM object WHERE object_id=?1",
+                [oid.to_bytes().as_slice()],
+            )
+            .unwrap();
+        assert_eq!(err(u.read_version(r, old)), StoreError::Integrity);
+        let w = u.write().unwrap();
+        assert_eq!(w.commit(), Err(StoreError::Integrity));
+        assert_eq!(u.local_seq(), before);
+    }
+
+    #[test]
+    fn history_budget_pressure_lowers_target_but_never_drops_active_state() {
+        let (d, a) = (TestDir::new(), TestDir::new());
+        let (p, dir) = copy_fixture(&d, &a, "v.qvault");
+        let mut u = unlock(&p, &dir, PASSWORD).unwrap();
+        let r = new_record();
+        for n in 0..6 {
+            let root = u.manifest().root_group_id();
+            let mut w = u.write().unwrap();
+            let c = w.reserve_counter().unwrap();
+            let mut v = entry_version(root, "x", w.writer_id(), c, &w.head_clocks(r));
+            v.modified_at = Timestamp(n);
+            w.put_local(r, v).unwrap();
+            w.commit().unwrap();
+        }
+        let old = u.manifest().encode().unwrap();
+        let head = u.manifest().record(r).unwrap().heads()[0].clone();
+        let mut w = u.write().unwrap();
+        w.retain_history_with(&|| false, &|m| {
+            m.validate()?;
+            if m.record(r).unwrap().history().len() <= 2 {
+                Ok(())
+            } else {
+                Err(StoreError::LimitExceeded)
+            }
+        })
+        .unwrap();
+        assert_eq!(w.manifest.record(r).unwrap().history().len(), 2);
+        assert_eq!(
+            w.manifest.record(r).unwrap().heads(),
+            std::slice::from_ref(&head)
+        );
+        drop(w);
+        assert_eq!(u.manifest().encode().unwrap(), old);
+        let mut w = u.write().unwrap();
+        assert_eq!(
+            w.retain_history_with(&|| false, &|_| Err(StoreError::LimitExceeded)),
+            Err(StoreError::LimitExceeded)
+        );
+        assert_eq!(
+            w.manifest.record(r).unwrap().heads(),
+            std::slice::from_ref(&head)
+        );
+        drop(w);
+        assert_eq!(u.manifest().encode().unwrap(), old);
     }
 
     fn soft_delete(mut v: RecordVersion) -> RecordVersion {
@@ -1295,7 +1682,7 @@ mod attachment_tests {
         let mut u = unlock(&p, &dir, PASSWORD).unwrap();
         let initial = count(&u);
         let seq = u.local_seq();
-        for mode in 0..4 {
+        for mode in 0..6 {
             let r = RecordId::generate().unwrap();
             let entry = u.manifest().root_group_id();
             let mut w = u.write().unwrap();
@@ -1306,10 +1693,15 @@ mod attachment_tests {
                 0 => {
                     assert_eq!(err(w.commit()), StoreError::Internal);
                 }
-                1 => {
+                1 | 4 | 5 => {
                     let mut meta =
                         staged.into_meta(entry, Text::new("x").unwrap(), Text::new("x").unwrap());
-                    meta.content_hash[0] ^= 1;
+                    let index = match mode {
+                        4 => 16,
+                        5 => 31,
+                        _ => 0,
+                    };
+                    meta.content_hash[index] ^= 1;
                     let v = version(&mut w, r, meta);
                     assert_eq!(err(w.put_local(r, v)), StoreError::InvalidEdit);
                     assert!(w.commit().is_err());
@@ -1344,7 +1736,7 @@ mod attachment_tests {
         let (d, a) = (TestDir::new(), TestDir::new());
         let (p, dir) = copy_fixture(&d, &a, "v.qvault");
         let mut u = unlock(&p, &dir, PASSWORD).unwrap();
-        for mode in 0..4 {
+        for mode in 0..6 {
             let mut r = RecordId::generate().unwrap();
             let entry = u.manifest().root_group_id();
             let mut w = u.write().unwrap();
@@ -1353,9 +1745,14 @@ mod attachment_tests {
                 .unwrap();
             let mut meta =
                 staged.into_meta(entry, Text::new("x").unwrap(), Text::new("x").unwrap());
-            if mode == 0 {
-                meta.content_hash[0] ^= 1;
-                w.staged.get_mut(&r).unwrap().hash.expose_secret_mut()[0] ^= 1;
+            if matches!(mode, 0 | 4 | 5) {
+                let index = match mode {
+                    4 => 16,
+                    5 => 31,
+                    _ => 0,
+                };
+                meta.content_hash[index] ^= 1;
+                w.staged.get_mut(&r).unwrap().hash.expose_secret_mut()[index] ^= 1;
             }
             if mode == 1 {
                 meta.chunk_object_ids.reverse();

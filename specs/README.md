@@ -22,6 +22,9 @@ what they say, and behaviour changes start with a spec change.
 
 0011 includes the owner-approved attachment CLI amendment of 2026-10-27
 (plan 0016): explicit file import/export and confirmed permanent removal.
+0011 also includes the owner-approved history/restore/purge CLI amendment of
+2026-10-27 (plan 0017): scoped historical IDs, explicit conflict restoration
+and local suppression limits.
 
 The 2026-10-24 direction amendment makes local vault use independent of accounts
 and network access, with two optional sync modes: direct account-free LAN sync

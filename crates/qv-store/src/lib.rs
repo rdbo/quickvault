@@ -77,7 +77,13 @@
 //!   has its own anchor, so a restored copy next to the active vault never
 //!   shares it (0007 §3.4).
 //! - A local edit must dominate every head of its record (0005 §1.2); all
-//!   old heads become history. Concurrent heads arrive only by sync.
+//!   old heads become history unless covered by a retained suppression floor.
+//!   Concurrent heads arrive only by sync. History retention targets ten
+//!   authenticated versions in deterministic date/ID order, lowering the target
+//!   under budgets only when conservative monotonic floor advances permit it.
+//! - History purge advances the floor to the join of all current heads without
+//!   modifying those heads or creating a synthetic record version/counter.
+//!   Floors and reference release use the same transaction/anchor path.
 //! - Final tombstones are heads with their own small object. Putting one
 //!   drops the record's whole history and advances its floor over every
 //!   dropped version, in the same manifest (0007 §2.2, §1.3); the vault
@@ -103,12 +109,10 @@
 //! failure is always `Integrity`. `SQLITE_FULL` is `LimitExceeded` only at
 //! the page limit, otherwise `Io` (a full disk).
 //!
-//! # Not in this phase
+//! # Not yet implemented
 //!
-//! Metadata and search views (`qv-core`, 1.8); received versions and merges of
-//! concurrent heads (2.2); history retention and purge other than final
-//! deletion (1.12); attachment
-//! chunks (1.11); archives and `verify` (1.13); password change (1.14);
+//! Received versions and merges of concurrent heads (2.2); archives and
+//! `verify` (1.13); password change (1.14);
 //! rotation (1.15); sync state, outbox and checkpoints (milestones 2–3);
 //! quick-unlock slots (2.6); keystore-backed anchors (2.3, 2.6); Windows
 //! and macOS file safety (4.1 and later).

@@ -9,6 +9,15 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-10-27: Owner-approved history/restore/purge CLI contract added for
+  roadmap phase 1.12: scoped historical version IDs, explicit conflict restore
+  consent, protected historical display and local suppression limits (plan 0017).
+
+- 2026-10-27: Use the existing reviewed constant-time implementation for
+  confidential attachment-content hash comparisons during staging and reading;
+  test rejected digests at first, middle and last byte positions (plan 0016
+  review remediation). No format or dependency change.
+
 - 2026-10-27: Fresh-context review approved phase 1.10c (plan 0015), including
   independent maintained-transport and private-Xvfb checks. Owner approved
   plan 0016 and its concrete attachment CLI spec amendment.
@@ -46,6 +55,15 @@ Dates are ISO 8601. Newest first within each section.
   retained; the specs index no longer calls the repository specification-only.
 
 ### Added
+
+- 2026-10-27: Entry history, explicit historical display/reveal, restore as a
+  fresh causal edit and confirmed local history purge (plan 0017, phase 1.12).
+  Retention targets ten versions under monotonic suppression and existing
+  budgets; no active head/conflict/tombstone is pruned. New CLI `history`,
+  `history show`, `restore` and `history purge` support scoped historical IDs,
+  masked output and explicit conflict-restoration consent. Purge keeps current
+  heads but suppresses them if later dominated; snapshots, unseen concurrent
+  history and independent copies may remain. No secure-erasure claim.
 
 - 2026-10-27: Streaming attachments through qv-core and `qvault attach
   add|ls|save|rm` (plan 0016, phase 1.11). Imports up to 10 MiB use protected

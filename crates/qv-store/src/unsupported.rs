@@ -212,6 +212,14 @@ impl UnlockedVault {
 
 impl Write<'_> {
     /// Unreachable: no Write exists on this target.
+    pub fn commit_cancellable(self, _cancelled: &impl Fn() -> bool) -> Result<(), StoreError> {
+        match self.0 {}
+    }
+    /// Unreachable: no Write exists on this target.
+    pub fn purge_history(&mut self, _record: RecordId) -> Result<(), StoreError> {
+        match self.0 {}
+    }
+    /// Unreachable: no Write exists on this target.
     pub fn stage_attachment(
         &mut self,
         _record: RecordId,

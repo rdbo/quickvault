@@ -248,6 +248,12 @@ impl<const N: usize> SecretArray<N> {
         &self.buf
     }
 
+    /// Compares all bytes in constant time using the reviewed ctutils implementation.
+    pub fn ct_eq(&self, other: &[u8; N]) -> bool {
+        use ctutils::CtEq;
+        self.buf[..].ct_eq(&other[..]).to_bool()
+    }
+
     /// Mutably borrows the secret bytes.
     pub fn expose_secret_mut(&mut self) -> &mut [u8; N] {
         &mut self.buf
@@ -437,6 +443,18 @@ pub(crate) fn secrets_test_guard() -> std::sync::RwLockReadGuard<'static, ()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn memory_secret_array_constant_time_comparison() {
+        let _guard = super::secrets_test_guard();
+        let secret = super::SecretArray::<32>::zeroed();
+        assert!(secret.ct_eq(&[0; 32]));
+        for index in 0..32 {
+            let mut different = [0; 32];
+            different[index] = 1;
+            assert!(!secret.ct_eq(&different));
+        }
+        assert!(super::SecretArray::<0>::zeroed().ct_eq(&[]));
+    }
     use super::*;
 
     fn serial() -> std::sync::RwLockWriteGuard<'static, ()> {

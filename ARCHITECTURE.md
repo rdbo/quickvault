@@ -132,6 +132,18 @@ verifies before creating a new owner-only file and authenticates again while
 streaming. It never overwrites or chooses paths from stored metadata; failure or
 crash may leave incomplete plaintext at the explicit destination. No secure-
 erasure or atomic export-completion claim is made.
+History retention now targets ten dominated versions per record under existing
+resource budgets and conservative monotonic suppression floors. Floor-only purge
+and retention share the existing manifest/transaction/anchor path, never prune
+active heads or tombstones, and filter suppressed heads when later dominated.
+Core exposes bounded authenticated historical metadata, separate session-bound
+historical reveal capabilities and intentional restore as a new causal edit.
+The CLI provides `history`, `history show`, `restore` and `history purge`, with
+explicit conflict-restoration consent and purge confirmation. Writer vectors
+are not attributed to invented device identities. Local purge is logical
+suppression, not erasure of snapshots, unseen concurrent history or independent
+copies. Configurable history-depth settings remain reserved; the implemented
+target is the default ten, which is not permission to violate safe floors.
 The isolated `spikes/ui-feasibility/` crate is a non-production Dioxus
 prototype with standard webview input and a qv-core fixture controller. Its
 controller tests and real Linux/Android create/edit/reopen, Android background

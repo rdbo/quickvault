@@ -54,4 +54,5 @@ plan, or a new plan that names the one it supersedes.
 | [0013](0013-ui-feasibility/PLAN.md) | Android/Linux shared-UI feasibility (roadmap 1.9) | Reviewed |
 | [0014](0014-cli-edit-trash/PLAN.md) | CLI editing, trash and signal cleanup (roadmap 1.10b) | Reviewed |
 | [0015](0015-cli-clipboard/PLAN.md) | CLI clipboard: direct X11 adapter and protected transport (roadmap 1.10c) | Reviewed |
-| [0016](0016-attachments/PLAN.md) | Streaming attachments and CLI file operations (roadmap 1.11) | Implemented |
+| [0016](0016-attachments/PLAN.md) | Streaming attachments and CLI file operations (roadmap 1.11) | Reviewed |
+| [0017](0017-entry-history/PLAN.md) | Entry history, restore and purge (roadmap 1.12) | Implemented |

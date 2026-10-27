@@ -65,6 +65,10 @@ pub(crate) fn command() -> Command {
                 .help("Skip destructive-action and plaintext-export confirmations (never the weak-password one)"),
         )
         .subcommand(attach_command())
+        .subcommand(history_command())
+        .subcommand(Command::new("restore").about("Restore a retained entry version as a new causal edit")
+            .arg(Arg::new("entry").required(true)).arg(Arg::new("version").required(true))
+            .arg(flag("resolve-conflicts", "Explicitly replace all known conflicting heads with this historical value")))
         .subcommand(
             Command::new("init")
                 .about("Create a vault; shows its recovery phrase once")
@@ -203,6 +207,23 @@ fn attach_command() -> Command {
             .arg(entry()).arg(attachment()).arg(path("path")))
         .subcommand(Command::new("rm").about("Permanently remove; independent copies may remain, with no secure-erasure guarantee")
             .arg(entry()).arg(attachment()))
+}
+
+fn history_command() -> Command {
+    Command::new("history")
+        .about("List retained history or explicitly show/purge it")
+        .arg(Arg::new("entry"))
+        .subcommand(
+            Command::new("show")
+                .arg(Arg::new("entry").required(true))
+                .arg(Arg::new("version").required(true))
+                .arg(flag("reveal", REVEAL_HELP)),
+        )
+        .subcommand(
+            Command::new("purge")
+                .about("Suppress local history; independent copies may remain, no secure erasure")
+                .arg(Arg::new("entry").required(true)),
+        )
 }
 
 fn count(name: &'static str, long: &'static str, help: &'static str) -> Arg {
@@ -447,6 +468,8 @@ fn dispatch(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
             crate::cmd::groups::run(ctx, m.subcommand_name().unwrap_or_default(), s)
         }
         Some(("attach", s)) => crate::cmd::attach::run(ctx, s),
+        Some(("history", s)) => crate::cmd::history::run(ctx, s, false),
+        Some(("restore", s)) => crate::cmd::history::run(ctx, s, true),
         Some(("trash", s)) => crate::cmd::trash::run(ctx, s),
         _ => Err(CliError::new(OTHER, "unknown command")),
     }

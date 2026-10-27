@@ -16,3 +16,4 @@ pub(crate) mod groups;
 pub(crate) mod trash;
 
 pub(crate) mod attach;
+pub(crate) mod history;
