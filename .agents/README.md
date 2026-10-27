@@ -53,9 +53,11 @@ provided; the roadmap itself is not an implementation plan.
 | `deny.toml`, `supply-chain/` | `cargo deny` policy and `cargo vet` audits/exemptions |
 | `fuzz/` | cargo-fuzz targets; own workspace and lockfile, outside the shipped workspace; pinned nightly in CI |
 | `scripts/` | Repository checks (`check-spdx.sh`); Android SDK/NDK and Rust Android targets setup (`setup-android.sh`, versions pinned inside) |
+| `third-party/` | Approved vendor provenance and patch maintenance; only x11rb 0.13.2 is authorized (plan 0015) |
 | `.github/workflows/` | CI (gates, supply chain, fuzzing), actions pinned by SHA |
 | `.agents/skills/` | Agent skills (source of truth) |
 | `.claude/skills` | Symlink to `../.agents/skills` for Claude Code |
+| `spikes/ui-feasibility/` | Isolated non-production Dioxus prototype; separate lockfile/policy; status and gaps in plan 0013 |
 | `tests/` | Placeholder for future integration tests |
 
 ## Efficient reading without losing evidence

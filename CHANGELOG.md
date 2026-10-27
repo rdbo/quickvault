@@ -9,6 +9,26 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-10-27: Fresh-context review approved phase 1.10b (plan 0014), with
+  independent gates passing and no code fixes. The owner approved plan 0015's
+  clipboard design and incoming-allocation correction, with continuing authority
+  for necessary correctness fixes within that implementation.
+
+- 2026-10-27: Fresh-context review approved phase 1.9's disposable Dioxus
+  feasibility scope (plan 0013); root/spike gates pass. Prepared plan 0014
+  for remaining CLI editing/trash/signals, with an owner decision pending on
+  separating clipboard integration because of dependency buffer/ownership gaps.
+
+- 2026-10-26: Owner selected standard Dioxus webview input for the shared UI.
+  Specs 0008/0009 now require bounded input and best-effort cleanup, with
+  framework/OS copy limits stated; native dialogs, a fork or a custom engine
+  are not required solely for deterministic wiping. D8 resolved; plan 0013
+  revised and approved. Related 0002/0012 cross-references, architecture and
+  agent guidance updated; core secret handling and release controls retained.
+
+- 2026-10-26: Fresh-context review approved the CLI EOF-CR and deep-listing
+  fixes (plan 0011); phase 1.10a is Reviewed.
+
 - 2026-10-26: Fixed CLI password input dropping a final carriage return at EOF.
   Deep listings now traverse iteratively, share path components and flush
   output incrementally; listing order and human/JSON formats are preserved.
@@ -22,6 +42,44 @@ Dates are ISO 8601. Newest first within each section.
   retained; the specs index no longer calls the repository specification-only.
 
 ### Added
+
+- 2026-10-27: CLI `copy`, `totp --copy` and `generate --copy` (plan 0015,
+  phase 1.10c). The private X11 adapter uses sensitive hints, a foreground
+  timeout/countdown and signal cleanup after dropping vault keys/metadata.
+  Window/connection release preserves a newer owner; INCR transfers and I/O
+  have explicit budgets. Maintained x11rb source protects outgoing buffers and
+  checks incoming lengths before allocation. Provenance/header-checker rules,
+  two documented vet exemptions and isolated-Xvfb CI tests accompany it.
+  Native Wayland requires XWayland; clipboard managers/recipients may retain
+  copies despite hints and timeout. No secure-erasure claim.
+
+- 2026-10-27: CLI entry editing (`add`, `edit`), groups/moves/deletion
+  (`mkdir [-p]`, `mv`, `rm [-r]`) and `trash ls|restore|empty` (plan 0014,
+  phase 1.10b). Notes and protected fields use bounded no-echo prompts;
+  `-i` prompts field values, and stdin/password prompt conflicts fail before
+  unlocking. SIGINT/TERM/HUP cancel input/countdowns and restore terminal and
+  recovery alternate-screen state. Core drafts preserve untouched data; trash
+  empty confirms unless `--yes`. Clipboard commands remain phase 1.10c.
+
+
+- 2026-10-26: Isolated non-production Dioxus spike source and protected fixture
+  controller (plan 0013). Linux create/edit/reopen, input cleanup and five
+  full-profile unlock samples validated; arm64 APK built with minimum Android 10, backups off and
+  no personal-data permissions. Dioxus loopback IPC requires Android
+  INTERNET permission (also capable of remote networking). Device validation
+  now passes on the connected phone, including persistence/background lock and
+  screenshot blocking; five unlock samples measure 852–881 ms (median 865 ms).
+  Fixed required loopback packaging policy and canonical app-private paths while
+  retaining storage checks. Four approved spike-only advisory exceptions and an isolated vet baseline retain root policy.
+
+- 2026-10-26: Plan 0013 for phase 1.9 Android/Linux feasibility, with verified
+  physical-device prerequisites and explicit phone-operation boundaries.
+  The initial native-input proposal was replaced by the owner's Dioxus input
+  decision; no spike app has been installed yet.
+
+- 2026-10-26: Withdrew unapproved CLI plan 0012 after the owner corrected
+  phase selection to the unfinished Android/Linux feasibility phase 1.9.
+  No CLI scope or behavior changed.
 
 - 2026-10-26: `scripts/setup-android.sh`: installs the Android command-line
   tools (checksum-pinned), platform 35, build-tools 35.0.0, NDK r27

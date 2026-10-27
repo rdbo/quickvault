@@ -16,7 +16,7 @@ cryptographic audit or platform validation have been completed here.
 
 | Finding | Design requirement | Required validation |
 |---------|--------------------|---------------------|
-| Mobile deferred behind shared-UI claims | 0009 §1.4, §1.6, §6: Android-first shared app with isolated OS adapters | Early Android/Linux shared-flow evidence, real-device native input/lifecycle, keystore/autofill entry-point feasibility and unlock/memory benchmarks; neither remote server nor iOS is a prerequisite |
+| Mobile deferred behind shared-UI claims | 0009 §1.4, §1.6, §6: Android-first shared app with isolated OS adapters | Early Android/Linux shared-flow evidence, real-device Dioxus input cleanup/lifecycle, keystore/autofill entry-point feasibility and unlock/memory benchmarks; neither remote server nor iOS is a prerequisite |
 | Unrequested synchronization | 0005 §0.5, 0009 §1.5: manual initiation first | For both modes, unlock/edit/login/discovery/timers/reconnection start no round; explicit sync exchanges data; failure/cancellation/restart leaves pending work until the next explicit sync; bounded in-operation retries stop on lock |
 | Implicit server prerequisite | 0005 §0, 0009: complete offline use | With no account/configured server and networking blocked, create/unlock/edit/recover a local vault; server outage or account expiry does not disable it |
 | Account-dependent LAN sync | 0005 §6: direct account-free exchange | With Internet access blocked and no server deployed, link two same-network devices through the selected approved protocol and sync from either device |
@@ -30,14 +30,14 @@ cryptographic audit or platform validation have been completed here.
 | Offline commitment mismatch | 0005: remote base separate from working state | Verify remote before merging pending local edits |
 | Whole-file rollback | 0004/0005: completeness and external anchors | Delete/replace objects; restore old DB with intact newer anchor; exercise crash recovery |
 | Live SQLite copying | 0004/0005: immutable archives built from verified objects | Concurrent writer during archive creation; incomplete archive, external replacement and crash cases |
-| Swap/hibernation leaks | 0008: OS prerequisites and reduced-protection mode | Target-platform configuration and native input tests; memory/serialization buffer review |
+| Swap/hibernation leaks | 0008: OS prerequisites and reduced-protection mode | Target-platform configuration and input-cleanup tests; memory/serialization buffer review |
 | Active revoked sessions | 0006: immediate invalidation and commit checks | Revoke with open stream, pending ticket and authorized-but-uncommitted write |
 | Incomplete key transport | 0002/0006: complete signed ephemeral transfer | Cross-implementation vectors, transcript mutations, replay, recipient/account/profile substitution and secret erasure |
 | Unpinned crypto | 0002: exact profiles and X-Wing draft | Upstream known-answer vectors; wrong hybrid half/label/profile must fail |
 | Hostile SQLite/CBOR | 0004: hardening and allocation budgets | Fuzz before/after authentication; malformed schema, lengths, nesting, pages and records |
 | Deleted-entry resurrection | 0005/0007: permanent tombstones | Merge a years-old file; concurrent delete/edit remains an explicit conflict |
 | Hardware assumptions | 0002/0009: backend-specific wrapping | Real-device algorithm/authentication/backup/reboot/lock/expiry tests; no silent fallback |
-| Webview exposure | 0008: native input, CSP and bounded bridge | Remote navigation/asset rejection, HTML/URL/IPC injection and lock-time races |
+| Webview exposure | 0008: Dioxus input cleanup, CSP and bounded bridge | Remote navigation/asset rejection, HTML/URL/IPC injection and lock-time races |
 | Self-referential/incomplete commitments | 0004: separate manifest and exact references | Missing history/chunk, duplicate references, wrong hash/role/configuration |
 | Rotation/purge ambiguity | 0002/0007: resumable generations and suppression | Offline old-generation peer, interrupted rotation, old-history reimport and partial purge acknowledgements |
 | Authentication complexity | 0006: TLS-bound opaque sessions and fixed OPAQUE profile | No token use on another TLS connection, replayed challenge or weak KSF; RFC OPAQUE vectors |
@@ -114,7 +114,7 @@ operation ends. Automatic scheduling is deferred, not a gate for initial sync.
 Do not ship an unreviewed custom protocol merely because its primitives are
 reviewed. Unknown required protocol features fail closed.
 
-Before each GUI/mobile release, validate native secret input, CSP/IPC, OS
+Before each GUI/mobile release, validate secret-input cleanup and its documented framework limits, CSP/IPC, OS
 wrapping, locked-device prerequisites, lifecycle cancellation, verified autofill
 matching and clipboard limitations on that actual platform. Disable unsupported
 features rather than shipping untested equivalent-security claims.
@@ -122,7 +122,7 @@ features rather than shipping untested equivalent-security claims.
 Framework feasibility evidence (0009 §6) belongs in initial Android/Linux
 development, before investing in the full UI; it does not replace each target's
 release evidence. A shared codebase or successful cross-compilation alone does
-not demonstrate OS secure input, lifecycle, keystore or autofill correctness.
+not demonstrate input cleanup, lifecycle, keystore or autofill correctness.
 Android's offline release is independent of the remote service and later iOS
 support. Keep unvalidated optional quick unlock/autofill disabled.
 
@@ -150,6 +150,10 @@ None for the acceptance process. Concrete benchmark/audit results are required
 implementation evidence, not claims that this repository already has them.
 
 ## Changelog
+
+- 2026-10-26: Align GUI evidence with Dioxus input and bounded cleanup claims;
+  retain active-content, OS, lifecycle and release gates. Framework residual
+  copies alone are not a requirement for native dialogs or a custom engine.
 
 - 2026-10-24: Require early Android/Linux shared-UI and platform-adapter
   feasibility evidence; preserve per-platform release gates and keep Android

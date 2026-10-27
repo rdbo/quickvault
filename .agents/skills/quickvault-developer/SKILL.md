@@ -15,6 +15,11 @@ the context budget rules. Read the plan, the files it names and the spec
 sections it cites. Follow relevant callers and cross-references when needed
 for correctness; avoid unrelated exploration.
 
+For the sole approved vendor package, x11rb 0.13.2, follow
+`third-party/README.md`: preserve upstream licensing/headers/lints, verify the
+archive hash and identity, document exact patches and run their focused tests.
+Product code still uses workspace rules; no other vendor exception is implied.
+
 ## Before you start
 
 1. **Find the plan.** If the user didn't name one, check the index in
@@ -96,7 +101,10 @@ How to ask:
 - Silence `clippy` with `#[allow]` without a written justification in the code.
 - Add `unsafe` unless the plan allows it, and never without a `// SAFETY:` comment.
 - Implement cryptographic primitives or roll your own protocol composition.
-- Use `unwrap`/`expect` on untrusted data, or print or derive `Debug` on secrets.
+- Use `unwrap`/`expect` on untrusted data, or print or derive secret-bearing
+  `Debug` on application secret types. Framework input follows 0008 §1.1/§4.4:
+  bound it, convert promptly to protected Rust containers, clear controls/state
+  and report best-effort limits; do not require native dialogs just for copies.
 - Add a dependency that isn't in the plan.
 - Commit, push or open a PR unless the user asks.
 

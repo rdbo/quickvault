@@ -19,9 +19,18 @@
 //! | `address` | paths and `@id` prefixes | 0011 §2 |
 //! | `exit` | exit codes and messages | 0011 §6 |
 //! | `cmd` | the commands | 0011 §4 |
+//! | `clipboard` | private X11 owner, protected transport and deadlines | 0011 §3.6, 0008 §1–3 |
 //!
-//! **Not in this phase:** `add`, `edit`, `mv`, `mkdir`, `rm`, `trash`,
-//! `copy` and the `--copy` variants (1.10b); `passwd`, `recover`,
+//! Editing/group/trash commands use core drafts and durable transactions;
+//! notes and protected values are prompted. SIGINT/TERM/HUP cancel prompts
+//! through atomic flags with terminal/alternate-screen RAII cleanup.
+//!
+//! Clipboard commands close the vault before serving a copied value in the
+//! foreground. The private X11 adapter uses a maintained protected-buffer x11rb
+//! patch, sensitive hints, bounded INCR transfers and ownership-safe release.
+//! OS/recipient copies may persist; native Wayland requires usable XWayland.
+//!
+//! **Not in this phase:** `passwd`, `recover`,
 //! `recovery` (1.14–1.15); `verify` (1.13); history and snapshots
 //! (1.12–1.13); colour output.
 
@@ -29,12 +38,14 @@
 
 mod address;
 mod cli;
+mod clipboard;
 mod cmd;
 mod config;
 mod exit;
 mod json;
 mod out;
 mod select;
+mod signals;
 mod term;
 
 use std::process::ExitCode;
@@ -47,6 +58,10 @@ fn main() -> ExitCode {
             "qvault: warning: reduced protection: core dumps or debugger attachment could not \
              be disabled\n",
         );
+    }
+    if let Err(error) = signals::install() {
+        cli::report(&error);
+        return ExitCode::from(error.code);
     }
     ExitCode::from(cli::run(
         std::env::args_os(),

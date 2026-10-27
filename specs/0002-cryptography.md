@@ -182,7 +182,7 @@ function. Decode directly to VK. No optional extra mnemonic passphrase in v1.
 
 4.2. Show at creation; require confirmation or an explicit recorded skip.
 Never log, persist plaintext or send it to the server. Redisplay only after
-master-password reauthentication; follow native secret-input/display rules.
+master-password reauthentication; follow the input/display and cleanup rules in 0008 §4.4.
 Rotation generates a new phrase; the operation may take significant time for
 history/attachments and MUST be resumable rather than promising a fixed duration.
 
@@ -287,6 +287,9 @@ password guessing and device compromise are separate from vault encryption.
    mechanisms rather than relying on an unverified portability assumption.
 
 ## Changelog
+
+- 2026-10-26: Align recovery input/display cross-reference with the owner-approved
+  Dioxus input policy in 0008 §4.4; no cryptographic/profile change.
 
 - 2026-10-24: Restrict account authentication and server publication during
   rotation to vaults configured for remote sync; require fresh independent

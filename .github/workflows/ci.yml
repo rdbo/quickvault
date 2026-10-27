@@ -27,6 +27,12 @@ jobs:
         run: cargo fmt --check
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Clipboard test server
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: SPDX checker rejection tests
+        run: sh scripts/test-check-spdx.sh
+      - name: Maintained X11 transport tests
+        run: cargo test --manifest-path third-party/x11rb/Cargo.toml --locked --lib rust_connection
       - name: Test
         run: cargo test --locked
 

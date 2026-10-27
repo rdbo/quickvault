@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-10-26 | 2026-10-26 | 0011 §1–3, §4 (Vault: `init`, `info`; Browsing; `generate`), §5–6; 0009 §3; 0010 §3–4; 0002 §3.1, §4.2; 0008 §1, §3; 0012 §1 |
+| Reviewed | 2026-10-26 | 2026-10-26 | 0011 §1–3, §4 (Vault: `init`, `info`; Browsing; `generate`), §5–6; 0009 §3; 0010 §3–4; 0002 §3.1, §4.2; 0008 §1, §3; 0012 §1 |
 
 ## Intent
 
@@ -774,3 +774,8 @@ old. `cargo deny check` and `cargo vet` run in step 9.
   needed in this remediation. This is not fresh-context phase approval.
   Existing staged review records were not staged over or committed; all
   implementation changes remain unstaged for owner review/commit.
+
+- 2026-10-26: Fresh-context remediation review approved; see REVIEW.md. Both
+  findings resolved without further code changes. Independent SPDX, fmt,
+  Clippy and locked tests passed (456 passed, 2 ignored). No dependency
+  changes in the remediation. Network isolation remains unverified here.

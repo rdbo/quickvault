@@ -15,11 +15,24 @@ code.
 
 ### 1. Memory and locked-device protection
 
-1.1. Keys, passwords, plaintext payloads, metadata and serialization/normalization
-buffers use zeroizing allocations with redacted Debug/Display. Audit library
-intermediates, error paths, panics, cloning and reallocation; a final SecretBox
-does not erase preceding copies. Core dumps and debugger attachment MUST be
-disabled where supported before reading secrets; report unsupported protection.
+1.1. Application-controlled Rust keys, passwords, plaintext payloads, metadata
+and serialization/normalization buffers use zeroizing allocations with redacted
+Debug/Display. GUI input MAY use ordinary Dioxus/webview controls and their
+framework event/bridge buffers. Bound input, minimize copies and lifetime,
+transfer secrets to protected Rust containers promptly, and clear controls and
+application state after use and on lock. Never log or persist these values.
+
+Framework, web-engine, input-method and OS intermediates may retain copies that
+application code cannot deterministically wipe. Document these limits; neither
+native widgets nor webview controls establish complete memory erasure. Residual
+framework copies alone do not require native dialogs, a framework fork or a
+custom engine. Audit library intermediates, error paths, panics, cloning and
+reallocation in proportion to the threats in 0001; a final SecretBox does not
+erase preceding copies. Arbitrary access to an unlocked process compromises
+its active secrets and is not prevented by zeroization. Residual data after
+lock, dumps and OS persistence still warrant best-effort cleanup and the OS
+prerequisites in §1.3. Core dumps and debugger attachment MUST be disabled where
+supported before reading secrets; report unsupported protection.
 
 1.2. Lock keys and short-lived protected-value buffers before filling them,
 through a small reviewed memory module. Prefer no-access/guarded allocations
@@ -61,7 +74,7 @@ network content is not generated from protected-value searches.
 |---------|------|
 | Clipboard | Use sensitive/no-history flags, clear after 20 seconds only if still owned; flags cannot force all clipboard managers to comply |
 | Screenshots/recents | Android FLAG_SECURE; hide previews where supported; no universal desktop screenshot-prevention claim |
-| Keyboard | Password/no-learning input types; native secure input for master password, recovery phrase and edited protected values |
+| Keyboard | Password/no-learning hints where supported; masked Dioxus/webview secret inputs are permitted; clear controls after use and on lock, with framework/OS memory limits documented |
 | Logs/crash reports | No plaintext, keys, recovery phrases, tokens or secret-bearing URLs; redact at type boundaries |
 | Temp files | No plaintext; explicit plaintext export is a separately confirmed operation to a user-selected path |
 | Autofill | Match verified app identity/web origin, not display labels or URL substrings; require choosing conflicted credentials |
@@ -89,13 +102,21 @@ UI action, expires after 30 seconds and is cleared on lock. Copy/autofill goes
 Rust directly to the OS. A compromised authorized webview remains a compromise
 of the trusted client; do not advertise handles as an XSS defense.
 
-4.4. GUI master password/recovery/protected-value editing uses native secure-input
-controls owned by the platform layer; the CLI uses non-echoing OS TTY input.
-The webview receives completion/cancel
-signals, not input text. Native reveal is preferred; if the supported frontend
-cannot provide secure input, that path MUST NOT ship with a stronger memory
-claim. Native controls also require zeroizing bridge buffers and OS protection;
-they cannot promise immunity to a compromised OS.
+4.4. Use the shared Dioxus UI and its standard webview controls for GUI master
+password/recovery/protected-value input. Secrets may cross the framework's local
+input/event bridge into Rust. Apply §1.1's input bounds, prompt conversion,
+no-log/no-persistence rules and best-effort cleanup. Do not retain protected
+values in long-lived frontend state or send keys to the renderer. Mask secret
+input, use password/no-learning hints where available, clear inputs on
+submit/cancel/lock and discard late events/results from an old session. The
+CLI continues to use non-echoing OS TTY input.
+
+Dioxus and the web engine are part of the trusted client, not a secret-isolation
+boundary. Do not claim that clearing the DOM, dropping Rust state, forcing GC
+or choosing native controls guarantees erasure of all copies. Native adapters
+remain appropriate for actual OS functions such as clipboard, keystore,
+biometrics, lifecycle and autofill; a separate native input dialog is not
+required merely because UI frameworks copy data.
 
 ### 5. Local files and testing
 
@@ -113,19 +134,20 @@ out of scope. Remotely supplied parser/rendering inputs remain in scope.
 
 ## Open Questions
 
-1. Validate native input and OS protection detection per supported platform.
-   Unsupported protection must be visible and cannot silently inherit claims.
-2. **Webview UI or native Rust UI?** Most of §4 (CSP, navigation blocking,
-   bridge allowlist, native secure-input overlays inside a webview, GC'd
-   plaintext copies) exists only because the UI is a webview. A native Rust
-   toolkit renders vault text without an HTML/JS engine and keeps secret
-   input and metadata in zeroizable Rust memory, removing that attack surface
-   and the overlay engineering. Cost: a different framework than Dioxus and
-   possibly separate mobile UI work. Recommendation: evaluate during the early
-   phase-1 Android/Linux framework work with 0009 §6 and Open Question 3;
-   preserve the shared app/UI requirement. Renderer/framework choice undecided.
+1. Validate input cleanup, lifecycle and OS protection reporting per supported
+   platform, recording framework-managed memory limitations.
+2. **Resolved 2026-10-26 (owner):** use Dioxus with its standard webview UI and
+   input controls. A native-input workaround, Dioxus fork or custom engine is
+   not required for deterministic framework-memory wiping. Platform validation
+   and the active-content/bridge requirements remain; this decision is not
+   evidence that they pass.
 
 ## Changelog
+
+- 2026-10-26: Owner selected stock Dioxus/webview input. Replace mandatory native
+  secret dialogs with bounded input and best-effort cleanup; distinguish controlled
+  Rust buffers from framework/OS copies and avoid complete-erasure claims.
+  Retain OS prerequisites, lifecycle, no-log/persistence and active-content rules.
 
 - 2026-10-24: Move renderer/framework evaluation to early Android/Linux work
   in phase 1 to reflect mobile priority and shared UI intent; preserve native

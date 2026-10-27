@@ -14,8 +14,8 @@
 //! cancels. A guard restores the saved terminal state on every return path.
 //! Input goes byte by byte into a locked, zeroizing buffer of fixed size,
 //! so it never reallocates; input past the bound is drained to the end of
-//! the line and refused (exit 9). SIGTERM and SIGHUP during a prompt are
-//! not handled yet (phase 1.10b).
+//! the line and refused (exit 9). Signals are checked between bounded polls;
+//! cancellation unwinds through the terminal and alternate-screen guards.
 
 use std::os::fd::BorrowedFd;
 use std::time::Duration;
@@ -143,6 +143,7 @@ impl<'a> Tty<'a> {
     fn key(&self) -> Result<Key, CliError> {
         let mut b = Zeroizing::new([0u8; 1]);
         loop {
+            readable(self.input)?;
             match rustix::io::read(self.input, &mut b[..]) {
                 Ok(0) => return Ok(Key::Eof),
                 Ok(_) => return Ok(Key::Byte(b[0])),
@@ -223,6 +224,36 @@ impl<'a> Tty<'a> {
         self.line(label, max, false)
     }
 
+    /// Bounded multiline notes, with no echo. Enter preserves LF; Ctrl-D
+    /// completes the input. Cancellation never returns a partial value.
+    pub(crate) fn multiline(&self, label: &str, max: usize) -> Result<Typed, CliError> {
+        let guard = self.raw()?;
+        self.say(label)?;
+        let mut buf = SecretBytes::zeroed(max);
+        let mut len = 0;
+        let mut too_long = false;
+        loop {
+            match self.key()? {
+                Key::Eof | Key::Byte(0x03) => return Err(CliError::cancelled()),
+                Key::Byte(0x04) => break,
+                Key::Byte(b) => {
+                    if len == max {
+                        too_long = true;
+                        continue;
+                    }
+                    buf.expose_secret_mut()[len] = if b == b'\r' { b'\n' } else { b };
+                    len += 1;
+                }
+            }
+        }
+        drop(guard);
+        self.say("\n")?;
+        if too_long {
+            return Err(CliError::new(LIMIT, "input too long"));
+        }
+        Ok(Typed { buf, len })
+    }
+
     /// Asks a yes/no question; anything but `y`/`yes` is no.
     pub(crate) fn confirm(&self, question: &str) -> Result<bool, CliError> {
         let a = self.line(&format!("{question} [y/N] "), MAX_ANSWER_BYTES, true)?;
@@ -248,9 +279,35 @@ impl<'a> Tty<'a> {
     pub(crate) fn countdown(&self, label: &str, secs: u64) -> Result<(), CliError> {
         for left in (1..=secs).rev() {
             self.say(&format!("\r{label} {left} s "))?;
-            std::thread::sleep(Duration::from_secs(1));
+            for _ in 0..10 {
+                crate::signals::check()?;
+                std::thread::sleep(Duration::from_millis(100));
+            }
         }
         self.say("\r\n")
+    }
+}
+
+/// Wait for data while remaining responsive to cancellation even on a pipe.
+fn readable(fd: BorrowedFd<'_>) -> Result<(), CliError> {
+    loop {
+        crate::signals::check()?;
+        let mut fds = [rustix::event::PollFd::new(
+            &fd,
+            rustix::event::PollFlags::IN,
+        )];
+        let timeout = rustix::event::Timespec {
+            tv_sec: 0,
+            tv_nsec: 100_000_000,
+        };
+        match rustix::event::poll(&mut fds, Some(&timeout)) {
+            Ok(0) | Err(rustix::io::Errno::INTR) => continue,
+            Ok(_) => {
+                crate::signals::check()?;
+                return Ok(());
+            }
+            Err(e) => return Err(io_err(e)),
+        }
     }
 }
 
@@ -273,6 +330,7 @@ fn read_first_line(fd: BorrowedFd<'_>, max: usize) -> Result<Typed, CliError> {
     let mut b = Zeroizing::new([0u8; 1]);
     let mut ended_at_lf = false;
     loop {
+        readable(fd)?;
         match rustix::io::read(fd, &mut b[..]) {
             Ok(0) => break,
             Ok(_) if b[0] == b'\n' => {

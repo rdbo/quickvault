@@ -153,8 +153,11 @@ at the phase that needs them.
    work). On-device checks need the owner's phone over `adb`: the session asks
    the owner to bring it when needed (there is no KVM for an emulator).
 8. **D8 — 0008 OQ2 / 0009 OQ3: webview (Dioxus) or native Rust renderer.**
-   Phase 1.9 produces the evidence. Recommendation: none yet; decide on the
-   spike report. Blocks: 2.4. Resolution: pending.
+   Resolution: owner chose Dioxus with its standard webview input on 2026-10-26.
+   Framework/OS memory copies are accepted as a documented best-effort limit,
+   not a reason for native dialogs, a fork or a custom engine. Phase 1.9 still
+   supplies integration/performance evidence; active-content and OS release
+   requirements remain. No production-readiness claim is inferred.
 9. **D9 — Attachments in the CLI.** 0011 §4 lists no attachment commands, but
    0003 §6 makes attachments a v1 model feature, and the manifest format must
    include chunk lists before the format freeze. Options: (A) amend 0011 with
@@ -197,8 +200,10 @@ phase plan must keep:
 
 - Frontends reach vaults only through `qv-core` (0009 §1.1). No frontend calls
   qv-crypto/qv-store directly, even in the 1.9 spike.
-- Secrets live only in zeroizing, non-`Debug` types from qv-crypto's memory
-  module (1.1). Nothing secret goes into logs, errors, panics or argv.
+- Application-controlled Rust secrets use qv-crypto's protected memory module
+  (1.1). Dioxus input/bridge intermediates follow 0008 §1.1/§4.4 with bounds,
+  prompt protected conversion, cleanup and documented framework/OS limits.
+  Nothing secret goes into logs, errors, panics or argv.
 - Every parser of untrusted bytes checks bounds before allocating, and
   authenticates before parsing where a key is available (0004 §4, §6).
 - **The on-disk format is unstable until 1.16.** Until then the format version
@@ -381,19 +386,20 @@ exact files.
 
 #### Phase 1.9 — Android/Linux shared-UI feasibility spike
 
-- [ ] **Do:** Build a throwaway-quality Dioxus app on Linux and a physical
+- [x] **Do:** Build a throwaway-quality Dioxus app on Linux and a physical
   Android device. It must show the vault list and entry editing against
-  `qv-core`, offline persistence, native secure input for the master password,
+  `qv-core`, offline persistence, Dioxus password input with bounded cleanup,
   and lifecycle lock/cancellation. Probe keystore/biometric access, the
   clipboard and the autofill service entry point. Benchmark unlock time
   (including password-kdf/1) and memory on the D7 devices. Write a feasibility
-  report that answers 0009 §6 and gives evidence for D8. Mark the spike code as
+  report that answers 0009 §6 and records evidence for the selected Dioxus UI. Mark the spike code as
   non-production, or keep it out of the workspace default members.
 - **Specs:** 0009 §6 (D5); 0008 OQ2; 0002 OQ1, 0004 OQ1 (benchmarks).
 - **Depends on:** 1.8, D7. Independent of 1.10, so it can swap with it.
 - **Files:** `spikes/ui-feasibility/` (or as the phase plan decides), `plans/NNNN-…/REPORT.md`.
-- **Done when:** the report exists with measured numbers and a recommendation
-  for D8. The owner has decided D8, or has asked for a follow-up spike.
+- **Done when:** the report exists with measured numbers and integration gaps.
+  D8 is already decided (Dioxus); no repeated framework-choice approval is needed.
+  Record failed/unavailable evidence accurately; selection is not validation.
 - **Verify:** builds for Linux and the Android target; benchmark logs attached to the report.
 - **0012 rows:** Mobile deferred behind shared-UI claims (feasibility evidence only).
 
@@ -401,8 +407,12 @@ exact files.
 
 Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`, browsing, `generate`; the
   rest of this entry except editing, trash and clipboard) and **1.10b** (`add`, `edit`, `mv`, `mkdir`, `rm`,
-  `trash …`, notes and `-i`, `copy` and the `--copy` variants, signal handling). 1.10b depends on 1.10a.
-- [x] **1.10a plan:** [0011](../0011-cli-foundation-read/PLAN.md) (done). - [ ] **1.10b plan:** —
+  `trash …`, notes and `-i`, signal handling) and **1.10c** (clipboard `copy`
+  and `--copy` variants; split approved 2026-10-27). 1.10b depends on 1.10a;
+  1.10c follows 1.10b and needs its own approved clipboard integration design.
+- [x] **1.10a plan:** [0011](../0011-cli-foundation-read/PLAN.md) (done).
+- [x] **1.10b plan:** [0014](../0014-cli-edit-trash/PLAN.md) (done, Reviewed).
+- [x] **1.10c plan:** [0015](../0015-cli-clipboard/PLAN.md) (done; fresh review pending).
 - **Do:** Create `qv-cli` (`qvault`): vault selection and config, `init`
   (recovery phrase on the alternate screen, confirmation), `info`, `ls`,
   `search`, `show`, `totp`, `add`, `edit`, `mv`, `mkdir`, `rm`, `trash …`,
@@ -561,15 +571,15 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
 
 - [ ] **Do:** Build the production `qv-app` skeleton on the framework chosen in
   D8. If it is a webview: local assets, CSP, navigation/frame/popup blocking,
-  and a typed allowlisted bridge checked in Rust. Add native secure input for
-  master password, phrase and protected values on Linux and Android. Flows:
+  and a typed allowlisted bridge checked in Rust. Use standard Dioxus input for
+  master password, phrase and protected values with 0008's bounded cleanup. Flows:
   create (with recovery phrase), unlock, lock, recover. Android adapters:
   lifecycle, FLAG_SECURE, keyboard flags.
 - **Specs:** 0008 §4; 0009 §1.6; 0002 §4.2.
 - **Depends on:** 2.3, D8.
 - **Files:** `crates/qv-app/`, `crates/qv-platform/`, Android packaging.
 - **Done when:** injection tests (HTML, URL, IPC) fail safely, remote
-  navigation is blocked, and secret text never crosses the bridge.
+  navigation is blocked, and secret input is bounded, converted promptly and cleared on submit/lock.
 - **Verify:** `cargo test --locked -p qv-app`; Android instrumented test run recorded.
 - **0012 rows:** Webview exposure, Ambiguous trust boundary.
 
@@ -810,9 +820,10 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
 
 - **Draft specs:** stop if a phase needs behaviour from a Draft section not
   covered by D5 or a later go-ahead.
-- **Framework fit (1.9):** if Dioxus cannot meet native secure input or
-  lifecycle locking, stop and escalate D8. Do not weaken 0008 or build
-  per-OS UIs.
+- **Framework integration (1.9):** Dioxus is selected. Record lifecycle,
+  active-content or OS integration gaps without complete-erasure claims.
+  Framework/OS copies alone do not require native dialogs or a custom engine.
+  Do not weaken unrelated 0008 requirements or build separate per-OS UIs.
 - **KDF/budgets (1.9, 1.16):** if password-kdf/1 misses the Android target,
   the profile changes *before* the freeze. Never lower it below the 64 MiB
   floor, and never ship unbenchmarked parameters.
@@ -838,6 +849,11 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
 
 ## Revisions
 
+- 2026-10-27: Owner approved plan 0014 D1 option A: 1.10b implements editing,
+  trash and signal cleanup; 1.10c separately designs and implements clipboard
+  commands. Previously approved arboard/license choices are candidates for
+  1.10c, not approval to ignore the documented buffer/ownership requirements.
+
 - 2026-10-26: Added targeted context-reading guidance for agent efficiency;
   phase scope/order, standing approval and fresh-context review are unchanged.
 - 2026-10-25: Approved by the owner with D1–D6 and D9 accepted as recommended. D1–D4 were recorded in `AGENTS.md` at approval, not in phase 1.1.
@@ -852,6 +868,45 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
 - 2026-10-26 (phase 1.10, plan 0011): the owner approved splitting 1.10 into 1.10a/1.10b and decisions D-1–D-6 of plan 0011 as recommended: `zxcvbn 3.1.1` in `qv-core` (0010 §3.2); `clap 4.6.7` builder API only; for 1.10b, `signal-hook 0.4.5` and `arboard 3.6.1` (X11 only, no image support) with per-crate `BSL-1.0` exceptions for `clipboard-win` and `error-code`; the recovery-phrase skip (0002 §4.2) recorded as vault settings key 3 `recovery_skipped_at` (development value for the 1.16 freeze). These dependencies are now approved for 1.10b's standing approval. Raised, not decided: 0011 has no command to adopt a vault with a missing or mismatched anchor (suggested for 1.13/1.14).
 
 ## Execution log
+
+- 2026-10-27: Phase 1.10c implemented as owner-approved plan 0015 (D1/D2 and
+  authorization for necessary correctness fixes). Added `copy`, `totp --copy`,
+  `generate --copy`, config/timeout preflight, foreground countdown and signal
+  cleanup with vault keys/metadata dropped before serving. Private Linux X11
+  adapter (including usable XWayland) uses sensitive hints, bounded INCR/I/O,
+  server timestamps and ownership-safe window release. Maintained x11rb 0.13.2
+  source uses SecretBytes for outgoing buffering and validates incoming lengths
+  before allocation; lifetime input is capped and FDs rejected. No arboard or
+  Windows license exception needed; two recorded vet exemptions. CI runs private
+  Xvfb, checker regressions and locked transport tests. All root gates, deny/vet
+  pass (474 tests, 2 ignored); 12 transport tests pass. Network-namespace
+  isolation remains unavailable and explicitly skipped. Native Wayland/other OS
+  adapters and recipient/manager erasure guarantees are not claimed. Changes
+  remain uncommitted. Next fresh session reviews plan 0015 and its local patch
+  before phase 1.11; no new phase begun.
+
+- 2026-10-27: Owner approved plan 0015 D1 and implementation. Prerequisite
+  source trace then found an input-allocation gap in that plan: x11rb's reader
+  forwards unbounded server length fields to a resizing protocol buffer, and
+  its read/enqueue loop precedes the planned application event-batch limit.
+  The plan explicitly requires stopping for this finding. Plan 0015 records
+  proposed D2: extend the same vendor patch with a 1 MiB packet limit and a
+  4 MiB lifetime read budget, rejecting incoming FDs. Status Blocked pending
+  this correction; no product code/dependency/spec change or clipboard action.
+  Independently completed the D1-approved vendor conventions/header checker
+  groundwork; checker rejection tests and all root gates pass (467 passed,
+  2 ignored). No vendor source or clipboard backend retained yet; D2 remains
+  pending, phase unticked.
+
+- 2026-10-27: Next-phase session reviewed committed phase 1.10b (plan 0014):
+  Approved, no code fixes or escalations. Independent SPDX, fmt, Clippy, locked
+  tests (467 passed, 2 ignored), deny and vet pass; see REVIEW.md. Architect
+  prepared plan 0015 for 1.10c. Source inspection also found stock arboard's
+  sensitive-data destructor checks ownership then unconditionally clears, so
+  dropping it alone has a successor-owner race. D1 proposes direct X11 with a
+  protected x11rb transport patch and narrow vendor conventions; explicit owner
+  approval is required. No new phase implementation, spec/dependency change or
+  checkbox completion; no shared clipboard or phone operation.
 
 - 2026-10-25: Roadmap approved. Next: phase 1.1 in a new session ("next phase").
 - 2026-10-25: Phase 1.1 implemented as plan 0003 (standing approval). Workspace, toolchain pin, lints, `cargo deny`/`cargo vet`, SPDX check, CI, and `qv-crypto` (protected memory, process hardening, fail-closed RNG). All gates green locally; the first hosted CI run is pending the owner's push. Not reviewed yet: the next session reviews it first. Next: phase 1.2 ("next phase").
@@ -882,3 +937,90 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
   Fixed EOF-CR handling, recursive listing and retained path prefixes, with
   regression tests and incremental listing/search output. Phase 1.10a fixes
   await fresh-context review; no new phase started. See plan 0011's log for gates.
+
+- 2026-10-26: Fresh-context review approved plan 0011 remediation; phase
+  1.10a is Reviewed. EOF-CR and deep-traversal findings resolved, no further
+  code fixes or escalations. Independent SPDX, fmt, Clippy and locked tests
+  passed (456 passed, 2 ignored); network isolation remains unverified here.
+
+- 2026-10-26: Plan [0012](../0012-cli-edit-trash/PLAN.md) proposes editing,
+  trash and signal cleanup as a revised 1.10b, with clipboard in 1.10c.
+  Source inspection found ordinary non-zeroizing plaintext buffers in
+  arboard's X11 storage and x11rb's outgoing transport. Existing arboard
+  approval does not settle that integration issue. Stopped for owner D1
+  (scope split); standing approval does not apply. No implementation or
+  phase checkbox change. Phase 1.9 still needs physical-device access.
+
+- 2026-10-26: Owner corrected the session's phase selection: proceed with
+  unfinished phase 1.9, not 1.10b. Unapproved plan 0012 is Abandoned; its
+  proposed split never took effect. Phone is now reachable via the owner's
+  adb server at localhost:5037. Read-only model/API/ABI/RAM queries confirm
+  the D7 baseline (model 2412DPC0AG, API 35, arm64, about 11 GiB RAM).
+  Owner requires device work to be limited to the locally built spike and
+  relevant diagnostics; no rooting, personal-data access, security-setting
+  changes or deletion of existing apps/data. No APK installed yet.
+
+- 2026-10-26: Phase 1.9 planned as [0013](../0013-ui-feasibility/PLAN.md),
+  Proposed. Phone access resolved; prerequisite evidence is in REPORT.md.
+  Standing approval does not apply yet: direct GTK/JNI bindings are outside
+  the candidate table, and Draft 0008 §4 is outside D5's named sections.
+  D1/D2 need the owner's go-ahead. No implementation, install or phase tick.
+
+- 2026-10-26: Owner resolved D8: use Dioxus and standard webview input; stop
+  treating inability to wipe every framework copy as a blocker. Approved
+  amendments to 0008/0009 and matching cross-references in 0002/0012,
+  architecture, agent guidance and plan 0013. Application Rust secret handling,
+  lock/cancellation, no-log/persistence, OS prerequisites and active-content
+  requirements remain. No GTK/JNI input workaround, fork or custom engine.
+
+- 2026-10-26: Plan 0013 revision implements the owner's Dioxus input decision
+  in specs/docs and starts the isolated spike. Controller tests and host UI
+  compilation/Clippy pass, but four upstream dependency advisories fail the
+  unchanged advisory policy. D3 requests their disposition for the disposable
+  spike; no ignores added. GUI linking also needs libxdo development files;
+  device/runtime/benchmark evidence remains pending. Phase 1.9 stays unticked,
+  plan Blocked. No phone install or personal-data/settings operation.
+
+- 2026-10-27: Phase 1.9 continues under plan 0013. Owner installed libxdo and
+  authorized the documented spike-only advisory exceptions. Linux runtime and
+  five full-profile unlock samples observed; root/spike gates and isolated
+  deny/vet pass. Android arm64 APK builds and is inspected. Phone installation
+  succeeded after owner resolved its restriction, but initial UI was white:
+  restored Dioxus-required Android socket permission and loopback-only network
+  policy omitted by the custom manifest. Rebuild/reinspection and fresh install
+  follow owner uninstall request. Device flow/measurements remain pending;
+  phase stays unticked. No phone settings or personal data touched by the agent.
+
+- 2026-10-27: Phase 1.9 Implemented (plan 0013). Owner confirmed physical
+  Android create/edit/reopen, Home/background lock, screenshot refusal and API
+  availability probe. Retained five full-profile unlock samples per platform:
+  Linux median408ms, Android median865ms. Actual app-only RSS samples and limits
+  in REPORT.md. Restored Dioxus loopback packaging and canonical app root without
+  weakening store checks. All final root/spike gates plus deny/vet pass. Adapter,
+  webview release-hardening and broader-device gaps remain documented; this is
+  feasibility, not production validation. Next session reviews with fresh context.
+
+- 2026-10-27: Phase 1.9 fresh-context review approved (plan 0013,
+  REVIEW.md): all independent root/spike gates pass, no fixes or new blocking
+  feasibility findings. Reviewed retained device evidence; no new phone actions.
+  Next remaining phase is 1.10b. Architect prepared plan 0014, Proposed:
+  editing/trash/signals first, clipboard in a separately designed 1.10c.
+  Reconfirmed arboard plaintext retention, x11rb write-buffer copies and
+  unconditional clear semantics; no application clipboard code exists yet.
+  Owner decision D1 is pending; the scope split is not applied or approved.
+  Session protocol step 4 prevents implementation until that decision. No phase
+  checkbox, dependency policy, production code or spec changed for this proposal.
+
+- 2026-10-27: Owner approved plan 0014 D1 option A: split remaining CLI into
+  1.10b editing/trash/signals and 1.10c clipboard; implement 0014 now.
+
+- 2026-10-27: Phase 1.10b implemented as owner-approved plan 0014: add/edit,
+  prompted notes/protected values and -i, mkdir -p/mv/rm, trash ls/restore/empty,
+  safe SIGINT/TERM/HUP flag handling, bounded input polling and terminal/alternate-
+  screen restoration. All gates including deny/vet pass; 467 tests pass with
+  2 ignored. PTY persistence/refusal/signal tests and offline write/restore flow
+  pass; blocked-network namespace check remains unavailable and is reported as
+  skipped. Only approved signal-hook/registry added, with two recorded initial
+  vet exemptions. Core/crypto/model/store APIs and formats unchanged; no spec
+  promoted to Implemented. Changes uncommitted. Next fresh session reviews
+  plan 0014, then plans 1.10c clipboard integration and its remaining decisions.

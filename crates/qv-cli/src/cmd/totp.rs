@@ -15,6 +15,11 @@ use crate::json::Json;
 use crate::out::Out;
 
 pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
+    let copy_options = if m.get_flag("copy") {
+        Some(crate::clipboard::options(ctx, m)?)
+    } else {
+        None
+    };
     let session = ctx.unlock()?;
     let addr = m.get_one::<String>("entry").map_or("", String::as_str);
     let handle = address::entry(&session, addr)?;
@@ -29,6 +34,13 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
         .ok_or_else(|| CliError::new(OTHER, "the entry has no TOTP field"))?;
     let now = session.totp(field.handle)?;
     session.lock();
+    if let Some(options) = copy_options {
+        let value = super::copy::protected_copy(now.code.expose_secret().as_bytes())?;
+        drop(now);
+        drop(detail);
+        drop(session);
+        return crate::clipboard::hold(value, options);
+    }
     let mut out = Out::stdout();
     if ctx.json {
         let mut j = Json::new(&mut out);

@@ -1,0 +1,76 @@
+diff --git a/crates/qv-store/src/error.rs b/crates/qv-store/src/error.rs
+index a274882..7a130f6 100644
+--- a/crates/qv-store/src/error.rs
++++ b/crates/qv-store/src/error.rs
+@@ -130,6 +130,7 @@ impl From<ModelError> for StoreError {
+ 
+ /// Maps a SQLite error without keeping its message.
+ pub(crate) fn sqlite_err(e: &rusqlite::Error) -> StoreError {
++    eprintln!("QV_SPIKE_SQLITE_CODE {:?}", e.sqlite_error().map(|e| e.extended_code));
+     use rusqlite::ErrorCode;
+     match e.sqlite_error_code() {
+         Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked) => StoreError::Locked,
+@@ -182,6 +183,7 @@ pub(crate) fn full_err(pages: u64, max_pages: u64, growth: u64) -> StoreError {
+ /// Maps an OS error without keeping its message.
+ #[cfg(any(target_os = "linux", target_os = "android"))]
+ pub(crate) fn errno_err(e: rustix::io::Errno) -> StoreError {
++    eprintln!("QV_SPIKE_ERRNO {}", e.raw_os_error());
+     use rustix::io::Errno;
+     match e {
+         Errno::NOENT => StoreError::NotFound,
+diff --git a/crates/qv-store/src/sqlite.rs b/crates/qv-store/src/sqlite.rs
+index 30b3916..dd2b909 100644
+--- a/crates/qv-store/src/sqlite.rs
++++ b/crates/qv-store/src/sqlite.rs
+@@ -193,14 +193,17 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection, StoreError> {
+ pub(crate) fn harden(conn: &Connection, budget: &StepBudget) -> Result<(), StoreError> {
+     let e = |e: rusqlite::Error| sqlite_err(&e);
+     for &(flag, name, value) in DB_CONFIG {
++        eprintln!("QV_SPIKE_STAGE db-config {name}");
+         conn.set_db_config(flag, value).map_err(e)?;
+         check(name, conn.db_config(flag).map_err(e)? == value)?;
+     }
+     for &(limit, name, value) in LIMITS {
++        eprintln!("QV_SPIKE_STAGE limit {name}");
+         conn.set_limit(limit, value).map_err(e)?;
+         check(name, conn.limit(limit).map_err(e)? == value)?;
+     }
+     for (name, set, expect) in int_pragmas() {
++        eprintln!("QV_SPIKE_STAGE pragma {name}");
+         conn.pragma_update(None, name, set).map_err(e)?;
+         let got: i64 = conn
+             .pragma_query_value(None, name, |r| r.get(0))
+@@ -246,6 +249,7 @@ mod tests {
+             assert_eq!(conn.db_config(flag).unwrap(), value);
+         }
+         for &(limit, name, value) in LIMITS {
++        eprintln!("QV_SPIKE_STAGE limit {name}");
+             assert_eq!(conn.limit(limit).unwrap(), value, "{name}");
+         }
+         for (name, _, expect) in int_pragmas() {
+diff --git a/crates/qv-store/src/vault.rs b/crates/qv-store/src/vault.rs
+index e42a4f3..88826d9 100644
+--- a/crates/qv-store/src/vault.rs
++++ b/crates/qv-store/src/vault.rs
+@@ -530,7 +530,9 @@ impl VaultFile {
+             Err(rustix::io::Errno::NOENT) => {}
+             Err(e) => return Err(errno_err(e)),
+         }
++        eprintln!("QV_SPIKE_STAGE parent");
+         fs::check_parent(path)?;
++        eprintln!("QV_SPIKE_STAGE temporary");
+         let (lock, temp) = fs::create_temp(path)?;
+         let mut anchored = None;
+         let built = build(&temp, password, &name).and_then(|(vk, replica, anchor)| {
+@@ -654,8 +656,11 @@ fn build(
+         return Err(StoreError::Internal);
+     }
+     fs::check_sidecars(temp)?;
++    eprintln!("QV_SPIKE_STAGE sqlite-open");
+     let mut conn = open_connection(temp)?;
++    eprintln!("QV_SPIKE_STAGE harden");
+     harden(&conn, &StepBudget::new())?;
++    eprintln!("QV_SPIKE_STAGE build-body");
+     conn.pragma_update(None, "page_size", 4096)
+         .map_err(|e| validation_err(&e))?;
+ 

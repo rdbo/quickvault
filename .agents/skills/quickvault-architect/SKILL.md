@@ -12,6 +12,10 @@ code or tests, and you do not resolve the owner's open design questions.
 `AGENTS.md` (auto-loaded) holds the ground rules and context budget rules.
 Use the topic map in `.agents/README.md` when needed to locate relevant specs.
 
+For the sole approved vendored package, x11rb 0.13.2, follow
+`third-party/README.md`. Plan provenance, exact patch scope and focused dependency
+tests; upstream headers/lints are retained. Product code keeps workspace rules.
+
 ## Process
 
 ### 1. Pin down the intent
@@ -55,8 +59,11 @@ Apply these, and say in the plan where each one matters:
   secret wrappers, validated/bounded decoded values).
 - **Hostile input:** bound sizes before allocating and authenticate before
   parsing (0004 §4, §6). Unknown versions or features fail closed.
-- **Secrets:** say which types hold secrets and how they're zeroized and kept out
-  of `Debug`, logs, errors and argv (0008, 0011 §3).
+- **Secrets:** identify protected Rust containers, bounds, lifetime and cleanup,
+  and keep secrets out of Debug, logs, errors and argv (0008, 0011 §3). Use
+  the owner's selected Dioxus/webview input under 0008 §1.1/§4.4; document
+  framework/OS copy limits instead of requiring native dialogs or an engine
+  fork solely for deterministic wiping. OS adapters remain feature-specific.
 - **Crypto:** use only reviewed crates pinned to the 0002 profiles. Never plan a
   hand-rolled primitive. Name the context and domain-separation labels.
 - **Durability:** spell out the transaction and crash-point ordering for any

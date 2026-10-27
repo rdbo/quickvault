@@ -35,7 +35,7 @@ const CHAR_FLAGS: [&str; 5] = [
 const PASSPHRASE_FLAGS: [&str; 1] = ["capitalize"];
 
 /// The settings the options ask for, or `None` without options.
-fn from_options(m: &ArgMatches) -> Result<Option<GeneratorSettings>, CliError> {
+pub(crate) fn from_options(m: &ArgMatches) -> Result<Option<GeneratorSettings>, CliError> {
     let chars = m.contains_id("length")
         || m.contains_id("exclude")
         || CHAR_FLAGS.iter().any(|f| m.get_flag(f));
@@ -87,6 +87,11 @@ fn from_options(m: &ArgMatches) -> Result<Option<GeneratorSettings>, CliError> {
 }
 
 pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
+    let copy_options = if m.get_flag("copy") {
+        Some(crate::clipboard::options(ctx, m)?)
+    } else {
+        None
+    };
     let generated: Generated = match from_options(m)? {
         Some(settings) => qv_core::generate(&settings)?,
         None => match crate::select::selected_vault(ctx.vault.as_deref(), &ctx.env)? {
@@ -100,6 +105,21 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
         },
     };
     let estimate = generated.estimate();
+    if let Some(options) = copy_options {
+        let value = super::copy::protected_copy(generated.expose_secret().as_bytes())?;
+        drop(generated);
+        let mut err = Out::stderr();
+        err.raw(&format!(
+            "{:.1} bits ({})\n",
+            estimate.bits,
+            label(estimate.strength)
+        ));
+        if estimate.bits < 64.0 {
+            err.raw("warning: less than 64 bits; a longer password or more words is safer\n");
+        }
+        err.flush()?;
+        return crate::clipboard::hold(value, options);
+    }
     let mut out = Out::stdout();
     if ctx.json {
         let mut j = Json::new(&mut out);

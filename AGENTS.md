@@ -83,12 +83,21 @@ to commit it first. Preserve the fresh-context review requirement.
   by SHA, with gates plus deny/vet (D2).
 - Every source starts with `// SPDX-License-Identifier: AGPL-3.0-or-later`
   (shell scripts use `#`, after the shebang); CI checks headers (D3).
+  The sole approved vendored exception is `third-party/x11rb` 0.13.2 (plan
+  0015): retain upstream licenses/headers/lints, exclude it from the product
+  workspace and validate package identity/provenance in the header checker.
+  QuickVault adapter code still follows all product header/lint rules. Review
+  the local vendor patch as maintained application code; run its focused tests.
 - Crates opt into workspace lints (`[lints] workspace = true`): `unsafe_code`
   forbidden; `unwrap`/`expect`/`panic!` denied outside tests. `unsafe` requires
   plan permission and a `// SAFETY:` comment.
-- Secrets live only in `qv_crypto::{SecretBytes, SecretArray}`, accessed via
-  `expose_secret*`; zeroize, no `Debug`/`Display`, never in logs, errors, panics
-  or argv (0008, 0011 §3). Surface lock/hardening failure status values.
+- Application-controlled Rust secrets live in `qv_crypto::{SecretBytes,
+  SecretArray}`, accessed via `expose_secret*`; zeroize, no secret-bearing
+  `Debug`/`Display`, logs, errors, panics or argv (0008, 0011 §3). Dioxus input
+  and framework/OS intermediates follow 0008 §1.1/§4.4: bound input, promptly
+  convert to protected Rust containers, clear controls/state, and document
+  best-effort cleanup limits. Framework copies alone do not require native
+  dialogs or a custom engine. Surface lock/hardening failure status values.
 - Never implement crypto primitives; use reviewed crates pinned to 0002
   profiles. Bound untrusted input before allocating, authenticate before parsing
   (0004 §4, §6); no `unwrap`/`expect` on untrusted data.

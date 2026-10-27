@@ -2,9 +2,13 @@
 
 | Verdict | Reviewed | Diff reviewed |
 |---------|----------|---------------|
-| Changes requested | 2026-10-26 | Phase 1.10a paths in `git diff b270ecf..5ea17f9`; clean tree at entry |
+| Approved | 2026-10-26 | Fresh-context remediation review: `git diff 5ea17f9..981c39d`; clean tree at entry |
 
 ## Summary
+
+Fresh-context follow-up approved both remediation fixes on 2026-10-26.
+No further code fixes or escalations. Plan 0011 is now Reviewed. The original
+review and its findings below are retained as historical evidence.
 
 The CLI foundation and read commands are present, with PTY integration tests,
 escaped output, core-only vault access and documented dependency decisions.
@@ -127,3 +131,34 @@ This follow-up records remediation; it does not replace the historical
 review verdict or provide fresh-context approval. Final verification results
 are recorded in PLAN.md. A fresh session must review these fixes before
 marking plan 0011 Reviewed or proceeding to the next roadmap phase.
+
+## Fresh-context remediation review — 2026-10-26
+
+**Verdict: Approved.** Reviewed the owner-approved R1–R3 revision, its
+execution log and diff, affected callers and tests against 0011 §2–3.2,
+§4 Browsing, §5–6, 0008 §1 and 0012 §1–2. No out-of-scope code changes.
+
+- Finding 1 resolved: only LF permits stripping the preceding CR. EOF
+  preserves CR, including at the exact byte bound; CRLF framing and
+  over-limit cases have permanent assertions. Reads stay bounded and
+  secret buffers are zeroized.
+- Finding 2 resolved: traversal and destruction use flat heap structures.
+  Parent indices share escaped path components; full paths are temporary
+  zeroizing strings with capacity computed before filling. Listing and
+  search flush rows/objects, preserving JSON separator state and propagating
+  write errors. Branching order and non-recursive behavior are covered.
+- The 50,000-level test exercises production traversal with a synthetic
+  loader and separately constructs/drops the component arena. Persisted
+  fixtures cover integration and output; this is not evidence of a maximum
+  size persisted vault or a security proof.
+
+No reviewer code fixes. Independent checks passed:
+`sh scripts/check-spdx.sh`, `cargo fmt --check`,
+`cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`
+(456 passed, 0 failed, 2 ignored). Logs:
+`/tmp/qv-phase-review-{spdx,fmt,clippy,test}.log`.
+Deny/vet were not required anew: remediation has no dependency or lockfile
+changes. `unshare -rn true` still fails with `No space left on device`
+(`/tmp/qv-phase-review-unshare.log`); isolation evidence remains outstanding.
+Existing phase deferrals (clipboard/signals, editing, anchor recovery CLI,
+strength-estimator limitations) remain as recorded in PLAN.md.

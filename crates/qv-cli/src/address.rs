@@ -27,6 +27,7 @@ use crate::out::escape_str;
 /// What an address must name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Want {
+    Any,
     Entry,
     Group,
 }
@@ -195,7 +196,7 @@ fn ambiguous(addr: &str, matches: &[ItemHandle], paths: &Paths) -> CliError {
 fn wanted(item: &ItemHandle, want: Want) -> bool {
     matches!(
         (item, want),
-        (ItemHandle::Entry(_), Want::Entry) | (ItemHandle::Group(_), Want::Group)
+        (_, Want::Any) | (ItemHandle::Entry(_), Want::Entry) | (ItemHandle::Group(_), Want::Group)
     )
 }
 
@@ -219,7 +220,7 @@ pub(crate) fn resolve(s: &Session, addr: &str, want: Want) -> Result<ItemHandle,
     let root = s.root()?;
     let Some((last, parents)) = parsed.segments.split_last() else {
         return match want {
-            Want::Group => Ok(ItemHandle::Group(root)),
+            Want::Group | Want::Any => Ok(ItemHandle::Group(root)),
             Want::Entry => Err(not_found(addr)),
         };
     };
@@ -246,6 +247,19 @@ pub(crate) fn resolve(s: &Session, addr: &str, want: Want) -> Result<ItemHandle,
     }
     let listing = s.list(group)?;
     let hits: Vec<ItemHandle> = match want {
+        Want::Any => listing
+            .groups
+            .iter()
+            .filter(|g| g.name.expose() == last.as_str())
+            .map(|g| ItemHandle::Group(g.handle))
+            .chain(
+                listing
+                    .entries
+                    .iter()
+                    .filter(|e| !parsed.trailing_slash && e.title.expose() == last.as_str())
+                    .map(|e| ItemHandle::Entry(e.handle)),
+            )
+            .collect(),
         Want::Group => listing
             .groups
             .iter()

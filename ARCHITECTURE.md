@@ -69,8 +69,9 @@ future designs, not requirements to prebuild into every subsystem.
    is not promised.
 6. **Minimize plaintext.** qv-core owns session/authorization policy; the trusted
    client includes the Rust subsystems, platform adapters and privileged frontend.
-   Protected values stay encrypted when idle, native secure controls collect
-   secret input, and clipboard/autofill bypass the webview. Handles reduce copies
+   Protected values stay encrypted when idle; standard Dioxus controls collect
+   secret input with bounded lifetimes and best-effort cleanup. Framework/OS
+   copies have documented limits. Clipboard/autofill bypass the webview. Handles reduce copies
    but do not isolate secrets from a compromised authorized UI.
 7. **Reviewed building blocks and compositions.** Use reviewed implementations,
    recorded versions/audits and vectors. The pairing/session/migration protocols
@@ -110,8 +111,23 @@ metadata index and search over non-protected fields, on-demand decryption,
 causal entry/group edits, the trash with final tombstones, read-only conflict
 surfacing and vault settings including generator defaults, plus the
 unverified header view and the zxcvbn master-password estimate) and `qv-cli`
-(`qvault` with `init`, `info`, `ls`, `search`, `show`, `totp` and `generate`;
-secret-safe prompts, escaped and JSON output, exit codes).
+(`qvault` with `init`, `info`, `ls`, `search`, `show`, `totp`, `generate`,
+`add`, `edit`, `mv`, `mkdir`, `rm`, `trash ls|restore|empty`, `copy` and
+`totp`/`generate --copy`; protected
+prompts/notes, signal cancellation and terminal restoration, escaped and JSON
+output, exit codes). Its private Linux X11 clipboard adapter (including usable
+XWayland) drops keys/metadata before foreground serving, uses protected outgoing
+buffers and bounded incoming/INCR state, and releases only its own window.
+Native Wayland is not implemented; OS/recipient/manager copies remain outside
+application erasure control. The transport patch is maintained under
+`third-party/x11rb` (provenance and checks in `third-party/README.md`).
+The isolated `spikes/ui-feasibility/` crate is a non-production Dioxus
+prototype with standard webview input and a qv-core fixture controller. Its
+controller tests and real Linux/Android create/edit/reopen, Android background
+lock/screenshot blocking, and bounded unlock measurements pass (plan 0013).
+OS probes establish availability only; production adapter/webview validation
+remains. Four dependency advisory exceptions and initial vet exemptions are
+spike-only. It is outside default workspace members and is not a shipped frontend.
 Other components are planned and are created by the roadmap phase that first
 needs them.
 
@@ -130,9 +146,10 @@ validation, and does not require separate application implementations per OS.
 
 ```mermaid
 flowchart TB
-    ui["CLI / local UI + native secure input"] --> core["qv-core: policy and sessions"]
+    ui["CLI / shared Dioxus UI and input"] --> core["qv-core: policy and sessions"]
     core --> rust["trusted Rust: model, crypto, store, sync"]
     core --> platform["platform: keystore, clipboard, autofill"]
+    ui --> clip["current CLI: private X11 clipboard adapter; keys already dropped"]
     rust --> db[("private active SQLite vault")]
     db -->|"build from verified objects"| snapshot["immutable authenticated archives"]
     snapshot <-->|"backup / archive exchange"| files["user-selected file storage"]
@@ -222,7 +239,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 |---------|--------|
 | Language | Stable Rust; toolchain pinned to 1.98.1 (`rust-toolchain.toml`), which is the MSRV |
 | Build / CI | Cargo virtual workspace (`crates/<name>/`); GitHub Actions with SHA-pinned actions running the gates, `cargo deny` and `cargo vet` |
-| UI | Shared Dioxus app/UI for Android and Linux, subject to early framework validation; native secure-input/OS adapters; iOS later |
+| UI | Owner-selected Dioxus app/UI and standard webview input for Android and Linux; best-effort cleanup with documented framework limits; OS adapters; iOS later |
 | Optional remote server | Axum/Tokio; SQLite first, Postgres deferred |
 | Local storage | rusqlite with bundled SQLite 3.53.2 and trimmed compile options (`.cargo/config.toml`), encrypted immutable objects and manifests; external anchors as per-replica files in the private state directory (`$XDG_STATE_HOME/quickvault/anchors` on Linux; keystore-backed where available later) |
 | Serialization | Bounded RFC 8949 deterministic CBOR |
@@ -233,24 +250,25 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Remote transport | TLS 1.3, X25519MLKEM768, pinned application server identity |
 | Remote account authentication | Pinned RFC 9807 OPAQUE application profile |
 | Direct LAN discovery / enrollment / transport | Not yet selected; requirements and open decisions in 0005 §6 |
-| CLI / license | clap (builder API), rustix termios for no-echo prompts, own escaping and JSON writer; `zxcvbn` (in `qv-core`) for typed master passwords / AGPL-3.0-or-later |
+| CLI / license | clap (builder API), rustix termios/poll for bounded no-echo prompts, signal-hook atomic flags for cancellation, own escaping and JSON writer, private X11 adapter over maintained x11rb 0.13.2 with protected transport buffers and framing budgets; `zxcvbn` (in `qv-core`) for typed master passwords / AGPL-3.0-or-later |
 
 OPAQUE and ordinary TLS certificates are explicit classical exceptions.
 TLS-bound opaque sessions replace custom per-request HMAC/counter signing.
 KDF benchmarks and protocol review are release requirements, not completed work.
 
-Dioxus remains the planned framework, not a validated password-manager platform.
-Evaluate Android and Linux builds, native secure-input integration, lifecycle,
-keystore/biometric access and autofill entry-point feasibility early (0009 §6).
-The existing webview-versus-native-renderer question remains open; changing the
-framework or relaxing security requirements needs an explicit owner decision.
+The owner selected Dioxus with standard webview input on 2026-10-26. Validate
+Android/Linux builds, input cleanup, lifecycle, keystore/biometric access and
+autofill entry-point feasibility early (0009 §6). Native dialogs or an engine
+fork are not required solely for deterministic memory wiping. Framework/OS
+intermediates have bounded, documented cleanup claims; active-content and OS
+release requirements remain. Framework selection is not validation evidence.
 
 ## 7. Delivery and validation
 
 | Phase | Deliverable |
 |-------|-------------|
 | 1 | Shared offline Rust core and early Linux CLI: encrypted vault, manifests, anchors, bounded history/recovery; early Android/Linux shared-UI and platform-adapter feasibility work |
-| 2 | Usable offline Android and Linux apps from the shared UI; validated native input/lifecycle, Android quick unlock/autofill as their gates pass, manually initiated direct LAN sync, conflicts and archive exchange; LAN protocol decisions/review required first |
+| 2 | Usable offline Android and Linux apps from the shared UI; validated input cleanup/lifecycle, Android quick unlock/autofill as their gates pass, manually initiated direct LAN sync, conflicts and archive exchange; LAN protocol decisions/review required first |
 | 3 | Optional closed self-hosted remote server, manually initiated remote sync, accounts, device grants/sessions, server pairing/recovery and remote generation transitions |
 | 4 | Windows |
 | Later | Automatic sync (separate design), third-party import/export, hosted admission, iOS/macOS, extensions and BSD |
@@ -264,7 +282,7 @@ These are specification requirements; no implementation or security validation
 has been completed by documenting them.
 
 Remaining implementation work includes KDF/mobile-budget benchmarks, reviewed
-platform-wrap backends, native-input lifecycle validation, and independent
+platform-wrap backends, input/lifecycle validation, and independent
 protocol review. A witness service is optional future work; v1's documented
 fork/freeze limits do not depend on pretending it exists.
 
@@ -276,8 +294,7 @@ platform gates pass; do not weaken unlock policy to complete an app milestone.
 
 Open design decisions recorded for the owner (not yet decided):
 whether per-device signing identities are worth their complexity
-([0006](specs/0006-server-authentication.md) OQ2), webview versus native Rust UI
-([0008](specs/0008-memory-and-side-channels.md) OQ2), and password slots in local
+([0006](specs/0006-server-authentication.md) OQ2), and password slots in local
 snapshots ([0007](specs/0007-history-and-backups.md) OQ1), plus LAN discovery/addressing,
 authenticated peer enrollment/session design, local peer-state persistence,
 LAN listening lifecycle and peer removal ([0005](specs/0005-synchronization.md)

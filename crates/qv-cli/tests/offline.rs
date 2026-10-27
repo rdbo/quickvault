@@ -72,6 +72,20 @@ fn flow(blocked: bool) {
         let out = piped(cmd(&home, blocked, &a), stdin.as_bytes());
         assert_eq!(out.code, 0, "{args:?}: {}", out.stderr);
     }
+    for args in [
+        &["mkdir", "Work/Nested", "-p"][..],
+        &["add", "Work/Nested/Offline", "--generate", "--pin", "8"],
+        &["edit", "Work/Nested/Offline", "--username", "offline-user"],
+        &["mv", "Work/Nested/Offline", "/"],
+        &["rm", "Offline"],
+        &["trash", "restore", "Offline"],
+        &["show", "Offline"],
+    ] {
+        let mut a = vec!["--password-stdin", "-v", &vault];
+        a.extend_from_slice(args);
+        let out = piped(cmd(&home, blocked, &a), stdin.as_bytes());
+        assert_eq!(out.code, 0, "{args:?}: {}", out.stderr);
+    }
     assert!(!home.config_file().exists());
 }
 
@@ -107,5 +121,16 @@ fn offline_cli_dependencies_are_fixed() {
         .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
         .map(|l| l.split(['.', ' ', '=']).next().unwrap())
         .collect();
-    assert_eq!(deps, ["clap", "qv-core", "rustix", "zeroize"]);
+    assert_eq!(
+        deps,
+        [
+            "clap",
+            "qv-core",
+            "rustix",
+            "signal-hook",
+            "x11rb",
+            "x11rb-protocol",
+            "zeroize"
+        ]
+    );
 }

@@ -2,7 +2,7 @@
 resolver = "3"
 members = ["crates/*"]
 # Fuzz targets have their own workspace and lockfile (fuzz/Cargo.toml).
-exclude = ["fuzz"]
+exclude = ["fuzz", "spikes/ui-feasibility", "third-party/x11rb"]
 
 [workspace.package]
 version = "0.0.0"
@@ -30,8 +30,11 @@ region = "=4.0.1"
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled", "hooks", "limits"] }
 rustix = { version = "=1.1.5", default-features = false, features = ["std", "process"] }
 sha1 = { version = "=0.11.0", default-features = false, features = ["zeroize"] }
+signal-hook = { version = "=0.4.5", default-features = false }
 sha2 = { version = "=0.11.1", default-features = false, features = ["zeroize"] }
 unicode-normalization = { version = "=0.1.26", default-features = false }
+x11rb = { version = "=0.13.2", default-features = false }
+x11rb-protocol = { version = "=0.13.2", default-features = false, features = ["std"] }
 zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
 zxcvbn = { version = "=3.1.1", default-features = false }
 
@@ -54,3 +57,6 @@ panic = "deny"
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
+
+[patch.crates-io]
+x11rb = { path = "third-party/x11rb" }

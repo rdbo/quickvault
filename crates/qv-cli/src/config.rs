@@ -18,7 +18,7 @@
 //! | Key | Type | Meaning |
 //! |-----|------|---------|
 //! | `default_vault` | string, absolute path | the vault used when neither `--vault` nor `QVAULT_PATH` is given |
-//! | `clipboard_timeout` | integer, 1–300 | seconds before `copy` clears the clipboard (phase 1.10b) |
+//! | `clipboard_timeout` | integer, 1–300 | seconds before `copy` clears the clipboard (phase 1.10c) |
 //! | `color` | `"auto"` or `"never"` | colour output; qvault emits no colour yet, so both behave the same |
 
 use std::io::Read;
@@ -40,7 +40,6 @@ pub(crate) enum Color {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Config {
     pub(crate) default_vault: Option<PathBuf>,
-    #[allow(dead_code)] // read by `copy` (phase 1.10b); validated now
     pub(crate) clipboard_timeout: Option<u32>,
     #[allow(dead_code)] // no colour output yet (0011 §5.1 only restricts it)
     pub(crate) color: Option<Color>,

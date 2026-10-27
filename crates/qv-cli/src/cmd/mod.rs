@@ -9,3 +9,8 @@ pub(crate) mod ls;
 pub(crate) mod search;
 pub(crate) mod show;
 pub(crate) mod totp;
+
+pub(crate) mod copy;
+pub(crate) mod edit;
+pub(crate) mod groups;
+pub(crate) mod trash;

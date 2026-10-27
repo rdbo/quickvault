@@ -17,7 +17,7 @@ use crate::out::{Out, escape_str};
 use crate::select::{self, Environment};
 use crate::term;
 
-const ARGV_NOTE: &str = "Values given as arguments (paths, titles, usernames, URLs, queries) are \
+const ARGV_NOTE: &str = "Values given as arguments (paths, titles, usernames, URLs, field values, queries) are \
 visible to other local users and stay in the shell history. Secrets are never accepted as \
 arguments or environment variables.";
 
@@ -134,6 +134,7 @@ pub(crate) fn command() -> Command {
         )
         .subcommand(
             Command::new("totp")
+                .arg(flag("copy", "Copy instead of printing; stay in the foreground until expiry"))
                 .about("Print the entry's current TOTP code and the seconds left")
                 .arg(
                     Arg::new("entry")
@@ -141,7 +142,47 @@ pub(crate) fn command() -> Command {
                         .help("An entry path or @id"),
                 ),
         )
+        .subcommand(
+            Command::new("copy")
+                .about("Copy a field using local X11; close the vault, then stay in the foreground")
+                .after_help("Clipboard recipients/managers may retain copies despite sensitive hints. Native Wayland requires XWayland. Ctrl-C clears only this command's ownership.")
+                .arg(Arg::new("entry").required(true).help("An entry path or @id"))
+                .arg(Arg::new("field").help("Unique field name; defaults to the first secret field"))
+                .arg(count("timeout", "timeout", "Clipboard lifetime in seconds (1–300, default: config or 20)")),
+        )
         .subcommand(generate_command())
+        .subcommand(edit_command(false))
+        .subcommand(edit_command(true))
+        .subcommand(
+            Command::new("mv")
+                .about("Move an entry or group")
+                .arg(Arg::new("item").required(true))
+                .arg(Arg::new("group").required(true)),
+        )
+        .subcommand(
+            Command::new("mkdir")
+                .about("Create a group")
+                .arg(Arg::new("path").required(true))
+                .arg(flag("parents", "Create missing parents").short('p')),
+        )
+        .subcommand(
+            Command::new("rm")
+                .about("Move an entry or group to trash")
+                .arg(Arg::new("item").required(true))
+                .arg(flag("recursive", "Include all group contents").short('r')),
+        )
+        .subcommand(
+            Command::new("trash")
+                .about("Manage the trash")
+                .subcommand_required(true)
+                .subcommand(Command::new("ls").about("List trash"))
+                .subcommand(
+                    Command::new("restore")
+                        .about("Restore a trashed item")
+                        .arg(Arg::new("item").required(true)),
+                )
+                .subcommand(Command::new("empty").about("Permanently delete non-conflicted trash")),
+        )
 }
 
 fn count(name: &'static str, long: &'static str, help: &'static str) -> Arg {
@@ -160,13 +201,17 @@ fn flag(name: &'static str, help: &'static str) -> Arg {
 }
 
 fn generate_command() -> Command {
-    Command::new("generate")
+    generator_args(Command::new("generate")
+        .arg(flag("copy", "Copy instead of printing; stay in the foreground until expiry"))
         .about("Generate a password, passphrase or PIN without saving it")
         .after_help(
             "Without options, uses the selected vault's defaults (unlocking it) or the built-in \
              defaults. Any option starts from the built-in defaults of its mode.",
-        )
-        .arg(count("length", "length", "Characters: password length"))
+        ))
+}
+
+fn generator_args(c: Command) -> Command {
+    c.arg(count("length", "length", "Characters: password length"))
         .arg(flag("no-lower", "Characters: no lowercase letters"))
         .arg(flag("no-upper", "Characters: no uppercase letters"))
         .arg(flag("no-digits", "Characters: no digits"))
@@ -195,14 +240,82 @@ fn generate_command() -> Command {
         .arg(count("pin", "pin", "A PIN of N digits"))
 }
 
+fn edit_command(edit: bool) -> Command {
+    let mut c = Command::new(if edit { "edit" } else { "add" })
+        .about(if edit {
+            "Edit an entry"
+        } else {
+            "Create an entry"
+        })
+        .after_help(ARGV_NOTE)
+        .arg(
+            Arg::new("entry")
+                .required(true)
+                .help("Entry path or @id (new path for add)"),
+        )
+        .arg(Arg::new("type").long("type").value_name("HINT"))
+        .arg(
+            Arg::new("username")
+                .long("username")
+                .value_name("VALUE")
+                .num_args(0..=1)
+                .default_missing_value(""),
+        )
+        .arg(
+            Arg::new("url")
+                .long("url")
+                .value_name("VALUE")
+                .num_args(0..=1)
+                .default_missing_value(""),
+        )
+        .arg(flag(
+            "notes",
+            "Prompt for multiline notes (Ctrl-D ends input; never argv)",
+        ))
+        .arg(
+            flag(
+                "interactive",
+                "Prompt for all field values; argv values are visible in process lists",
+            )
+            .short('i'),
+        )
+        .arg(
+            Arg::new("field")
+                .long("field")
+                .action(ArgAction::Append)
+                .value_name("NAME=VALUE")
+                .help("Set an unprotected text field; with -i use NAME to prompt instead"),
+        )
+        .arg(
+            Arg::new("secret-field")
+                .long("secret-field")
+                .action(ArgAction::Append)
+                .value_name("NAME")
+                .help("Name of a secret field to prompt for (never its value)"),
+        )
+        .arg(flag(
+            "generate",
+            "Generate the password using vault defaults or generator flags",
+        ));
+    if edit {
+        c = c.arg(Arg::new("title").long("title").value_name("TITLE"));
+        for name in ["remove-field", "protect", "unprotect"] {
+            c = c.arg(
+                Arg::new(name)
+                    .long(name)
+                    .action(ArgAction::Append)
+                    .value_name("NAME"),
+            );
+        }
+    }
+    generator_args(c)
+}
+
 /// Global options and the environment, shared by every command.
 pub(crate) struct Ctx {
     pub(crate) vault: Option<PathBuf>,
     pub(crate) password_stdin: bool,
     pub(crate) json: bool,
-    // Read by the destructive commands of phase 1.10b (`trash empty`); no
-    // 1.10a command confirms anything `--yes` may skip.
-    #[allow(dead_code)]
     pub(crate) yes: bool,
     pub(crate) env: Environment,
 }
@@ -237,6 +350,7 @@ impl Ctx {
         let password = self.master_password()?;
         let session = core.unlock(path, &password, None)?;
         drop(password);
+        crate::signals::check()?;
         warn_location(session.warnings()?);
         Ok(session)
     }
@@ -305,7 +419,14 @@ fn dispatch(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
         Some(("search", s)) => crate::cmd::search::run(ctx, s),
         Some(("show", s)) => crate::cmd::show::run(ctx, s),
         Some(("totp", s)) => crate::cmd::totp::run(ctx, s),
+        Some(("copy", s)) => crate::cmd::copy::run(ctx, s),
         Some(("generate", s)) => crate::cmd::generate::run(ctx, s),
+        Some(("add", s)) => crate::cmd::edit::run(ctx, s, false),
+        Some(("edit", s)) => crate::cmd::edit::run(ctx, s, true),
+        Some(("mv" | "mkdir" | "rm", s)) => {
+            crate::cmd::groups::run(ctx, m.subcommand_name().unwrap_or_default(), s)
+        }
+        Some(("trash", s)) => crate::cmd::trash::run(ctx, s),
         _ => Err(CliError::new(OTHER, "unknown command")),
     }
 }
@@ -349,6 +470,11 @@ mod tests {
                 let takes_value = a.get_num_args().is_some_and(|n| n.takes_values())
                     || matches!(a.get_action(), ArgAction::Set | ArgAction::Append);
                 if !takes_value {
+                    continue;
+                }
+                if id == "secret-field" {
+                    assert!(path.ends_with(" add") || path.ends_with(" edit"));
+                    assert_eq!(a.get_value_names().unwrap(), &["NAME"]);
                     continue;
                 }
                 for word in [

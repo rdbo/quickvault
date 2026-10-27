@@ -196,6 +196,34 @@ impl Interactive {
         }
     }
 
+    pub fn signal(&self, signal: rustix::process::Signal) {
+        let pid = rustix::process::Pid::from_raw(i32::try_from(self.child.id()).unwrap()).unwrap();
+        rustix::process::kill_process(pid, signal).unwrap();
+    }
+
+    /// Keep an observation descriptor while the child exits, so tests can
+    /// inspect restored terminal state. Tests close it before finish drains EOF.
+    pub fn terminal_observer(&self) -> OwnedFd {
+        let name = rustix::pty::ptsname(&self.master, Vec::new()).unwrap();
+        rustix::fs::open(
+            name.as_c_str(),
+            OFlags::RDWR | OFlags::NOCTTY,
+            Mode::empty(),
+        )
+        .unwrap()
+    }
+
+    pub fn wait_exited(&mut self) {
+        let deadline = Instant::now() + TIMEOUT;
+        while self.child.try_wait().unwrap().is_none() {
+            self.read_some(Duration::from_millis(20));
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for cancelled process"
+            );
+        }
+    }
+
     /// Reads what is available within `wait`; `false` once the child has
     /// closed the terminal.
     fn read_some(&mut self, wait: Duration) -> bool {

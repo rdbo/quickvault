@@ -51,7 +51,7 @@ the user requests sync; automatic sync and background retries are deferred.
 1.6. `qv-app` MUST use a shared cross-platform application and UI codebase for
 Android and Linux: reuse screens, navigation, state and vault workflows, with
 layouts adapted for touch and desktop. The shared Rust core remains responsible
-for vault behavior. Isolate necessary OS-specific secure input, key storage,
+for vault behavior. Isolate necessary OS-specific key storage,
 biometrics, lifecycle, clipboard and autofill integration in `qv-platform` and
 minimal packaging/entry-point glue. Framework APIs and reviewed libraries MAY
 implement these adapters where they satisfy the security contract. Do not
@@ -99,8 +99,10 @@ The OS controls how password managers plug in:
 This is a packaging/OS constraint, not a language one: the logic can be Rust.
 Plan:
 
-4.1. Dioxus provides the main UI; native secure input and OS autofill controls
-are required security adapters, not optional attempts to eliminate platform glue.
+4.1. Dioxus provides the shared UI, including standard webview secret-input
+controls under 0008 §1.1/§4.4. Native OS autofill, keystore, biometric and
+lifecycle entry points remain platform adapters. No native password dialog
+is required solely to avoid framework-managed memory copies.
 
 4.2. Autofill logic (matching, unlock, fill) lives in Rust (`qv-platform`).
 The OS-facing entry points are the **thinnest possible glue**: on Android a
@@ -109,7 +111,7 @@ on iOS a minimal extension linking the Rust static library.
 
 4.3. Autofill uses an implemented authenticated platform-wrap backend. If it
 is unavailable/expired or a full KDF exceeds extension limits, hand off to the
-main app for native secure input; never weaken the vault KDF. Process separation
+main app for the Dioxus unlock flow; never weaken the vault KDF. Process separation
 uses an authenticated OS-protected channel with short-lived scoped results,
 not a shared plaintext key file. Verify app signing identity and web origin using
 platform association APIs; never match by app label, substring or unverified
@@ -124,20 +126,22 @@ custom scheme. Require choosing an unresolved credential version before filling.
 
 ### 6. Early cross-platform framework validation
 
-Dioxus is the planned shared UI framework, subject to the existing renderer/
-framework decision (0008 OQ2). Validate it on Android and Linux during phase 1,
-before building the full application. Demonstrate shared vault-list and
-entry-editing flows against the same core, offline persistence, required native
-secure-input integration and lifecycle locking/cancellation on an Android
-device. Check access to keystore/biometrics, clipboard and the autofill service
+Dioxus with its standard webview renderer and input controls is the owner's
+selected shared UI framework (2026-10-26; 0008 OQ2). Validate integration on
+Android and Linux during phase 1, before building the full application.
+Demonstrate shared vault-list and entry-editing flows against the same core,
+offline persistence, bounded secret-input cleanup and lifecycle
+locking/cancellation on an Android device. Check access to keystore/biometrics, clipboard and the autofill service
 entry point; identify required adapter/packaging work and benchmark unlock and
 memory budgets. A successful empty app build is insufficient evidence of fit.
 Feature-specific release gates still apply; this feasibility work does not
 require shipping every adapter or implementing iOS first.
 
-If the planned framework cannot meet the security contract, document the gap
-and seek an explicit framework/renderer decision; do not silently weaken native
-secret handling or create separate Android/Linux UI implementations.
+Document integration/security gaps and address them in the relevant phase;
+do not infer complete framework-memory erasure or require a replacement renderer
+merely because internal copies are outside application control. Active-content,
+session, OS and release requirements remain in force. A framework replacement
+requires a new owner decision; do not create separate Android/Linux app UIs.
 
 The [Dioxus mobile guide](https://dioxuslabs.com/learn/0.7/guides/platforms/mobile/)
 describes Android/iOS support with a WebView renderer and experimental rendering
@@ -151,17 +155,21 @@ QuickVault implementation readiness or validation (consulted 2026-10-24).
 OS entry points and native adapters are part of the trusted client, with bounded
 authenticated IPC and session cancellation (0008). Validate packaging, access
 groups, backup exclusions and locking on each target. Framework support alone
-does not establish secure input, keystore enforcement or autofill-origin trust.
+does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Open Questions
 
 1. CLI agent process (post-v1): design and IPC security.
-2. Minimum native secure-input/autofill glue and lifecycle integration per OS.
-3. Validate the planned Dioxus framework for the Android-first shared app in
-   phase 1 (§6), including required platform adapters; coordinate the existing
-   renderer/framework choice with 0008 OQ2. No replacement is selected here.
+2. Minimum OS adapter/autofill glue and lifecycle integration per OS.
+3. **Framework choice resolved 2026-10-26 (owner):** use Dioxus and standard
+   webview input. Phase 1 (§6) validates integration and records gaps; it does
+   not reconsider native input or a custom engine just for memory-copy concerns.
 
 ## Changelog
+
+- 2026-10-26: Owner chose Dioxus and standard webview secret input; resolve the
+  renderer choice and update feasibility/autofill handoff wording. Retain
+  platform-specific OS adapters and release validation.
 
 - 2026-10-24: Prioritize Android alongside Linux for initial app development,
   ahead of the remote server; defer iOS. Require shared cross-platform app/UI

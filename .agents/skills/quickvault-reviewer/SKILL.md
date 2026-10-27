@@ -15,6 +15,12 @@ Review the **diff** and the code it touches, not the whole codebase.
 Follow affected callers, tests and spec cross-references as needed to establish
 correctness. Use `.agents/README.md` for navigation, not as review evidence.
 
+For the sole approved vendor package, x11rb 0.13.2, follow
+`third-party/README.md`: verify identity/provenance and the exact diff from the
+hashed upstream archive, then review local patches as maintained application
+code and run their focused tests. Upstream headers/lints remain; product code
+and all other packages retain the ordinary rules. Metadata checks are not audits.
+
 ## Inputs
 
 1. **The plan:** the one the user named, or the most recent `Implemented` plan
@@ -38,8 +44,11 @@ correctness. Use `.agents/README.md` for navigation, not as review evidence.
    limits, concurrency, and crash consistency (transaction and anchor ordering,
    0004 §5 and 0005 §5.4).
 4. **Is it secure?** These points are specific to QuickVault:
-   - Secrets are zeroized, have no `Debug`/`Display`, and never appear in logs,
-     errors, panics or argv (0008, 0011 §3).
+   - Application-controlled Rust secrets are zeroized, have no secret-bearing
+     `Debug`/`Display`, and never appear in logs, errors, panics or argv (0008,
+     0011 §3). Dioxus/framework input follows 0008 §1.1/§4.4: bounds, prompt
+     conversion to protected containers, control/state cleanup and documented
+     residual-copy limits. Do not equate native widgets with guaranteed erasure.
    - Untrusted input is bounded before allocation and authenticated before
      parsing. Exchange files never reach SQLite (0004 §4, §6).
    - MAC and secret comparisons are constant-time (0008 §2).

@@ -1,0 +1,44 @@
+[package]
+name = "qv-ui-feasibility"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98.1"
+license = "AGPL-3.0-or-later"
+publish = false
+
+# Disposable phase-1.9 workspace; no production or default-workspace target.
+[workspace]
+resolver = "3"
+
+[features]
+default = ["desktop"]
+ui = ["dep:dioxus", "dep:dioxus-desktop"]
+desktop = ["ui"]
+mobile = ["ui"]
+
+[[bin]]
+name = "qv-ui-feasibility"
+path = "src/main.rs"
+required-features = ["ui"]
+
+[dependencies]
+dioxus = { optional = true, version = "=0.7.3", default-features = false, features = ["minimal"] }
+dioxus-desktop = { optional = true, version = "=0.7.3", default-features = false, features = ["tokio_runtime"] }
+qv-core = { path = "../../crates/qv-core", version = "=0.0.0" }
+zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
+
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"

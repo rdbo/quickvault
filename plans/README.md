@@ -49,4 +49,8 @@ plan, or a new plan that names the one it supersedes.
 | [0008](0008-vault-file-sqlite/PLAN.md) | Vault file: hardened SQLite, schema, header and keyslots, `qv-store` (roadmap 1.6) | Reviewed |
 | [0009](0009-objects-manifest-anchor/PLAN.md) | Objects, manifests, local head, anchor and the write path, `qv-store` (roadmap 1.7) | Reviewed |
 | [0010](0010-core-sessions/PLAN.md) | qv-core sessions and vault operations, `qv-core` (roadmap 1.8) | Reviewed |
-| [0011](0011-cli-foundation-read/PLAN.md) | CLI foundation, vault and read commands, `qv-cli` (roadmap 1.10a) | Implemented — review fixes awaiting fresh review |
+| [0011](0011-cli-foundation-read/PLAN.md) | CLI foundation, vault and read commands, `qv-cli` (roadmap 1.10a) | Reviewed |
+| [0012](0012-cli-edit-trash/PLAN.md) | CLI editing, trash and signal cleanup (proposed phase 1.10b revision) | Abandoned — wrong phase selection; owner directed phase 1.9 |
+| [0013](0013-ui-feasibility/PLAN.md) | Android/Linux shared-UI feasibility (roadmap 1.9) | Reviewed |
+| [0014](0014-cli-edit-trash/PLAN.md) | CLI editing, trash and signal cleanup (roadmap 1.10b) | Reviewed |
+| [0015](0015-cli-clipboard/PLAN.md) | CLI clipboard: direct X11 adapter and protected transport (roadmap 1.10c) | Implemented |

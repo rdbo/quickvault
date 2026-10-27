@@ -1,0 +1,144 @@
+# cargo-deny configuration (spec 0012 §3): advisories, licenses, bans, sources.
+
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+unmaintained = "all"
+unsound = "all"
+# Owner authorized continuing the disposable spike, 2026-10-26 (plan 0013 D3).
+# These exceptions apply only to synthetic feasibility data, not production.
+ignore = [
+    { id = "RUSTSEC-2024-0429", reason = "glib VariantStrIter: scoped search found no framework call sites; no complete reachability proof; remediate before production" },
+    { id = "RUSTSEC-2026-0097", reason = "rand 0.7.3 log feature is absent in the locked graph; recheck when changing dependencies" },
+    { id = "RUSTSEC-2025-0057", reason = "Unmaintained fxhash in the stock framework tree, accepted for disposable feasibility only" },
+    { id = "RUSTSEC-2024-0370", reason = "Unmaintained proc-macro-error build dependency, accepted for disposable feasibility only" },
+]
+
+[licenses]
+# Only what the current dependency tree needs; extend deliberately.
+allow = [
+    "Apache-2.0",
+    "MIT",
+    # Unicode Character Database tables in unicode-normalization (NFC, spec
+    # 0002 §3.1); owner-approved 2026-10-25 (plan 0005).
+    "Unicode-3.0",
+]
+confidence-threshold = 0.93
+
+[licenses.private]
+# Our own crates are `publish = false` and AGPL-3.0-or-later.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "const_format"
+version = "=0.2.37"
+allow = ["Zlib"]
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "const_format_proc_macros"
+version = "=0.2.37"
+allow = ["Zlib"]
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "cssparser"
+version = "=0.29.6"
+allow = ["MPL-2.0"]
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "cssparser-macros"
+version = "=0.6.1"
+allow = ["MPL-2.0"]
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "dtoa-short"
+version = "=0.3.5"
+allow = ["MPL-2.0"]
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "konst"
+version = "=0.2.20"
+allow = ["Zlib"]
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "konst_macro_rules"
+version = "=0.2.19"
+allow = ["Zlib"]
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "libloading"
+version = "=0.7.4"
+allow = ["ISC"]
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "libloading"
+version = "=0.8.9"
+allow = ["ISC"]
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "option-ext"
+version = "=0.2.0"
+allow = ["MPL-2.0"]
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "rustls-webpki"
+version = "=0.103.16"
+allow = ["ISC"]
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "selectors"
+version = "=0.24.0"
+allow = ["MPL-2.0"]
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "slotmap"
+version = "=1.1.1"
+allow = ["Zlib"]
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "subtle"
+version = "=2.6.1"
+allow = ["BSD-3-Clause"]
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "untrusted"
+version = "=0.9.0"
+allow = ["ISC"]
+
+# Standard Dioxus transitive; isolated spike only (plan 0013).
+[[licenses.exceptions]]
+name = "zlib-rs"
+version = "=0.6.8"
+allow = ["Zlib"]
+
+# Dioxus macro target metadata; only this package/version, not a global allowance.
+[[licenses.exceptions]]
+name = "target-lexicon"
+version = "=0.12.16"
+allow = ["Apache-2.0 WITH LLVM-exception"]

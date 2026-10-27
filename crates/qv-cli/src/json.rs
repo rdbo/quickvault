@@ -29,6 +29,8 @@
 //!   "protected", "value"}]}`; `versions` is the number of conflicting
 //!   versions (1 normally); `path` is `null` for a recovered entry. With
 //!   `--field`, `{"name", "kind", "protected", "value"}`.
+//! - `trash ls`: `{"items": [{"id", "kind", "name", "deleted_at", "conflict"}]}`;
+//!   `kind` is `entry` or `group`, `deleted_at` is RFC 3339 or null.
 //! - `totp`: `{"code", "seconds_remaining"}`.
 //! - `generate`: `{"value", "bits", "strength"}`; `strength` is `weak`,
 //!   `fair`, `strong` or `very strong`.
