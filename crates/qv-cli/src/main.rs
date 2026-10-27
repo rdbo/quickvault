@@ -37,6 +37,7 @@
 #![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 
 mod address;
+mod attachment_files;
 mod cli;
 mod clipboard;
 mod cmd;

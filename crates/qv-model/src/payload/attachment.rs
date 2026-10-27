@@ -18,6 +18,7 @@
 //! untrusted metadata (0003 §6.3).
 
 use std::collections::BTreeSet;
+use zeroize::{Zeroize, Zeroizing};
 
 use qv_encoding::{Decoder, EncodeError, Encoder};
 
@@ -56,6 +57,12 @@ pub struct AttachmentMeta {
 
 crate::redacted_debug!(AttachmentMeta);
 
+impl Drop for AttachmentMeta {
+    fn drop(&mut self) {
+        self.content_hash.zeroize();
+    }
+}
+
 /// Size limit, chunk count and unique chunk IDs.
 pub(crate) fn check(p: &AttachmentMeta) -> Result<(), ModelError> {
     if p.size > MAX_ATTACHMENT_BYTES || p.chunk_object_ids.len() > MAX_CHUNKS {
@@ -91,7 +98,7 @@ pub(crate) fn decode(d: &mut Decoder<'_>) -> Result<AttachmentMeta, ModelError> 
                 }
                 chunks = Some(list);
             }
-            6 => hash = Some(read_array::<32>(d)?),
+            6 => hash = Some(Zeroizing::new(read_array::<32>(d)?)),
             k => keep(&mut ext, k, d)?,
         }
     }
@@ -101,7 +108,7 @@ pub(crate) fn decode(d: &mut Decoder<'_>) -> Result<AttachmentMeta, ModelError> 
         mime: req(mime)?,
         size: req(size)?,
         chunk_object_ids: req(chunks)?,
-        content_hash: req(hash)?,
+        content_hash: *req(hash)?,
         ext,
     };
     check(&meta)?;

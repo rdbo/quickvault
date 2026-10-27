@@ -130,6 +130,26 @@ impl VaultFile {
 }
 
 impl UnlockedVault {
+    /// Unreachable: no UnlockedVault exists on this target.
+    pub fn verify_attachment(
+        &self,
+        _record: RecordId,
+        _version: VersionId,
+        _cancelled: &impl Fn() -> bool,
+    ) -> Result<(), StoreError> {
+        match self.0 {}
+    }
+    /// Unreachable: no UnlockedVault exists on this target.
+    pub fn read_attachment(
+        &self,
+        _record: RecordId,
+        _version: VersionId,
+        _sink: &mut impl std::io::Write,
+        _cancelled: &impl Fn() -> bool,
+    ) -> Result<(), StoreError> {
+        match self.0 {}
+    }
+
     /// Unreachable: no `UnlockedVault` exists on this target.
     pub fn header(&self) -> &Header {
         match self.0 {}
@@ -191,6 +211,16 @@ impl UnlockedVault {
 }
 
 impl Write<'_> {
+    /// Unreachable: no Write exists on this target.
+    pub fn stage_attachment(
+        &mut self,
+        _record: RecordId,
+        _source: &mut impl std::io::Read,
+        _cancelled: &impl Fn() -> bool,
+    ) -> Result<crate::StagedAttachment, StoreError> {
+        match self.0 {}
+    }
+
     /// Unreachable: no `Write` exists on this target.
     pub fn writer_id(&self) -> WriterId {
         match self.0 {}

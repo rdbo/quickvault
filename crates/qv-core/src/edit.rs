@@ -57,11 +57,21 @@ pub(crate) fn commit(ctx: &mut Ctx<'_>, changes: Vec<Change>) -> Result<(), Core
     if changes.is_empty() {
         return Ok(());
     }
+    commit_with(ctx, |_| Ok(changes), &|| false)
+}
+
+/// Shared staging/causal transaction path, including post-durable index repair.
+pub(crate) fn commit_with(
+    ctx: &mut Ctx<'_>,
+    build: impl FnOnce(&mut qv_store::Write<'_>) -> Result<Vec<Change>, CoreError>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<(), CoreError> {
     let now = ctx.now();
     let cancel = ctx.canceller();
     let open = &mut *ctx.open;
     let seq = open.vault.local_seq();
     let mut w = open.vault.write()?;
+    let changes = build(&mut w)?;
     let mut infos = Vec::with_capacity(changes.len());
     for ch in changes {
         let counter = w.reserve_counter()?;
@@ -85,6 +95,9 @@ pub(crate) fn commit(ctx: &mut Ctx<'_>, changes: Vec<Change>) -> Result<(), Core
     #[cfg(test)]
     crate::session::hooks::reached(crate::session::hooks::Point::BeforeCommit);
     cancel.check()?;
+    if cancelled() {
+        return Err(CoreError::Cancelled);
+    }
     let committed = w.commit();
     #[cfg(test)]
     crate::session::hooks::reached(crate::session::hooks::Point::AfterCommit);

@@ -94,7 +94,7 @@ pub use memory::{MemoryProtection, SecretArray, SecretBytes, memory_protection};
 pub use otp::{OtpAlgorithm, OtpCode, hotp};
 pub use password::{Argon2Params, MasterPassword};
 pub use phrase::{PHRASE_WORDS, RecoveryPhrase};
-pub use primitives::{MacTag, ObjectHash, ObjectHasher, object_hash};
+pub use primitives::{ContentHasher, MacTag, ObjectHash, ObjectHasher, object_hash};
 pub use process::{Hardening, ProcessHardening, harden_process};
 pub use profile::{
     DerivationProfile, MacProfile, ObjectHashProfile, PasswordKdfProfile, PasswordWrapProfile,
@@ -102,4 +102,4 @@ pub use profile::{
 };
 pub use rng::{RngError, fill_random, random_array};
 pub use slot::PasswordSlot;
-pub use stored_data::{Sealed, open, seal, sealed_len};
+pub use stored_data::{CHUNK_BYTES, Sealed, open, open_chunk, seal, seal_chunk, sealed_len};

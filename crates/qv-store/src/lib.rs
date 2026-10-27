@@ -115,6 +115,7 @@
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod anchor;
+mod attachment;
 mod crash;
 #[cfg(test)]
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -146,6 +147,7 @@ mod unsupported;
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use anchor::{AnchorDir, MAX_ANCHOR_BYTES};
+pub use attachment::StagedAttachment;
 pub use error::StoreError;
 pub use head::AnchorStatus;
 pub use header::Header;

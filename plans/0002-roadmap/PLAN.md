@@ -429,7 +429,7 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
 
 #### Phase 1.11 — Attachments
 
-- [ ] **Do:** Store attachments in chunks (64 KiB padded chunks, chunk AAD,
+- [x] **Plan:** [0016](../0016-attachments/PLAN.md). **Do:** Store attachments in chunks (64 KiB padded chunks, chunk AAD,
   content hash), stream them under the budgets, release chunks by reference,
   and sanitize save paths. Add CLI commands if D9 = A (with the 0011 amendment
   as the first step).
@@ -868,6 +868,33 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
 - 2026-10-26 (phase 1.10, plan 0011): the owner approved splitting 1.10 into 1.10a/1.10b and decisions D-1–D-6 of plan 0011 as recommended: `zxcvbn 3.1.1` in `qv-core` (0010 §3.2); `clap 4.6.7` builder API only; for 1.10b, `signal-hook 0.4.5` and `arboard 3.6.1` (X11 only, no image support) with per-crate `BSL-1.0` exceptions for `clipboard-win` and `error-code`; the recovery-phrase skip (0002 §4.2) recorded as vault settings key 3 `recovery_skipped_at` (development value for the 1.16 freeze). These dependencies are now approved for 1.10b's standing approval. Raised, not decided: 0011 has no command to adopt a vault with a missing or mismatched anchor (suggested for 1.13/1.14).
 
 ## Execution log
+
+- 2026-10-27: Owner approved plan 0016 D1 and phase 1.11 is Implemented:
+  streamed fixed-size authenticated attachment chunks, measured content hashes,
+  bounded staging inside the existing transaction/anchor path, core scoped
+  handles/lifecycle and `attach add|ls|save|rm`. Applied the approved 0011 file
+  import/export/removal amendment first. Added local model hash cleanup under
+  0008; no dependency, lockfile, primitive or schema change. Final SPDX, fmt,
+  Clippy and locked tests pass (489 passed, 2 ignored), including private-Xvfb
+  regression coverage. New tests cover 10 MiB and chunk boundaries, corrupt
+  roles/hash/length, staged rollback, eight crash points, lock/anchor failure,
+  file changes, unsafe paths and overwrite/successor refusal. Namespace-blocked
+  networking remains unavailable, explicitly not a pass. Changes uncommitted;
+  next fresh session reviews 0016 before phase 1.12. No security proof or spec
+  completion status claimed.
+
+- 2026-10-27: Clean-tree next-phase session reviewed phase 1.10c (plan 0015):
+  Approved, no code fixes/escalations. Independent root gates, deny/vet, patched
+  vendor formatting and 12 transport tests pass; 474 workspace tests pass with
+  2 ignored, including all private-Xvfb tests. Archive hash and exact source
+  changes verified. Network namespace isolation remains unavailable, not a pass.
+  Architect prepared [0016](../0016-attachments/PLAN.md) for phase 1.11, Proposed:
+  streaming authenticated chunks, core lifecycle and `attach add|ls|save|rm`.
+  D9 already chooses CLI attachments; the concrete 0011 amendment includes
+  explicit plaintext save and confirmed permanent attachment removal semantics.
+  Session protocol step 4 requires owner approval for this spec-amending plan.
+  D1 pending; no implementation, normative amendment, dependency change or
+  phase 1.11 tick. Review/planning changes remain uncommitted.
 
 - 2026-10-27: Phase 1.10c implemented as owner-approved plan 0015 (D1/D2 and
   authorization for necessary correctness fixes). Added `copy`, `totp --copy`,

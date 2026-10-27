@@ -9,6 +9,10 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-10-27: Fresh-context review approved phase 1.10c (plan 0015), including
+  independent maintained-transport and private-Xvfb checks. Owner approved
+  plan 0016 and its concrete attachment CLI spec amendment.
+
 - 2026-10-27: Fresh-context review approved phase 1.10b (plan 0014), with
   independent gates passing and no code fixes. The owner approved plan 0015's
   clipboard design and incoming-allocation correction, with continuing authority
@@ -42,6 +46,16 @@ Dates are ISO 8601. Newest first within each section.
   retained; the specs index no longer calls the repository specification-only.
 
 ### Added
+
+- 2026-10-27: Streaming attachments through qv-core and `qvault attach
+  add|ls|save|rm` (plan 0016, phase 1.11). Imports up to 10 MiB use protected
+  chunk buffers, authenticated ordered chunks and complete SHA-256/length
+  checks within the existing transaction/anchor path. Metadata hashes now
+  zeroize on drop and rejected decode. Listing supports JSON; plaintext save
+  requires explicit consent and a new owner-only path, with no overwrite,
+  symlink traversal, temporary plaintext or automatic file opening. Removal
+  confirms permanent causal deletion and prunes by references. Failed/crashed
+  exports can leave incomplete plaintext; independent copies are not erased.
 
 - 2026-10-27: CLI `copy`, `totp --copy` and `generate --copy` (plan 0015,
   phase 1.10c). The private X11 adapter uses sensitive hints, a foreground

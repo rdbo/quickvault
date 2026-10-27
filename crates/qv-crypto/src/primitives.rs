@@ -170,6 +170,42 @@ impl ObjectHasher {
     }
 }
 
+/// Incremental SHA-256 of confidential attachment content; state zeroizes on drop.
+/// No cloning or value-bearing formatting. Dependency scratch copies remain best effort.
+pub struct ContentHasher {
+    inner: Sha256,
+}
+impl core::fmt::Debug for ContentHasher {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("ContentHasher(<redacted>)")
+    }
+}
+impl Default for ContentHasher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl ContentHasher {
+    /// Starts an empty content hash.
+    pub fn new() -> Self {
+        Self {
+            inner: Sha256::new(),
+        }
+    }
+    /// Hashes the next plaintext fragment.
+    pub fn update(&mut self, data: &[u8]) {
+        self.inner.update(data);
+    }
+    /// Finishes into protected memory and wipes the temporary digest.
+    pub fn finalize(self) -> crate::SecretArray<32> {
+        let mut digest = self.inner.finalize();
+        let mut out = crate::SecretArray::zeroed();
+        out.expose_secret_mut().copy_from_slice(&digest);
+        digest.as_mut_slice().zeroize();
+        out
+    }
+}
+
 /// Plain SHA-256 into `out`, for checks that are not object hashes (word-list
 /// integrity, the BIP-39 checksum). `out` may be a locked secret buffer.
 pub(crate) fn sha256(data: &[u8], out: &mut [u8; 32]) {
@@ -191,6 +227,23 @@ pub(crate) fn hmac_sha512_full(key: &[u8], msg: &[u8]) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn attachment_content_hash_fragmentation() {
+        let _guard = crate::memory::secrets_test_guard();
+        fn assert_wipes<T: zeroize::ZeroizeOnDrop>() {}
+        assert_wipes::<Sha256>();
+        let mut hash = ContentHasher::new();
+        hash.update(b"a");
+        hash.update(b"bc");
+        assert_eq!(
+            hash.finalize().expose_secret(),
+            &[
+                0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae,
+                0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61,
+                0xf2, 0x00, 0x15, 0xad
+            ]
+        );
+    }
     #[test]
     fn primitives_mac1_verify_rejects_every_byte_change() {
         let key = [7u8; 32];

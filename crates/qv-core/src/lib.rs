@@ -16,6 +16,7 @@
 //! | `index` | The metadata index built from every head, with a 64 MiB budget | 0004 §5.1, 0008 §1.2 |
 //! | `views` | Listings, recovered items, trash, conflicts, search, details, reveal, TOTP, expiry report | 0003 §4–5, 0005 §2.3, 0007 §2.1, 0011 §4 |
 //! | `edit` | Drafts, edits, moves, soft delete, restore, final deletion | 0005 §1.2, §2.5, 0007 §2 |
+//! | `attachment` | Session-bound metadata, streaming import/verify/save and confirmed-by-frontend permanent removal | 0003 §6, 0004 §3.3, 0011 §4 |
 //! | `settings` | Vault settings and the password generator | 0003 §3, 0010 §5 |
 //! | `order` | Fractional ordering keys for new groups | 0003 §4 |
 //! | `strength` | [`password_strength`] (zxcvbn) and [`confirmation_positions`] | 0010 §3.2, §4.2; 0002 §4.2 |
@@ -64,6 +65,7 @@
 //! **Errors**: [`CoreError`] (its rustdoc maps variants to CLI exit codes)
 //! carries no data.
 
+mod attachment;
 mod edit;
 mod error;
 mod index;
@@ -100,3 +102,5 @@ pub use qv_model::{
     Settings, Text, Timestamp, TotpError, VaultMeta, VersionId,
 };
 pub use qv_store::{AnchorDir, AnchorStatus, LocationWarnings, StoreError, VAULT_EXTENSION};
+
+pub use attachment::{AttachmentHandle, AttachmentSummary};

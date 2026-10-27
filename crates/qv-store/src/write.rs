@@ -33,7 +33,7 @@
 //! carry a counter whose reservation is not committed too. Offline vaults
 //! have no outbox (server sync, milestone 3).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use qv_crypto::RecordId;
 use qv_model::{
@@ -66,6 +66,7 @@ pub struct Write<'v> {
     used: BTreeSet<u64>,
     touched: BTreeSet<RecordId>,
     new_kinds: Vec<(RecordId, RecordKind)>,
+    staged: BTreeMap<RecordId, crate::attachment::StagedAttachment>,
     growth: u64,
     puts: usize,
     poisoned: bool,
@@ -173,6 +174,7 @@ impl UnlockedVault {
             used: BTreeSet::new(),
             touched: BTreeSet::new(),
             new_kinds: Vec::new(),
+            staged: BTreeMap::new(),
             growth: 0,
             puts: 0,
             poisoned: false,
@@ -182,6 +184,142 @@ impl UnlockedVault {
 }
 
 impl Write<'_> {
+    /// Streams bounded plaintext into encrypted objects in this transaction.
+    /// Any failure poisons the write; commit requires matching metadata consumption.
+    pub fn stage_attachment(
+        &mut self,
+        record: RecordId,
+        source: &mut impl std::io::Read,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<crate::StagedAttachment, StoreError> {
+        if self
+            .manifest
+            .records()
+            .len()
+            .saturating_add(self.staged.len())
+            >= crate::MAX_RECORDS
+        {
+            self.poisoned = true;
+            return Err(StoreError::LimitExceeded);
+        }
+        if self.poisoned
+            || self.manifest.record(record).is_some()
+            || self.staged.contains_key(&record)
+        {
+            self.poisoned = true;
+            return Err(StoreError::InvalidEdit);
+        }
+        let result = self.stage_content(record, source, cancelled);
+        if result.is_err() {
+            self.poisoned = true;
+        }
+        result
+    }
+    fn stage_content(
+        &mut self,
+        record: RecordId,
+        source: &mut impl std::io::Read,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<crate::StagedAttachment, StoreError> {
+        use qv_crypto::{ContentHasher, SecretArray, SecretBytes, purpose};
+        let header = self.vault.file.header;
+        let root = self.vault.vk.purpose_key::<purpose::Attachment>(
+            header.vault_id,
+            header.key_generation,
+            header.derivation_profile,
+        )?;
+        let key = root.attachment_key(header.vault_id, qv_crypto::AttachmentId(record.0))?;
+        let mut buf = SecretBytes::zeroed(qv_crypto::CHUNK_BYTES);
+        let mut hash = ContentHasher::new();
+        let mut size = 0u64;
+        let mut chunks = Vec::new();
+        loop {
+            let mut filled = 0;
+            while filled < buf.len() {
+                if cancelled() {
+                    return Err(StoreError::Io);
+                }
+                let allowed = (qv_model::MAX_ATTACHMENT_BYTES - size - filled as u64 + 1)
+                    .min((buf.len() - filled) as u64) as usize;
+                let n = match source.read(&mut buf.expose_secret_mut()[filled..filled + allowed]) {
+                    Ok(n) => n,
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(_) => return Err(StoreError::Io),
+                };
+                if n == 0 {
+                    break;
+                }
+                filled += n;
+                if size + filled as u64 > qv_model::MAX_ATTACHMENT_BYTES {
+                    return Err(StoreError::LimitExceeded);
+                }
+            }
+            if filled == 0 {
+                break;
+            }
+            if chunks.len() >= crate::MAX_CHUNKS
+                || self.manifest.references().len() >= crate::MAX_OBJECTS
+            {
+                return Err(StoreError::LimitExceeded);
+            }
+            size += filled as u64;
+            hash.update(&buf.expose_secret()[..filled]);
+            let id = ObjectId::generate()?;
+            let aad = crate::attachment::aad(
+                scope(&header),
+                record,
+                id,
+                chunks.len(),
+                header.data_profile,
+            )?;
+            let sealed = qv_crypto::seal_chunk(
+                &key,
+                header.data_profile,
+                &aad,
+                &buf.expose_secret()[..filled],
+            )?;
+            buf.expose_secret_mut().fill(0);
+            let reference = ObjectRef::new(id, header.data_profile, &sealed.ciphertext)?;
+            let total = self
+                .manifest
+                .references()
+                .iter()
+                .try_fold(reference.length(), |n, r| {
+                    n.checked_add(r.length()).ok_or(StoreError::LimitExceeded)
+                })?;
+            if total > crate::MAX_TOTAL_CIPHERTEXT {
+                return Err(StoreError::LimitExceeded);
+            }
+            let object = crate::object::SealedObject {
+                object_id: id,
+                data_profile: header.data_profile,
+                nonce: sealed.nonce,
+                ciphertext: sealed.ciphertext,
+            };
+            insert_object(&self.vault.file.conn, header.key_generation, &object)?;
+            self.growth = self.growth.saturating_add(len64(object.ciphertext.len()));
+            self.manifest.insert_reference(reference)?;
+            chunks.push(id);
+            point(CrashPoint::ObjectsWritten)?;
+            if filled < buf.len() {
+                break;
+            }
+        }
+        let hash = hash.finalize();
+        let mut copy = SecretArray::zeroed();
+        copy.expose_secret_mut()
+            .copy_from_slice(hash.expose_secret());
+        self.staged.insert(
+            record,
+            crate::StagedAttachment {
+                chunks: chunks.clone(),
+                size,
+                hash: copy,
+            },
+        );
+        Ok(crate::StagedAttachment { chunks, size, hash })
+    }
+
     /// This replica's writer ID, for the new clock.
     pub fn writer_id(&self) -> WriterId {
         self.writer
@@ -227,6 +365,14 @@ impl Write<'_> {
         if self.poisoned {
             return Err(StoreError::Internal);
         }
+        if let Some(staged) = self.staged.get(&record) {
+            let matches = matches!(&version.body, RecordBody::Live(Payload::AttachmentMeta(a))
+                if a.size == staged.size && a.chunk_object_ids == staged.chunks && &a.content_hash == staged.hash.expose_secret());
+            if !matches {
+                self.poisoned = true;
+                return Err(StoreError::InvalidEdit);
+            }
+        }
         self.check_edit(record, &version)?;
         let counter = version.clock.get(self.writer);
         let header = self.vault.file.header;
@@ -260,6 +406,7 @@ impl Write<'_> {
             self.poisoned = true;
             return Err(e);
         }
+        self.staged.remove(&record);
         self.used.insert(counter);
         self.touched.insert(record);
         self.growth = self.growth.saturating_add(len64(object.ciphertext.len()));
@@ -357,7 +504,7 @@ impl Write<'_> {
 
     /// Commits the mutation (steps 3–8 of the module docs).
     pub fn commit(mut self) -> Result<(), StoreError> {
-        if self.poisoned {
+        if self.poisoned || !self.staged.is_empty() {
             return Err(StoreError::Internal);
         }
         let header = self.vault.file.header;
@@ -1112,6 +1259,257 @@ mod tests {
                 drop(u);
                 let u = unlock(&p, &dir, PASSWORD).unwrap();
                 prop_assert_eq!(u.manifest().encode().unwrap(), m.encode().unwrap());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod attachment_tests {
+    use super::*;
+    use crate::{
+        fs::test_dir::TestDir,
+        vault::tests::{PASSWORD, copy_fixture, err, unlock},
+    };
+    use qv_model::{Extensions, Text, Timestamp, VersionId};
+    fn version(w: &mut Write<'_>, r: RecordId, a: qv_model::AttachmentMeta) -> RecordVersion {
+        let c = w.reserve_counter().unwrap();
+        RecordVersion {
+            version_id: VersionId::generate().unwrap(),
+            clock: Clock::for_edit(&w.head_clocks(r), w.writer_id(), c).unwrap(),
+            modified_at: Timestamp(1_700_000_000_000),
+            body: RecordBody::Live(Payload::AttachmentMeta(a)),
+            ext: Extensions::new(),
+        }
+    }
+    fn count(u: &UnlockedVault) -> i64 {
+        u.file
+            .conn
+            .query_row("SELECT count(*) FROM object", [], |r| r.get(0))
+            .unwrap()
+    }
+    #[test]
+    fn attachment_staging_errors_and_unconsumed_metadata_rollback() {
+        let (d, a) = (TestDir::new(), TestDir::new());
+        let (p, dir) = copy_fixture(&d, &a, "v.qvault");
+        let mut u = unlock(&p, &dir, PASSWORD).unwrap();
+        let initial = count(&u);
+        let seq = u.local_seq();
+        for mode in 0..4 {
+            let r = RecordId::generate().unwrap();
+            let entry = u.manifest().root_group_id();
+            let mut w = u.write().unwrap();
+            let staged = w
+                .stage_attachment(r, &mut &vec![7; 65_537][..], &|| false)
+                .unwrap();
+            match mode {
+                0 => {
+                    assert_eq!(err(w.commit()), StoreError::Internal);
+                }
+                1 => {
+                    let mut meta =
+                        staged.into_meta(entry, Text::new("x").unwrap(), Text::new("x").unwrap());
+                    meta.content_hash[0] ^= 1;
+                    let v = version(&mut w, r, meta);
+                    assert_eq!(err(w.put_local(r, v)), StoreError::InvalidEdit);
+                    assert!(w.commit().is_err());
+                }
+                2 => {
+                    struct Broken;
+                    impl std::io::Read for Broken {
+                        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                            Err(std::io::ErrorKind::Other.into())
+                        }
+                    }
+                    assert!(
+                        w.stage_attachment(RecordId::generate().unwrap(), &mut Broken, &|| false)
+                            .is_err()
+                    );
+                    assert!(w.commit().is_err());
+                }
+                _ => {
+                    assert!(
+                        w.stage_attachment(RecordId::generate().unwrap(), &mut &b"x"[..], &|| true)
+                            .is_err()
+                    );
+                    assert!(w.commit().is_err());
+                }
+            }
+            assert_eq!(count(&u), initial);
+            assert_eq!(u.local_seq(), seq);
+        }
+    }
+    #[test]
+    fn attachment_authenticated_wrong_hash_reorder_and_context_fail() {
+        let (d, a) = (TestDir::new(), TestDir::new());
+        let (p, dir) = copy_fixture(&d, &a, "v.qvault");
+        let mut u = unlock(&p, &dir, PASSWORD).unwrap();
+        for mode in 0..4 {
+            let mut r = RecordId::generate().unwrap();
+            let entry = u.manifest().root_group_id();
+            let mut w = u.write().unwrap();
+            let staged = w
+                .stage_attachment(r, &mut &vec![9; 65_537][..], &|| false)
+                .unwrap();
+            let mut meta =
+                staged.into_meta(entry, Text::new("x").unwrap(), Text::new("x").unwrap());
+            if mode == 0 {
+                meta.content_hash[0] ^= 1;
+                w.staged.get_mut(&r).unwrap().hash.expose_secret_mut()[0] ^= 1;
+            }
+            if mode == 1 {
+                meta.chunk_object_ids.reverse();
+                w.staged.get_mut(&r).unwrap().chunks.reverse();
+            }
+            if mode == 2 {
+                // A trusted fixture rebinding ciphertext to a different attachment ID.
+                let other = RecordId::generate().unwrap();
+                let tracked = w.staged.remove(&r).unwrap();
+                w.staged.insert(other, tracked);
+                r = other;
+            }
+            if mode == 3 {
+                meta.size += 1;
+                w.staged.get_mut(&r).unwrap().size += 1;
+            }
+            let v = version(&mut w, r, meta);
+            let id = v.version_id;
+            w.put_local(r, v).unwrap();
+            w.commit().unwrap();
+            assert_eq!(
+                err(u.verify_attachment(r, id, &|| false)),
+                StoreError::Integrity
+            );
+        }
+    }
+    #[test]
+    fn attachment_ciphertext_mutations_and_reopen() {
+        let (d, a) = (TestDir::new(), TestDir::new());
+        let (p, dir) = copy_fixture(&d, &a, "v.qvault");
+        let mut u = unlock(&p, &dir, PASSWORD).unwrap();
+        let r = RecordId::generate().unwrap();
+        let entry = u.manifest().root_group_id();
+        let mut w = u.write().unwrap();
+        let staged = w
+            .stage_attachment(r, &mut &vec![3; 65_537][..], &|| false)
+            .unwrap();
+        let meta = staged.into_meta(entry, Text::new("x").unwrap(), Text::new("x").unwrap());
+        let chunks = meta.chunk_object_ids.clone();
+        let v = version(&mut w, r, meta);
+        let id = v.version_id;
+        w.put_local(r, v).unwrap();
+        w.commit().unwrap();
+        u.verify_attachment(r, id, &|| false).unwrap();
+        let sql = "SELECT ciphertext FROM object WHERE object_id=?1";
+        let original: Vec<u8> = u
+            .file
+            .conn
+            .query_row(sql, [chunks[0].to_bytes().as_slice()], |r| r.get(0))
+            .unwrap();
+        for mode in 0..3 {
+            let mut bad = original.clone();
+            match mode {
+                0 => bad[30] ^= 1,
+                1 => {
+                    bad.pop();
+                }
+                _ => bad.push(0),
+            };
+            u.file
+                .conn
+                .execute(
+                    "UPDATE object SET ciphertext=?1 WHERE object_id=?2",
+                    rusqlite::params![bad, chunks[0].to_bytes().as_slice()],
+                )
+                .unwrap();
+            assert_eq!(
+                err(u.verify_attachment(r, id, &|| false)),
+                StoreError::Integrity
+            );
+        }
+        u.file
+            .conn
+            .execute(
+                "UPDATE object SET ciphertext=?1 WHERE object_id=?2",
+                rusqlite::params![original, chunks[0].to_bytes().as_slice()],
+            )
+            .unwrap();
+        drop(u);
+        let u = unlock(&p, &dir, PASSWORD).unwrap();
+        u.verify_attachment(r, id, &|| false).unwrap();
+        u.file
+            .conn
+            .execute(
+                "DELETE FROM object WHERE object_id=?1",
+                [chunks[0].to_bytes().as_slice()],
+            )
+            .unwrap();
+        assert_eq!(
+            err(u.verify_attachment(r, id, &|| false)),
+            StoreError::Integrity
+        );
+    }
+}
+
+#[cfg(test)]
+mod attachment_crash_tests {
+    use super::*;
+    use crate::{
+        crash::test::{arm, disarm},
+        fs::test_dir::TestDir,
+        vault::tests::{PASSWORD, copy_fixture, unlock},
+    };
+    #[test]
+    fn attachment_crash_at_staging_commit_and_anchor_boundaries() {
+        use CrashPoint::*;
+        for point in [
+            Begun,
+            ObjectsWritten,
+            ManifestWritten,
+            HeadWritten,
+            Pruned,
+            Committed,
+            AnchorTempWritten,
+            AnchorReplaced,
+        ] {
+            let (d, a, s) = (TestDir::new(), TestDir::new(), TestDir::new());
+            let (p, dir) = copy_fixture(&d, &a, "v.qvault");
+            let r = RecordId::generate().unwrap();
+            {
+                let mut u = unlock(&p, &dir, PASSWORD).unwrap();
+                let entry = u.manifest().root_group_id();
+                arm(point, &p, &a.join("anchors"), s.path());
+                let result = (|| -> Result<(), StoreError> {
+                    let mut w = u.write()?;
+                    let staged = w.stage_attachment(r, &mut &vec![5; 65_537][..], &|| false)?;
+                    let meta = staged.into_meta(
+                        entry,
+                        qv_model::Text::new("x")?,
+                        qv_model::Text::new("x")?,
+                    );
+                    let counter = w.reserve_counter()?;
+                    w.put_local(
+                        r,
+                        RecordVersion {
+                            version_id: qv_model::VersionId::generate()?,
+                            clock: Clock::for_edit(&[], w.writer_id(), counter)?,
+                            modified_at: qv_model::Timestamp(123),
+                            body: RecordBody::Live(Payload::AttachmentMeta(meta)),
+                            ext: qv_model::Extensions::new(),
+                        },
+                    )?;
+                    w.commit()
+                })();
+                assert_eq!(result, Err(StoreError::Internal));
+                assert!(!disarm(), "{point:?}");
+            }
+            let anchors = crate::AnchorDir::open(&s.join("anchors")).unwrap();
+            let u = unlock(&s.join("v.qvault"), &anchors, PASSWORD).unwrap();
+            let durable = matches!(point, Committed | AnchorTempWritten | AnchorReplaced);
+            assert_eq!(u.manifest().record(r).is_some(), durable, "{point:?}");
+            if durable {
+                let v = u.manifest().record(r).unwrap().heads()[0].version_id();
+                u.verify_attachment(r, v, &|| false).unwrap();
             }
         }
     }

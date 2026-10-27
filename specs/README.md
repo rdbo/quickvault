@@ -20,6 +20,9 @@ what they say, and behaviour changes start with a spec change.
 | [0011](0011-cli.md) | Command-Line Interface | Accepted |
 | [0012](0012-security-validation.md) | Security Validation and Release Gates | Accepted |
 
+0011 includes the owner-approved attachment CLI amendment of 2026-10-27
+(plan 0016): explicit file import/export and confirmed permanent removal.
+
 The 2026-10-24 direction amendment makes local vault use independent of accounts
 and network access, with two optional sync modes: direct account-free LAN sync
 and account-based remote server sync. Either mode, both or neither may be used

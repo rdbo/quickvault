@@ -62,8 +62,9 @@ pub(crate) fn command() -> Command {
                 .long("yes")
                 .action(ArgAction::SetTrue)
                 .global(true)
-                .help("Skip confirmations of destructive commands (never the weak-password one)"),
+                .help("Skip destructive-action and plaintext-export confirmations (never the weak-password one)"),
         )
+        .subcommand(attach_command())
         .subcommand(
             Command::new("init")
                 .about("Create a vault; shows its recovery phrase once")
@@ -183,6 +184,25 @@ pub(crate) fn command() -> Command {
                 )
                 .subcommand(Command::new("empty").about("Permanently delete non-conflicted trash")),
         )
+}
+
+fn attach_command() -> Command {
+    let entry = || Arg::new("entry").required(true);
+    let attachment = || Arg::new("attachment").required(true);
+    let path = |name| {
+        Arg::new(name)
+            .required(true)
+            .value_parser(value_parser!(PathBuf))
+    };
+    Command::new("attach").about("Import, list, explicitly export or permanently remove attachments")
+        .subcommand_required(true)
+        .subcommand(Command::new("add").arg(entry()).arg(path("file"))
+            .arg(Arg::new("name").long("name")).arg(Arg::new("mime").long("mime")))
+        .subcommand(Command::new("ls").arg(entry()))
+        .subcommand(Command::new("save").about("Export plaintext to a NEW explicit file; failure/crash can leave incomplete plaintext")
+            .arg(entry()).arg(attachment()).arg(path("path")))
+        .subcommand(Command::new("rm").about("Permanently remove; independent copies may remain, with no secure-erasure guarantee")
+            .arg(entry()).arg(attachment()))
 }
 
 fn count(name: &'static str, long: &'static str, help: &'static str) -> Arg {
@@ -426,6 +446,7 @@ fn dispatch(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
         Some(("mv" | "mkdir" | "rm", s)) => {
             crate::cmd::groups::run(ctx, m.subcommand_name().unwrap_or_default(), s)
         }
+        Some(("attach", s)) => crate::cmd::attach::run(ctx, s),
         Some(("trash", s)) => crate::cmd::trash::run(ctx, s),
         _ => Err(CliError::new(OTHER, "unknown command")),
     }

@@ -27,7 +27,7 @@ use crate::error::CoreError;
 use crate::index::{Index, MAX_VIEW_BYTES};
 use crate::setup::TimeSource;
 
-/// Lets a caller cancel an unlock in progress.
+/// Lets a caller cancel an unlock or streaming attachment operation in progress.
 #[derive(Clone, Default)]
 pub struct CancelToken(Arc<AtomicBool>);
 
@@ -610,6 +610,37 @@ mod lock_tests {
         );
         assert_eq!(err(s.search("x")), CoreError::SessionLocked);
         assert_eq!(err(s.overview()), CoreError::SessionLocked);
+    }
+
+    #[test]
+    fn attachment_lock_before_and_after_durable_commit() {
+        for point in [Point::BeforeCommit, Point::AfterCommit] {
+            let env = Env::new();
+            let s = Arc::new(env.unlock());
+            let e = add_entry(&s, s.root().unwrap(), "Files");
+            let before = seq(&s);
+            let result = race(&s, point, move |s| {
+                s.add_attachment(e, "x", "x", &mut &vec![3; 65_537][..], None)
+                    .map(|_| ())
+            });
+            let durable = point == Point::AfterCommit;
+            assert_eq!(
+                result,
+                if durable {
+                    Ok(())
+                } else {
+                    Err(CoreError::Cancelled)
+                }
+            );
+            let again = env.unlock();
+            assert_eq!(seq(&again), before + u64::from(durable));
+            let fresh = again.list(again.root().unwrap()).unwrap().entries[0].handle;
+            let items = again.attachments(fresh).unwrap();
+            assert_eq!(items.len(), usize::from(durable));
+            if durable {
+                again.verify_attachment(items[0].handle, None).unwrap();
+            }
+        }
     }
 
     #[test]

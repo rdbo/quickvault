@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-10-27 | 2026-10-27 | 0011 §1–6; 0008 §1–3; 0010 §6; 0012 §1–3 |
+| Reviewed | 2026-10-27 | 2026-10-27 | 0011 §1–6; 0008 §1–3; 0010 §6; 0012 §1–3 |
 
 ## Intent
 
@@ -516,3 +516,9 @@ Found, not fixed: native Wayland and other OS backends remain outside this
 approved scope; clipboard managers/recipients can retain copies despite hints.
 The isolated Xvfb evidence does not replace later actual-platform clipboard and
 OS configuration validation. Network isolation was unavailable as recorded.
+
+- 2026-10-27: Fresh-context review Approved; see REVIEW.md. Independently
+  verified upstream archive hash/source differences and all root gates,
+  deny/vet, patched-source formatting, 12 transport tests and private-Xvfb
+  integration (474 workspace tests passed, 2 ignored). No code fix or
+  escalation. Network namespace isolation remains unavailable, not a pass.

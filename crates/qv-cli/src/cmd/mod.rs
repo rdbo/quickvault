@@ -14,3 +14,5 @@ pub(crate) mod copy;
 pub(crate) mod edit;
 pub(crate) mod groups;
 pub(crate) mod trash;
+
+pub(crate) mod attach;

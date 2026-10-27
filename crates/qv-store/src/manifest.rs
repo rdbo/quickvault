@@ -740,7 +740,7 @@ impl Manifest {
         self.records.binary_search_by(|r| r.record_id.cmp(&id))
     }
 
-    fn insert_reference(&mut self, r: ObjectRef) -> Result<(), StoreError> {
+    pub(crate) fn insert_reference(&mut self, r: ObjectRef) -> Result<(), StoreError> {
         match self
             .references
             .binary_search_by(|x| x.object_id.cmp(&r.object_id))

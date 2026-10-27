@@ -105,15 +105,16 @@ group-tree projection and TOTP) and `qv-store` (the hardened vault file with
 its header and local keyslots; unlinkable encrypted objects, the encrypted
 manifest, the authenticated local head and the per-replica external anchor;
 writer state; creation, verified unlock with explicit anchor recovery, and
-the single mutation transaction) and `qv-core` (sessions with lock,
+the single mutation transaction, plus bounded authenticated attachment chunks) and `qv-core` (sessions with lock,
 cancellation and session-scoped handles, mutation authorization, the bounded
 metadata index and search over non-protected fields, on-demand decryption,
 causal entry/group edits, the trash with final tombstones, read-only conflict
 surfacing and vault settings including generator defaults, plus the
-unverified header view and the zxcvbn master-password estimate) and `qv-cli`
+unverified header view, the zxcvbn master-password estimate and session-bound
+streaming attachment operations) and `qv-cli`
 (`qvault` with `init`, `info`, `ls`, `search`, `show`, `totp`, `generate`,
 `add`, `edit`, `mv`, `mkdir`, `rm`, `trash ls|restore|empty`, `copy` and
-`totp`/`generate --copy`; protected
+`totp`/`generate --copy`, `attach add|ls|save|rm`; protected
 prompts/notes, signal cancellation and terminal restoration, escaped and JSON
 output, exit codes). Its private Linux X11 clipboard adapter (including usable
 XWayland) drops keys/metadata before foreground serving, uses protected outgoing
@@ -121,6 +122,16 @@ buffers and bounded incoming/INCR state, and releases only its own window.
 Native Wayland is not implemented; OS/recipient/manager copies remain outside
 application erasure control. The transport patch is maintained under
 `third-party/x11rb` (provenance and checks in `third-party/README.md`).
+Attachment content uses existing per-attachment keys, fixed full-chunk framing
+and canonical chunk AAD, with ciphertext reference/hash checks, per-chunk AEAD
+and whole-content SHA-256/length verification. Imports stage encrypted objects
+inside the existing transaction/anchor path; removal uses causal tombstones and
+reference pruning. Protected chunk buffers bound working content memory instead
+of accumulating entire attachments. CLI save confirms explicit plaintext export,
+verifies before creating a new owner-only file and authenticates again while
+streaming. It never overwrites or chooses paths from stored metadata; failure or
+crash may leave incomplete plaintext at the explicit destination. No secure-
+erasure or atomic export-completion claim is made.
 The isolated `spikes/ui-feasibility/` crate is a non-production Dioxus
 prototype with standard webview input and a qv-core fixture controller. Its
 controller tests and real Linux/Android create/edit/reopen, Android background
@@ -243,7 +254,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Optional remote server | Axum/Tokio; SQLite first, Postgres deferred |
 | Local storage | rusqlite with bundled SQLite 3.53.2 and trimmed compile options (`.cargo/config.toml`), encrypted immutable objects and manifests; external anchors as per-replica files in the private state directory (`$XDG_STATE_HOME/quickvault/anchors` on Linux; keystore-backed where available later) |
 | Serialization | Bounded RFC 8949 deterministic CBOR |
-| Data encryption | XChaCha20-Poly1305 |
+| Data encryption | XChaCha20-Poly1305; 64 KiB attachment content chunks with fixed padded framing and streaming SHA-256 verification |
 | Password KDF / derivation | Argon2id / HKDF-SHA-512 |
 | Server enrollment | Pinned X-Wing draft-11 plus authenticated encryption/transcript |
 | Application signatures | Ed25519 + ML-DSA-65, both required |

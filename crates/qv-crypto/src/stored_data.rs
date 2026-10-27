@@ -8,7 +8,8 @@
 //! The ciphertext is `P + 16` bytes (tag appended). On open, after the tag
 //! verifies, the framing must be exactly canonical: `4 + L ≤ P`,
 //! `padme(4 + L) == P` and every padding byte zero. Anything else is an
-//! integrity failure.
+//! integrity failure. Attachment chunks instead use fixed full-chunk padding
+//! and the same authenticated true-length header (0004 §3.3).
 //!
 //! The caller passes its size budget (`max_ciphertext`, e.g. 1 MiB for a
 //! padded record, 0004 §4.1). It is checked before anything is allocated or
@@ -29,7 +30,7 @@ const FRAME_HEADER: usize = 4;
 pub struct Sealed {
     /// The random 24-byte nonce (0002 §7.1).
     pub nonce: [u8; NONCE_LEN],
-    /// `padme(4 + L) + 16` bytes.
+    /// `P + 16` bytes: Padmé for records, fixed full-chunk P for attachments.
     pub ciphertext: Vec<u8>,
 }
 
@@ -122,6 +123,59 @@ pub fn open(
     if ciphertext.len() > max_ciphertext {
         return Err(CryptoError::LimitExceeded);
     }
+    decrypt_frame(key, aad, nonce, ciphertext, false)
+}
+
+/// Maximum plaintext content of one attachment chunk (0004 §3.3).
+pub const CHUNK_BYTES: usize = 65_536;
+
+/// Encrypts a nonempty chunk with fixed full-chunk padding and true length.
+pub fn seal_chunk(
+    key: &impl AeadKey,
+    profile: StoredDataProfile,
+    aad: &[u8],
+    plaintext: &[u8],
+) -> Result<Sealed, CryptoError> {
+    match profile {
+        StoredDataProfile::V1 => {}
+    }
+    if plaintext.is_empty() || plaintext.len() > CHUNK_BYTES {
+        return Err(CryptoError::LimitExceeded);
+    }
+    let total = sealed_len(CHUNK_BYTES).ok_or(CryptoError::Internal)?;
+    seal_framed(
+        key.aead_key(TOKEN),
+        random_array::<NONCE_LEN>()?,
+        aad,
+        plaintext,
+        total,
+    )
+}
+
+/// Authenticates fixed-size chunk framing before exposing any plaintext.
+pub fn open_chunk(
+    key: &impl AeadKey,
+    profile: StoredDataProfile,
+    aad: &[u8],
+    nonce: &[u8; NONCE_LEN],
+    ciphertext: &[u8],
+) -> Result<SecretBytes, CryptoError> {
+    match profile {
+        StoredDataProfile::V1 => {}
+    }
+    if Some(ciphertext.len()) != sealed_len(CHUNK_BYTES) {
+        return Err(CryptoError::Integrity);
+    }
+    decrypt_frame(key, aad, nonce, ciphertext, true)
+}
+
+fn decrypt_frame(
+    key: &impl AeadKey,
+    aad: &[u8],
+    nonce: &[u8; NONCE_LEN],
+    ciphertext: &[u8],
+    chunk: bool,
+) -> Result<SecretBytes, CryptoError> {
     let body_len = ciphertext
         .len()
         .checked_sub(TAG_LEN)
@@ -138,12 +192,12 @@ pub fn open(
         buf.expose_secret_mut(),
         tag,
     )?;
-    unframe(buf.expose_secret())
+    unframe_mode(buf.expose_secret(), chunk)
 }
 
 /// Validates canonical framing (already authenticated) and copies out `L`
 /// bytes. The padded buffer is the caller's and is wiped when it drops.
-fn unframe(framed: &[u8]) -> Result<SecretBytes, CryptoError> {
+fn unframe_mode(framed: &[u8], chunk: bool) -> Result<SecretBytes, CryptoError> {
     let header: [u8; FRAME_HEADER] = framed
         .get(..FRAME_HEADER)
         .and_then(|h| h.try_into().ok())
@@ -151,7 +205,15 @@ fn unframe(framed: &[u8]) -> Result<SecretBytes, CryptoError> {
     let len = usize::try_from(u32::from_be_bytes(header)).map_err(|_| CryptoError::Integrity)?;
     let end = len
         .checked_add(FRAME_HEADER)
-        .filter(|&end| end <= framed.len() && padme(end) == Some(framed.len()))
+        .filter(|&end| {
+            end <= framed.len()
+                && if chunk {
+                    (1..=CHUNK_BYTES).contains(&len)
+                        && sealed_len(CHUNK_BYTES) == framed.len().checked_add(TAG_LEN)
+                } else {
+                    padme(end) == Some(framed.len())
+                }
+        })
         .ok_or(CryptoError::Integrity)?;
     let padding = framed.get(end..).ok_or(CryptoError::Integrity)?;
     if padding.iter().fold(0u8, |acc, &b| acc | b) != 0 {
@@ -203,6 +265,75 @@ mod tests {
         v.extend_from_slice(payload);
         v.resize(total, 0);
         v
+    }
+
+    #[test]
+    fn attachment_chunk_fixed_framing_and_rejections() {
+        let _guard = crate::memory::secrets_test_guard();
+        let key = TestKey([7; 32]);
+        for n in [1, 65_535, 65_536] {
+            let plain = vec![0x5a; n];
+            let sealed = seal_chunk(&key, StoredDataProfile::V1, b"aad", &plain).unwrap();
+            assert_eq!(sealed.ciphertext.len(), sealed_len(CHUNK_BYTES).unwrap());
+            assert_eq!(
+                open_chunk(
+                    &key,
+                    StoredDataProfile::V1,
+                    b"aad",
+                    &sealed.nonce,
+                    &sealed.ciphertext
+                )
+                .unwrap()
+                .expose_secret(),
+                plain
+            );
+            assert!(
+                open_chunk(
+                    &key,
+                    StoredDataProfile::V1,
+                    b"other",
+                    &sealed.nonce,
+                    &sealed.ciphertext
+                )
+                .is_err()
+            );
+            assert!(
+                open_chunk(
+                    &key,
+                    StoredDataProfile::V1,
+                    b"aad",
+                    &sealed.nonce,
+                    &sealed.ciphertext[1..]
+                )
+                .is_err()
+            );
+            if n == 1 {
+                assert!(
+                    open(
+                        &key,
+                        StoredDataProfile::V1,
+                        b"aad",
+                        &sealed.nonce,
+                        &sealed.ciphertext,
+                        LIMIT
+                    )
+                    .is_err()
+                );
+            }
+        }
+        for n in [0, 65_537] {
+            assert!(seal_chunk(&key, StoredDataProfile::V1, b"", &vec![0; n]).is_err());
+        }
+        let total = sealed_len(CHUNK_BYTES).unwrap() - TAG_LEN;
+        for n in [0, 65_537] {
+            let raw = frame(n, &[], total);
+            let c = seal_raw(&key, [1; 24], b"", &raw);
+            assert!(open_chunk(&key, StoredDataProfile::V1, b"", &[1; 24], &c).is_err());
+        }
+        let mut raw = frame(1, b"x", total);
+        raw[99] = 1;
+        let c = seal_raw(&key, [1; 24], b"", &raw);
+        assert!(open_chunk(&key, StoredDataProfile::V1, b"", &[1; 24], &c).is_err());
     }
 
     #[test]
