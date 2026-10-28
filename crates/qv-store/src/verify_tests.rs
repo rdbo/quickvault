@@ -19,7 +19,7 @@ use crate::vault::tests::{PASSWORD, copy_fixture, edit, err, unlock};
 use crate::{StoreError, VerifyCounts};
 
 /// One vault with a recorded history version and one attachment.
-fn setup() -> (TestDir, TestDir, UnlockedVault, RecordId) {
+pub(crate) fn setup() -> (TestDir, TestDir, UnlockedVault, RecordId) {
     let (d, a) = (TestDir::new(), TestDir::new());
     let (p, dir) = copy_fixture(&d, &a, "v.qvault");
     let record = <RecordId as RandomId>::generate().unwrap();
@@ -51,7 +51,7 @@ fn setup() -> (TestDir, TestDir, UnlockedVault, RecordId) {
 }
 
 /// The first chunk object of the fixture's attachment.
-fn chunk_object(u: &UnlockedVault) -> ObjectId {
+pub(crate) fn chunk_object(u: &UnlockedVault) -> ObjectId {
     u.manifest()
         .records()
         .iter()

@@ -18,7 +18,7 @@
 //! | `edit` | Drafts, edits, moves, soft delete, restore, final deletion | 0005 §1.2, §2.5, 0007 §2 |
 //! | `attachment` | Session-bound metadata, streaming import/verify/save and confirmed-by-frontend permanent removal | 0003 §6, 0004 §3.3, 0011 §4 |
 //! | `history` | Authenticated retained-history views/reveal, fresh causal restore and floor-only purge | 0007 §1, 0011 §4 |
-//! | `snapshot` | Local snapshot policy (hourly/first-of-day coalescing, count/byte/age budgets, pruning), authenticated listing, the mandatory recovery copy of a destructive operation, and the `verify` report | 0007 §3, 0004 §3.6, 0011 §4 |
+//! | `snapshot` | Local snapshot policy (hourly/first-of-day coalescing, count/byte/age budgets, pruning), authenticated listing and new-path restore, the mandatory recovery copy of a destructive operation, and the `verify` report | 0007 §3, 0004 §3.6, 0011 §4 |
 //! | `settings` | Vault settings and the password generator | 0003 §3, 0010 §5 |
 //! | `order` | Fractional ordering keys for new groups | 0003 §4 |
 //! | `strength` | [`password_strength`] (zxcvbn) and [`confirmation_positions`] | 0010 §3.2, §4.2; 0002 §4.2 |
@@ -76,10 +76,12 @@
 //! for the frontend ([`Session::snapshot_status`]) and never fails the
 //! command. [`Session::verify`] is a read-only full pass and never repairs
 //! anything; the documented remedy for a failure is restoring a snapshot.
+//! [`Session::restore_snapshot`] writes a new vault and explicit recovery
+//! baseline, preserving the active vault and its anchor. Restore unlock defers
+//! pruning until its input is safely restored; no global freshness is claimed.
 //!
 //! **Not yet implemented:** general conflict resolution and merges (2.2),
-//! `snapshot restore` into a new vault file (1.13b), production
-//! inactivity/OS lifecycle hooks (2.3), password change and rotation (1.14,
+//! production inactivity/OS lifecycle hooks (2.3), password change and rotation (1.14,
 //! 1.15).
 //!
 //! **Errors**: [`CoreError`] (its rustdoc maps variants to CLI exit codes)

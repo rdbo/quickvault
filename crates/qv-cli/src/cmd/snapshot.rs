@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault snapshot ls [--json]` (spec 0011 §4–5, 0007 §3).
+//! `qvault snapshot ls [--json]` / `restore <id> <new-path>` (spec 0011 §4–5, 0007 §3).
 //!
 //! Listing authenticates each file's archive header with the vault key, so
 //! only this vault ID and key generation appear. Files that do not
@@ -17,13 +17,65 @@ use crate::json::Json;
 use crate::out::{Out, rfc3339};
 
 pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
-    let (cmd, _args) = m
+    let (cmd, args) = m
         .subcommand()
         .ok_or_else(|| CliError::usage("missing snapshot command"))?;
     match cmd {
         "ls" => list(ctx),
+        "restore" => restore(ctx, args),
         _ => Err(CliError::usage("unknown snapshot command")),
     }
+}
+
+fn restore(ctx: &Ctx, args: &ArgMatches) -> Result<(), CliError> {
+    if ctx.json {
+        return Err(CliError::usage("snapshot restore does not support --json"));
+    }
+    let id = args
+        .get_one::<String>("id")
+        .map(String::as_str)
+        .unwrap_or_default();
+    let prefix = id.strip_prefix('@').unwrap_or(id);
+    if !(6..=32).contains(&prefix.len()) || !prefix.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(CliError::usage("a snapshot ID needs 6 to 32 hex digits"));
+    }
+    let target = args
+        .get_one::<std::path::PathBuf>("path")
+        .ok_or_else(|| CliError::usage("missing restore path"))?;
+    let source = ctx.vault_path()?;
+    let core = crate::select::core()?;
+    let password = ctx.master_password()?;
+    let cancel = crate::signals::token();
+    let session = core.unlock_for_snapshot_restore(&source, &password, Some(&cancel))?;
+    drop(password);
+    crate::signals::check()?;
+    crate::cli::warn_location(session.warnings()?);
+    if matches!(session.snapshot_status(), Some(r) if r.skipped == Some(qv_core::SnapshotSkip::Disabled))
+    {
+        return Err(CliError::new(
+            crate::exit::OTHER,
+            "no usable private snapshot directory",
+        ));
+    }
+    let ids = session.snapshot_matches(id)?;
+    let selected = match ids.as_slice() {
+        [] => return Err(CliError::new(crate::exit::NOT_FOUND, "snapshot not found")),
+        [one] => one,
+        many => {
+            return Err(CliError::new(
+                crate::exit::AMBIGUOUS,
+                format!("ambiguous snapshot ID; matches: {}", many.join(", ")),
+            ));
+        }
+    };
+    crate::signals::check()?;
+    session.restore_snapshot(selected, target, Some(&cancel))?;
+    crate::cli::warn_snapshots(&session);
+    session.lock();
+    crate::out::eprint(
+        "qvault: restored a new recovery baseline; the snapshot may be old and does not establish the latest global state. Unlock it with the password current when the snapshot was created.\n",
+    );
+    Ok(())
 }
 
 fn list(ctx: &Ctx) -> Result<(), CliError> {

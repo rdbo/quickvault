@@ -37,9 +37,8 @@ use qv_model::{RandomId, RecordKind};
 use crate::error::StoreError;
 use crate::manifest;
 use crate::schema::{self, ObjectReader};
-use crate::vault::{
-    Keys, UnlockedVault, accepted_profile, check_control_kinds, check_head, read_role, scope,
-};
+use crate::validation::{check_control_kinds, check_head};
+use crate::vault::{Keys, UnlockedVault, accepted_profile, read_role, scope};
 
 /// What one full pass counted (0011 `verify`).
 ///

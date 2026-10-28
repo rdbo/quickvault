@@ -460,8 +460,8 @@ Split on 2026-10-28 (see *Revisions*) into **1.13a** (the archive
 writer/reader, the `verify` pass, snapshot policy and pruning, and the
 `snapshot ls`/`verify` commands) and **1.13b** (`snapshot restore` into a new
 vault path).
-- [x] **1.13a plan:** [0018](../0018-archives-snapshots-verify/PLAN.md) (Implemented).
-- [ ] **1.13b plan:** to be written in its own session as plan 0019.
+- [x] **1.13a plan:** [0018](../0018-archives-snapshots-verify/PLAN.md) (Reviewed after owner-authorized remediation).
+- [x] **1.13b plan:** [0019](../0019-snapshot-restore/PLAN.md) (Implemented; owner explicitly authorized continuation in this session).
 - **Do:** Write the archive writer (verified objects only, temp file →
   re-read and verify → fsync → publish under a unique name) and the reader
   (fixed prefix and bounded header → VK → header MAC → manifest hash → frames
@@ -895,6 +895,36 @@ vault path).
 - 2026-10-26 (phase 1.10, plan 0011): the owner approved splitting 1.10 into 1.10a/1.10b and decisions D-1–D-6 of plan 0011 as recommended: `zxcvbn 3.1.1` in `qv-core` (0010 §3.2); `clap 4.6.7` builder API only; for 1.10b, `signal-hook 0.4.5` and `arboard 3.6.1` (X11 only, no image support) with per-crate `BSL-1.0` exceptions for `clipboard-win` and `error-code`; the recovery-phrase skip (0002 §4.2) recorded as vault settings key 3 `recovery_skipped_at` (development value for the 1.16 freeze). These dependencies are now approved for 1.10b's standing approval. Raised, not decided: 0011 has no command to adopt a vault with a missing or mismatched anchor (suggested for 1.13/1.14).
 
 ## Execution log
+
+- 2026-10-28: Owner requested “fix and then implement 1.13b”, authorizing
+  remediation and continuation without an intervening commit. Revised plan
+  0018, fixed both review findings and completed resumed same-session review:
+  Approved (not a new independent review). Archives authenticate all roles and
+  attachment content before sink delivery/publication; complete-envelope
+  commitments protect seek passes; failed publication preserves older copies.
+  Phase **1.13b implemented as plan 0019**: `snapshot restore <id> <new-path>`,
+  fresh local replica/writer/head/anchor, archived password slot and complete
+  history/floor/chunk preservation, source vault/anchor unchanged. Restore
+  defers pruning until input is safely restored and reports publication
+  correctly when lock races with completion. Store/core/CLI, hostile-input,
+  cancellation and creation-crash tests pass. Final SPDX/fmt/Clippy/locked tests
+  pass: 574 passed, 0 failed, 2 pre-existing ignored, including private Xvfb;
+  fuzz formatting/build pass. Network namespace isolation is unavailable, not
+  a pass. No dependency/schema/format/spec change or security-proof claim.
+  All changes uncommitted. Next fresh session reviews 0019 before phase 1.14;
+  preserve that independent review requirement and owner commit boundary.
+
+- 2026-10-28: Clean-tree next-phase session reviewed committed phase 1.13a
+  (plan 0018, `66474cb`): **Re-plan needed**, see its
+  [REVIEW.md](../0018-archives-snapshots-verify/REVIEW.md). Reproduced acceptance
+  of nonce-corrupted archive objects and publication of an undecryptable
+  recovery snapshot, including corrupt retained history after normal unlock.
+  Also reproduced a valid-MAC header reference digest inconsistent with its
+  manifest being accepted. No product fixes; plan remains Implemented with
+  approval withheld. Stopped under session protocol step 2 for architect
+  remediation; phase 1.13b is not planned or implemented. Reviewer checks and
+  environment limitations are recorded in the review. Changes are uncommitted;
+  no commit, push or branch.
 
 - 2026-10-27: Phase 1.12 implemented as owner-approved plan 0017. Added safe
   bounded history retention/floors, authenticated history views and explicit

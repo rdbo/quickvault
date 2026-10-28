@@ -88,7 +88,7 @@ rather than creating unused workspace scaffolding.
 | qv-encoding | Bounded deterministic CBOR (0004 §3.1): validates hostile input before typed reads, encodes only canonical items, builds AAD/info/transcript arrays; depends on no other qv crate |
 | qv-crypto | Profiles, key hierarchy, encryption, signature verification, protected memory |
 | qv-model | Canonical payloads, atomic records, deterministic tree projection |
-| qv-store | Hardened SQLite, immutable objects, manifests, transactions, authenticated archives (header, writer, reader) and the full `verify` pass |
+| qv-store | Hardened SQLite, immutable objects, manifests, transactions, authenticated archives (header, writer, role-verifying reader), new-path restore and the full `verify` pass |
 | qv-protocol | Bounded canonical LAN/server wire types, contexts and version registry |
 | qv-sync | Shared causal merge, direct LAN exchange, remote candidate state and publication orchestration |
 | qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets and the `verify` report |
@@ -115,7 +115,7 @@ streaming attachment operations, local snapshot policy/budgets with their
 authenticated listing, and the `verify` report) and `qv-cli`
 (`qvault` with `init`, `info`, `ls`, `search`, `show`, `totp`, `generate`,
 `add`, `edit`, `mv`, `mkdir`, `rm`, `trash ls|restore|empty`,
-`snapshot ls`, `verify`, `copy` and
+`snapshot ls|restore`, `verify`, `copy` and
 `totp`/`generate --copy`, `attach add|ls|save|rm`; protected
 prompts/notes, signal cancellation and terminal restoration, escaped and JSON
 output, exit codes). Its private Linux X11 clipboard adapter (including usable
@@ -159,7 +159,15 @@ purge commits: a copy that cannot be written aborts the deletion with nothing
 purged, and exceeding the ordinary budget requires explicit approval.
 `qvault verify` is a read-only full re-hash/authentication pass that reports the
 local head and the anchor comparison; it never repairs, and the documented
-remedy for a failure is restoring a snapshot (`snapshot restore`, 1.13b).
+remedy for a failure is `snapshot restore <id> <new-path>`. Restore authenticates
+all archived records, history and attachment content, preserves the manifest's
+history/floors/tombstones and writes a new private vault via the existing
+creation protocol. It uses fresh local replica/writer/head/anchor state and the
+snapshot's password slot; the active vault and its external anchor remain
+unchanged. It establishes an explicit recovery baseline, not global freshness.
+Restore defers automatic pruning until its selected input is safely restored.
+Archive verification uses bounded seek passes over encrypted frames and checks
+complete-envelope commitments between passes; no plaintext is staged on disk.
 Snapshot failures and budget skips are warnings on stderr and never fail the
 requested command. Archives carry no device-local slots, keys, session tokens,
 sync state or anchors; hosts, other media and independent copies remain outside

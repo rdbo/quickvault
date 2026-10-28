@@ -54,6 +54,7 @@ use crate::object::{RecordRole, Scope, SealedObject, open_record, seal_record};
 use crate::schema::{self, ObjectReader, StoredHead, StoredReplica, validation_err};
 use crate::slot::{LocalSlot, password_slot};
 use crate::sqlite::{StepBudget, harden, open_connection};
+use crate::validation::{check_control_kinds, check_head};
 
 /// The vault file extension (0004 §1.1).
 pub const VAULT_EXTENSION: &str = "qvault";
@@ -130,7 +131,7 @@ impl fmt::Debug for UnlockedVault {
 }
 
 /// The header MAC over the exact stored bytes.
-fn header_tag(
+pub(crate) fn header_tag(
     vk: &VaultKey,
     header: &Header,
     body: &[u8],
@@ -185,7 +186,11 @@ pub(crate) fn accepted_profile(header: &Header, id: u16) -> Result<StoredDataPro
 
 /// Reads and verifies the committed state (0004 §3.6, §5.1). Run inside
 /// one read transaction, after the header MAC.
-fn load_state(conn: &Connection, header: &Header, vk: &VaultKey) -> Result<State, StoreError> {
+pub(crate) fn load_state(
+    conn: &Connection,
+    header: &Header,
+    vk: &VaultKey,
+) -> Result<State, StoreError> {
     let keys = Keys::derive(vk, header)?;
     let stored = schema::read_state(conn)?;
 
@@ -305,64 +310,12 @@ pub(crate) fn read_role(
     )
 }
 
-/// The control-record kind rules of a verified state (0003 §2.3): the
-/// metadata, keyslot and root-group IDs carry their own kinds and no other
-/// record may be either control kind.
-pub(crate) fn check_control_kinds(
-    manifest: &Manifest,
-    kinds: &BTreeMap<RecordId, RecordKind>,
-) -> Result<(), StoreError> {
-    for (&id, &kind) in kinds {
-        let expected = if id == manifest.vault_meta_id() {
-            Some(RecordKind::VaultMeta)
-        } else if id == manifest.keyslot_id() {
-            Some(RecordKind::PasswordKeyslot)
-        } else if id == manifest.root_group_id() {
-            Some(RecordKind::Group)
-        } else {
-            None
-        };
-        let ok = match expected {
-            Some(e) => kind == e,
-            None => !matches!(kind, RecordKind::VaultMeta | RecordKind::PasswordKeyslot),
-        };
-        if !ok {
-            return Err(StoreError::Integrity);
-        }
-    }
-    Ok(())
-}
-
-/// Per-head rules that need the decrypted version: chunk lists match an
-/// `attachment_meta` payload, the root group stays a live root, and vault
-/// metadata names the manifest's root.
-pub(crate) fn check_head(
-    manifest: &Manifest,
-    record: RecordId,
-    v: &VersionRef,
-    version: &RecordVersion,
-) -> Result<(), StoreError> {
-    let chunks_ok = match &version.body {
-        RecordBody::Live(Payload::AttachmentMeta(a)) => {
-            v.chunks() == Some(a.chunk_object_ids.as_slice())
-        }
-        _ => v.chunks().is_none(),
-    };
-    if !chunks_ok {
-        return Err(StoreError::Integrity);
-    }
-    if record == manifest.root_group_id() {
-        version.check_root().map_err(|_| StoreError::Integrity)?;
-    }
-    if let RecordBody::Live(Payload::VaultMeta(m)) = &version.body
-        && m.root_group != manifest.root_group_id()
-    {
-        return Err(StoreError::Integrity);
-    }
-    Ok(())
-}
-
 impl VaultFile {
+    /// Flushes a completed new file before publication.
+    pub(crate) fn sync(&self) -> Result<(), StoreError> {
+        self.lock.sync()
+    }
+
     /// Opens a vault for unlocking: file checks, lock, hardening, schema
     /// validation and header/slot decoding. No KDF runs here.
     pub fn open(path: &Path) -> Result<VaultFile, StoreError> {
@@ -370,7 +323,7 @@ impl VaultFile {
         Self::open_locked(path, lock)
     }
 
-    fn open_locked(path: &Path, lock: LockedFile) -> Result<VaultFile, StoreError> {
+    pub(crate) fn open_locked(path: &Path, lock: LockedFile) -> Result<VaultFile, StoreError> {
         let warnings = warnings_for(path, &lock);
         // SQLite rolls back or replays these before any check below.
         fs::check_sidecars(path)?;
@@ -486,7 +439,7 @@ impl VaultFile {
         ))
     }
 
-    fn verify_header(&self, vk: &VaultKey) -> Result<(), StoreError> {
+    pub(crate) fn verify_header(&self, vk: &VaultKey) -> Result<(), StoreError> {
         let rows: Vec<SlotRow<'_>> = self.slots.iter().map(LocalSlot::row).collect();
         let (key, transcript) = header_tag(vk, &self.header, &self.header_body, &rows)?;
         verify_mac(&key, self.header.mac_profile, &transcript, &self.header_mac)

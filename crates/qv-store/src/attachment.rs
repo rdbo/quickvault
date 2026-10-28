@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Bounded attachment chunk roles and streaming reads (0003 §6, 0004 §3.3).
+use crate::StoreError;
 #[cfg(any(target_os = "linux", target_os = "android"))]
-use crate::{StoreError, UnlockedVault, schema::ObjectReader, vault::scope};
+use crate::{UnlockedVault, schema::ObjectReader, vault::scope};
+use qv_crypto::StoredDataProfile;
 use qv_crypto::{RecordId, SecretArray};
-#[cfg(any(target_os = "linux", target_os = "android"))]
 use qv_encoding::encode_array;
-use qv_model::{AttachmentMeta, Extensions, ObjectId, Text};
+use qv_model::{AttachmentMeta, Extensions, ObjectId, RandomId, Text};
+use zeroize::Zeroizing;
 
 /// The measured content of an attachment staged in a Write transaction.
 pub struct StagedAttachment {
@@ -37,28 +39,8 @@ impl StagedAttachment {
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod platform {
     use super::*;
-    use qv_crypto::{ContentHasher, ObjectHashProfile, StoredDataProfile, purpose};
-    use qv_model::{Payload, RandomId, RecordBody, VersionId};
-    use zeroize::Zeroizing;
-    pub(crate) fn aad(
-        scope: crate::object::Scope,
-        attachment: RecordId,
-        object: ObjectId,
-        index: usize,
-        profile: StoredDataProfile,
-    ) -> Result<Zeroizing<Vec<u8>>, StoreError> {
-        encode_array(|a| {
-            a.text("qv/chunk/v1");
-            a.bytes(&scope.vault_id.0);
-            a.uint(u64::from(scope.key_generation.0));
-            a.bytes(&attachment.0);
-            a.bytes(&object.to_bytes());
-            a.uint(index as u64);
-            a.uint(u64::from(profile.id()));
-            Ok(())
-        })
-        .map_err(|_| StoreError::Internal)
-    }
+    use qv_crypto::{ContentHasher, ObjectHashProfile, purpose};
+    use qv_model::{Payload, RecordBody, VersionId};
 
     impl UnlockedVault {
         /// Verifies all chunks and the complete content without releasing plaintext.
@@ -150,5 +132,23 @@ mod platform {
         }
     }
 }
-#[cfg(any(target_os = "linux", target_os = "android"))]
-pub(crate) use platform::aad;
+
+pub(crate) fn aad(
+    scope: crate::object::Scope,
+    attachment: RecordId,
+    object: ObjectId,
+    index: usize,
+    profile: StoredDataProfile,
+) -> Result<Zeroizing<Vec<u8>>, StoreError> {
+    encode_array(|a| {
+        a.text("qv/chunk/v1");
+        a.bytes(&scope.vault_id.0);
+        a.uint(u64::from(scope.key_generation.0));
+        a.bytes(&attachment.0);
+        a.bytes(&object.to_bytes());
+        a.uint(index as u64);
+        a.uint(u64::from(profile.id()));
+        Ok(())
+    })
+    .map_err(|_| StoreError::Internal)
+}

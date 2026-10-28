@@ -195,7 +195,11 @@ pub(crate) fn command() -> Command {
                 .subcommand(
                     Command::new("ls")
                         .about("List local snapshots (authenticates every header)"),
-                ),
+                )
+                .subcommand(Command::new("restore")
+                    .about("Restore into a new vault path and explicit recovery baseline; may be old")
+                    .arg(Arg::new("id").required(true))
+                    .arg(Arg::new("path").required(true).value_parser(value_parser!(std::path::PathBuf)))),
         )
         .subcommand(Command::new("verify").about(
             "Re-hash and authenticate the whole vault and report the anchor (never repairs)",

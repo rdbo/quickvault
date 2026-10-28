@@ -181,3 +181,91 @@ fn snapshot_disk_growth_a_snapshot_failure_aborts_the_destructive_operation() {
     assert_eq!(s.trash().unwrap().len(), 1);
     assert_eq!(s.overview().unwrap().local_seq, seq);
 }
+
+#[test]
+fn snapshot_restore_creates_a_new_baseline_and_preserves_active_vault() {
+    let h = Home::new();
+    let s = h.create();
+    let root = s.root().unwrap();
+    s.save_entry(s.new_entry(root, "login", "Snapshot entry").unwrap())
+        .unwrap();
+    drop(s);
+    let listed = run(&h, &["snapshot", "ls"]);
+    assert_eq!(listed.code, 0, "{}", listed.stderr);
+    let id = listed.stdout.lines().next().unwrap()[..32].to_owned();
+    let before = std::fs::read(h.vault()).unwrap();
+    let anchors: Vec<_> = std::fs::read_dir(h.anchors())
+        .unwrap()
+        .map(|e| {
+            let p = e.unwrap().path();
+            (p.clone(), std::fs::read(p).unwrap())
+        })
+        .collect();
+    let target = h.vaults().join("restored.qvault");
+    let path = arg(&target);
+    let o = run(
+        &h,
+        &["snapshot", "restore", &format!("@{}", &id[..6]), &path],
+    );
+    assert_eq!(o.code, 0, "{}", o.stderr);
+    assert!(o.stdout.is_empty());
+    assert!(o.stderr.contains("new recovery baseline") && o.stderr.contains("may be old"));
+    assert_eq!(std::fs::read(h.vault()).unwrap(), before);
+    for (p, bytes) in anchors {
+        assert_eq!(std::fs::read(p).unwrap(), bytes);
+    }
+    let o = piped(
+        h.qvault(["--password-stdin", "-v", &path, "--json", "verify"]),
+        format!("{PASSWORD}\n").as_bytes(),
+    );
+    assert_eq!(o.code, 0, "{}", o.stderr);
+    assert!(o.stdout.contains("\"local_seq\":1") && o.stdout.contains("\"anchor\":\"verified\""));
+    let o = piped(
+        h.qvault(["--password-stdin", "-v", &path, "search", "Snapshot entry"]),
+        format!("{PASSWORD}\n").as_bytes(),
+    );
+    assert_eq!(o.code, 0, "{}", o.stderr);
+    assert!(o.stdout.contains("Snapshot entry"));
+    let target_before = std::fs::read(&target).unwrap();
+    let o = run(&h, &["snapshot", "restore", &id, &path]);
+    assert_eq!(o.code, 1, "{}", o.stderr);
+    assert_eq!(std::fs::read(&target).unwrap(), target_before);
+}
+
+#[test]
+fn snapshot_restore_preflight_and_addressing_errors() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = Home::new();
+    let s = h.create();
+    drop(s);
+    for args in [
+        vec!["--json", "snapshot", "restore", "abcdef", "new.qvault"],
+        vec!["snapshot", "restore", "invalid", "new.qvault"],
+    ] {
+        let mut a = vec!["--password-stdin"];
+        a.extend(args);
+        let o = piped(h.qvault(a), b"");
+        assert_eq!(o.code, 2, "{}", o.stderr);
+    }
+    assert_eq!(run(&h, &["snapshot", "ls"]).code, 0);
+    let target = arg(&h.vaults().join("new.qvault"));
+    let o = run(&h, &["snapshot", "restore", &"f".repeat(32), &target]);
+    assert_eq!(o.code, 4, "{}", o.stderr);
+    let ids = [
+        "abcdef00000000000000000000000000",
+        "abcdef11111111111111111111111111",
+    ];
+    for id in ids {
+        let path = h.snapshots().join(format!("{id}.qvsnap"));
+        std::fs::write(&path, b"hostile archive").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let o = run(&h, &["snapshot", "restore", "abcdef", &target]);
+    assert_eq!(o.code, 5, "{}", o.stderr);
+    for id in ids {
+        assert!(o.stderr.contains(id));
+    }
+    let o = run(&h, &["snapshot", "restore", ids[0], &target]);
+    assert_eq!(o.code, 7, "{}", o.stderr);
+    assert!(!h.vaults().join("new.qvault").exists());
+}

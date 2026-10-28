@@ -57,7 +57,7 @@
 //! AEAD. No length is used before it is checked and no archive byte reaches
 //! SQLite.
 
-use std::io::{ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 
 use qv_crypto::{
     DerivationProfile, KeyGeneration, MacProfile, MacTag, ObjectHashProfile, PurposeKey,
@@ -138,14 +138,22 @@ pub(crate) fn hex32(id: &[u8; 16]) -> String {
 pub struct ArchiveScope {
     vault_id: VaultId,
     key_generation: KeyGeneration,
+    archive_id: Option<[u8; 16]>,
 }
 
 impl ArchiveScope {
+    /// Pins an explicitly selected archive ID across reader passes.
+    pub fn with_archive_id(mut self, archive_id: [u8; 16]) -> Self {
+        self.archive_id = Some(archive_id);
+        self
+    }
+
     /// The scope of one vault state.
     pub fn new(vault_id: VaultId, key_generation: KeyGeneration) -> Self {
         Self {
             vault_id,
             key_generation,
+            archive_id: None,
         }
     }
 
@@ -421,7 +429,9 @@ impl ArchiveHeader {
 
     /// Whether this header names `scope`'s vault ID and generation.
     pub fn matches(&self, scope: ArchiveScope) -> bool {
-        self.vault_id == scope.vault_id && self.key_generation == scope.key_generation
+        self.vault_id == scope.vault_id
+            && self.key_generation == scope.key_generation
+            && scope.archive_id.is_none_or(|id| self.archive_id == id)
     }
 
     /// The header-MAC transcript: `["qv/archive-header/v1", header fields]`.
@@ -558,8 +568,8 @@ fn object_frame_len(generation: KeyGeneration, r: &ObjectRef) -> Result<usize, S
 }
 
 /// One verified object frame, its ciphertext borrowed from the frame buffer
-/// (0004 §6.3). A sink receives it after the length and SHA-256 checks and
-/// **before** any AEAD decryption.
+/// (0004 §6.3). A sink receives it only after all roles and attachment
+/// contents have authenticated, with complete frame commitments checked again.
 ///
 /// Redacted `Debug`: it links an object ID to a manifest reference (0004 §2.2).
 pub struct ArchiveObject<'a> {
@@ -611,6 +621,8 @@ impl ArchiveObject<'_> {
 pub struct OpenedArchive {
     header: ArchiveHeader,
     manifest: crate::manifest::Manifest,
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub(crate) frames: Vec<IndexedFrame>,
 }
 
 impl core::fmt::Debug for OpenedArchive {
@@ -651,8 +663,11 @@ pub fn read_header<R: Read>(
     Ok(header)
 }
 
-/// Reads a whole archive in the fixed 0004 §6.3 order and hands every
-/// verified object frame to `sink`.
+/// Reads a whole seekable archive in the fixed 0004 §6.3 order and hands
+/// verified object frames to `sink` only after full role authentication.
+/// A bounded index of frame positions permits ordered attachment verification
+/// without buffering the archive or staging plaintext. A sink failure may
+/// leave partial output; callers must accept output only on overall success.
 ///
 /// The order is: prefix → bounded header → the caller's vault ID and key
 /// generation → header MAC → manifest frame bounded and hashed against
@@ -662,7 +677,7 @@ pub fn read_header<R: Read>(
 /// Cancellation is checked between frames. Trailing bytes, a missing or extra
 /// frame, a wrong `object_count`/`total_length`, another profile or
 /// generation and a substituted frame are [`StoreError::Integrity`].
-pub fn read_archive<R: Read>(
+pub fn read_archive<R: Read + Seek>(
     input: &mut R,
     expect: ArchiveScope,
     vk: &VaultKey,
@@ -702,6 +717,10 @@ pub fn read_archive<R: Read>(
         return Err(StoreError::Integrity);
     }
 
+    if manifest.reference_digest()? != *header.reference_digest() {
+        return Err(StoreError::Integrity);
+    }
+
     // Counts and totals, before a single object frame is read.
     let references = manifest.references();
     if u64::try_from(references.len()).ok() != Some(header.object_count()) {
@@ -717,7 +736,8 @@ pub fn read_archive<R: Read>(
         return Err(StoreError::Integrity);
     }
 
-    // One frame per reference, in the manifest's validated sorted order.
+    // Index encrypted frames only; no sink sees anything before full validation.
+    let mut frames = Vec::with_capacity(references.len());
     for r in references {
         if cancelled() {
             return Err(StoreError::Io);
@@ -726,12 +746,17 @@ pub fn read_archive<R: Read>(
         if expected > MAX_ARCHIVE_OBJECT_FRAME {
             return Err(StoreError::LimitExceeded);
         }
+        let offset = input.stream_position().map_err(|_| StoreError::Io)?;
         let len = read_frame_len(input, MAX_ARCHIVE_OBJECT_FRAME)?;
         if len != expected {
             return Err(StoreError::Integrity);
         }
         let frame = read_frame(input, len)?;
-        sink(object_envelope(&frame, &header, r)?)?;
+        object_envelope(&frame, &header, r)?;
+        frames.push(IndexedFrame {
+            offset,
+            digest: object_hash(ARCHIVE_HASH_PROFILE, &frame).0,
+        });
     }
     if cancelled() {
         return Err(StoreError::Io);
@@ -739,16 +764,65 @@ pub fn read_archive<R: Read>(
 
     // Exact EOF: a trailing byte means the archive was extended or tampered
     // with (0004 §6.3).
+    exact_eof(input)?;
+    let end = input.stream_position().map_err(|_| StoreError::Io)?;
+    crate::archive_verify::verify(input, &header, &manifest, &frames, vk, cancelled)?;
+    for (r, indexed) in references.iter().zip(&frames) {
+        if cancelled() {
+            return Err(StoreError::Io);
+        }
+        let frame = indexed.read(input, &header, r)?;
+        sink(object_envelope(&frame, &header, r)?)?;
+    }
+    input
+        .seek(SeekFrom::Start(end))
+        .map_err(|_| StoreError::Io)?;
+    exact_eof(input)?;
+    Ok(OpenedArchive {
+        header,
+        manifest,
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        frames,
+    })
+}
+
+fn exact_eof<R: Read>(input: &mut R) -> Result<(), StoreError> {
     let mut probe = [0u8; 1];
     loop {
         match input.read(&mut probe) {
-            Ok(0) => break,
+            Ok(0) => return Ok(()),
             Ok(_) => return Err(StoreError::Integrity),
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
             Err(_) => return Err(StoreError::Io),
         }
     }
-    Ok(OpenedArchive { header, manifest })
+}
+
+/// One bounded frame's position and complete-envelope commitment between passes.
+pub(crate) struct IndexedFrame {
+    offset: u64,
+    digest: [u8; 32],
+}
+impl IndexedFrame {
+    pub(crate) fn read<R: Read + Seek>(
+        &self,
+        input: &mut R,
+        header: &ArchiveHeader,
+        r: &ObjectRef,
+    ) -> Result<Vec<u8>, StoreError> {
+        input
+            .seek(SeekFrom::Start(self.offset))
+            .map_err(|_| StoreError::Io)?;
+        let len = read_frame_len(input, MAX_ARCHIVE_OBJECT_FRAME)?;
+        if len != object_frame_len(header.key_generation(), r)? {
+            return Err(StoreError::Integrity);
+        }
+        let frame = read_frame(input, len)?;
+        if object_hash(ARCHIVE_HASH_PROFILE, &frame).0 != self.digest {
+            return Err(StoreError::Integrity);
+        }
+        Ok(frame)
+    }
 }
 
 /// Parses and checks the manifest frame's envelope `[key_generation,
@@ -784,7 +858,7 @@ fn manifest_envelope<'a>(
 /// Parses and checks one object frame against `r` (0004 §6.3): the envelope's
 /// object ID, generation, profile, nonce length and ciphertext length and
 /// SHA-256, all before any AEAD. The ciphertext is borrowed from `frame`.
-fn object_envelope<'a>(
+pub(crate) fn object_envelope<'a>(
     frame: &'a [u8],
     header: &ArchiveHeader,
     r: &ObjectRef,
@@ -804,7 +878,8 @@ fn object_envelope<'a>(
         .map_err(malformed)?;
     let ciphertext = d.bytes().map_err(malformed)?;
     d.finish().map_err(malformed)?;
-    if object_id != r.object_id()
+    if !data_profile.accepts(header.minimum_profiles().0)
+        || object_id != r.object_id()
         || generation != header.key_generation().0
         || data_profile != r.data_profile()
         || u64::try_from(ciphertext.len()).ok() != Some(r.length())
@@ -889,6 +964,15 @@ mod platform {
         /// archive's random ID, which 0011 prints.
         pub fn name(&self) -> &OsStr {
             &self.name
+        }
+
+        /// The filename's full lowercase archive ID. Header agreement is checked on open.
+        pub fn archive_id(&self) -> &str {
+            self.name
+                .to_str()
+                .and_then(parse_name)
+                .map(|(_, id)| id)
+                .unwrap_or_default()
         }
 
         /// Its size on disk.
@@ -993,6 +1077,7 @@ mod platform {
             created_at: Timestamp,
             cancelled: &dyn Fn() -> bool,
         ) -> Result<ArchiveStats, StoreError> {
+            self.verify_all(cancelled)?;
             self.begin_read()?;
             match self.archive_stream(&mut out, created_at, cancelled) {
                 Ok(stats) => {
@@ -1239,9 +1324,42 @@ mod platform {
             expect: ArchiveScope,
             vk: &VaultKey,
         ) -> Result<ArchiveHeader, StoreError> {
-            let file = fs::open_private_ro(&self.file(entry)?)?;
+            let file = self.open_entry(entry)?;
             let mut input = std::io::BufReader::new(file);
-            read_header(&mut input, expect, vk)
+            let header = read_header(&mut input, expect, vk)?;
+            if header.archive_id_hex() != entry.archive_id() {
+                return Err(StoreError::Integrity);
+            }
+            Ok(header)
+        }
+
+        /// Opens one private local snapshot, never as a SQLite database.
+        pub fn open_entry(&self, entry: &SnapshotEntry) -> Result<std::fs::File, StoreError> {
+            fs::check_private_dir(&self.path)?;
+            fs::open_private_ro(&self.file(entry)?)
+        }
+
+        /// Explicitly restores one snapshot into a new path and fresh local baseline.
+        pub fn restore(
+            &self,
+            entry: &SnapshotEntry,
+            source: &UnlockedVault,
+            path: &Path,
+            cancelled: &dyn Fn() -> bool,
+        ) -> Result<(), StoreError> {
+            source.check_identity()?;
+            let scope = ArchiveScope::new(source.header().vault_id, source.header().key_generation);
+            let header = self.read_header(entry, scope, source.vault_key())?;
+            let scope = scope.with_archive_id(header.archive_id());
+            let mut input = std::io::BufReader::new(self.open_entry(entry)?);
+            crate::VaultFile::create_from_archive(
+                path,
+                &mut input,
+                scope,
+                source.vault_key(),
+                &source.anchors,
+                cancelled,
+            )
         }
 
         /// Removes one published snapshot (0007 §3.3 pruning).
@@ -1847,7 +1965,7 @@ mod tests {
             Ok(())
         };
         let opened = read_archive(
-            &mut &out[..],
+            &mut std::io::Cursor::new(&out[..]),
             scope_of(&u),
             u.vault_key(),
             &mut sink,
@@ -1862,7 +1980,12 @@ mod tests {
         assert_eq!(format!("{:?}", opened.header()), "ArchiveHeader(..)");
 
         // The header-only path agrees and stops before the frames.
-        let header = read_header(&mut &out[..], scope_of(&u), u.vault_key()).unwrap();
+        let header = read_header(
+            &mut std::io::Cursor::new(&out[..]),
+            scope_of(&u),
+            u.vault_key(),
+        )
+        .unwrap();
         assert_eq!(header.archive_id(), opened.header().archive_id());
 
         // The frames are the manifest's references in their sorted order.
@@ -2019,7 +2142,7 @@ mod tests {
         let mut sink = |_: ArchiveObject<'_>| Ok(());
         assert_eq!(
             err(read_archive(
-                &mut &archive[..],
+                &mut std::io::Cursor::new(&archive[..]),
                 scope_of(&u),
                 u.vault_key(),
                 &mut sink,
@@ -2183,7 +2306,7 @@ mod tests {
         let mut sink = |_: ArchiveObject<'_>| Ok(());
         assert_eq!(
             err(read_archive(
-                &mut &crafted[..],
+                &mut std::io::Cursor::new(&crafted[..]),
                 scope_of(&u),
                 u.vault_key(),
                 &mut sink,
@@ -2236,7 +2359,7 @@ mod tests {
         let scope = scope_of(&u);
         let read =
             |bytes: &[u8], sink: &mut dyn FnMut(ArchiveObject<'_>) -> Result<(), StoreError>| {
-                read_archive(&mut &bytes[..], scope, vk, sink, &|| false)
+                read_archive(&mut std::io::Cursor::new(bytes), scope, vk, sink, &|| false)
             };
         let mut sink = |_: ArchiveObject<'_>| Ok(());
         assert!(read(&good, &mut sink).is_ok());
@@ -2367,7 +2490,14 @@ mod tests {
         let vk = u.vault_key();
         let scope = scope_of(&u);
         let mut sink = |_: ArchiveObject<'_>| Ok(());
-        let opened = read_archive(&mut &good[..], scope, vk, &mut sink, &|| false).unwrap();
+        let opened = read_archive(
+            &mut std::io::Cursor::new(&good[..]),
+            scope,
+            vk,
+            &mut sink,
+            &|| false,
+        )
+        .unwrap();
         let digest = config_digest_for(
             u.header().vault_id,
             u.header().key_generation,
@@ -2449,5 +2579,159 @@ mod tests {
             Some(StoreError::NotFound)
         );
         assert_eq!(format!("{dir:?}"), "SnapshotDir(..)");
+    }
+    #[test]
+    fn archive_rejects_nonce_only_corruption_in_every_role_before_sink() {
+        let (_d, _a, mut u, _record) = crate::verify_tests::setup();
+        let good = archive_of(&mut u);
+        let original = split(&good);
+        for index in 1..original.frames.len() {
+            let mut parts = split(&good);
+            let frame = &mut parts.frames[index];
+            let mut d = Decoder::new(frame).unwrap();
+            d.array().unwrap();
+            d.bytes().unwrap();
+            d.uint().unwrap();
+            d.uint().unwrap();
+            let nonce = d.bytes().unwrap();
+            let offset = nonce.as_ptr() as usize - frame.as_ptr() as usize;
+            frame[offset] ^= 1;
+            let bad = join(&parts);
+            let mut delivered = 0;
+            assert_eq!(
+                err(read_archive(
+                    &mut std::io::Cursor::new(bad),
+                    scope_of(&u),
+                    u.vault_key(),
+                    &mut |_| {
+                        delivered += 1;
+                        Ok(())
+                    },
+                    &|| false
+                )),
+                StoreError::Integrity,
+                "frame {index}"
+            );
+            assert_eq!(delivered, 0);
+        }
+    }
+
+    #[test]
+    fn archive_rejects_wrong_reference_digest_before_sink() {
+        let d = crate::fs::test_dir::TestDir::new();
+        let (mut u, _a) = vault_with(&d);
+        let good = archive_of(&mut u);
+        let bad = rewrite_header(&good, u.vault_key(), |h| h.reference_digest[0] ^= 1);
+        let mut delivered = 0;
+        assert_eq!(
+            err(read_archive(
+                &mut std::io::Cursor::new(bad),
+                scope_of(&u),
+                u.vault_key(),
+                &mut |_| {
+                    delivered += 1;
+                    Ok(())
+                },
+                &|| false
+            )),
+            StoreError::Integrity
+        );
+        assert_eq!(delivered, 0);
+    }
+
+    #[test]
+    fn archive_publish_rejects_corrupt_history_and_chunks_after_unlock() {
+        let (d, a, mut u, record) = crate::verify_tests::setup();
+        let path = vault_path(&d);
+        let history = u.manifest().record(record).unwrap().history()[0].object_id();
+        let chunk = crate::verify_tests::chunk_object(&u);
+        let dir = snapshot_dir(&d);
+        dir.publish(&mut u, SnapshotKind::Ordinary, CREATED, &|| false)
+            .unwrap();
+        for id in [history, chunk] {
+            let nonce: Vec<u8> = u
+                .file
+                .conn
+                .query_row(
+                    "SELECT nonce FROM object WHERE object_id = ?1",
+                    [id.to_bytes().as_slice()],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            u.file
+                .conn
+                .execute(
+                    "UPDATE object SET nonce = zeroblob(24) WHERE object_id = ?1",
+                    [id.to_bytes().as_slice()],
+                )
+                .unwrap();
+            drop(u);
+            let anchors = crate::AnchorDir::open(&a.join("anchors")).unwrap();
+            u = unlock(&path, &anchors, PASSWORD).unwrap();
+            assert_eq!(
+                err(dir.publish(&mut u, SnapshotKind::Recovery, CREATED, &|| false)),
+                StoreError::Integrity
+            );
+            assert_eq!(
+                dir.entries().unwrap().len(),
+                1,
+                "failed publication changed old copies"
+            );
+            u.file
+                .conn
+                .execute(
+                    "UPDATE object SET nonce = ?1 WHERE object_id = ?2",
+                    rusqlite::params![nonce, id.to_bytes().as_slice()],
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn archive_rejects_frame_changes_between_verification_passes() {
+        struct Changed {
+            cursor: std::io::Cursor<Vec<u8>>,
+            offset: usize,
+            changed: bool,
+        }
+        impl Read for Changed {
+            fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+                self.cursor.read(b)
+            }
+        }
+        impl Seek for Changed {
+            fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+                if matches!(pos, SeekFrom::Start(_)) && !self.changed {
+                    self.cursor.get_mut()[self.offset] ^= 1;
+                    self.changed = true;
+                }
+                self.cursor.seek(pos)
+            }
+        }
+        let d = crate::fs::test_dir::TestDir::new();
+        let (mut u, _a) = vault_with(&d);
+        let good = archive_of(&mut u);
+        let parts = split(&good);
+        let offset = parts.head.len() + 4 + parts.frames[0].len() + 4 + parts.frames[1].len() - 1;
+        let mut input = Changed {
+            cursor: std::io::Cursor::new(good),
+            offset,
+            changed: false,
+        };
+        let mut delivered = 0;
+        assert_eq!(
+            err(read_archive(
+                &mut input,
+                scope_of(&u),
+                u.vault_key(),
+                &mut |_| {
+                    delivered += 1;
+                    Ok(())
+                },
+                &|| false
+            )),
+            StoreError::Integrity
+        );
+        assert_eq!(delivered, 0);
     }
 }

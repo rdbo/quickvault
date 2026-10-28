@@ -38,6 +38,11 @@ impl CancelToken {
         Self::default()
     }
 
+    /// Uses a shared cancellation flag, for integration with signal/event loops.
+    pub fn from_shared_flag(flag: Arc<AtomicBool>) -> Self {
+        Self(flag)
+    }
+
     /// Cancels every operation watching this token.
     pub fn cancel(&self) {
         self.0.store(true, Ordering::SeqCst);
@@ -655,6 +660,43 @@ mod lock_tests {
         );
         assert_eq!(err(s.search("x")), CoreError::SessionLocked);
         assert_eq!(err(s.overview()), CoreError::SessionLocked);
+    }
+
+    #[test]
+    fn snapshot_restore_lock_before_and_after_publication() {
+        for point in [Point::BeforeCommit, Point::AfterCommit] {
+            let env = Env::new();
+            let s = Arc::new(env.unlock_with(Some(env.snapshot_policy())));
+            let id = s.snapshots().unwrap().snapshots[0].archive_id.clone();
+            let source = std::fs::read(&env.path).unwrap();
+            let target = env.path.with_file_name("restored.qvault");
+            let checked = target.clone();
+            let result = race(&s, point, move |s| s.restore_snapshot(&id, &target, None));
+            let durable = point == Point::AfterCommit;
+            assert_eq!(
+                result,
+                if durable {
+                    Ok(())
+                } else {
+                    Err(CoreError::Cancelled)
+                }
+            );
+            assert_eq!(checked.exists(), durable);
+            assert_eq!(std::fs::read(&env.path).unwrap(), source);
+            assert!(s.is_locked());
+            if durable {
+                let core = env.core();
+                let _k = crate::testutil::kdf();
+                let copy = core
+                    .unlock(
+                        &checked,
+                        &crate::testutil::pw(crate::testutil::PASSWORD),
+                        None,
+                    )
+                    .unwrap();
+                assert!(copy.verify(None).unwrap().ok());
+            }
+        }
     }
 
     #[test]

@@ -9,6 +9,28 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-28: `qvault snapshot restore <id> <new-path>` restores a local archive
+  into a new private vault with fresh replica, writer and external anchor
+  state (plan 0019, phase 1.13b). It preserves archived records, history,
+  suppression floors and attachments, leaves the active vault and its anchor
+  unchanged, and uses the password current when the snapshot was made.
+  Full or unambiguous six-or-more-hex IDs (optional `@`) are supported;
+  existing targets are refused. The explicit recovery baseline does not prove
+  global freshness. Automatic pruning waits until restore succeeds, and
+  signal cancellation is checked between bounded units of work. No dependency,
+  schema or format change.
+
+### Fixed
+
+- 2026-10-28: Authenticate archive records, retained history and attachment
+  chunks before publication or delivery to import code. Reject nonce-only
+  corruption and contradictory reference digests, and preserve existing
+  snapshots when a replacement cannot be verified (plan 0018 review fixes).
+  Verification uses bounded seek passes over ciphertext without plaintext
+  staging; the archive format is unchanged.
+
+### Added
+
 - 2026-10-28: Local snapshot policy, `qvault snapshot ls`, `qvault verify` and
   the mandatory recovery snapshot of `trash empty` (plan 0018 steps 7–10,
   phase 1.13a; 0007 §3, 0011 §4). With a configured private snapshot

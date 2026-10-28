@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-10-27 | 2026-10-28 (D1 approved by owner; standing approval for the rest, roadmap 0002) | 0004 §3.6, §4, §5.3, §6; 0007 §3 (+ D6 amendment); 0005 §5.4; 0008 §1–2/§5; 0011 §1–6; 0012 §1 |
+| Reviewed | 2026-10-27 | 2026-10-28 (D1 approved by owner; standing approval for the rest, roadmap 0002) | 0004 §3.6, §4, §5.3, §6; 0007 §3 (+ D6 amendment); 0005 §5.4; 0008 §1–2/§5; 0011 §1–6; 0012 §1 |
 
 ## Intent
 
@@ -1136,3 +1136,90 @@ unchanged (no dependency added), so 0012 §3 does not apply.
 
 Next: fresh-context review (`quickvault-reviewer`); 1.13b (`snapshot restore`,
 plan 0019) remains a separate session.
+
+### 2026-10-28 — Fresh-context review: re-plan needed
+
+Reviewed committed phase 1.13a (`66474cb` against `2dc7ac5`); see
+[REVIEW.md](REVIEW.md). Approval is withheld. Four temporary diagnostic probes
+confirmed that nonce-only corruption is accepted by the archive reader and
+snapshot publication, including retained-history corruption that survives a
+normal unlock even though `verify_all` rejects it. A valid-MAC header with a
+reference digest disagreeing with its manifest is also accepted. Probe source
+and logs are in `/tmp/qv18-review/`; product source was restored byte-for-byte.
+
+The role-aware archive authentication/publication fix needs an architect
+revision; no remediation or phase 1.13b implementation was started. Status
+stays `Implemented` under the reviewer lifecycle, with verdict **Re-plan
+needed**. Roadmap 0002 session protocol step 2 requires stopping on the
+escalations. Reviewer gate results and environment limitations are recorded in
+REVIEW.md. All review records remain uncommitted for the owner.
+
+### 2026-10-28 — Owner-authorized review remediation revision
+
+Owner requested “fix and then implement 1.13b”, authorizing this remediation
+and continuation without an intervening commit. Preserve existing review
+records. No new spec, dependency, crypto primitive, format or schema.
+
+The stream's sorted object order differs from record/chunk role order. Change
+`read_archive` to `Read + Seek`: first check every bounded frame's hash and
+record its offset plus whole-envelope SHA-256 (at most MAX_OBJECTS entries),
+then seek through authenticated manifest roles to verify record AEAD, version
+identity/clock, root/control kinds, history and every attachment's chunk AEAD,
+length and whole-content hash. Reuse `open_record`, `open_chunk`, chunk AAD
+and shared head/control checks; extract these checks to a platform-independent
+validation module. No SQLite input and no plaintext staging. Finally deliver
+objects to the sink only after complete validation, rechecking each whole-frame
+digest so a changed nonce between passes is rejected. Buffers hold one bounded
+frame and one record/chunk, never total archive contents. Update slice callers
+to Cursor and retain fail-closed cross-platform behavior. Compare header and
+manifest reference digests before processing objects.
+
+The writer validates source content before emitting an archive by using the
+existing full verifier; publication's reread also performs full role checks.
+Prune snapshots only after a newly published copy is fully verified, including
+age pruning, so failure preserves existing recovery material.
+
+- [x] R1 **Do:** implement seek-based archive authentication and shared role
+  checks, digest agreement and validation-before-sink; **Files:** archive.rs,
+  validation.rs / archive_verify.rs (new), vault.rs, verify.rs, verify_tests.rs, attachment.rs, lib.rs,
+  fuzz/fuzz_targets/archive_read.rs; **Done when:** nonce-only corruption in
+  active/history/chunk objects and wrong reference digest fail with Integrity
+  before any sink call; healthy archives round-trip; **Verify:**
+  `cargo test --locked -p qv-store archive` and `-p qv-store verify`.
+- [x] R2 **Do:** reject corrupt source before publication and defer age pruning
+  until successful publication; add regression tests proving old copies remain
+  on corrupt-source failure; **Files:** archive.rs, qv-core/src/snapshot.rs;
+  **Done when:** corrupt history after normal unlock cannot publish or replace
+  recovery material; **Verify:** store archive and core snapshot suites.
+- [x] R3 **Do:** document remediation, run all AGENTS gates and reviewer pass;
+  **Files:** CHANGELOG.md, this plan/review/index/roadmap; **Done when:** findings
+  addressed with rejection tests, no security-proof claim; **Verify:** all four
+  required gates, fuzz formatting/build where available and git diff --check.
+
+Status In progress, owner authorization 2026-10-28. Existing original review
+remains historical; append remediation review evidence after implementation.
+
+### 2026-10-28 — Remediation implemented and resumed review
+
+R1–R3 complete. Shared head/control validation and chunk AAD now serve the
+seek-based archive validator. Complete-envelope commitments protect subsequent
+passes; no sink is called before record/history/chunk AEAD, role and attachment
+whole-content checks succeed. The header reference digest is compared before
+object processing. Source full verification precedes archive writing; failed
+publication preserves existing copies, including expired ones. Four new store
+regressions cover nonce-only corruption in every role, post-unlock historical/
+chunk corruption, contradictory digest and between-pass changes; a core test
+covers expired-copy preservation after publication failure. Focused archive
+23 pass, core snapshot 15 pass, store verify suite passes.
+
+Reviewer pass traced authenticated roles, bounded index/frame reads, shared
+AAD/semantic checks, no-SQLite archive parsing, failure ordering and existing
+callers. Both original findings are addressed; verdict Approved for remediation
+(same-session resumed review, not a fresh independent review). Required SPDX,
+fmt, Clippy and full locked tests pass in `/tmp/qv18-review/fix-*.log` with private
+Xvfb: 565 passed, 0 failed, 2 pre-existing ignored. Fuzz formatting/build pass;
+non-sanitized debug smoke fuzz run completes 94,607 executions in 61 seconds,
+no finding (not an instrumented release campaign). No dependencies changed.
+Only behavior-preserving test slicing/comment/KDF-serialization edits followed
+the full-suite build; Clippy and the final phase-1.13b gates cover the final
+combined tree. No commit. Proceeding to 0019 under explicit owner instruction.

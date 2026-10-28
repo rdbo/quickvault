@@ -404,7 +404,12 @@ fn snapshot_pass(
     let mut report = SnapshotReport::default();
     let max_age_ms = policy.max_age_seconds.saturating_mul(MILLIS_PER_SECOND);
 
-    // 2. Age pruning, oldest first, authenticated headers only.
+    // 2. Write and verify the new copy (0004 §6.5).
+    let published = dir.publish(vault, kind, now, cancelled)?;
+    let new = published_summary(&published);
+    let new_entry = published.entry().clone();
+
+    // 3. Age pruning, oldest first, authenticated headers only.
     let (rows, _) = authenticated(policy, vault)?;
     for (entry, header) in &rows {
         if cancelled() {
@@ -422,11 +427,6 @@ fn snapshot_pass(
         }
         remove_entry(dir, entry, &id, &mut report)?;
     }
-
-    // 3. Write and verify the new copy (0004 §6.5).
-    let published = dir.publish(vault, kind, now, cancelled)?;
-    let new = published_summary(&published);
-    let new_entry = published.entry().clone();
 
     // 4. Count and byte pruning as if the new copy were ordinary, oldest
     //    first; the pinned copy and the new copy are never candidates.
@@ -531,6 +531,71 @@ impl Session {
                 unreadable,
             })
         })
+    }
+
+    /// Matches local snapshot filename IDs, including damaged/foreign files.
+    /// Authentication is required by `restore_snapshot` before acceptance.
+    pub fn snapshot_matches(&self, prefix: &str) -> Result<Vec<String>, CoreError> {
+        let prefix = prefix.strip_prefix('@').unwrap_or(prefix);
+        if !(6..=32).contains(&prefix.len()) || !prefix.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(CoreError::InvalidInput);
+        }
+        let prefix = prefix.to_ascii_lowercase();
+        self.read(|ctx| {
+            let policy = ctx.open.snapshots.clone().ok_or(CoreError::NotAllowed)?;
+            let mut ids: Vec<String> = policy
+                .dir
+                .entries()?
+                .iter()
+                .map(|e| e.archive_id().to_owned())
+                .filter(|id| id.starts_with(&prefix))
+                .collect();
+            ids.sort();
+            ids.dedup();
+            Ok(ids)
+        })
+    }
+
+    /// Explicitly restores a full local archive ID into a new path and fresh
+    /// local baseline. The active vault and its anchor are preserved. This
+    /// does not establish that the snapshot is the latest global state.
+    pub fn restore_snapshot(
+        &self,
+        id: &str,
+        path: &std::path::Path,
+        cancel: Option<&CancelToken>,
+    ) -> Result<(), CoreError> {
+        if id.len() != 32 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(CoreError::InvalidInput);
+        }
+        let id = id.to_ascii_lowercase();
+        let result = self.mutate(|ctx| {
+            ctx.check_cancel()?;
+            if cancel.is_some_and(CancelToken::is_cancelled) {
+                return Err(CoreError::Cancelled);
+            }
+            let policy = ctx.open.snapshots.clone().ok_or(CoreError::NotAllowed)?;
+            let entries = policy.dir.entries()?;
+            let mut matches = entries.iter().filter(|e| e.archive_id() == id);
+            let entry = matches.next().ok_or(CoreError::NotFound)?;
+            if matches.next().is_some() {
+                return Err(CoreError::Store(StoreError::Integrity));
+            }
+            #[cfg(test)]
+            crate::session::hooks::reached(crate::session::hooks::Point::BeforeCommit);
+            ctx.check_cancel()?;
+            let c = ctx.canceller();
+            policy.dir.restore(entry, &ctx.open.vault, path, &|| {
+                c.is_cancelled() || cancel.is_some_and(CancelToken::is_cancelled)
+            })?;
+            #[cfg(test)]
+            crate::session::hooks::reached(crate::session::hooks::Point::AfterCommit);
+            Ok(())
+        });
+        if result.is_ok() {
+            self.run_automatic_snapshot(cancel);
+        }
+        result
     }
 
     /// The snapshots created before `cutoff` (1.14 `passwd` support, 0007
@@ -1282,5 +1347,117 @@ mod tests {
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         assert_eq!(seq(&s), seq_before);
         assert!(s.begin_destructive(true, None).is_ok());
+    }
+    #[test]
+    fn snapshot_publication_failure_preserves_expired_recovery_material() {
+        use std::os::unix::fs::PermissionsExt;
+        let env = Env::new();
+        let s = env.unlock_with(Some(env.snapshot_policy()));
+        let old = s.snapshots().unwrap().snapshots[0].archive_id.clone();
+        drop(s);
+        env.time.set(i64::MAX / 2);
+        let configured = policy(&env, 48, DEFAULT_MAX_BYTES, 1);
+        let dir = configured.dir.path().to_owned();
+        let core = env.core_with(Some(configured));
+        let _k = kdf();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let s = core
+            .unlock(&env.path, &pw(crate::testutil::PASSWORD), None)
+            .unwrap();
+        assert!(s.snapshot_status().unwrap().failed);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(ids(&s.snapshots().unwrap()), vec![old]);
+    }
+    #[test]
+    fn snapshot_restore_preserves_source_and_defers_pruning_the_selected_input() {
+        let env = Env::new();
+        let s = env.unlock_with(Some(env.snapshot_policy()));
+        add_entry(&s, s.root().unwrap(), "from snapshot");
+        let snap = s.begin_destructive(false, None).unwrap();
+        let id = snap.summary().archive_id.clone();
+        s.finish_destructive(snap).unwrap();
+        let before = std::fs::read(&env.path).unwrap();
+        let anchors: Vec<_> = std::fs::read_dir(&env.anchors)
+            .unwrap()
+            .map(|e| {
+                let p = e.unwrap().path();
+                (p.clone(), std::fs::read(p).unwrap())
+            })
+            .collect();
+        drop(s);
+        env.time.set(i64::MAX / 2);
+        let core = env.core_with(Some(policy(&env, 48, DEFAULT_MAX_BYTES, 1)));
+        let s = {
+            let _k = kdf();
+            core.unlock_for_snapshot_restore(&env.path, &pw(crate::testutil::PASSWORD), None)
+                .unwrap()
+        };
+        assert!(
+            s.snapshot_status().is_none(),
+            "automatic pruning ran before restore"
+        );
+        assert!(
+            s.snapshot_matches(&format!("@{}", &id[..6]))
+                .unwrap()
+                .contains(&id)
+        );
+        let target = env.path.with_file_name("restored.qvault");
+        s.restore_snapshot(&id.to_ascii_uppercase(), &target, None)
+            .unwrap();
+        assert_eq!(std::fs::read(&env.path).unwrap(), before);
+        for (p, bytes) in anchors {
+            assert_eq!(std::fs::read(p).unwrap(), bytes);
+        }
+        let restored = {
+            let _k = kdf();
+            core.unlock(&target, &pw(crate::testutil::PASSWORD), None)
+                .unwrap()
+        };
+        assert_eq!(restored.overview().unwrap().local_seq, 1);
+        assert_eq!(restored.search("from snapshot").unwrap().len(), 1);
+        assert!(restored.verify(None).unwrap().ok());
+        assert!(
+            s.snapshot_status().is_some(),
+            "deferred policy did not resume after success"
+        );
+    }
+
+    #[test]
+    fn snapshot_restore_rejects_invalid_foreign_missing_and_cancelled_inputs() {
+        let env = Env::new();
+        let s = env.unlock_with(Some(env.snapshot_policy()));
+        let id = s.snapshots().unwrap().snapshots[0].archive_id.clone();
+        let target = env.path.with_file_name("restored.qvault");
+        assert_eq!(err(s.snapshot_matches("xyz")), CoreError::InvalidInput);
+        assert_eq!(
+            err(s.restore_snapshot("123456", &target, None)),
+            CoreError::InvalidInput
+        );
+        assert_eq!(
+            err(s.restore_snapshot(&"f".repeat(32), &target, None)),
+            CoreError::NotFound
+        );
+        let token = crate::CancelToken::new();
+        token.cancel();
+        assert!(s.restore_snapshot(&id, &target, Some(&token)).is_err());
+        assert!(!target.exists());
+        let foreign = "abcdef1234567890abcdef1234567890";
+        let path = env
+            .dir
+            .path()
+            .join("snapshots")
+            .join(format!("{foreign}.qvsnap"));
+        std::fs::write(&path, b"QVSNAP\0garbage").unwrap();
+        assert_eq!(
+            s.snapshot_matches("abcdef").unwrap(),
+            vec![foreign.to_owned()]
+        );
+        assert!(s.restore_snapshot(foreign, &target, None).is_err());
+        assert!(!target.exists());
+        s.lock();
+        assert_eq!(
+            err(s.restore_snapshot(&id, &target, None)),
+            CoreError::SessionLocked
+        );
     }
 }

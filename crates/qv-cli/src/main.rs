@@ -33,7 +33,10 @@
 //! patch, sensitive hints, bounded INCR transfers and ownership-safe release.
 //! OS/recipient copies may persist; native Wayland requires usable XWayland.
 //!
-//! **Not in this phase:** `snapshot restore` (1.13b); `passwd`, `recover`,
+//! `snapshot restore` writes a new vault and explicit recovery baseline,
+//! preserving the active vault and its anchor; it does not establish freshness.
+//!
+//! **Not in this phase:** `passwd`, `recover`,
 //! `recovery` (1.14–1.15); sync (2–3); colour output.
 
 #![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]

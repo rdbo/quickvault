@@ -29,6 +29,8 @@
 //! | `manifest` | [`Manifest`]: codec, validation, budgets, digests, encryption, envelope hash | 0004 §3.4–3.5, §4.1–4.2 |
 //! | `head` | the local head, its MAC and digest, the head-versus-anchor table ([`AnchorStatus`]) | 0005 §5.4 |
 //! | `anchor` | [`AnchorDir`]: anchor files, atomic replacement | 0005 §5.4 |
+//! | `archive_verify` / `validation` | Bounded role-aware archive authentication and shared record checks | 0004 §3.6, §6 |
+//! | `restore` | New-path snapshot restoration with fresh local baseline and existing creation ordering | 0007 §3.4; 0005 §5.4 |
 //! | `archive` | [`ArchiveHeader`], [`ArchiveScope`], framing, the archive writer and reader, [`SnapshotDir`] | 0004 §6; 0007 §3 |
 //! | `vault` | [`VaultFile`] (`create`, `open`, `unlock`, `unlock_for_recovery`) and [`UnlockedVault`] (verification, reads) | 0004 §3.6, §5.1, 0002 §8 |
 //! | `verify` | [`VerifyCounts`] and the full `verify` pass | 0004 §3.6 |
@@ -117,7 +119,7 @@
 //!
 //! Received versions and merges of concurrent heads (2.2); archives that
 //! carry a password slot (0004 §6.4, phase 2), archive merge and exchange
-//! (2.2) and `snapshot restore` (1.13b); password change (1.14);
+//! (2.2); password change (1.14);
 //! rotation (1.15); sync state, outbox and checkpoints (milestones 2–3);
 //! quick-unlock slots (2.6); keystore-backed anchors (2.3, 2.6); Windows
 //! and macOS file safety (4.1 and later).
@@ -125,6 +127,7 @@
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod anchor;
 mod archive;
+mod archive_verify;
 mod attachment;
 mod crash;
 #[cfg(test)]
@@ -140,11 +143,14 @@ mod location;
 mod manifest;
 mod object;
 #[cfg(any(target_os = "linux", target_os = "android"))]
+mod restore;
+#[cfg(any(target_os = "linux", target_os = "android"))]
 mod schema;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod slot;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod sqlite;
+mod validation;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod vault;
 #[cfg(any(target_os = "linux", target_os = "android"))]

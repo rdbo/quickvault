@@ -30,3 +30,10 @@ pub(crate) fn check() -> Result<(), CliError> {
         Ok(())
     }
 }
+
+/// Shares the installed signal flag with bounded core operations.
+pub(crate) fn token() -> qv_core::CancelToken {
+    qv_core::CancelToken::from_shared_flag(Arc::clone(
+        CANCELLED.get_or_init(|| Arc::new(AtomicBool::new(false))),
+    ))
+}

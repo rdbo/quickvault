@@ -106,7 +106,7 @@ fuzz_target!(|data: &[u8]| {
     let scope = ArchiveScope::new(vault.header().vault_id, vault.header().key_generation);
     let mut sink = |_: ArchiveObject<'_>| Ok(());
     let _ = read_archive(
-        &mut &bytes[..],
+        &mut std::io::Cursor::new(&bytes[..]),
         scope,
         vault.vault_key(),
         &mut sink,

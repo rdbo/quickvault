@@ -111,6 +111,21 @@ never_debug!(
 );
 
 impl SnapshotDir {
+    /// Unreachable on unsupported targets.
+    pub fn open_entry(&self, _entry: &SnapshotEntry) -> Result<std::fs::File, StoreError> {
+        match self.0 {}
+    }
+    /// Unreachable on unsupported targets.
+    pub fn restore(
+        &self,
+        _entry: &SnapshotEntry,
+        _source: &UnlockedVault,
+        _path: &Path,
+        _cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), StoreError> {
+        match self.0 {}
+    }
+
     /// Always [`StoreError::Unsupported`] on this target.
     pub fn open(_dir: &Path) -> Result<SnapshotDir, StoreError> {
         Err(StoreError::Unsupported)
@@ -167,6 +182,11 @@ impl SnapshotDir {
 }
 
 impl SnapshotEntry {
+    /// Unreachable on unsupported targets.
+    pub fn archive_id(&self) -> &str {
+        match self.0 {}
+    }
+
     /// Unreachable: no `SnapshotEntry` exists on this target.
     pub fn name(&self) -> &std::ffi::OsStr {
         match self.0 {}
@@ -243,6 +263,18 @@ impl AnchorDir {
 }
 
 impl VaultFile {
+    /// Fails closed on unsupported targets.
+    pub fn create_from_archive<R: std::io::Read + std::io::Seek>(
+        _path: &Path,
+        _input: &mut R,
+        _scope: crate::ArchiveScope,
+        _vk: &VaultKey,
+        _anchors: &AnchorDir,
+        _cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::Unsupported)
+    }
+
     /// Always [`StoreError::Unsupported`] on this target.
     pub fn open(_path: &Path) -> Result<VaultFile, StoreError> {
         Err(StoreError::Unsupported)

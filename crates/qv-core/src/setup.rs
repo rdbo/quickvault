@@ -277,6 +277,27 @@ impl Core {
         password: &MasterPassword,
         cancel: Option<&CancelToken>,
     ) -> Result<Session, CoreError> {
+        self.unlock_with_snapshot_policy(path, password, cancel, true)
+    }
+
+    /// Opens for an explicit new-path snapshot restore. Automatic pruning is
+    /// deferred until restore succeeds, so it cannot remove the selected input.
+    pub fn unlock_for_snapshot_restore(
+        &self,
+        path: &Path,
+        password: &MasterPassword,
+        cancel: Option<&CancelToken>,
+    ) -> Result<Session, CoreError> {
+        self.unlock_with_snapshot_policy(path, password, cancel, false)
+    }
+
+    fn unlock_with_snapshot_policy(
+        &self,
+        path: &Path,
+        password: &MasterPassword,
+        cancel: Option<&CancelToken>,
+        automatic: bool,
+    ) -> Result<Session, CoreError> {
         let (vault, status) = self.open(path, cancel, |f| {
             f.unlock_for_recovery(password, &self.anchors)
         })?;
@@ -293,7 +314,9 @@ impl Core {
             false,
             cancel,
         )?;
-        session.run_automatic_snapshot(cancel);
+        if automatic {
+            session.run_automatic_snapshot(cancel);
+        }
         Ok(session)
     }
 
