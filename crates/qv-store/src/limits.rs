@@ -3,6 +3,8 @@
 //! Vault-file budgets (spec 0004 §4.1). Development values where the spec
 //! gives none; the 1.16 format freeze records the final ones.
 
+use crate::object::ENVELOPE_OVERHEAD;
+
 /// Largest vault file accepted before SQLite parses it: the 1 GiB
 /// referenced-ciphertext budget plus room for history, manifests and
 /// objects awaiting pruning. Development value.
@@ -38,3 +40,16 @@ pub const MAX_CLOCK_COMPONENTS: usize = 1 << 20;
 
 /// Most chunks of one attachment: 10 MiB in 64 KiB chunks (0003 §6).
 pub const MAX_CHUNKS: usize = 160;
+
+/// Largest object frame of an archive: one record or chunk envelope at its
+/// ciphertext budget (0004 §4.1, §6.1). Development value.
+pub const MAX_ARCHIVE_OBJECT_FRAME: usize = MAX_RECORD_CIPHERTEXT + ENVELOPE_OVERHEAD;
+
+/// Largest manifest frame of an archive: a manifest envelope at the manifest
+/// ciphertext budget (0004 §4.1, §6.3). Development value.
+pub const MAX_ARCHIVE_MANIFEST_FRAME: usize = MAX_MANIFEST_CIPHERTEXT + ENVELOPE_OVERHEAD;
+
+/// Largest sum of referenced ciphertext lengths one archive may claim: the
+/// vault's own total budget, so a header is refused before any frame is read
+/// (0004 §4.1).
+pub const MAX_ARCHIVE_TOTAL_LENGTH: u64 = MAX_TOTAL_CIPHERTEXT;

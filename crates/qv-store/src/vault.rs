@@ -174,7 +174,7 @@ pub(crate) fn scope(header: &Header) -> Scope {
 }
 
 /// A stored data profile that this header accepts.
-fn accepted_profile(header: &Header, id: u16) -> Result<StoredDataProfile, StoreError> {
+pub(crate) fn accepted_profile(header: &Header, id: u16) -> Result<StoredDataProfile, StoreError> {
     let p = StoredDataProfile::from_id(id)?;
     if p.accepts(header.min_data_profile) {
         Ok(p)
@@ -253,24 +253,7 @@ fn load_state(conn: &Connection, header: &Header, vk: &VaultKey) -> Result<State
         }
         kinds.insert(rec.record_id(), kind.ok_or(StoreError::Integrity)?);
     }
-    for (&id, &k) in &kinds {
-        let expected = if id == manifest.vault_meta_id() {
-            Some(RecordKind::VaultMeta)
-        } else if id == manifest.keyslot_id() {
-            Some(RecordKind::PasswordKeyslot)
-        } else if id == manifest.root_group_id() {
-            Some(RecordKind::Group)
-        } else {
-            None
-        };
-        let ok = match expected {
-            Some(e) => k == e,
-            None => !matches!(k, RecordKind::VaultMeta | RecordKind::PasswordKeyslot),
-        };
-        if !ok {
-            return Err(StoreError::Integrity);
-        }
-    }
+    check_control_kinds(&manifest, &kinds)?;
 
     let writer = WriterId::from_bytes(stored.replica.writer_id)?;
     Ok(State {
@@ -322,10 +305,38 @@ pub(crate) fn read_role(
     )
 }
 
+/// The control-record kind rules of a verified state (0003 §2.3): the
+/// metadata, keyslot and root-group IDs carry their own kinds and no other
+/// record may be either control kind.
+pub(crate) fn check_control_kinds(
+    manifest: &Manifest,
+    kinds: &BTreeMap<RecordId, RecordKind>,
+) -> Result<(), StoreError> {
+    for (&id, &kind) in kinds {
+        let expected = if id == manifest.vault_meta_id() {
+            Some(RecordKind::VaultMeta)
+        } else if id == manifest.keyslot_id() {
+            Some(RecordKind::PasswordKeyslot)
+        } else if id == manifest.root_group_id() {
+            Some(RecordKind::Group)
+        } else {
+            None
+        };
+        let ok = match expected {
+            Some(e) => kind == e,
+            None => !matches!(kind, RecordKind::VaultMeta | RecordKind::PasswordKeyslot),
+        };
+        if !ok {
+            return Err(StoreError::Integrity);
+        }
+    }
+    Ok(())
+}
+
 /// Per-head rules that need the decrypted version: chunk lists match an
 /// `attachment_meta` payload, the root group stays a live root, and vault
 /// metadata names the manifest's root.
-fn check_head(
+pub(crate) fn check_head(
     manifest: &Manifest,
     record: RecordId,
     v: &VersionRef,
@@ -807,6 +818,49 @@ impl UnlockedVault {
     /// The authenticated header.
     pub fn header(&self) -> &Header {
         &self.file.header
+    }
+
+    /// Opens one read transaction over the committed state and re-checks that
+    /// the head and replica rows on disk are the ones this session verified
+    /// ([`StoreError::Changed`] otherwise, 0004 §1.3). The archive writer runs
+    /// its whole pass inside it (0004 §6) and never writes.
+    pub(crate) fn begin_read(&self) -> Result<(), StoreError> {
+        self.check_identity()?;
+        self.file.budget.reset();
+        if let Err(e) = self.file.conn.execute_batch("BEGIN") {
+            return Err(crate::error::sqlite_err(&e));
+        }
+        let fresh = schema::read_head(&self.file.conn)
+            .and_then(|h| Ok((h, schema::read_replica(&self.file.conn)?)));
+        match fresh {
+            Ok((head, replica))
+                if head == self.state.stored_head && replica == self.state.replica =>
+            {
+                Ok(())
+            }
+            Ok(_) => {
+                self.abort_read();
+                Err(StoreError::Changed)
+            }
+            Err(e) => {
+                self.abort_read();
+                Err(e)
+            }
+        }
+    }
+
+    /// Ends a successful read pass.
+    pub(crate) fn end_read(&self) -> Result<(), StoreError> {
+        self.file
+            .conn
+            .execute_batch("COMMIT")
+            .map_err(|e| crate::error::sqlite_err(&e))
+    }
+
+    /// Abandons a read pass; the error is ignored because a read transaction
+    /// changes nothing.
+    pub(crate) fn abort_read(&self) {
+        let _ = self.file.conn.execute_batch("ROLLBACK");
     }
 
     /// Location warnings for this vault's path.

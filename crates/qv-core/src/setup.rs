@@ -11,10 +11,11 @@ use qv_crypto::{
     harden_process, memory_protection,
 };
 use qv_model::Timestamp;
-use qv_store::{AnchorDir, AnchorStatus, LocationWarnings, UnlockedVault, VaultFile};
+use qv_store::{AnchorDir, AnchorStatus, LocationWarnings, StoreError, UnlockedVault, VaultFile};
 
 use crate::error::{CoreError, crypto};
 use crate::session::{CancelToken, Session};
+use crate::snapshot::SnapshotPolicy;
 
 /// A clock for timestamps and trash expiry. Dates are display information
 /// and policy input only, never causality (0005 §1.5).
@@ -44,15 +45,27 @@ pub struct CoreConfig {
     pub anchors: AnchorDir,
     /// The clock.
     pub time: Arc<dyn TimeSource>,
+    /// The local snapshot policy (0007 §3.3). `None` disables automatic
+    /// snapshots, the snapshot listing and the mandatory recovery copy of a
+    /// destructive operation; frontends enable it with
+    /// [`CoreConfig::with_snapshots`].
+    pub snapshots: Option<SnapshotPolicy>,
 }
 
 impl CoreConfig {
-    /// A configuration with the system clock.
+    /// A configuration with the system clock and local snapshots disabled.
     pub fn new(anchors: AnchorDir) -> Self {
         Self {
             anchors,
             time: Arc::new(SystemTime),
+            snapshots: None,
         }
+    }
+
+    /// Enables local snapshots in `policy`'s directory (0007 §3.1–3.3).
+    pub fn with_snapshots(mut self, policy: SnapshotPolicy) -> Self {
+        self.snapshots = Some(policy);
+        self
     }
 }
 
@@ -146,6 +159,7 @@ pub struct Core {
     anchors: AnchorDir,
     time: Arc<dyn TimeSource>,
     process: ProcessHardening,
+    snapshots: Option<Arc<SnapshotPolicy>>,
 }
 
 impl core::fmt::Debug for Core {
@@ -170,6 +184,7 @@ impl Core {
             anchors: config.anchors,
             time: config.time,
             process: harden().process,
+            snapshots: config.snapshots.map(Arc::new),
         }
     }
 
@@ -235,7 +250,16 @@ impl Core {
         self.check_anchor_location(path)?;
         let vault = VaultFile::create(path, password, name, &self.anchors)?;
         let recovery_phrase = RecoveryPhrase::from_vault_key(vault.vault_key()).map_err(crypto)?;
-        let session = Session::open(vault, self.time.clone(), false, None)?;
+        // A new vault is not an unlock: the first automatic snapshot waits
+        // for the next unlock (0007 §3.2).
+        let session = Session::open(
+            vault,
+            self.time.clone(),
+            AnchorStatus::Verified,
+            self.snapshots.clone(),
+            false,
+            None,
+        )?;
         Ok(Created {
             session,
             recovery_phrase,
@@ -253,8 +277,24 @@ impl Core {
         password: &MasterPassword,
         cancel: Option<&CancelToken>,
     ) -> Result<Session, CoreError> {
-        let vault = self.open(path, cancel, |f| f.unlock(password, &self.anchors))?;
-        Session::open(vault, self.time.clone(), false, cancel)
+        let (vault, status) = self.open(path, cancel, |f| {
+            f.unlock_for_recovery(password, &self.anchors)
+        })?;
+        match status {
+            AnchorStatus::Missing => return Err(StoreError::NoAnchor.into()),
+            AnchorStatus::Mismatch => return Err(StoreError::Rollback.into()),
+            _ => {}
+        }
+        let session = Session::open(
+            vault,
+            self.time.clone(),
+            status,
+            self.snapshots.clone(),
+            false,
+            cancel,
+        )?;
+        session.run_automatic_snapshot(cancel);
+        Ok(session)
     }
 
     /// Unlocks a vault whose anchor is missing or mismatched (0005 §5.4):
@@ -266,14 +306,19 @@ impl Core {
         password: &MasterPassword,
         cancel: Option<&CancelToken>,
     ) -> Result<(Session, AnchorStatus), CoreError> {
-        let mut status = AnchorStatus::Verified;
-        let vault = self.open(path, cancel, |f| {
-            let (v, s) = f.unlock_for_recovery(password, &self.anchors)?;
-            status = s;
-            Ok(v)
+        let (vault, status) = self.open(path, cancel, |f| {
+            f.unlock_for_recovery(password, &self.anchors)
         })?;
         let read_only = matches!(status, AnchorStatus::Missing | AnchorStatus::Mismatch);
-        let session = Session::open(vault, self.time.clone(), read_only, cancel)?;
+        let session = Session::open(
+            vault,
+            self.time.clone(),
+            status,
+            self.snapshots.clone(),
+            read_only,
+            cancel,
+        )?;
+        session.run_automatic_snapshot(cancel);
         Ok((session, status))
     }
 
@@ -281,14 +326,14 @@ impl Core {
         &self,
         path: &Path,
         cancel: Option<&CancelToken>,
-        unlock: impl FnOnce(VaultFile) -> Result<UnlockedVault, qv_store::StoreError>,
-    ) -> Result<UnlockedVault, CoreError> {
+        unlock: impl FnOnce(VaultFile) -> Result<(UnlockedVault, AnchorStatus), qv_store::StoreError>,
+    ) -> Result<(UnlockedVault, AnchorStatus), CoreError> {
         cancelled(cancel)?;
         self.check_anchor_location(path)?;
         let file = VaultFile::open(path)?;
-        let vault = unlock(file)?;
+        let unlocked = unlock(file)?;
         cancelled(cancel)?;
-        Ok(vault)
+        Ok(unlocked)
     }
 }
 

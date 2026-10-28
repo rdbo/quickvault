@@ -18,6 +18,7 @@
 //! | `edit` | Drafts, edits, moves, soft delete, restore, final deletion | 0005 §1.2, §2.5, 0007 §2 |
 //! | `attachment` | Session-bound metadata, streaming import/verify/save and confirmed-by-frontend permanent removal | 0003 §6, 0004 §3.3, 0011 §4 |
 //! | `history` | Authenticated retained-history views/reveal, fresh causal restore and floor-only purge | 0007 §1, 0011 §4 |
+//! | `snapshot` | Local snapshot policy (hourly/first-of-day coalescing, count/byte/age budgets, pruning), authenticated listing, the mandatory recovery copy of a destructive operation, and the `verify` report | 0007 §3, 0004 §3.6, 0011 §4 |
 //! | `settings` | Vault settings and the password generator | 0003 §3, 0010 §5 |
 //! | `order` | Fractional ordering keys for new groups | 0003 §4 |
 //! | `strength` | [`password_strength`] (zxcvbn) and [`confirmation_positions`] | 0010 §3.2, §4.2; 0002 §4.2 |
@@ -65,9 +66,21 @@
 //! version and leaves separate attachments unchanged. Purge is local logical
 //! suppression, never proof of erasure of backups or independent copies.
 //!
+//! **Snapshots and `verify`** (0007 §3, 0011 §4): with a
+//! [`SnapshotPolicy`] configured, an unlock may write one ordinary archive of
+//! the verified state per hour and one on the first unlock of a UTC day, from
+//! authenticated snapshot headers only — no vault write, marker row or
+//! settings commit. Budgets are 30 days, 48 ordinary snapshots and 512 MiB,
+//! pruned oldest first; a recovery copy pinned by an in-progress destructive
+//! operation is never pruned. A snapshot failure or budget skip is a warning
+//! for the frontend ([`Session::snapshot_status`]) and never fails the
+//! command. [`Session::verify`] is a read-only full pass and never repairs
+//! anything; the documented remedy for a failure is restoring a snapshot.
+//!
 //! **Not yet implemented:** general conflict resolution and merges (2.2),
-//! archives/snapshots (1.13), production inactivity/OS lifecycle hooks (2.3),
-//! password change and rotation (1.14, 1.15).
+//! `snapshot restore` into a new vault file (1.13b), production
+//! inactivity/OS lifecycle hooks (2.3), password change and rotation (1.14,
+//! 1.15).
 //!
 //! **Errors**: [`CoreError`] (its rustdoc maps variants to CLI exit codes)
 //! carries no data.
@@ -81,6 +94,7 @@ mod order;
 mod session;
 mod settings;
 mod setup;
+mod snapshot;
 mod strength;
 #[cfg(test)]
 mod testutil;
@@ -91,6 +105,11 @@ pub use error::CoreError;
 pub use session::{CancelToken, EntryHandle, FieldHandle, GroupHandle, ItemHandle, Session};
 pub use settings::{SettingsDraft, estimate, generate};
 pub use setup::{Core, CoreConfig, Created, Protection, SystemTime, TimeSource, VaultInfo, harden};
+pub use snapshot::{
+    DEFAULT_MAX_AGE_SECONDS, DEFAULT_MAX_BYTES, DEFAULT_MAX_COUNT, RecoverySnapshot,
+    SNAPSHOT_INTERVAL_SECONDS, SnapshotListing, SnapshotPolicy, SnapshotReport, SnapshotSkip,
+    SnapshotSummary, VerifyNote, VerifyReport,
+};
 pub use strength::{PasswordCheck, PasswordVerdict, confirmation_positions, password_strength};
 pub use views::{
     ConflictSummary, EntryDetail, EntrySummary, ExpiryReport, FieldDetail, FieldSummary,
@@ -109,7 +128,9 @@ pub use qv_model::{
     Entry, Extensions, Field, FieldId, FieldKind, FieldValue, GeneratorDefaults, Group, RandomId,
     SecretText, Settings, Text, Timestamp, TotpError, VaultMeta, VersionId, WriterId,
 };
-pub use qv_store::{AnchorDir, AnchorStatus, LocationWarnings, StoreError, VAULT_EXTENSION};
+pub use qv_store::{
+    AnchorDir, AnchorStatus, LocationWarnings, SnapshotKind, StoreError, VAULT_EXTENSION,
+};
 
 pub use attachment::{AttachmentHandle, AttachmentSummary};
 pub use history::{HistoryHandle, HistorySummary};

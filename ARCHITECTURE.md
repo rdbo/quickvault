@@ -88,10 +88,10 @@ rather than creating unused workspace scaffolding.
 | qv-encoding | Bounded deterministic CBOR (0004 §3.1): validates hostile input before typed reads, encodes only canonical items, builds AAD/info/transcript arrays; depends on no other qv crate |
 | qv-crypto | Profiles, key hierarchy, encryption, signature verification, protected memory |
 | qv-model | Canonical payloads, atomic records, deterministic tree projection |
-| qv-store | Hardened SQLite, immutable objects, manifests, transactions, archives |
+| qv-store | Hardened SQLite, immutable objects, manifests, transactions, authenticated archives (header, writer, reader) and the full `verify` pass |
 | qv-protocol | Bounded canonical LAN/server wire types, contexts and version registry |
 | qv-sync | Shared causal merge, direct LAN exchange, remote candidate state and publication orchestration |
-| qv-core | Session policy, handles, lock cancellation, mutation authorization |
+| qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets and the `verify` report |
 | qv-platform | Native secure input, keystore, clipboard, verified OS autofill |
 | qv-cli / qv-app | Explicit user actions and views; no unrestricted crypto/file/SQL bridge |
 | qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
@@ -105,15 +105,17 @@ group-tree projection and TOTP) and `qv-store` (the hardened vault file with
 its header and local keyslots; unlinkable encrypted objects, the encrypted
 manifest, the authenticated local head and the per-replica external anchor;
 writer state; creation, verified unlock with explicit anchor recovery, and
-the single mutation transaction, plus bounded authenticated attachment chunks) and `qv-core` (sessions with lock,
+the single mutation transaction, plus bounded authenticated attachment chunks, the authenticated archive reader/writer and the read-only full `verify` pass) and `qv-core` (sessions with lock,
 cancellation and session-scoped handles, mutation authorization, the bounded
 metadata index and search over non-protected fields, on-demand decryption,
 causal entry/group edits, the trash with final tombstones, read-only conflict
 surfacing and vault settings including generator defaults, plus the
-unverified header view, the zxcvbn master-password estimate and session-bound
-streaming attachment operations) and `qv-cli`
+unverified header view, the zxcvbn master-password estimate, session-bound
+streaming attachment operations, local snapshot policy/budgets with their
+authenticated listing, and the `verify` report) and `qv-cli`
 (`qvault` with `init`, `info`, `ls`, `search`, `show`, `totp`, `generate`,
-`add`, `edit`, `mv`, `mkdir`, `rm`, `trash ls|restore|empty`, `copy` and
+`add`, `edit`, `mv`, `mkdir`, `rm`, `trash ls|restore|empty`,
+`snapshot ls`, `verify`, `copy` and
 `totp`/`generate --copy`, `attach add|ls|save|rm`; protected
 prompts/notes, signal cancellation and terminal restoration, escaped and JSON
 output, exit codes). Its private Linux X11 clipboard adapter (including usable
@@ -144,6 +146,24 @@ are not attributed to invented device identities. Local purge is logical
 suppression, not erasure of snapshots, unseen concurrent history or independent
 copies. Configurable history-depth settings remain reserved; the implemented
 target is the default ten, which is not permission to violate safe floors.
+Local snapshots (0007 §3) are archives built only from verified objects: the
+live SQLite file is never copied or normalized, and no password slot is
+written. On unlock, core may take one ordinary snapshot per hour and one on the
+first unlock of a UTC day, deciding from authenticated archive headers in the
+private snapshot directory only — no marker row, settings row or vault commit
+on a read command. Budgets are 30 days, 48 ordinary snapshots and 512 MiB,
+pruned oldest first; a recovery copy pinned by an in-progress destructive
+operation is never pruned, and a `recover-` file left by a crash is reclassified
+before pruning. `trash empty` writes and verifies a recovery copy before its
+purge commits: a copy that cannot be written aborts the deletion with nothing
+purged, and exceeding the ordinary budget requires explicit approval.
+`qvault verify` is a read-only full re-hash/authentication pass that reports the
+local head and the anchor comparison; it never repairs, and the documented
+remedy for a failure is restoring a snapshot (`snapshot restore`, 1.13b).
+Snapshot failures and budget skips are warnings on stderr and never fail the
+requested command. Archives carry no device-local slots, keys, session tokens,
+sync state or anchors; hosts, other media and independent copies remain outside
+application control, so no erasure is claimed.
 The isolated `spikes/ui-feasibility/` crate is a non-production Dioxus
 prototype with standard webview input and a qv-core fixture controller. Its
 controller tests and real Linux/Android create/edit/reopen, Android background
@@ -317,8 +337,14 @@ platform gates pass; do not weaken unlock policy to complete an app milestone.
 
 Open design decisions recorded for the owner (not yet decided):
 whether per-device signing identities are worth their complexity
-([0006](specs/0006-server-authentication.md) OQ2), and password slots in local
-snapshots ([0007](specs/0007-history-and-backups.md) OQ1), plus LAN discovery/addressing,
+([0006](specs/0006-server-authentication.md) OQ2), plus LAN discovery/addressing,
 authenticated peer enrollment/session design, local peer-state persistence,
 LAN listening lifecycle and peer removal ([0005](specs/0005-synchronization.md)
 OQ3–OQ6). No LAN wire protocol has been selected by this direction change.
+
+Decided on 2026-10-25 as owner decision D6 (roadmap 0002), recorded in
+[0007](specs/0007-history-and-backups.md) §3.1/§3.5 (plan 0018): password slots
+in local snapshots (0007 OQ1) — local snapshots carry no password slot and open
+with the vault key or the recovery phrase, and a password change offers to
+delete the snapshots created before it. Self-contained archives stay an
+explicit, warned user choice (0004 §6.4).

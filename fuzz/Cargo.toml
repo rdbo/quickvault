@@ -14,6 +14,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "=0.4.13"
+qv-crypto = { path = "../crates/qv-crypto", version = "=0.0.0" }
 qv-encoding = { path = "../crates/qv-encoding", version = "=0.0.0" }
 qv-model = { path = "../crates/qv-model", version = "=0.0.0" }
 qv-store = { path = "../crates/qv-store", version = "=0.0.0" }
@@ -45,6 +46,13 @@ bench = false
 [[bin]]
 name = "vault_open"
 path = "fuzz_targets/vault_open.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "archive_read"
+path = "fuzz_targets/archive_read.rs"
 test = false
 doc = false
 bench = false

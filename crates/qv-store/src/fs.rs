@@ -88,6 +88,14 @@ impl LockedFile {
         let identity = fstat(&fd).map_err(errno_err)?;
         Ok(Self { fd, identity })
     }
+
+    /// Takes the descriptor out of the guard, for a temporary file that is
+    /// written, re-read and published (archives, 0004 §6.5). Giving up the
+    /// descriptor also gives up the lock, which a temp file does not need:
+    /// its name is random and created with `O_EXCL`.
+    pub(crate) fn into_file(self) -> std::fs::File {
+        std::fs::File::from(self.fd)
+    }
 }
 
 /// The directory containing `path` (`.` for a bare file name).
@@ -197,6 +205,27 @@ pub(crate) fn open_existing(path: &Path) -> Result<LockedFile, StoreError> {
     })?;
     check_file(&fstat(&fd).map_err(errno_err)?)?;
     LockedFile::lock(fd)
+}
+
+/// Opens a private regular file read-only, for re-reading what was just
+/// written before it is published (an archive temp file, 0004 §6.5).
+/// [`StoreError::UnsafeFile`] for a symlink, a non-regular file or a file
+/// that is not owner-only.
+pub(crate) fn open_private_ro(path: &Path) -> Result<std::fs::File, StoreError> {
+    let fd = open(
+        path,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
+        Mode::empty(),
+    )
+    .map_err(|e| match e {
+        Errno::LOOP | Errno::NXIO | Errno::ISDIR => StoreError::UnsafeFile,
+        e => errno_err(e),
+    })?;
+    let st = fstat(&fd).map_err(errno_err)?;
+    if !is_owner_only(&st) {
+        return Err(StoreError::UnsafeFile);
+    }
+    Ok(std::fs::File::from(fd))
 }
 
 /// Checks SQLite's sidecar files next to `path` before SQLite opens it

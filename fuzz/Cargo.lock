@@ -331,6 +331,7 @@ name = "qv-encoding-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
+ "qv-crypto",
  "qv-encoding",
  "qv-model",
  "qv-store",

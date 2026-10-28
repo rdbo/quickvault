@@ -24,15 +24,17 @@
 //! Editing/group/trash commands use core drafts and durable transactions;
 //! notes and protected values are prompted. SIGINT/TERM/HUP cancel prompts
 //! through atomic flags with terminal/alternate-screen RAII cleanup.
+//! `trash empty` writes and verifies a recovery snapshot before its deletion
+//! commits (0011 §4), and `snapshot ls`/`verify` authenticate archive headers
+//! and the whole committed state without repairing anything.
 //!
 //! Clipboard commands close the vault before serving a copied value in the
 //! foreground. The private X11 adapter uses a maintained protected-buffer x11rb
 //! patch, sensitive hints, bounded INCR transfers and ownership-safe release.
 //! OS/recipient copies may persist; native Wayland requires usable XWayland.
 //!
-//! **Not in this phase:** `passwd`, `recover`,
-//! `recovery` (1.14–1.15); `verify` (1.13); history and snapshots
-//! (1.12–1.13); colour output.
+//! **Not in this phase:** `snapshot restore` (1.13b); `passwd`, `recover`,
+//! `recovery` (1.14–1.15); sync (2–3); colour output.
 
 #![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 

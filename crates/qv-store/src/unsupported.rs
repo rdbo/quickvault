@@ -41,6 +41,56 @@ pub struct AnchorDir(Never);
 /// A mutation (unavailable on this target).
 pub struct Write<'v>(Never, core::marker::PhantomData<&'v ()>);
 
+/// A private snapshot directory (unavailable on this target).
+pub struct SnapshotDir(Never);
+
+/// One snapshot file (unavailable on this target).
+pub struct SnapshotEntry(Never);
+
+/// A published snapshot (unavailable on this target).
+pub struct PublishedSnapshot(Never);
+
+/// The counts of a `verify` pass (0011 `verify`). The same plain aggregate
+/// counters as the Linux/Android implementation; producing one fails closed
+/// here.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct VerifyCounts {
+    /// Referenced objects re-hashed.
+    pub objects: u64,
+    /// Records in the manifest.
+    pub records: u64,
+    /// Active heads re-verified.
+    pub active_heads: u64,
+    /// Retained history versions re-verified.
+    pub retained_versions: u64,
+    /// Active heads that are final tombstones.
+    pub tombstones: u64,
+    /// Records carrying a suppression floor.
+    pub suppressed_records: u64,
+    /// Total referenced ciphertext length.
+    pub total_bytes: u64,
+}
+
+/// What a local snapshot is for (0007 §3.2). A plain two-value type, because
+/// callers match on it on every target; producing one fails closed here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapshotKind {
+    /// An automatic or user-visible snapshot.
+    Ordinary,
+    /// The mandatory pre-operation copy of a destructive operation.
+    Recovery,
+}
+
+impl SnapshotKind {
+    /// The fixed label `ordinary` or `recovery` (0011 §4).
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ordinary => "ordinary",
+            Self::Recovery => "recovery",
+        }
+    }
+}
+
 macro_rules! never_debug {
     ($($t:ty),+) => {$(
         impl fmt::Debug for $t {
@@ -50,7 +100,130 @@ macro_rules! never_debug {
         }
     )+};
 }
-never_debug!(VaultFile, UnlockedVault, AnchorDir, Write<'_>);
+never_debug!(
+    VaultFile,
+    UnlockedVault,
+    AnchorDir,
+    Write<'_>,
+    SnapshotDir,
+    SnapshotEntry,
+    PublishedSnapshot
+);
+
+impl SnapshotDir {
+    /// Always [`StoreError::Unsupported`] on this target.
+    pub fn open(_dir: &Path) -> Result<SnapshotDir, StoreError> {
+        Err(StoreError::Unsupported)
+    }
+
+    /// Always [`StoreError::Unsupported`] on this target.
+    pub fn default_dir() -> Result<PathBuf, StoreError> {
+        Err(StoreError::Unsupported)
+    }
+
+    /// Unreachable: no `SnapshotDir` exists on this target.
+    pub fn path(&self) -> &Path {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `SnapshotDir` exists on this target.
+    pub fn entries(&self) -> Result<Vec<SnapshotEntry>, StoreError> {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `SnapshotDir` exists on this target.
+    pub fn read_header(
+        &self,
+        _entry: &SnapshotEntry,
+        _expect: crate::ArchiveScope,
+        _vk: &VaultKey,
+    ) -> Result<crate::ArchiveHeader, StoreError> {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `SnapshotDir` exists on this target.
+    pub fn remove(&self, _entry: &SnapshotEntry) -> Result<(), StoreError> {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `SnapshotDir` exists on this target.
+    pub fn reclassify_as_ordinary(
+        &self,
+        _entry: &SnapshotEntry,
+    ) -> Result<SnapshotEntry, StoreError> {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `SnapshotDir` exists on this target.
+    pub fn publish(
+        &self,
+        _vault: &mut UnlockedVault,
+        _kind: SnapshotKind,
+        _created_at: qv_model::Timestamp,
+        _cancelled: &dyn Fn() -> bool,
+    ) -> Result<PublishedSnapshot, StoreError> {
+        match self.0 {}
+    }
+}
+
+impl SnapshotEntry {
+    /// Unreachable: no `SnapshotEntry` exists on this target.
+    pub fn name(&self) -> &std::ffi::OsStr {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `SnapshotEntry` exists on this target.
+    pub fn size(&self) -> u64 {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `SnapshotEntry` exists on this target.
+    pub fn kind(&self) -> SnapshotKind {
+        match self.0 {}
+    }
+}
+
+impl PublishedSnapshot {
+    /// Unreachable: no `PublishedSnapshot` exists on this target.
+    pub fn entry(&self) -> &SnapshotEntry {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `PublishedSnapshot` exists on this target.
+    pub fn stats(&self) -> &crate::ArchiveStats {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `PublishedSnapshot` exists on this target.
+    pub fn archive_id(&self) -> &str {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `PublishedSnapshot` exists on this target.
+    pub fn created_at(&self) -> qv_model::Timestamp {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `PublishedSnapshot` exists on this target.
+    pub fn kind(&self) -> SnapshotKind {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `PublishedSnapshot` exists on this target.
+    pub fn size(&self) -> u64 {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `PublishedSnapshot` exists on this target.
+    pub fn objects(&self) -> u64 {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `PublishedSnapshot` exists on this target.
+    pub fn total_bytes(&self) -> u64 {
+        match self.0 {}
+    }
+}
 
 impl AnchorDir {
     /// Always [`StoreError::Unsupported`] on this target.
@@ -130,6 +303,21 @@ impl VaultFile {
 }
 
 impl UnlockedVault {
+    /// Unreachable: no `UnlockedVault` exists on this target.
+    pub fn verify_all(&self, _cancelled: &dyn Fn() -> bool) -> Result<VerifyCounts, StoreError> {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `UnlockedVault` exists on this target.
+    pub fn write_archive<W: std::io::Write>(
+        &mut self,
+        _out: W,
+        _created_at: qv_model::Timestamp,
+        _cancelled: &dyn Fn() -> bool,
+    ) -> Result<crate::ArchiveStats, StoreError> {
+        match self.0 {}
+    }
+
     /// Unreachable: no UnlockedVault exists on this target.
     pub fn verify_attachment(
         &self,

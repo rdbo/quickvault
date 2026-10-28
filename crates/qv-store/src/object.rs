@@ -27,9 +27,9 @@ use crate::limits::MAX_RECORD_CIPHERTEXT;
 pub(crate) const RECORD_AAD_LABEL: &str = "qv/record/v1";
 
 /// Bytes an envelope adds around its ciphertext, at most: the array head,
-/// a 16-byte ID, a `u32` generation, a `u16` profile, a 24-byte nonce and
-/// the ciphertext's byte-string head.
-const ENVELOPE_OVERHEAD: usize = 1 + 17 + 5 + 3 + 25 + 9;
+/// a 16-byte ID, a `u32` generation, a `u16` profile, a 24-byte nonce (its
+/// length needs a two-byte CBOR head) and the ciphertext's byte-string head.
+pub(crate) const ENVELOPE_OVERHEAD: usize = 1 + 17 + 5 + 3 + 26 + 9;
 
 /// The portable form of an encrypted object (0004 §2.2).
 pub struct ObjectEnvelope {

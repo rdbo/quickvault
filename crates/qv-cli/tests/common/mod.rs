@@ -70,6 +70,11 @@ impl Home {
         self.root.join("state").join("quickvault").join("anchors")
     }
 
+    /// The CLI's private snapshot directory (0007 §3.1).
+    pub fn snapshots(&self) -> PathBuf {
+        self.root.join("state").join("quickvault").join("snapshots")
+    }
+
     pub fn config_file(&self) -> PathBuf {
         self.root
             .join("config")

@@ -13,7 +13,7 @@
 //! | 6 | locked by another process, or changed on disk | `Locked`, `Replaced`, `Changed`, `CoreError::StaleHandle` |
 //! | 7 | integrity or rollback failure | `Integrity`, `Rollback`, `NoAnchor` |
 //! | 8 | unresolved conflict | `CoreError::Conflict` |
-//! | 9 | resource or safety limit | `LimitExceeded`, input over a bound |
+//! | 9 | resource or safety limit | `LimitExceeded`, `CoreError::SnapshotOverBudget`, input over a bound |
 //!
 //! Messages are fixed text. The only variable parts are non-secret context
 //! (a config line number, an escaped path or the matches of an ambiguous
@@ -85,7 +85,7 @@ pub(crate) fn core_code(e: CoreError) -> u8 {
         CoreError::NotFound => NOT_FOUND,
         CoreError::StaleHandle => BUSY,
         CoreError::Conflict => CONFLICT,
-        CoreError::LimitExceeded => LIMIT,
+        CoreError::LimitExceeded | CoreError::SnapshotOverBudget { .. } => LIMIT,
         _ => OTHER,
     }
 }
@@ -183,6 +183,7 @@ mod tests {
         // 9
         assert_eq!(store(StoreError::LimitExceeded), 9);
         assert_eq!(core(CoreError::LimitExceeded), 9);
+        assert_eq!(core(CoreError::SnapshotOverBudget { needed: 4096 }), 9);
         assert_eq!(CliError::from(CryptoError::LimitExceeded).code, 9);
         // 2
         assert_eq!(CliError::usage("x").code, 2);

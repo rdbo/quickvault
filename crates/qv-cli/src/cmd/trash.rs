@@ -3,13 +3,13 @@
 //! Trash is a separate address scope; permanent deletion always confirms.
 use crate::{
     cli::Ctx,
-    exit::{AMBIGUOUS, CliError, NOT_FOUND},
+    exit::{AMBIGUOUS, CliError, LIMIT, NOT_FOUND, OTHER},
     json::Json,
     out::{Out, escape_str},
     term,
 };
 use clap::ArgMatches;
-use qv_core::{ItemHandle, Session};
+use qv_core::{CoreError, ItemHandle, Session, SnapshotSkip};
 
 fn resolve(s: &Session, addr: &str) -> Result<ItemHandle, CliError> {
     let trash = s.trash()?;
@@ -122,6 +122,15 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
             s.restore(item)?;
         }
         "empty" => {
+            // The mandatory recovery snapshot comes first, before any vault
+            // change (0007 §3.2, 0011 §4).
+            if matches!(s.snapshot_status(), Some(r) if r.skipped == Some(SnapshotSkip::Disabled)) {
+                return Err(CliError::new(
+                    OTHER,
+                    "cannot take the recovery snapshot before emptying the trash: no usable \
+                     private snapshot directory; nothing was deleted",
+                ));
+            }
             if s.expired_trash()?.clock_anomaly {
                 crate::out::eprint(
                     "qvault: warning: vault dates are ahead of this clock; check it before deletion\n",
@@ -135,7 +144,47 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
                 return Err(CliError::cancelled());
             }
             crate::signals::check()?;
-            let report = s.empty_trash()?;
+            // `--yes` approves exceeding the snapshot budget too; otherwise a
+            // budget refusal asks once and retries with explicit approval.
+            let snapshot = match s.begin_destructive(ctx.yes, None) {
+                Ok(snapshot) => snapshot,
+                Err(CoreError::SnapshotOverBudget { needed }) => {
+                    crate::out::eprint(&format!(
+                        "qvault: the recovery snapshot needs {needed} bytes and does not fit the \
+                         snapshot budget\n"
+                    ));
+                    if !term::stdio_tty()?.confirm(
+                        "Take the recovery snapshot beyond the ordinary snapshot budget?",
+                    )? {
+                        return Err(CliError::new(
+                            LIMIT,
+                            "the recovery snapshot does not fit the snapshot budget; nothing was \
+                             deleted",
+                        ));
+                    }
+                    s.begin_destructive(true, None)?
+                }
+                Err(e) => return Err(e.into()),
+            };
+            crate::signals::check()?;
+            let report = s.empty_trash();
+            let finished = s.finish_destructive(snapshot);
+            let report = match report {
+                Ok(report) => report,
+                Err(e) => {
+                    // A failure before the commit leaves the trash intact; the
+                    // pre-deletion copy stays as a `recover-` file that the
+                    // next policy pass reclassifies (0007 §3.2).
+                    let _ = finished;
+                    return Err(e.into());
+                }
+            };
+            if let Err(e) = finished {
+                // The deletion is durable; only the reclassification failed.
+                let mut error = CliError::from(e);
+                error.message.push_str("; the deletion was committed");
+                return Err(error);
+            }
             if report.skipped_conflicts != 0 {
                 crate::out::eprint(&format!(
                     "qvault: {} conflicted item(s) kept in trash\n",

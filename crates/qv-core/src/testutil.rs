@@ -10,9 +10,9 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use qv_crypto::MasterPassword;
 use qv_model::Timestamp;
-use qv_store::AnchorDir;
+use qv_store::{AnchorDir, SnapshotDir};
 
-use crate::{Core, CoreConfig, Session, TimeSource};
+use crate::{Core, CoreConfig, Session, SnapshotPolicy, TimeSource};
 
 pub(crate) const PASSWORD: &str = "correct horse battery staple";
 pub(crate) const NAME: &str = "Personal";
@@ -146,7 +146,30 @@ impl Env {
         Core::new(CoreConfig {
             anchors,
             time: self.time.clone(),
+            snapshots: None,
         })
+    }
+
+    /// A core with the given clock and snapshot policy.
+    pub(crate) fn core_with(&self, snapshots: Option<SnapshotPolicy>) -> Core {
+        let anchors = AnchorDir::open(&self.anchors).unwrap();
+        Core::new(CoreConfig {
+            anchors,
+            time: self.time.clone(),
+            snapshots,
+        })
+    }
+
+    /// A snapshot policy in the test directory's `snapshots/`.
+    pub(crate) fn snapshot_policy(&self) -> SnapshotPolicy {
+        SnapshotPolicy::new(SnapshotDir::open(&self.dir.path().join("snapshots")).unwrap())
+    }
+
+    /// Unlocks the vault with a snapshot policy (the KDF serialized).
+    pub(crate) fn unlock_with(&self, policy: Option<SnapshotPolicy>) -> Session {
+        let core = self.core_with(policy);
+        let _k = kdf();
+        core.unlock(&self.path, &pw(PASSWORD), None).unwrap()
     }
 
     /// Unlocks the vault (the KDF serialized).

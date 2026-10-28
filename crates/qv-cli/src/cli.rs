@@ -188,6 +188,18 @@ pub(crate) fn command() -> Command {
                 )
                 .subcommand(Command::new("empty").about("Permanently delete non-conflicted trash")),
         )
+        .subcommand(
+            Command::new("snapshot")
+                .about("Local snapshot archives of the verified vault state")
+                .subcommand_required(true)
+                .subcommand(
+                    Command::new("ls")
+                        .about("List local snapshots (authenticates every header)"),
+                ),
+        )
+        .subcommand(Command::new("verify").about(
+            "Re-hash and authenticate the whole vault and report the anchor (never repairs)",
+        ))
 }
 
 fn attach_command() -> Command {
@@ -393,6 +405,7 @@ impl Ctx {
         drop(password);
         crate::signals::check()?;
         warn_location(session.warnings()?);
+        warn_snapshots(&session);
         Ok(session)
     }
 }
@@ -409,6 +422,29 @@ pub(crate) fn warn_location(w: qv_core::LocationWarnings) {
     }
     if w.removable {
         crate::out::eprint("qvault: warning: the vault is on removable media\n");
+    }
+}
+
+/// The automatic-snapshot outcome as stderr warnings (0011 §4). Failures and
+/// budget skips never fail the requested command and never touch stdout.
+pub(crate) fn warn_snapshots(session: &Session) {
+    let Some(report) = session.snapshot_status() else {
+        return;
+    };
+    if report.failed {
+        crate::out::eprint(
+            "qvault: warning: the automatic snapshot could not be written; the vault is unchanged\n",
+        );
+    }
+    match report.skipped {
+        Some(qv_core::SnapshotSkip::OverBudget { needed }) => crate::out::eprint(&format!(
+            "qvault: warning: the automatic snapshot needs {needed} bytes and was skipped: it does \
+             not fit the snapshot budget\n"
+        )),
+        Some(qv_core::SnapshotSkip::Disabled) => crate::out::eprint(
+            "qvault: warning: local snapshots are disabled: no usable private snapshot directory\n",
+        ),
+        _ => {}
     }
 }
 
@@ -471,6 +507,8 @@ fn dispatch(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
         Some(("history", s)) => crate::cmd::history::run(ctx, s, false),
         Some(("restore", s)) => crate::cmd::history::run(ctx, s, true),
         Some(("trash", s)) => crate::cmd::trash::run(ctx, s),
+        Some(("snapshot", s)) => crate::cmd::snapshot::run(ctx, s),
+        Some(("verify", s)) => crate::cmd::verify::run(ctx, s),
         _ => Err(CliError::new(OTHER, "unknown command")),
     }
 }

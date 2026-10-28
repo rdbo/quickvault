@@ -55,4 +55,5 @@ plan, or a new plan that names the one it supersedes.
 | [0014](0014-cli-edit-trash/PLAN.md) | CLI editing, trash and signal cleanup (roadmap 1.10b) | Reviewed |
 | [0015](0015-cli-clipboard/PLAN.md) | CLI clipboard: direct X11 adapter and protected transport (roadmap 1.10c) | Reviewed |
 | [0016](0016-attachments/PLAN.md) | Streaming attachments and CLI file operations (roadmap 1.11) | Reviewed |
-| [0017](0017-entry-history/PLAN.md) | Entry history, restore and purge (roadmap 1.12) | Implemented |
+| [0017](0017-entry-history/PLAN.md) | Entry history, restore and purge (roadmap 1.12) | Reviewed |
+| [0018](0018-archives-snapshots-verify/PLAN.md) | Archives, local snapshots and `verify` (roadmap 1.13a) | Implemented |

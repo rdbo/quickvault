@@ -35,6 +35,12 @@ pub(crate) enum CrashPoint {
     /// `create`: the first anchor is written; the vault is not yet renamed
     /// into place.
     CreateAnchored,
+    /// `publish`: the temp archive is written and re-verified with the
+    /// archive reader; it is neither synced nor renamed yet.
+    ArchiveVerified,
+    /// `publish`: the temp archive is renamed to its published name; the
+    /// snapshot directory is not yet synced.
+    ArchivePublished,
 }
 
 /// Marks an ordering point.
@@ -60,9 +66,17 @@ pub(crate) mod test {
 
     struct Armed {
         point: CrashPoint,
-        vault: PathBuf,
-        anchors: PathBuf,
+        copy: Copy,
         snapshot: PathBuf,
+    }
+
+    /// What a killed process would leave behind, per kind of operation.
+    enum Copy {
+        /// A mutation or `create`: the vault file, its journal and the anchor
+        /// directory.
+        Vault { vault: PathBuf, anchors: PathBuf },
+        /// `publish`: every file of one directory (the snapshot directory).
+        Dir(PathBuf),
     }
 
     thread_local! {
@@ -77,8 +91,22 @@ pub(crate) mod test {
         ARMED.with(|a| {
             *a.borrow_mut() = Some(Armed {
                 point,
-                vault: vault.to_owned(),
-                anchors: anchors.to_owned(),
+                copy: Copy::Vault {
+                    vault: vault.to_owned(),
+                    anchors: anchors.to_owned(),
+                },
+                snapshot: snapshot.to_owned(),
+            });
+        });
+    }
+
+    /// Arms `point` for the current thread. When reached, every file in `dir`
+    /// (the snapshot directory) is copied into `snapshot`.
+    pub(crate) fn arm_dir(point: CrashPoint, dir: &Path, snapshot: &Path) {
+        ARMED.with(|a| {
+            *a.borrow_mut() = Some(Armed {
+                point,
+                copy: Copy::Dir(dir.to_owned()),
                 snapshot: snapshot.to_owned(),
             });
         });
@@ -107,24 +135,39 @@ pub(crate) mod test {
         let Some(a) = armed else {
             return Ok(());
         };
-        let name = a.vault.file_name().unwrap();
-        let target = a.snapshot.join(name);
-        copy_if_exists(&a.vault, &target);
-        copy_if_exists(
-            &with_suffix(&a.vault, "-journal"),
-            &with_suffix(&target, "-journal"),
-        );
-        let anchors = a.snapshot.join("anchors");
-        std::fs::create_dir_all(&anchors).unwrap();
-        std::fs::set_permissions(
-            &anchors,
-            std::os::unix::fs::PermissionsExt::from_mode(0o700),
-        )
-        .unwrap();
-        if let Ok(entries) = std::fs::read_dir(&a.anchors) {
-            for e in entries {
-                let e = e.unwrap();
-                copy_if_exists(&e.path(), &anchors.join(e.file_name()));
+        match &a.copy {
+            Copy::Vault { vault, anchors } => {
+                let name = vault.file_name().unwrap();
+                let target = a.snapshot.join(name);
+                copy_if_exists(vault, &target);
+                copy_if_exists(
+                    &with_suffix(vault, "-journal"),
+                    &with_suffix(&target, "-journal"),
+                );
+                let dir = a.snapshot.join("anchors");
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+                    .unwrap();
+                if let Ok(entries) = std::fs::read_dir(anchors) {
+                    for e in entries {
+                        let e = e.unwrap();
+                        copy_if_exists(&e.path(), &dir.join(e.file_name()));
+                    }
+                }
+            }
+            Copy::Dir(dir) => {
+                std::fs::create_dir_all(&a.snapshot).unwrap();
+                std::fs::set_permissions(
+                    &a.snapshot,
+                    std::os::unix::fs::PermissionsExt::from_mode(0o700),
+                )
+                .unwrap();
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for e in entries {
+                        let e = e.unwrap();
+                        copy_if_exists(&e.path(), &a.snapshot.join(e.file_name()));
+                    }
+                }
             }
         }
         Err(StoreError::Internal)

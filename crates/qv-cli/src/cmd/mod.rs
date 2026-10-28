@@ -17,3 +17,5 @@ pub(crate) mod trash;
 
 pub(crate) mod attach;
 pub(crate) mod history;
+pub(crate) mod snapshot;
+pub(crate) mod verify;

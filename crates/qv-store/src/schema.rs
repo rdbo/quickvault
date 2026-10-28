@@ -456,7 +456,15 @@ pub(crate) fn read_replica(conn: &Connection) -> Result<StoredReplica, StoreErro
 /// Reads the head, manifest and replica rows, shape-checked first.
 pub(crate) fn read_state(conn: &Connection) -> Result<StoredState, StoreError> {
     check_singletons(conn)?;
-    let head = read_head(conn)?;
+    Ok(StoredState {
+        head: read_head(conn)?,
+        manifest: read_manifest(conn)?,
+        replica: read_replica(conn)?,
+    })
+}
+
+/// Reads the manifest row ([`check_singletons`] or [`read_rows`] first).
+pub(crate) fn read_manifest(conn: &Connection) -> Result<StoredManifest, StoreError> {
     let (hash, generation, profile, nonce, ciphertext): (Vec<u8>, i64, i64, Vec<u8>, Vec<u8>) =
         conn.query_row(
             "SELECT manifest_hash, key_generation, data_profile, nonce, ciphertext FROM manifest",
@@ -471,17 +479,12 @@ pub(crate) fn read_state(conn: &Connection) -> Result<StoredState, StoreError> {
         .ok()
         .filter(|&g| g > 0)
         .ok_or(StoreError::Integrity)?;
-    let manifest = StoredManifest {
+    Ok(StoredManifest {
         hash: array(hash)?,
         key_generation: KeyGeneration(generation),
         data_profile: u16::try_from(profile).map_err(|_| StoreError::Integrity)?,
         nonce: array(nonce)?,
         ciphertext,
-    };
-    Ok(StoredState {
-        head,
-        manifest,
-        replica: read_replica(conn)?,
     })
 }
 

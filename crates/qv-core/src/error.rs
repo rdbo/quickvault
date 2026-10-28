@@ -19,7 +19,7 @@ use qv_store::StoreError;
 /// | [`NotFound`](Self::NotFound) | 4 |
 /// | [`StaleHandle`](Self::StaleHandle) | 6 |
 /// | [`Conflict`](Self::Conflict) | 8 |
-/// | [`LimitExceeded`](Self::LimitExceeded) | 9 |
+/// | [`LimitExceeded`](Self::LimitExceeded), [`SnapshotOverBudget`](Self::SnapshotOverBudget) | 9 |
 /// | every other variant | 1 |
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -52,6 +52,14 @@ pub enum CoreError {
     Totp(TotpError),
     /// A size budget would be exceeded; nothing was changed (0004 §4.4).
     LimitExceeded,
+    /// The mandatory recovery snapshot of a destructive operation needs
+    /// `needed` bytes and does not fit the ordinary snapshot budgets
+    /// (0007 §3.3). The operation aborts unchanged unless the frontend asks
+    /// the user and retries with explicit approval.
+    SnapshotOverBudget {
+        /// The size the recovery snapshot needs on disk.
+        needed: u64,
+    },
     /// The operating system random number generator failed.
     Rng,
     /// The vault's directory is the anchor directory or lies inside it, so
@@ -68,6 +76,10 @@ impl fmt::Display for CoreError {
             Self::Store(e) => e.fmt(f),
             Self::Generator(e) => e.fmt(f),
             Self::Totp(e) => e.fmt(f),
+            Self::SnapshotOverBudget { needed } => write!(
+                f,
+                "the recovery snapshot needs {needed} bytes and does not fit the snapshot budget"
+            ),
             other => f.write_str(match other {
                 Self::SessionLocked => "the vault session is locked",
                 Self::StaleHandle => "the item changed; reload it",

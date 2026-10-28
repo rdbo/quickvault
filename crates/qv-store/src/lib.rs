@@ -29,7 +29,9 @@
 //! | `manifest` | [`Manifest`]: codec, validation, budgets, digests, encryption, envelope hash | 0004 §3.4–3.5, §4.1–4.2 |
 //! | `head` | the local head, its MAC and digest, the head-versus-anchor table ([`AnchorStatus`]) | 0005 §5.4 |
 //! | `anchor` | [`AnchorDir`]: anchor files, atomic replacement | 0005 §5.4 |
+//! | `archive` | [`ArchiveHeader`], [`ArchiveScope`], framing, the archive writer and reader, [`SnapshotDir`] | 0004 §6; 0007 §3 |
 //! | `vault` | [`VaultFile`] (`create`, `open`, `unlock`, `unlock_for_recovery`) and [`UnlockedVault`] (verification, reads) | 0004 §3.6, §5.1, 0002 §8 |
+//! | `verify` | [`VerifyCounts`] and the full `verify` pass | 0004 §3.6 |
 //! | `write` | [`Write`]: the mutation transaction, counters, `adopt_baseline` | 0004 §1.3, §5.2; 0005 §1.2–1.3 |
 //! | `crash` | crash-injection points (active in this crate's tests only) | — |
 //! | `unsupported` | the same API failing closed on targets other than Linux/Android | — |
@@ -45,8 +47,10 @@
 //! | [`MAX_DB_BYTES`] | 2 GiB, checked before SQLite opens the file |
 //! | [`MAX_HEADER_BYTES`], [`MAX_SLOTS`] | 64 KiB, 64 (0004 §4.1) |
 //! | manifest budgets | [`MAX_MANIFEST_CIPHERTEXT`] 64 MiB, [`MAX_RECORDS`] 50,000, [`MAX_OBJECTS`] 250,000, [`MAX_TOTAL_CIPHERTEXT`] 1 GiB, [`MAX_CLOCK_COMPONENTS`] 2^20, [`MAX_RECORD_CIPHERTEXT`] 1 MiB, [`MAX_CHUNKS`] 160 |
+//! | archive magic and version | [`ARCHIVE_MAGIC`] `"QVSNAP\0"`, [`ARCHIVE_FORMAT`] `0x01` |
+//! | archive budgets | [`MAX_ARCHIVE_HEADER_BYTES`] 64 KiB, [`MAX_ARCHIVE_MANIFEST_FRAME`], [`MAX_ARCHIVE_OBJECT_FRAME`], [`MAX_ARCHIVE_TOTAL_LENGTH`] |
 //! | initial key generation | 1 |
-//! | labels | `qv/record/v1`, `qv/manifest/v1`, `qv/config/v1`, `qv/local-head/v1`, `qv/header-mac/v1` |
+//! | labels | `qv/record/v1`, `qv/manifest/v1`, `qv/config/v1`, `qv/local-head/v1`, `qv/header-mac/v1`, [`ARCHIVE_HEADER_LABEL`] |
 //!
 //! Tables (all `STRICT`; see `schema`): `header`, `keyslot`, `object`,
 //! `manifest`, `local_head`, `replica`. The header MAC is MAC/1 under the
@@ -111,14 +115,16 @@
 //!
 //! # Not yet implemented
 //!
-//! Received versions and merges of concurrent heads (2.2); archives and
-//! `verify` (1.13); password change (1.14);
+//! Received versions and merges of concurrent heads (2.2); archives that
+//! carry a password slot (0004 §6.4, phase 2), archive merge and exchange
+//! (2.2) and `snapshot restore` (1.13b); password change (1.14);
 //! rotation (1.15); sync state, outbox and checkpoints (milestones 2–3);
 //! quick-unlock slots (2.6); keystore-backed anchors (2.3, 2.6); Windows
 //! and macOS file safety (4.1 and later).
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod anchor;
+mod archive;
 mod attachment;
 mod crash;
 #[cfg(test)]
@@ -142,6 +148,11 @@ mod sqlite;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod vault;
 #[cfg(any(target_os = "linux", target_os = "android"))]
+mod verify;
+#[cfg(test)]
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod verify_tests;
+#[cfg(any(target_os = "linux", target_os = "android"))]
 mod write;
 // Other targets get an API that fails closed; on Linux it is compiled only
 // for its own tests, so its never-called methods are allowed to be unused.
@@ -151,23 +162,33 @@ mod unsupported;
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use anchor::{AnchorDir, MAX_ANCHOR_BYTES};
+pub use archive::{
+    ARCHIVE_DERIVATION_PROFILE, ARCHIVE_EXTENSION, ARCHIVE_FORMAT, ARCHIVE_HEADER_LABEL,
+    ARCHIVE_MAC_PROFILE, ARCHIVE_MAGIC, ArchiveHeader, ArchiveObject, ArchiveScope, ArchiveStats,
+    MAX_ARCHIVE_HEADER_BYTES, OpenedArchive, read_archive, read_header,
+};
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub use archive::{PublishedSnapshot, SnapshotDir, SnapshotEntry, SnapshotKind};
 pub use attachment::StagedAttachment;
 pub use error::StoreError;
 pub use head::AnchorStatus;
 pub use header::Header;
 pub use limits::{
-    MAX_CHUNKS, MAX_CLOCK_COMPONENTS, MAX_DB_BYTES, MAX_HEADER_BYTES, MAX_MANIFEST_CIPHERTEXT,
-    MAX_OBJECTS, MAX_RECORD_CIPHERTEXT, MAX_RECORDS, MAX_SLOTS, MAX_TOTAL_CIPHERTEXT, PAGE_SIZE,
+    MAX_ARCHIVE_MANIFEST_FRAME, MAX_ARCHIVE_OBJECT_FRAME, MAX_ARCHIVE_TOTAL_LENGTH, MAX_CHUNKS,
+    MAX_CLOCK_COMPONENTS, MAX_DB_BYTES, MAX_HEADER_BYTES, MAX_MANIFEST_CIPHERTEXT, MAX_OBJECTS,
+    MAX_RECORD_CIPHERTEXT, MAX_RECORDS, MAX_SLOTS, MAX_TOTAL_CIPHERTEXT, PAGE_SIZE,
 };
 pub use location::LocationWarnings;
 pub use manifest::{MANIFEST_FORMAT, Manifest, ObjectRef, RecordEntry, VersionRef};
 pub use object::ObjectEnvelope;
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 pub use unsupported::{
-    AnchorDir, MAX_ANCHOR_BYTES, UnlockedVault, VAULT_EXTENSION, VaultFile, Write,
+    AnchorDir, MAX_ANCHOR_BYTES, UnlockedVault, VAULT_EXTENSION, VaultFile, VerifyCounts, Write,
 };
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use vault::{UnlockedVault, VAULT_EXTENSION, VaultFile};
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub use verify::VerifyCounts;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use write::Write;
 

@@ -21,11 +21,12 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use qv_crypto::RecordId;
 use qv_model::{FieldId, Timestamp, VersionId};
-use qv_store::{LocationWarnings, UnlockedVault};
+use qv_store::{AnchorStatus, LocationWarnings, UnlockedVault};
 
 use crate::error::CoreError;
 use crate::index::{Index, MAX_VIEW_BYTES};
 use crate::setup::TimeSource;
+use crate::snapshot::{SnapshotPolicy, SnapshotReport};
 
 /// Lets a caller cancel an unlock or streaming attachment operation in progress.
 #[derive(Clone, Default)]
@@ -152,6 +153,30 @@ pub(crate) struct Open {
     /// Opened for recovery with a missing or mismatched anchor; writes stay
     /// blocked until `adopt_baseline`.
     pub(crate) read_only: bool,
+    /// The head-versus-anchor comparison made at unlock, reported by
+    /// [`Session::verify`] (0011 §4). It is not re-derived per call: the
+    /// store re-checks and advances the anchor on every successful write.
+    pub(crate) anchor: AnchorStatus,
+    /// The local snapshot policy, when the frontend configured one
+    /// (0007 §3.3).
+    pub(crate) snapshots: Option<Arc<SnapshotPolicy>>,
+    /// The automatic-policy outcome, for the frontend's stderr warnings
+    /// (0011 §4).
+    pub(crate) auto_snapshot: Option<SnapshotReport>,
+    /// The archive ID of the recovery snapshot an in-progress destructive
+    /// operation pins (0007 §3.2). Shared with the operation's handle so
+    /// that dropping the handle releases the pin.
+    pub(crate) pin: Arc<Mutex<Option<String>>>,
+}
+
+impl Open {
+    /// The archive ID currently pinned by an in-progress operation.
+    pub(crate) fn pinned(&self) -> Option<String> {
+        self.pin
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
 }
 
 /// What a call sees while it holds the session.
@@ -175,6 +200,11 @@ impl Canceller<'_> {
         } else {
             Ok(())
         }
+    }
+
+    /// Whether a lock was requested, for the store's cancellation callbacks.
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
     }
 }
 
@@ -242,6 +272,8 @@ impl Session {
     pub(crate) fn open(
         vault: UnlockedVault,
         time: Arc<dyn TimeSource>,
+        anchor: AnchorStatus,
+        snapshots: Option<Arc<SnapshotPolicy>>,
         read_only: bool,
         cancel: Option<&crate::CancelToken>,
     ) -> Result<Session, CoreError> {
@@ -251,6 +283,9 @@ impl Session {
             &|| cancel.is_some_and(CancelToken::is_cancelled),
             MAX_VIEW_BYTES,
         )?;
+        // Without a policy the automatic snapshot is indistinguishable from
+        // "disabled"; frontends show that as reduced protection.
+        let auto_snapshot = snapshots.is_none().then(SnapshotReport::disabled);
         Ok(Session {
             tag,
             locking: AtomicBool::new(false),
@@ -258,6 +293,10 @@ impl Session {
                 vault,
                 index,
                 read_only,
+                anchor,
+                snapshots,
+                auto_snapshot,
+                pin: Arc::new(Mutex::new(None)),
             })),
             time,
         })
@@ -350,6 +389,8 @@ impl Session {
             ctx.check_cancel()?;
             ctx.open.vault.adopt_baseline()?;
             ctx.open.read_only = false;
+            // The adopted state is the new baseline (0005 §5.4).
+            ctx.open.anchor = AnchorStatus::Verified;
             Ok(())
         })
     }

@@ -42,8 +42,8 @@
 //! min_derivation_profile]`.
 
 use qv_crypto::{
-    KeyGeneration, ObjectHashProfile, ObjectHasher, PurposeKey, RecordId, StoredDataProfile,
-    object_hash, purpose,
+    DerivationProfile, KeyGeneration, ObjectHashProfile, ObjectHasher, PurposeKey, RecordId,
+    StoredDataProfile, VaultId, object_hash, purpose,
 };
 use qv_encoding::{Decoder, Encoder, encode_array};
 use qv_model::{Causality, Clock, HistoryFloor, MAX_HEADS, ObjectId, RandomId, VersionId};
@@ -357,13 +357,29 @@ fn encode_references(refs: &[ObjectRef], e: &mut Encoder) -> Result<(), qv_encod
 /// SHA-256 of `["qv/config/v1", format, vault_id, key_generation,
 /// min_data_profile, min_derivation_profile]` (0004 §3.4).
 pub(crate) fn config_digest(header: &Header) -> Result<[u8; 32], StoreError> {
+    config_digest_for(
+        header.vault_id,
+        header.key_generation,
+        header.min_data_profile,
+        header.min_derivation_profile,
+    )
+}
+
+/// See [`config_digest`]: the same digest from the four stored minima, so the
+/// archive reader can recompute it from an archive header (0004 §6.2).
+pub(crate) fn config_digest_for(
+    vault_id: VaultId,
+    key_generation: KeyGeneration,
+    min_data_profile: StoredDataProfile,
+    min_derivation_profile: DerivationProfile,
+) -> Result<[u8; 32], StoreError> {
     let bytes = encode_array(|a| {
         a.text(CONFIG_LABEL);
         a.uint(FORMAT);
-        a.bytes(&header.vault_id.0);
-        a.uint(u64::from(header.key_generation.0));
-        a.uint(u64::from(header.min_data_profile.id()));
-        a.uint(u64::from(header.min_derivation_profile.id()));
+        a.bytes(&vault_id.0);
+        a.uint(u64::from(key_generation.0));
+        a.uint(u64::from(min_data_profile.id()));
+        a.uint(u64::from(min_derivation_profile.id()));
         Ok(())
     })
     .map_err(|_| StoreError::Internal)?;
@@ -1003,6 +1019,27 @@ pub(crate) fn envelope_hash(
     Ok(h.finalize().0)
 }
 
+/// The canonical manifest envelope `[key_generation, data_profile, nonce,
+/// ciphertext]` (0004 §3.5, §6.1). `manifest_hash` is the SHA-256 of exactly
+/// these bytes, which is what an archive's manifest frame carries.
+pub(crate) fn envelope_bytes(
+    generation: KeyGeneration,
+    profile: StoredDataProfile,
+    nonce: &[u8; 24],
+    ciphertext: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, StoreError> {
+    let mut e = Encoder::new();
+    e.array(|a| {
+        a.uint(u64::from(generation.0));
+        a.uint(u64::from(profile.id()));
+        a.bytes(nonce);
+        a.bytes(ciphertext);
+        Ok(())
+    })
+    .map_err(|_| StoreError::Internal)?;
+    e.finish().map_err(|_| StoreError::Internal)
+}
+
 /// Encrypts a validated manifest.
 pub(crate) fn seal_manifest(
     key: &PurposeKey<purpose::Manifest>,
@@ -1148,6 +1185,27 @@ pub(crate) mod tests {
         assert!(back.reference(oid(40)).is_some());
         assert_eq!(back.config_digest(), &config_digest(&header()).unwrap());
         assert_ne!(back.reference_digest().unwrap(), [0; 32]);
+    }
+
+    #[test]
+    fn manifest_envelope_bytes_hash_to_the_manifest_hash() {
+        let nonce = [9u8; 24];
+        let ciphertext = vec![7u8; 4096];
+        let bytes =
+            envelope_bytes(KeyGeneration(1), StoredDataProfile::V1, &nonce, &ciphertext).unwrap();
+        assert_eq!(
+            object_hash(ObjectHashProfile::V1, &bytes).0,
+            envelope_hash(KeyGeneration(1), StoredDataProfile::V1, &nonce, &ciphertext).unwrap(),
+            "the re-encoded envelope must hash to the stored manifest hash"
+        );
+        // An archive frame wraps it as a canonical four-element array.
+        let mut d = Decoder::new(&bytes).unwrap();
+        assert_eq!(d.array().unwrap(), 4);
+        assert_eq!(d.uint().unwrap(), 1);
+        assert_eq!(d.uint().unwrap(), 1);
+        assert_eq!(d.bytes().unwrap(), nonce.as_slice());
+        assert_eq!(d.bytes().unwrap(), ciphertext.as_slice());
+        d.finish().unwrap();
     }
 
     #[test]

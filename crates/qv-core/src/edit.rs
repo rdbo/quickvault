@@ -744,6 +744,12 @@ impl Session {
 
     /// Finally deletes every non-conflicted item in the trash. Conflicted
     /// items stay and are counted (0005 §2.5).
+    ///
+    /// This is only the vault half of the destructive operation: the caller
+    /// must write and pin its recovery snapshot with
+    /// [`Session::begin_destructive`] first and reclassify it with
+    /// [`Session::finish_destructive`] after this returns (0007 §3.2; the CLI
+    /// enforces that order). Soft deletes take no snapshot.
     pub fn empty_trash(&self) -> Result<PurgeReport, CoreError> {
         self.mutate(|ctx| {
             let mut list = Vec::new();

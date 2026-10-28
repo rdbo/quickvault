@@ -9,7 +9,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use qv_core::{AnchorDir, Core, CoreConfig};
+use qv_core::{AnchorDir, Core, CoreConfig, SnapshotPolicy};
 
 use crate::config::{self, Config};
 use crate::exit::CliError;
@@ -78,11 +78,17 @@ pub(crate) fn require_vault(
     })
 }
 
-/// A core with the default anchor directory (0005 §5.4).
+/// A core with the default anchor and snapshot directories (0005 §5.4,
+/// 0007 §3.1). An unusable snapshot directory must not break a read, so it
+/// disables snapshots and the session reports that as a warning (0011 §4).
 pub(crate) fn core() -> Result<Core, CliError> {
     let dir = AnchorDir::default_dir()?;
     let anchors = AnchorDir::open(&dir)?;
-    Ok(Core::new(CoreConfig::new(anchors)))
+    let mut config = CoreConfig::new(anchors);
+    if let Ok(policy) = SnapshotPolicy::default_dir() {
+        config = config.with_snapshots(policy);
+    }
+    Ok(Core::new(config))
 }
 
 #[cfg(test)]

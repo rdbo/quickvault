@@ -24,7 +24,13 @@ what they say, and behaviour changes start with a spec change.
 (plan 0016): explicit file import/export and confirmed permanent removal.
 0011 also includes the owner-approved history/restore/purge CLI amendment of
 2026-10-27 (plan 0017): scoped historical IDs, explicit conflict restoration
-and local suppression limits.
+and local suppression limits. 0007 includes the owner-approved D6 amendment of
+2026-10-27 (plan 0018): local snapshots carry no password slot, open with the
+vault key or the recovery phrase, and a password change offers to delete the
+snapshots created before it. 0011 includes the owner-approved snapshot/`verify`
+CLI amendment of 2026-10-28 (plan 0018): the full integrity report with anchor
+status, authenticated local-snapshot listing, scoped archive IDs and the
+mandatory recovery snapshot before bulk deletion.
 
 The 2026-10-24 direction amendment makes local vault use independent of accounts
 and network access, with two optional sync modes: direct account-free LAN sync

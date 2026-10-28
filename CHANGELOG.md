@@ -7,7 +7,54 @@ Dates are ISO 8601. Newest first within each section.
 
 ## Unreleased
 
+### Added
+
+- 2026-10-28: Local snapshot policy, `qvault snapshot ls`, `qvault verify` and
+  the mandatory recovery snapshot of `trash empty` (plan 0018 steps 7–10,
+  phase 1.13a; 0007 §3, 0011 §4). With a configured private snapshot
+  directory, an unlock may write one ordinary archive per hour and one on the
+  first unlock of a UTC day, decided from authenticated archive headers only:
+  no marker or settings row and no vault write on a read command. Budgets are
+  30 days, 48 ordinary snapshots and 512 MiB, pruned oldest first; a recovery
+  copy pinned by an in-progress destructive operation is never pruned and a
+  `recover-` file left by a crash is reclassified before pruning. `trash empty`
+  writes and verifies a recovery copy before its purge commits: a copy that
+  cannot be written aborts the deletion with nothing purged, and exceeding the
+  ordinary budget requires explicit approval (exit 9 when declined). `verify`
+  is a read-only full re-hash/authentication pass that reports object/record/
+  head/history/tombstone counts, the local sequence and the anchor comparison
+  (`verified|advanced|missing|mismatch`) as human lines or documented JSON.
+  `snapshot ls` authenticates every header with the vault key and lists only
+  same-vault, same-generation archives newest first; unauthenticatable files
+  are stderr warnings, never rows. Snapshot files carry no password slot, and
+  snapshot failures or budget skips are warnings that never fail the command.
+  Limits: `verify` never repairs (the remedy is a snapshot restore, 1.13b), a
+  failed verify is not proof of erasure, and archives elsewhere on other media
+  remain outside application control. No dependency, schema, MSRV or format
+  change.
+
+- 2026-10-28: `qv-store` archives and `verify` (0004 §6, §3.6; plan 0018 steps
+  3–6): the bounded archive header codec and `u32be` framing, the writer that
+  streams only verified objects to a temp file and checks each object's
+  profile, length and SHA-256 against its reference first, the publish
+  protocol (temp → re-read and verify with the reader → `fsync` →
+  `RENAME_NOREPLACE` → directory `fsync`), the 0004 §6.3 reader, the private
+  local-snapshot directory, the full `verify` pass and the `archive_read` fuzz
+  target with its CI step. No dependency, schema, MSRV or frozen format change.
+
 ### Changed
+
+- 2026-10-28: Owner-approved 0011 snapshot/`verify` contract (plan 0018, owner
+  decision D1): `verify` reports counts, anchor status and fixed-label notes and
+  never repairs; `snapshot ls` lists only authenticated same-vault,
+  same-generation snapshots; archive IDs are scoped and prefix-addressable; and
+  `trash empty` must write and verify a recovery snapshot before it commits.
+
+- 2026-10-27: 0007 §3 amended per owner decision D6: a local snapshot carries
+  no password slot and opens with the vault key of the same vault ID and
+  generation or the recovery phrase; the new §3.5 requires a password change to
+  offer (never to claim erasure of) the pre-change snapshots, and OQ1 is
+  resolved. No archive format value changes (plan 0018).
 
 - 2026-10-27: Owner-approved history/restore/purge CLI contract added for
   roadmap phase 1.12: scoped historical version IDs, explicit conflict restore

@@ -442,7 +442,7 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
 
 #### Phase 1.12 — Entry history, restore and purge
 
-- [x] **Plan:** [0017](../0017-entry-history/PLAN.md) (Implemented). **Do:** Implement history retention (N = 10 under budgets), history
+- [x] **Plan:** [0017](../0017-entry-history/PLAN.md) (Reviewed). **Do:** Implement history retention (N = 10 under budgets), history
   floors with componentwise merge and suppression, explicit purge, and restore
   as a new causal edit. Add the CLI commands `history`, `history show`,
   `restore` and `history purge`.
@@ -456,7 +456,13 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
 
 #### Phase 1.13 — Archives, local snapshots and `verify`
 
-- [ ] **Do:** Write the archive writer (verified objects only, temp file →
+Split on 2026-10-28 (see *Revisions*) into **1.13a** (the archive
+writer/reader, the `verify` pass, snapshot policy and pruning, and the
+`snapshot ls`/`verify` commands) and **1.13b** (`snapshot restore` into a new
+vault path).
+- [x] **1.13a plan:** [0018](../0018-archives-snapshots-verify/PLAN.md) (Implemented).
+- [ ] **1.13b plan:** to be written in its own session as plan 0019.
+- **Do:** Write the archive writer (verified objects only, temp file →
   re-read and verify → fsync → publish under a unique name) and the reader
   (fixed prefix and bounded header → VK → header MAC → manifest hash → frames
   checked in reference order before AEAD). Add snapshot scheduling (hourly,
@@ -849,6 +855,22 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
 
 ## Revisions
 
+- 2026-10-28 (phase 1.13, plan 0018): split 1.13 into **1.13a** and **1.13b**.
+  1.13a: the D6 0007 amendment, the 0011 `snapshot ls`/`verify` amendment
+  (owner-approved D1 on 2026-10-28), the archive header/writer/reader in
+  `qv-store` with the `archive_read` fuzz target and CI wiring, the full
+  `verify` pass, snapshot policy/coalescing/budgets/pruning and authenticated
+  listing in `qv-core`, and the CLI `snapshot ls`, `verify` and the mandatory
+  recovery snapshot of `trash empty`. 1.13b: `snapshot restore <id> <path>` —
+  building a new vault file from a verified archive (fresh replica, head and
+  anchor), its CLI contract and the restore-path evidence for the remaining
+  0012 rows — planned as 0019 in its own session. Development values for the
+  1.16 freeze from 1.13a: the archive magic `QVSNAP\0`/format version, header
+  field set, frame layout, the `qv/archive-header/v1` label, the snapshot
+  directory (`$XDG_STATE_HOME/quickvault/snapshots`), the local filename scheme
+  and the 30-day/48-snapshot/512 MiB budgets. 1.13a adds no dependency, no
+  `unsafe` and no new write path.
+
 - 2026-10-27: Owner explicitly requested fixing phase 1.11 review findings,
   finishing that review and starting phase 1.12 in the same session without an
   intervening owner commit. This authorizes that specific continuation; future
@@ -1091,3 +1113,27 @@ Split on 2026-10-26 (see *Revisions*) into **1.10a** (foundation, `init`, `info`
   See plan 0016 REVIEW.md and /tmp/opencode/qv17-review/ logs. Session protocol
   step 2 stops progression; phase 1.12 was not planned or started. No product
   code, dependency or spec changed; no commit, push or branch.
+
+- 2026-10-28: Next-phase session began with a clean tree at `2dc7ac5`
+  ("phase 1.12"). Fresh-context review of phase 1.12 (plan 0017) approved
+  (`plans/0017-entry-history/REVIEW.md`): retention/suppression floors, purge
+  and restore semantics re-derived from the code, one write path confirmed,
+  five low and one informational findings, none blocking. All gates passed;
+  `cargo test --locked` 510 passed / 0 failed / 2 ignored with the private
+  Xvfb (the two clipboard failures without it are environmental). Plan 0017
+  and the index moved to `Reviewed`. Architect planned phase 1.13 as plan 0018
+  and split it (see *Revisions*); the concrete 0011 `snapshot`/`verify`
+  amendment needed owner approval (D1), which the owner gave as written on
+  2026-10-28. Phase 1.13b remains for a later session.
+
+- 2026-10-28: Phase 1.13a implemented (plan 0018, `Implemented`): 0007 §3 D6
+  amendment and the 0011 snapshot/verify contracts; `qv-store` archive header
+  codec, writer with the temp → re-read/verify → fsync → no-replace publish
+  protocol, the bounded authenticate-then-parse reader in the 0004 §6.3 order,
+  the `archive_read` fuzz target (CI-wired, 73,982 local runs, no finding) and
+  `verify_all`; `qv-core` snapshot policy (hourly/first-of-day, 30 d / 48 /
+  512 MiB pruning, pinned pre-destruction copy, authenticated listing) and
+  `verify`; CLI `snapshot ls`, `verify` and the `trash empty` recovery-snapshot
+  ordering; named evidence for the four 0012 rows. All gates pass with 560
+  passed / 0 failed / 2 ignored; no dependency, `unsafe`, schema or MSRV
+  change and no second write path. `snapshot restore` is deferred to 1.13b.

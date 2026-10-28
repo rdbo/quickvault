@@ -64,10 +64,15 @@ snapshots, rotation, manifests and the resource budget.
 
 3.1. Snapshots are archives (0004 §6) written from verified local objects.
 They never contain device-local quick slots, signing keys, session tokens,
-sync state or external anchors. Local snapshots are self-contained archives:
-they carry the password slot valid at their creation and open with that
-password or the recovery phrase (see Open Questions). Store in a private
-application directory, outside exchange directories.
+sync state or external anchors. By default a local snapshot carries **no
+password slot** (0004 §6.4; roadmap 0002 decision D6): it opens only with the
+vault key of the same vault ID and key generation — i.e. from the active
+vault that wrote it, or any other replica holding that key — or with the
+recovery phrase. An archive that gives a file-sync provider, a backup thief
+or a copy on a shared medium nothing to attack offline MUST NOT be weakened
+for convenience: no slot is added unless the user explicitly chooses a
+self-contained archive (0004 §6.4). Store snapshots in a private application
+directory, outside exchange directories.
 
 3.2. Take a recovery snapshot before explicit file imports, whole-state recovery,
 profile/generation migrations and bulk deletion; at most one ordinary snapshot
@@ -90,6 +95,18 @@ budget with explicit user approval or a user-selected alternate location.
 anchor. Opening a restored copy is an explicit recovery baseline, and subsequent
 merge with an existing device preserves that device's deletion/suppression
 knowledge. A restore never proves that the snapshot is the latest global state.
+
+3.5. **Password changes and existing snapshots.** Changing the master
+password (0002 §3.4) leaves the vault key and key generation unchanged, so
+snapshots taken before the change remain decryptable with that key. Because
+the old password may be the reason for the change, the frontend MUST, after a
+successful password change, offer to delete the snapshots created before it,
+naming how many exist. It MUST delete them only on explicit confirmation, and
+it MUST NOT describe the result as cryptographic erasure: copies held
+elsewhere, on other media or by other devices are unaffected (§4.3), and a
+party that obtains the vault key from an old vault-file copy or an old keyslot
+can still open them. Declining the offer keeps them under the ordinary
+snapshot budgets (§3.2–3.3).
 
 ### 4. Server retention and purge acknowledgements
 
@@ -136,18 +153,17 @@ reference set. Purge acknowledgements must not imply independent copies vanished
 
 ## Open Questions
 
-1. **Password slots in local snapshots.** A self-contained snapshot keeps
-   opening with the password current at its creation, so after a password
-   change made *because the old password leaked*, up to 30 days of snapshots
-   still yield VK to a thief holding that old password. Alternative: local
-   snapshots carry no slot (like exchange archives) and open with the active
-   vault's VK or the recovery phrase; cost: if the active vault's keyslot is
-   lost and the recovery phrase is unavailable, snapshots are unusable.
-   Recommendation: no slot by default, plus offering to delete pre-change
-   snapshots on password change. Undecided.
+1. **Password slots in local snapshots.** *Resolved 2026-10-25 (owner decision
+   D6, roadmap 0002): no password slot by default. On password change, offer to
+   delete pre-change snapshots (§3.1, §3.5). Self-contained archives remain an
+   explicit, warned user choice (0004 §6.4).*
 
 ## Changelog
 
+- 2026-10-27: Resolve OQ1 per owner decision D6. Local snapshots carry no
+  password slot and open with the vault key or the recovery phrase; add §3.5
+  (offer to delete pre-change snapshots on password change) and the
+  private-directory requirement (plan 0018).
 - 2026-10-24: Apply ordinary snapshot coalescing to LAN and server merges;
   scope server retention/purge acknowledgements to optional remote sync and
   preserve suppression/independent-copy limits for LAN-only use.

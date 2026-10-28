@@ -13,20 +13,29 @@
 //!    object ID and inserts the object row. A final tombstone (0007 §2.2)
 //!    also drops the record's history and advances its history floor to
 //!    cover every dropped version, in the same manifest.
-//! 3. `commit` seals the new manifest (every budget checked first), inserts
+//! 3. `commit` runs history retention over the candidate manifest (the
+//!    store's target of ten authenticated versions, lowered only by safe
+//!    monotonic floor advances under the budgets). The advanced suppression
+//!    floors and the release of the object references the new manifest no
+//!    longer needs are part of this manifest; cancellation is checked during
+//!    the retention scans.
+//! 4. `commit` seals the new manifest (every budget checked first), inserts
 //!    it and deletes the old one,
-//! 4. writes the new head (sequence + 1, naming the old head's digest),
-//! 5. stores the counter reservation and prunes the object rows whose
-//!    references the new manifest dropped,
-//! 6. commits durably (`synchronous=FULL`),
-//! 7. replaces the external anchor, and only then
-//! 8. updates the session and reports success.
+//! 5. writes the new head (sequence + 1, naming the old head's digest),
+//! 6. stores the counter reservation and prunes the object rows whose
+//!    references neither the old nor the new manifest keeps,
+//! 7. checks cancellation once more, then commits durably
+//!    (`synchronous=FULL`),
+//! 8. replaces the external anchor, and only then
+//! 9. updates the session and reports success.
 //!
-//! A crash before step 6 leaves the old state; after it, the next unlock
-//! sees a head one step past the anchor and advances the anchor (0005
-//! §5.4). If step 7 fails, `commit` returns the anchor's error although the
-//! change is durable, and the next write retries the anchor before it
-//! starts, so the database never gets two steps ahead of its anchor.
+//! A cancellation before step 7 rolls the transaction back: no manifest,
+//! head, floor or released reference is durable. A crash before step 7
+//! leaves the old state; after it, the next unlock sees a head one step past
+//! the anchor and advances the anchor (0005 §5.4). If step 8 fails, `commit`
+//! returns the anchor's error although the change is durable, and the next
+//! write retries the anchor before it starts, so the database never gets two
+//! steps ahead of its anchor.
 //!
 //! Counters are reserved in the same SQLite transaction that uses them
 //! (`replica.next_counter`, plan 0009 D-B), so no committed version can
