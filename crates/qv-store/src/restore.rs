@@ -42,6 +42,7 @@ impl VaultFile {
         anchors: &AnchorDir,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), StoreError> {
+        crate::rotation_guard::check(path)?;
         check_cancel(cancelled)?;
         if path.extension().and_then(|e| e.to_str()) != Some(vault::VAULT_EXTENSION) {
             return Err(StoreError::Unsupported);
@@ -130,10 +131,12 @@ impl VaultFile {
             point(CrashPoint::CreateBuilt)?;
             check_cancel(cancelled)?;
             // Remember the new ID before storing: clean it even if directory fsync fails.
+            crate::rotation_guard::check(path)?;
             anchored = Some(state.replica.replica_id);
             anchors.store(&state.replica.replica_id, &vault::anchor_of(&state))?;
             point(CrashPoint::CreateAnchored)?;
             check_cancel(cancelled)?;
+            crate::rotation_guard::check(path)?;
             fs::rename_noreplace(&temp, path)?;
             published = true;
             fs::sync_dir(fs::parent_of(path))?;

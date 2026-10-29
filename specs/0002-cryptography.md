@@ -117,7 +117,11 @@ and replacement of external credentials whose old values may already be known.
 
 1. Freeze ordinary writes on the initiating trusted device, resolve control
    conflicts, and take a local recovery snapshot. Generate new VK, generation
-   number (previous + 1), recovery phrase, password slot and recovery public keys.
+   number (previous + 1), recovery phrase and password slot. Recovery signing
+   seeds remain independent derivations of the new VK under §3.3. Derive their
+   public keys before any operation that publishes or uses recovery identities;
+   an offline-only vault with no configured sync may defer public-key derivation
+   until such configuration.
 2. Build a private replacement DB containing all active versions, unresolved
    conflicts, chosen retained history and chunks, permanent tombstones and
    suppression frontiers. Reencrypt under new keys, preserve logical clocks/IDs,
@@ -287,6 +291,11 @@ password guessing and device compromise are separate from vault encryption.
    mechanisms rather than relying on an unverified portability assumption.
 
 ## Changelog
+
+- 2026-10-29: Owner approved plan 0021 D1 A: an offline-only rotation may
+  defer recovery public-key derivation until sync configuration needs those
+  identities. Independent signing seeds still change with VK; recovery identity
+  use/publication and fresh device approval requirements are unchanged.
 
 - 2026-10-26: Align recovery input/display cross-reference with the owner-approved
   Dioxus input policy in 0008 §4.4; no cryptographic/profile change.

@@ -186,3 +186,47 @@ fn credentials_weak_password_delay_is_not_skipped_by_yes() {
     assert_eq!(code, 0, "{text}");
     new_unlock(&h);
 }
+
+#[test]
+fn credentials_rotation_marker_blocks_normal_unlock_and_phrase_recovery() {
+    let h = Home::new();
+    let phrase = create(&h);
+    let before = std::fs::read(h.vault()).unwrap();
+    let anchors: Vec<_> = std::fs::read_dir(h.anchors())
+        .unwrap()
+        .map(|e| {
+            let path = e.unwrap().path();
+            let bytes = std::fs::read(&path).unwrap();
+            (path, bytes)
+        })
+        .collect();
+    // An incomplete journal must stop normal opens before database ingestion.
+    let marker = h.vault().with_file_name("v.qvault.qvrotate");
+    std::fs::write(&marker, b"incomplete rotation intent").unwrap();
+    let out = piped(
+        h.qvault(["--password-stdin", "-v", &arg(&h.vault()), "ls"]),
+        format!("{PASSWORD}\n").as_bytes(),
+    );
+    assert_eq!(out.code, 7, "{}", out.stderr);
+    assert_eq!(std::fs::read(h.vault()).unwrap(), before);
+    if h.snapshots().exists() {
+        assert_eq!(std::fs::read_dir(h.snapshots()).unwrap().count(), 0);
+    }
+    let mut p = Interactive::spawn(h.qvault(["recover", &arg(&h.vault())]));
+    p.expect("Recovery phrase (24 words): ");
+    p.line(phrase.expose_secret());
+    let (code, text) = p.finish();
+    assert_eq!(code, 7, "{text}");
+    for (path, bytes) in &anchors {
+        assert_eq!(std::fs::read(path).unwrap(), *bytes);
+    }
+    // In the rename gap, an absent active name still reports integrity (7),
+    // rather than NotFound (4). Store tests also check creation in this gap.
+    std::fs::rename(h.vault(), h.vaults().join("old.qvault")).unwrap();
+    let out = piped(h.qvault(["-v", &arg(&h.vault()), "info"]), b"");
+    assert_eq!(out.code, 7, "{}", out.stderr);
+    assert!(!h.vault().exists());
+    for (path, bytes) in anchors {
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+}

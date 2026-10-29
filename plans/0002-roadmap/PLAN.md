@@ -482,7 +482,7 @@ vault path).
 
 #### Phase 1.14 — Password change and recovery flows
 
-- [x] **Plan:** [0020](../0020-password-recovery/PLAN.md) (Implemented). **Do:** Implement `passwd` (new complete slot plus encrypted keyslot
+- [x] **Plan:** [0020](../0020-password-recovery/PLAN.md) (Reviewed). **Do:** Implement `passwd` (new complete slot plus encrypted keyslot
   record, atomic, weak-password flow per 0011 §5.4), `recovery show` (after
   re-authentication, TTY only, alternate screen) and `recover <path>` (unlock
   with the phrase, set a new password). Handle the KDF-only profile migration
@@ -497,7 +497,15 @@ vault path).
 
 #### Phase 1.15 — Offline VK rotation
 
-- [ ] **Do:** Implement `recovery rotate` for vaults without remote sync: freeze
+Split 2026-10-29 under the session-size rule: **1.15a** builds the bounded
+rotation journal/MACs and ordinary-open/create/restore safeguards; **1.15b**
+builds the replacement, snapshot inventory, installation/restart workflow and
+CLI, after fresh-context review of 1.15a. The whole-rotation criteria below
+remain required before 1.16.
+
+- [x] **1.15a plan:** [0021](../0021-offline-key-rotation/PLAN.md) (Implemented; fresh review pending).
+- [ ] **1.15b plan:** next fresh session, after 1.15a review and owner commit.
+- **Do:** Implement `recovery rotate` for vaults without remote sync: freeze
   writes, take a recovery snapshot, build the private replacement DB, reencrypt
   with logical IDs and clocks preserved, confirm the new phrase and password,
   write the recovery journal, install with the generation step in the anchor,
@@ -855,6 +863,12 @@ vault path).
 
 ## Revisions
 
+- 2026-10-29: Owner delegated plan 0021 D1 choice; selected A and amended 0002
+  §3.5.1 to defer offline-only recovery public-key derivation until needed.
+  Split 1.15 into 1.15a (journal/open safeguards) and 1.15b (replacement,
+  installation, snapshot accounting and CLI) before code, using the explicit
+  session-size split rule. Keep the commit/fresh-review boundary between them.
+
 - 2026-10-29: Owner requested fixing 0019 and implementing phase 1.14 without
   an intervening commit. Plan 0020 includes the necessary existing qv-store
   transaction/credential internals in addition to the core/CLI list for 1.14;
@@ -900,6 +914,36 @@ vault path).
 - 2026-10-26 (phase 1.10, plan 0011): the owner approved splitting 1.10 into 1.10a/1.10b and decisions D-1–D-6 of plan 0011 as recommended: `zxcvbn 3.1.1` in `qv-core` (0010 §3.2); `clap 4.6.7` builder API only; for 1.10b, `signal-hook 0.4.5` and `arboard 3.6.1` (X11 only, no image support) with per-crate `BSL-1.0` exceptions for `clipboard-win` and `error-code`; the recovery-phrase skip (0002 §4.2) recorded as vault settings key 3 `recovery_skipped_at` (development value for the 1.16 freeze). These dependencies are now approved for 1.10b's standing approval. Raised, not decided: 0011 has no command to adopt a vault with a missing or mismatched anchor (suggested for 1.13/1.14).
 
 ## Execution log
+
+- 2026-10-29: Owner delegated D1; selected A and applied the narrow 0002
+  offline public-key timing amendment. Split 1.15 under the session-size rule
+  before code. **Phase 1.15a implemented as plan 0021**: bounded canonical
+  transition journal with independent generation MACs, redacted fixed-size
+  metadata and ordinary open/create/restore/write exclusion for `.qvrotate`
+  markers. Refusals preserve DB/anchors, including absent-active rename gaps,
+  late markers and pending-anchor retry. No production marker writer,
+  replacement construction, snapshot inventory or rotation CLI yet: those
+  remain **1.15b**, planned next fresh session after 0021 review and owner
+  commit. No new dependency, unsafe, crypto profile or SQLite schema change.
+  Independent complete development vector and journal fuzz target/CI added;
+  local instrumented campaign clean (179,938 runs in 61 seconds, without ASan).
+  Required SPDX/fmt/Clippy/locked tests pass: 603 passed, 0 failed, 2 pre-existing
+  ignored, including private Xvfb. Logs `/tmp/qv21/`; network isolation remains
+  unavailable, not a pass. Same-context implementation inspection only; preserve
+  fresh-context review before 1.15b. Changes uncommitted; no commit/push/branch.
+
+- 2026-10-29: Clean-tree next-phase session reviewed committed phase 1.14
+  (`acc1021`, plan 0020): **Approved with minor fixes**, correcting only the
+  plan's stale status table. No blocking product finding. Independent SPDX,
+  fmt, Clippy and locked tests pass (591 passed, 0 failed, 2 pre-existing
+  ignored), including private Xvfb; network namespace unavailable, not a pass.
+  See 0020 REVIEW.md and `/tmp/qv21-review/` logs. Phase 1.15 planned as
+  **0021, Proposed**. D1 asks whether to defer offline recovery public-key
+  derivation with a narrow 0002 amendment (recommended) or bring signature
+  dependencies/qv-crypto work forward. Standing approval is withheld under
+  Session protocol step 4 (spec amendment or component/order deviation).
+  No production code, dependencies or normative specs changed; phase unticked.
+  Changes remain uncommitted; no commit, push or branch.
 
 - 2026-10-29: Owner requested fixing the 0019 finding and implementing the
   phase without a commit boundary. Slot-bearing archives now fail integrity

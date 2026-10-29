@@ -9,6 +9,18 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-29: Rotation foundation (plan 0021, phase 1.15a): bounded canonical
+  journal metadata with independent old/new generation MACs, strict rejection
+  tests and a journal fuzz target. Existing `.qvrotate` intent markers block
+  ordinary open/create/restore and mutation paths without adopting an anchor.
+  No production marker writer or `recovery rotate` command yet; replacement,
+  durable recovery and snapshot accounting follow in phase 1.15b. Owner-approved
+  0002 amendment defers offline recovery public-key derivation until needed.
+
+- 2026-10-29: Fresh-context review of phase 1.14 (plan 0020): Approved with
+  minor fixes to its stale plan status. No blocking product finding; independent
+  required gates pass with private Xvfb. Network isolation unavailable.
+
 - 2026-10-29: `qvault passwd`, `recovery show` and `recover <existing.qvault>`
   (plan 0020, phase 1.14). Password replacement atomically updates the complete
   slot, encrypted keyslot record and header MAC through the existing transaction

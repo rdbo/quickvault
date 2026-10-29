@@ -160,6 +160,16 @@ remain capable of disclosing the same VK; deletion is not cryptographic erasure.
 The current registry still has only KDF/wrap profile 1; rewrapping exercises the
 KDF-only path without inventing a second profile. Standalone phrase-based archive
 import, generation rotation and remote credential adoption remain future work.
+Rotation foundation (plan 0021, phase 1.15a) adds a bounded, canonical intent
+container with independently verified old/new local-state MACs. The container
+holds fixed-size metadata, never a key, password slot or path, and does not
+authorize installation. An existing `.qvrotate` sibling excludes ordinary
+open/create/restore and mutation paths before SQLite/anchor changes, even
+when the active path is absent. No production writer creates that marker yet.
+Replacement construction, cross-generation snapshot accounting, installation,
+restart recovery and `recovery rotate` remain phase 1.15b. The owner-approved
+0002 amendment defers offline-only recovery public-key derivation until sync
+uses the identities; the independent seeds still change with the new VK.
 
 Local snapshots (0007 §3) are archives built only from verified objects: the
 live SQLite file is never copied or normalized, and no password slot is
@@ -340,7 +350,10 @@ release requirements remain. Framework selection is not validation evidence.
 | Later | Automatic sync (separate design), third-party import/export, hosted admission, iOS/macOS, extensions and BSD |
 
 The phased implementation roadmap for these milestones is
-[plans/0002-roadmap](plans/0002-roadmap/PLAN.md).
+tracked in [plans/0002-roadmap](plans/0002-roadmap/PLAN.md). Offline rotation is split into
+roadmap 1.15a (journal/open safeguards) and 1.15b (verified replacement,
+durable restart/install and CLI), with the owner commit and fresh-review
+boundary between them.
 
 Future implementations must satisfy the acceptance criteria in
 [0012 — Security Validation](specs/0012-security-validation.md).

@@ -2,7 +2,7 @@
 
 | Status | Created | Implemented | Specs |
 |--------|---------|----------|-------|
-| Approved | 2026-10-29 | 2026-10-29 (owner: fix it and do the phase; standing approval, roadmap 0002) | 0002 §1–4/§8; 0004 §3.6/§5; 0005 §5.4 (D5); 0007 §3; 0008 §1–3/§5 (D5); 0010 §4.2; 0011 §3–6; 0012 §1 |
+| Reviewed | 2026-10-29 | 2026-10-29 (owner: fix it and do the phase; standing approval, roadmap 0002) | 0002 §1–4/§8; 0004 §3.6/§5; 0005 §5.4 (D5); 0007 §3; 0008 §1–3/§5 (D5); 0010 §4.2; 0011 §3–6; 0012 §1 |
 
 ## Intent
 
@@ -280,3 +280,11 @@ fresh-context reviewer prerequisite before phase 1.15. Recovery here targets an
 existing local vault; standalone phrase/archive import and real future-profile
 migration choices remain outside this implementation. All changes uncommitted;
 no branch, commit or push. The owner's existing staged changes are preserved.
+
+2026-10-29: Fresh-context review of committed `acc1021`: Approved with minor
+fixes, see REVIEW.md. Corrected the stale Approved table status to Reviewed;
+no product/test changes. Independent SPDX/fmt/Clippy and full locked tests
+pass (591 passed, 0 failed, 2 pre-existing ignored) using a private temporary
+Xvfb. Logs `/tmp/qv21-review/`. Network namespace isolation unavailable, not
+claimed as passed. No blocking finding. Phase 1.15 proposed separately in
+plan 0021; D1 needs owner resolution before implementation.

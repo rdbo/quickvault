@@ -319,14 +319,17 @@ impl VaultFile {
     /// Opens a vault for unlocking: file checks, lock, hardening, schema
     /// validation and header/slot decoding. No KDF runs here.
     pub fn open(path: &Path) -> Result<VaultFile, StoreError> {
+        crate::rotation_guard::check(path)?;
         let lock = fs::open_existing(path)?;
         Self::open_locked(path, lock)
     }
 
     pub(crate) fn open_locked(path: &Path, lock: LockedFile) -> Result<VaultFile, StoreError> {
+        crate::rotation_guard::check(path)?;
         let warnings = warnings_for(path, &lock);
         // SQLite rolls back or replays these before any check below.
         fs::check_sidecars(path)?;
+        lock.same_as_path(path)?;
         let conn = open_connection(path)?;
         lock.same_as_path(path)?;
         let budget = StepBudget::new();
@@ -426,6 +429,7 @@ impl VaultFile {
         vk: VaultKey,
         anchors: &AnchorDir,
     ) -> Result<(UnlockedVault, AnchorStatus), StoreError> {
+        self.check_identity()?;
         self.budget.reset();
         let state = {
             let tx = self
@@ -475,6 +479,7 @@ impl VaultFile {
     /// [`StoreError::Replaced`] if the path no longer names the locked
     /// file (0004 §1.3).
     pub fn check_identity(&self) -> Result<(), StoreError> {
+        crate::rotation_guard::check(&self.path)?;
         self.lock.same_as_path(&self.path)
     }
 
@@ -506,6 +511,7 @@ impl VaultFile {
         name: &str,
         anchors: &AnchorDir,
     ) -> Result<UnlockedVault, StoreError> {
+        crate::rotation_guard::check(path)?;
         if path.extension().and_then(|e| e.to_str()) != Some(VAULT_EXTENSION) {
             return Err(StoreError::Unsupported);
         }
@@ -521,9 +527,11 @@ impl VaultFile {
         let built = build(&temp, password, &name).and_then(|(vk, replica, anchor)| {
             lock.sync()?;
             point(CrashPoint::CreateBuilt)?;
+            crate::rotation_guard::check(path)?;
             anchors.store(&replica, &anchor)?;
             anchored = Some(replica);
             point(CrashPoint::CreateAnchored)?;
+            crate::rotation_guard::check(path)?;
             fs::rename_noreplace(&temp, path)?;
             Ok(vk)
         });

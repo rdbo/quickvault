@@ -120,6 +120,7 @@ impl UnlockedVault {
     /// Retries a failed anchor update before the next commit, so the
     /// database never gets two steps ahead of its anchor.
     fn finish_pending_anchor(&mut self) -> Result<(), StoreError> {
+        self.check_identity()?;
         if self.gate == WriteGate::AnchorPending {
             self.anchors
                 .store(&self.state.replica.replica_id, &anchor_of(&self.state))?;
@@ -578,6 +579,7 @@ impl Write<'_> {
     /// Commits while checking cancellation during history scans and immediately
     /// before durable commit. After durability the actual outcome is reported.
     pub fn commit_cancellable(mut self, cancelled: &impl Fn() -> bool) -> Result<(), StoreError> {
+        self.vault.check_identity()?;
         if self.poisoned || !self.staged.is_empty() {
             return Err(StoreError::Internal);
         }
@@ -726,6 +728,7 @@ impl Write<'_> {
         if cancelled() {
             return Err(StoreError::Io);
         }
+        self.vault.check_identity()?;
         conn.execute_batch("COMMIT").map_err(w)?;
         // Durable from here: the session follows the database.
         self.finished = true;

@@ -112,6 +112,14 @@
 //! durable database even if its anchor update fails. The same fixed-profile
 //! path can rewrap without changing VK, generation or application objects.
 //!
+//! Rotation foundation (1.15a): [`RotationJournal`] bounds and authenticates
+//! transition metadata with independent old/new generation MACs. Decoding or
+//! one verified MAC never authorizes installing a replacement or adopting an
+//! anchor. An existing `.qvrotate` sibling blocks ordinary opens, creation,
+//! restoration and mutations, including when the active name is absent.
+//! No production API publishes that marker yet. Replacement construction,
+//! durable restart recovery, snapshot inventory and the CLI remain in 1.15b.
+//!
 //! # Errors
 //!
 //! [`StoreError`] carries no data. CLI exit codes (0011 §6):
@@ -156,6 +164,9 @@ mod object;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod restore;
 #[cfg(any(target_os = "linux", target_os = "android"))]
+mod rotation_guard;
+mod rotation_journal;
+#[cfg(any(target_os = "linux", target_os = "android"))]
 mod schema;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod slot;
@@ -198,6 +209,9 @@ pub use limits::{
 pub use location::LocationWarnings;
 pub use manifest::{MANIFEST_FORMAT, Manifest, ObjectRef, RecordEntry, VersionRef};
 pub use object::ObjectEnvelope;
+pub use rotation_journal::{
+    MAX_ROTATION_JOURNAL_BYTES, RotationJournal, RotationJournalBody, RotationSide,
+};
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 pub use unsupported::{
     AnchorDir, MAX_ANCHOR_BYTES, UnlockedVault, VAULT_EXTENSION, VaultFile, VerifyCounts, Write,

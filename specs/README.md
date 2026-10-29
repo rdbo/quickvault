@@ -20,6 +20,10 @@ what they say, and behaviour changes start with a spec change.
 | [0011](0011-cli.md) | Command-Line Interface | Accepted |
 | [0012](0012-security-validation.md) | Security Validation and Release Gates | Accepted |
 
+0002 includes the owner-approved offline rotation amendment of 2026-10-29
+(plan 0021 D1 A): recovery public-key derivation may wait until sync needs it;
+the independently derived signing seeds still change with VK.
+
 0011 includes the owner-approved attachment CLI amendment of 2026-10-27
 (plan 0016): explicit file import/export and confirmed permanent removal.
 0011 also includes the owner-approved history/restore/purge CLI amendment of
