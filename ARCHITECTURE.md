@@ -166,8 +166,19 @@ holds fixed-size metadata, never a key, password slot or path, and does not
 authorize installation. An existing `.qvrotate` sibling excludes ordinary
 open/create/restore and mutation paths before SQLite/anchor changes, even
 when the active path is absent. No production writer creates that marker yet.
-Replacement construction, cross-generation snapshot accounting, installation,
-restart recovery and `recovery rotate` remain phase 1.15b. The owner-approved
+Phase 1.15b (plan 0022) builds the private replacement of the next generation.
+`UnlockedVault::prepare_rotation` reencrypts every retained object under a new
+VK with fresh object IDs, keeps every version ID, clock, floor and conflict, and
+adds one causal keyslot edit. It writes a head at generation +1 and sequence +1
+that names the old digest. It then reopens the persisted file hardened, unlocks
+its new password slot and compares it fully with the source, without reading or
+writing the shared anchor. Ordinary opens refuse every `.qvrotate` name, so an
+orphaned replacement or retained old copy can never advance that anchor. A
+per-generation snapshot inventory, MAC'd with the new local-state key, records
+earlier-generation snapshots (authenticated with the old VK) for budget
+accounting. A row's file is removed only when its hash matches.
+Installation through the journal, restart and rollback, inventory-aware
+snapshot policy, core and `recovery rotate` remain phase 1.15c. The owner-approved
 0002 amendment defers offline-only recovery public-key derivation until sync
 uses the identities; the independent seeds still change with the new VK.
 
@@ -351,9 +362,9 @@ release requirements remain. Framework selection is not validation evidence.
 
 The phased implementation roadmap for these milestones is
 tracked in [plans/0002-roadmap](plans/0002-roadmap/PLAN.md). Offline rotation is split into
-roadmap 1.15a (journal/open safeguards) and 1.15b (verified replacement,
-durable restart/install and CLI), with the owner commit and fresh-review
-boundary between them.
+roadmap 1.15a (journal/open safeguards), 1.15b (verified replacement and
+snapshot inventory) and 1.15c (durable install/restart, core and CLI), with
+the owner commit and fresh-review boundary between each.
 
 Future implementations must satisfy the acceptance criteria in
 [0012 — Security Validation](specs/0012-security-validation.md).

@@ -230,3 +230,31 @@ fn credentials_rotation_marker_blocks_normal_unlock_and_phrase_recovery() {
         assert_eq!(std::fs::read(path).unwrap(), bytes);
     }
 }
+
+#[test]
+fn credentials_reserved_rotation_copy_is_never_unlocked_or_anchored() {
+    let h = Home::new();
+    create(&h);
+    let anchors: Vec<_> = std::fs::read_dir(h.anchors())
+        .unwrap()
+        .map(|e| {
+            let path = e.unwrap().path();
+            let bytes = std::fs::read(&path).unwrap();
+            (path, bytes)
+        })
+        .collect();
+    // A valid copy under a reserved replacement name shares the anchor's
+    // replica ID; an ordinary unlock must refuse it before any anchor check.
+    let copy = h
+        .vaults()
+        .join("v.qvault.qvrotate-new-00112233445566778899aabbccddeeff");
+    std::fs::copy(h.vault(), &copy).unwrap();
+    let out = piped(
+        h.qvault(["--password-stdin", "-v", &arg(&copy), "ls"]),
+        format!("{PASSWORD}\n").as_bytes(),
+    );
+    assert_eq!(out.code, 7, "{}", out.stderr);
+    for (path, bytes) in anchors {
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+}

@@ -89,3 +89,5 @@ jobs:
         run: cargo +"$NIGHTLY" fuzz run archive_read -- -max_total_time=60 -max_len=262144
       - name: Fuzz rotation_journal (60 s)
         run: cargo +"$NIGHTLY" fuzz run rotation_journal -- -max_total_time=60 -max_len=8192
+      - name: Fuzz snapshot_inventory (60 s)
+        run: cargo +"$NIGHTLY" fuzz run snapshot_inventory -- -max_total_time=60 -max_len=8192

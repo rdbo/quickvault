@@ -5,19 +5,17 @@ use crate::{
     AnchorDir, ArchiveScope, StoreError, VaultFile,
     archive::{self, OpenedArchive},
     crash::{CrashPoint, point},
-    fs,
+    creation, fs,
     head::LocalHead,
     header::Header,
     manifest::seal_manifest,
     object::SealedObject,
-    schema::{self, ObjectReader, StoredSlot},
+    schema::{ObjectReader, StoredReplica, StoredSlot},
     slot::LocalSlot,
-    sqlite::{StepBudget, harden, open_connection},
-    vault::{self, Keys, insert_manifest, insert_object, load_state, scope, sign_head},
+    vault::{self, Keys, insert_object, load_state, scope, sign_head},
 };
-use qv_crypto::{VaultKey, mac};
+use qv_crypto::VaultKey;
 use qv_model::{Payload, RandomId, RecordBody, WriterId};
-use rusqlite::TransactionBehavior;
 use std::{
     io::{Read, Seek},
     path::Path,
@@ -162,74 +160,50 @@ fn build<R: Read + Seek>(
     vk: &VaultKey,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<(), StoreError> {
-    let mut conn = open_connection(temp)?;
-    let budget = StepBudget::new();
-    harden(&conn, &budget)?;
-    conn.pragma_update(None, "page_size", 4096)
-        .map_err(|e| crate::error::sqlite_err(&e))?;
     let keys = Keys::derive(vk, header)?;
-    let body = header.encode()?;
-    let (key, transcript) = vault::header_tag(vk, header, &body, &[local.row()])?;
-    let tag = mac(&key, header.mac_profile, &transcript)?;
-    let sealed = seal_manifest(
-        &keys.manifest,
-        scope(header),
-        header.data_profile,
-        opened.manifest(),
-    )?;
-    let head = LocalHead {
-        vault_id: header.vault_id,
-        key_generation: header.key_generation,
-        local_seq: 1,
-        previous_digest: None,
-        manifest_hash: sealed.hash,
-        remote: None,
+    let replica = StoredReplica {
+        replica_id: qv_crypto::random_array::<16>().map_err(|_| StoreError::Rng)?,
+        writer_id: WriterId::generate()?.to_bytes(),
+        next_counter: 1,
     };
-    let (stored, _) = sign_head(&keys, header, &head)?;
-    let replica = qv_crypto::random_array::<16>().map_err(|_| StoreError::Rng)?;
-    let writer = WriterId::generate()?;
-    let tx = conn
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|e| crate::error::sqlite_err(&e))?;
-    schema::install(&tx)?;
-    tx.execute(
-        "INSERT INTO header (id, body, mac) VALUES (1, ?1, ?2)",
-        rusqlite::params![body.as_slice(), tag.as_bytes().as_slice()],
+    creation::write_database(
+        temp,
+        header,
+        vk,
+        local,
+        replica,
+        |tx| {
+            for (reference, indexed) in opened.manifest().references().iter().zip(&opened.frames) {
+                check_cancel(cancelled)?;
+                let frame = indexed.read(input, opened.header(), reference)?;
+                let o = archive::object_envelope(&frame, opened.header(), reference)?;
+                let sealed = SealedObject {
+                    object_id: o.object_id(),
+                    data_profile: o.data_profile(),
+                    nonce: *o.nonce(),
+                    ciphertext: o.ciphertext().to_vec(),
+                };
+                insert_object(tx, header.key_generation, &sealed)?;
+            }
+            let manifest = seal_manifest(
+                &keys.manifest,
+                scope(header),
+                header.data_profile,
+                opened.manifest(),
+            )?;
+            let head = LocalHead {
+                vault_id: header.vault_id,
+                key_generation: header.key_generation,
+                local_seq: 1,
+                previous_digest: None,
+                manifest_hash: manifest.hash,
+                remote: None,
+            };
+            let (head, _) = sign_head(&keys, header, &head)?;
+            Ok(creation::Filled { manifest, head })
+        },
+        cancelled,
     )
-    .map_err(|e| crate::error::write_err(&tx, &e, 0))?;
-    tx.execute(
-        "INSERT INTO keyslot (slot_id, type, body) VALUES (?1, ?2, ?3)",
-        rusqlite::params![local.slot_id.0.as_slice(), 0, local.body.as_slice()],
-    )
-    .map_err(|e| crate::error::write_err(&tx, &e, 0))?;
-    tx.execute(
-        "INSERT INTO replica (id, replica_id, writer_id, next_counter) VALUES (1, ?1, ?2, 1)",
-        rusqlite::params![replica.as_slice(), writer.to_bytes().as_slice()],
-    )
-    .map_err(|e| crate::error::write_err(&tx, &e, 0))?;
-    for (reference, indexed) in opened.manifest().references().iter().zip(&opened.frames) {
-        check_cancel(cancelled)?;
-        let frame = indexed.read(input, opened.header(), reference)?;
-        let o = archive::object_envelope(&frame, opened.header(), reference)?;
-        let sealed = SealedObject {
-            object_id: o.object_id(),
-            data_profile: o.data_profile(),
-            nonce: *o.nonce(),
-            ciphertext: o.ciphertext().to_vec(),
-        };
-        insert_object(&tx, header.key_generation, &sealed)?;
-    }
-    insert_manifest(&tx, &sealed)?;
-    tx.execute(
-        "INSERT INTO local_head (id, body, mac) VALUES (1, ?1, ?2)",
-        rusqlite::params![stored.body.as_slice(), stored.mac.as_slice()],
-    )
-    .map_err(|e| crate::error::write_err(&tx, &e, 0))?;
-    check_cancel(cancelled)?;
-    tx.commit().map_err(|e| crate::error::sqlite_err(&e))?;
-    conn.close()
-        .map_err(|(_, e)| crate::error::sqlite_err(&e))?;
-    Ok(())
 }
 
 #[cfg(test)]

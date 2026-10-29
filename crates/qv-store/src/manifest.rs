@@ -41,6 +41,8 @@
 //! `["qv/config/v1", format, vault_id, key_generation, min_data_profile,
 //! min_derivation_profile]`.
 
+use std::collections::BTreeMap;
+
 use qv_crypto::{
     DerivationProfile, KeyGeneration, ObjectHashProfile, ObjectHasher, PurposeKey, RecordId,
     StoredDataProfile, VaultId, object_hash, purpose,
@@ -797,6 +799,82 @@ impl Manifest {
     /// Replaces every head of `record_id` with `head`; the old heads move to
     /// history (0005 §2.1). The caller has checked that `head` dominates
     /// them.
+    /// The same records, roles, floors and conflicts under the generation of
+    /// `header`: every object and chunk ID replaced by its entry in `map`
+    /// (old ID → new reference) and the reference list replaced by the map's
+    /// values (rotation, 0002 §3.5.2). Every reference must be mapped exactly
+    /// once; anything else is [`StoreError::Internal`].
+    pub(crate) fn remapped(
+        &self,
+        header: &Header,
+        map: &BTreeMap<ObjectId, ObjectRef>,
+    ) -> Result<Self, StoreError> {
+        if map.len() != self.references.len()
+            || self
+                .references
+                .iter()
+                .any(|r| !map.contains_key(&r.object_id))
+        {
+            return Err(StoreError::Internal);
+        }
+        let id = |old: &ObjectId| {
+            map.get(old)
+                .map(|r| r.object_id)
+                .ok_or(StoreError::Internal)
+        };
+        let role = |v: &VersionRef| -> Result<VersionRef, StoreError> {
+            Ok(VersionRef {
+                version_id: v.version_id,
+                clock: v.clock.clone(),
+                object_id: id(&v.object_id)?,
+                chunks: match &v.chunks {
+                    Some(c) => Some(c.iter().map(id).collect::<Result<_, _>>()?),
+                    None => None,
+                },
+            })
+        };
+        let mut records = Vec::with_capacity(self.records.len());
+        for r in &self.records {
+            records.push(RecordEntry {
+                record_id: r.record_id,
+                heads: r.heads.iter().map(role).collect::<Result<_, _>>()?,
+                history: r.history.iter().map(role).collect::<Result<_, _>>()?,
+                floor: r.floor.clone(),
+            });
+        }
+        let mut references: Vec<ObjectRef> = map.values().copied().collect();
+        references.sort_by_key(|r| r.object_id);
+        let m = Self {
+            config_digest: config_digest(header)?,
+            vault_meta_id: self.vault_meta_id,
+            keyslot_id: self.keyslot_id,
+            root_group_id: self.root_group_id,
+            records,
+            references,
+        };
+        m.validate()?;
+        Ok(m)
+    }
+
+    /// Test only: adds `head` as another current head of `record_id`, as a
+    /// merge of a concurrent version would (phase 2.2).
+    #[cfg(test)]
+    pub(crate) fn add_head_for_test(
+        &mut self,
+        record_id: RecordId,
+        head: VersionRef,
+        object: ObjectRef,
+    ) -> Result<(), StoreError> {
+        let i = self
+            .record_index(record_id)
+            .map_err(|_| StoreError::Internal)?;
+        self.insert_reference(object)?;
+        let r = self.records.get_mut(i).ok_or(StoreError::Internal)?;
+        r.heads.push(head);
+        r.heads.sort_by_key(|v| v.version_id);
+        Ok(())
+    }
+
     pub(crate) fn replace_heads(
         &mut self,
         record_id: RecordId,

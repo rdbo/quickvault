@@ -61,7 +61,7 @@ use crate::vault::{
 };
 
 /// Largest counter: SQLite stores `next_counter` as a signed 64-bit integer.
-const MAX_COUNTER: u64 = i64::MAX as u64;
+pub(crate) const MAX_COUNTER: u64 = i64::MAX as u64;
 
 /// One open mutation. Dropping it without [`Write::commit`] rolls the
 /// transaction back and leaves the vault unchanged.
@@ -119,7 +119,8 @@ impl UnlockedVault {
 
     /// Retries a failed anchor update before the next commit, so the
     /// database never gets two steps ahead of its anchor.
-    fn finish_pending_anchor(&mut self) -> Result<(), StoreError> {
+    pub(crate) fn finish_pending_anchor(&mut self) -> Result<(), StoreError> {
+        self.refuse_candidate()?;
         self.check_identity()?;
         if self.gate == WriteGate::AnchorPending {
             self.anchors
@@ -144,7 +145,17 @@ impl UnlockedVault {
         Ok(())
     }
 
+    /// A rotation replacement is verified but never written or anchored
+    /// before installation (plan 0022).
+    fn refuse_candidate(&self) -> Result<(), StoreError> {
+        if self.file.role == crate::vault::FileRole::Candidate {
+            return Err(StoreError::Integrity);
+        }
+        Ok(())
+    }
+
     fn begin(&mut self, new_writer: Option<WriterId>) -> Result<Write<'_>, StoreError> {
+        self.refuse_candidate()?;
         self.check_identity()?;
         self.file.budget.reset();
         let keys = Keys::derive(&self.vk, &self.file.header)?;

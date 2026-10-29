@@ -31,6 +31,11 @@
 //! | `anchor` | [`AnchorDir`]: anchor files, atomic replacement | 0005 §5.4 |
 //! | `archive_verify` / `validation` | Bounded role-aware archive authentication and shared record checks | 0004 §3.6, §6 |
 //! | `restore` | New-path snapshot restoration with fresh local baseline and existing creation ordering | 0007 §3.4; 0005 §5.4 |
+//! | `creation` | The shared new-database writer of restore and rotation | 0004 §1.2, §5 |
+//! | `rotation` | [`PreparedRotation`]: the verified private next-generation replacement | 0002 §2.2, §3.5 |
+//! | `rotation_guard` | `.qvrotate` marker and reserved-name refusal | 0002 §3.5.4 |
+//! | `rotation_journal` | [`RotationJournal`] codec and independent MACs | 0002 §3.5.4 |
+//! | `snapshot_inventory` | [`SnapshotInventory`]: cross-generation snapshot accounting | 0007 §3.2–3.3 |
 //! | `archive` | [`ArchiveHeader`], [`ArchiveScope`], framing, the archive writer and reader, [`SnapshotDir`] | 0004 §6; 0007 §3 |
 //! | `vault` | [`VaultFile`] (`create`, `open`, `unlock`, `unlock_for_recovery`) and [`UnlockedVault`] (verification, reads) | 0004 §3.6, §5.1, 0002 §8 |
 //! | `verify` | [`VerifyCounts`] and the full `verify` pass | 0004 §3.6 |
@@ -117,8 +122,29 @@
 //! one verified MAC never authorizes installing a replacement or adopting an
 //! anchor. An existing `.qvrotate` sibling blocks ordinary opens, creation,
 //! restoration and mutations, including when the active name is absent.
-//! No production API publishes that marker yet. Replacement construction,
-//! durable restart recovery, snapshot inventory and the CLI remain in 1.15b.
+//! No production API publishes that marker yet.
+//!
+//! Rotation replacement (1.15b, plan 0022): ordinary opens also refuse any
+//! file name containing `.qvrotate`, because a rotation's replacement and
+//! retained old copy share the active replica's anchor.
+//! [`UnlockedVault::prepare_rotation`] builds the next generation into a
+//! reserved private file:
+//! - a new VK, phrase and password slot (the source's slot profiles);
+//! - every object resealed under a fresh ID and nonce;
+//! - version IDs, clocks, history, floors, conflicts and extension fields
+//!   kept;
+//! - one causal keyslot edit (as `passwd` stages it; the old head becomes
+//!   history);
+//! - a head at generation +1 and sequence +1 naming the old digest;
+//! - writer counter +1.
+//!
+//! It then reopens the file hardened as a `Candidate`, which can be verified
+//! but never written or anchored. It unlocks the new slot and compares every
+//! version and attachment with the source. [`SnapshotInventory`] (MAC'd with
+//! the new generation's local-state key, `qv/snapshot-inventory/v1`, at most
+//! 4096 rows / 1 MiB, `inventory-<vault>-<gen>.qvinv`) carries
+//! earlier-generation snapshots into budget accounting. Journal installation,
+//! restart, inventory-aware policy, core and the CLI are roadmap 1.15c.
 //!
 //! # Errors
 //!
@@ -137,7 +163,8 @@
 //! Received versions and merges of concurrent heads (2.2); archives that
 //! carry a password slot (0004 §6.4, phase 2), archive merge and exchange
 //! (2.2); standalone archive recovery using a phrase;
-//! rotation (1.15); sync state, outbox and checkpoints (milestones 2–3);
+//! rotation installation and restart (1.15c); sync state, outbox and
+//! checkpoints (milestones 2–3);
 //! quick-unlock slots (2.6); keystore-backed anchors (2.3, 2.6); Windows
 //! and macOS file safety (4.1 and later).
 
@@ -150,6 +177,8 @@ mod crash;
 #[cfg(test)]
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod crash_tests;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod creation;
 #[cfg(all(test, any(target_os = "linux", target_os = "android")))]
 mod credentials;
 mod error;
@@ -164,12 +193,15 @@ mod object;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod restore;
 #[cfg(any(target_os = "linux", target_os = "android"))]
+mod rotation;
+#[cfg(any(target_os = "linux", target_os = "android"))]
 mod rotation_guard;
 mod rotation_journal;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod schema;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod slot;
+mod snapshot_inventory;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod sqlite;
 mod validation;
@@ -209,12 +241,18 @@ pub use limits::{
 pub use location::LocationWarnings;
 pub use manifest::{MANIFEST_FORMAT, Manifest, ObjectRef, RecordEntry, VersionRef};
 pub use object::ObjectEnvelope;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub use rotation::PreparedRotation;
 pub use rotation_journal::{
     MAX_ROTATION_JOURNAL_BYTES, RotationJournal, RotationJournalBody, RotationSide,
 };
+pub use snapshot_inventory::{
+    InventoryRow, MAX_INVENTORY_BYTES, MAX_INVENTORY_ROWS, SnapshotInventory, UnverifiedInventory,
+};
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 pub use unsupported::{
-    AnchorDir, MAX_ANCHOR_BYTES, UnlockedVault, VAULT_EXTENSION, VaultFile, VerifyCounts, Write,
+    AnchorDir, MAX_ANCHOR_BYTES, PreparedRotation, UnlockedVault, VAULT_EXTENSION, VaultFile,
+    VerifyCounts, Write,
 };
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use vault::{UnlockedVault, VAULT_EXTENSION, VaultFile};

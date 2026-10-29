@@ -9,6 +9,19 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-29: Verified rotation replacement (plan 0022, phase 1.15b). The store
+  builds a private next-generation database: a new VK, phrase and password
+  slot; every object reencrypted under fresh IDs; logical IDs, clocks, history,
+  floors and conflicts preserved; and one causal keyslot edit. It verifies the
+  database again from the persisted bytes without touching the shared anchor.
+  Ordinary opens refuse `.qvrotate` names (exit 7). Adds a MAC'd
+  per-generation snapshot inventory with hash-checked removal, an independent
+  vector and a fuzz target. Nothing installs it yet: the journal installation,
+  restart, core and `recovery rotate` come in phase 1.15c.
+
+- 2026-10-29: Fresh-context review of phase 1.15a (plan 0021): Approved, no
+  fixes. Independent required gates pass with private Xvfb.
+
 - 2026-10-29: Rotation foundation (plan 0021, phase 1.15a): bounded canonical
   journal metadata with independent old/new generation MACs, strict rejection
   tests and a journal fuzz target. Existing `.qvrotate` intent markers block

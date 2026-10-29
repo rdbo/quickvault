@@ -343,7 +343,37 @@ impl VaultFile {
     }
 }
 
+/// A prepared rotation replacement (unavailable on this target).
+pub struct PreparedRotation(Never);
+
+impl fmt::Debug for PreparedRotation {
+    fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {}
+    }
+}
+
+impl PreparedRotation {
+    /// Unreachable on unsupported targets.
+    pub fn phrase(&self) -> &qv_crypto::RecoveryPhrase {
+        match self.0 {}
+    }
+
+    /// Unreachable on unsupported targets.
+    pub fn new_generation(&self) -> qv_crypto::KeyGeneration {
+        match self.0 {}
+    }
+}
+
 impl UnlockedVault {
+    /// Unreachable: no `UnlockedVault` exists on this target.
+    pub fn prepare_rotation(
+        self,
+        _new_password: &MasterPassword,
+        _cancelled: &dyn Fn() -> bool,
+    ) -> Result<PreparedRotation, StoreError> {
+        match self.0 {}
+    }
+
     /// Unreachable on unsupported targets.
     pub fn recovery_phrase(
         &self,

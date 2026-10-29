@@ -7,10 +7,36 @@ use std::path::Path;
 
 use crate::{StoreError, error::errno_err, fs};
 
-/// Any existing marker blocks ordinary access. Do not follow it or parse it.
-/// A dangling symlink, directory or truncated marker must also fail closed.
+/// The text every rotation sibling name contains: the marker
+/// `<vault>.qvrotate`, the replacement `<vault>.qvrotate-new-<32 hex>`, the
+/// retained `<vault>.qvrotate-old-<32 hex>` and their temporary names.
+pub(crate) const RESERVED: &str = ".qvrotate";
+
+/// Any existing marker blocks ordinary access, and so does a path that is
+/// itself a reserved rotation name: an orphaned replacement or a retained old
+/// copy shares the active replica's anchor, so an ordinary unlock could advance
+/// or fork it. Do not follow the marker or parse it. A dangling symlink,
+/// directory or truncated marker must also fail closed.
 pub(crate) fn check(path: &Path) -> Result<(), StoreError> {
-    match rustix::fs::lstat(fs::with_suffix(path, ".qvrotate")) {
+    if is_reserved(path) {
+        return Err(StoreError::Integrity);
+    }
+    check_marker(path)
+}
+
+/// Whether the file name of `path` is a reserved rotation name.
+pub(crate) fn is_reserved(path: &Path) -> bool {
+    path.file_name().is_some_and(|n| {
+        n.as_encoded_bytes()
+            .windows(RESERVED.len())
+            .any(|w| w == RESERVED.as_bytes())
+    })
+}
+
+/// The marker test alone, for the rotation's own replacement file, whose name
+/// is reserved on purpose.
+pub(crate) fn check_marker(path: &Path) -> Result<(), StoreError> {
+    match rustix::fs::lstat(fs::with_suffix(path, RESERVED)) {
         Ok(_) => Err(StoreError::Integrity),
         Err(rustix::io::Errno::NOENT) => Ok(()),
         Err(e) => Err(errno_err(e)),
@@ -27,7 +53,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn marker(path: &Path) -> PathBuf {
-        fs::with_suffix(path, ".qvrotate")
+        fs::with_suffix(path, RESERVED)
     }
     fn anchors(a: &AnchorDir) -> Vec<(PathBuf, Vec<u8>)> {
         let mut rows: Vec<_> = std::fs::read_dir(a.path())
@@ -62,6 +88,65 @@ mod tests {
             std::fs::remove_file(&path).unwrap();
             assert_eq!(err(VaultFile::open(&path)), StoreError::Integrity);
         }
+    }
+
+    #[test]
+    fn rotation_guard_reserved_names_are_never_opened_created_or_restored() {
+        let (d, a) = (TestDir::new(), TestDir::new());
+        let (path, anchor_dir) = copy_fixture(&d, &a, "v.qvault");
+        let source = unlock(&path, &anchor_dir, PASSWORD).unwrap();
+        let old_anchors = anchors(&anchor_dir);
+        let bytes = std::fs::read(&path).unwrap();
+        for name in [
+            "v.qvault.qvrotate-new-00112233445566778899aabbccddeeff",
+            "v.qvault.qvrotate-old-00112233445566778899aabbccddeeff",
+            ".v.qvault.qvrotate-new-00.tmp-0011223344556677",
+            "x.qvrotate.qvault",
+        ] {
+            // A valid copy of the anchored vault under a reserved name: an
+            // ordinary unlock would compare it with the shared anchor.
+            let copy = d.join(name);
+            write_file(&copy, &bytes, 0o600);
+            assert_eq!(err(VaultFile::open(&copy)), StoreError::Integrity, "{name}");
+            let lock = fs::open_existing(&copy).unwrap();
+            assert_eq!(
+                err(VaultFile::open_locked(&copy, lock)),
+                StoreError::Integrity
+            );
+            assert!(!fs::with_suffix(&copy, "-journal").exists());
+            std::fs::remove_file(&copy).unwrap();
+        }
+        let target = d.join("x.qvrotate.qvault");
+        assert_eq!(
+            err(VaultFile::create(
+                &target,
+                &pw(PASSWORD),
+                "blocked",
+                &anchor_dir
+            )),
+            StoreError::Integrity
+        );
+        let mut input = std::io::Cursor::new(b"must not be consumed");
+        assert_eq!(
+            VaultFile::create_from_archive(
+                &target,
+                &mut input,
+                ArchiveScope::new(source.header().vault_id, source.header().key_generation),
+                source.vault_key(),
+                &anchor_dir,
+                &|| false,
+            ),
+            Err(StoreError::Integrity)
+        );
+        assert_eq!(input.position(), 0);
+        assert!(!target.exists());
+        assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 1);
+        assert_eq!(anchors(&anchor_dir), old_anchors);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        // An ordinary name is unaffected.
+        assert!(is_reserved(Path::new("/a/b.qvrotate")));
+        assert!(!is_reserved(Path::new("/a.qvrotate/b.qvault")));
+        assert!(source.check_identity().is_ok());
     }
 
     #[test]

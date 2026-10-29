@@ -80,6 +80,17 @@ pub struct VaultFile {
     pub(crate) slots: Vec<LocalSlot>,
     warnings: LocationWarnings,
     pub(crate) budget: StepBudget,
+    pub(crate) role: FileRole,
+}
+
+/// What an open vault file is for. Only `rotation` creates a
+/// [`FileRole::Candidate`]; it can be verified but never written or anchored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FileRole {
+    /// An ordinary vault path: reserved rotation names are refused.
+    Ordinary,
+    /// A rotation's private replacement under its reserved name.
+    Candidate,
 }
 
 /// Whether this session may write.
@@ -325,7 +336,18 @@ impl VaultFile {
     }
 
     pub(crate) fn open_locked(path: &Path, lock: LockedFile) -> Result<VaultFile, StoreError> {
-        crate::rotation_guard::check(path)?;
+        Self::open_locked_as(path, lock, FileRole::Ordinary)
+    }
+
+    /// [`Self::open_locked`] for a given role. Only the rotation's own
+    /// replacement skips the reserved-name refusal; the marker, sidecar,
+    /// identity and hardening checks always run.
+    pub(crate) fn open_locked_as(
+        path: &Path,
+        lock: LockedFile,
+        role: FileRole,
+    ) -> Result<VaultFile, StoreError> {
+        Self::guard(path, role)?;
         let warnings = warnings_for(path, &lock);
         // SQLite rolls back or replays these before any check below.
         fs::check_sidecars(path)?;
@@ -360,7 +382,18 @@ impl VaultFile {
             slots,
             warnings,
             budget,
+            role,
         })
+    }
+
+    fn guard(path: &Path, role: FileRole) -> Result<(), StoreError> {
+        match role {
+            FileRole::Ordinary => crate::rotation_guard::check(path),
+            FileRole::Candidate if crate::rotation_guard::is_reserved(path) => {
+                crate::rotation_guard::check_marker(path)
+            }
+            FileRole::Candidate => Err(StoreError::Internal),
+        }
     }
 
     /// Unlocks with the master password: one KDF run, the header MAC, the
@@ -424,6 +457,43 @@ impl VaultFile {
 
     /// The unlock verification and anchor check, once VK is known and the
     /// header MAC verified.
+    /// The path this file was opened at.
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// A rotation replacement's verified state, without any anchor access:
+    /// its head is one step past the shared anchor by construction, and only
+    /// the installer may advance that anchor (plan 0022). The session can be
+    /// read and verified; every write path refuses it.
+    pub(crate) fn finish_candidate(
+        self,
+        vk: VaultKey,
+        anchors: &AnchorDir,
+    ) -> Result<UnlockedVault, StoreError> {
+        if self.role != FileRole::Candidate {
+            return Err(StoreError::Internal);
+        }
+        self.check_identity()?;
+        self.budget.reset();
+        let state = {
+            let tx = self
+                .conn
+                .unchecked_transaction()
+                .map_err(|e| validation_err(&e))?;
+            let state = load_state(&tx, &self.header, &vk)?;
+            tx.commit().map_err(|e| validation_err(&e))?;
+            state
+        };
+        Ok(UnlockedVault {
+            file: self,
+            vk,
+            state,
+            anchors: anchors.clone(),
+            gate: WriteGate::Blocked(StoreError::Integrity),
+        })
+    }
+
     fn finish_unlock(
         self,
         vk: VaultKey,
@@ -479,7 +549,7 @@ impl VaultFile {
     /// [`StoreError::Replaced`] if the path no longer names the locked
     /// file (0004 §1.3).
     pub fn check_identity(&self) -> Result<(), StoreError> {
-        crate::rotation_guard::check(&self.path)?;
+        Self::guard(&self.path, self.role)?;
         self.lock.same_as_path(&self.path)
     }
 
@@ -1287,7 +1357,7 @@ pub(crate) mod tests {
 
     /// Re-seals the committed manifest after `f` changes it and writes a
     /// correctly MAC'd head for it, as an author holding VK could.
-    fn rewrite_manifest(u: &mut UnlockedVault, f: impl FnOnce(&mut Manifest)) {
+    pub(crate) fn rewrite_manifest(u: &mut UnlockedVault, f: impl FnOnce(&mut Manifest)) {
         let header = u.file.header;
         let keys = Keys::derive(&u.vk, &header).unwrap();
         let mut m = u.state.manifest.clone();

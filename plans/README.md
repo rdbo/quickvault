@@ -59,4 +59,5 @@ plan, or a new plan that names the one it supersedes.
 | [0018](0018-archives-snapshots-verify/PLAN.md) | Archives, local snapshots and `verify` (roadmap 1.13a) | Reviewed |
 | [0019](0019-snapshot-restore/PLAN.md) | Restore a local snapshot to a new vault (roadmap 1.13b) | Reviewed |
 | [0020](0020-password-recovery/PLAN.md) | Password change and recovery flows (roadmap 1.14) | Reviewed |
-| [0021](0021-offline-key-rotation/PLAN.md) | Rotation journal and open safeguards (roadmap 1.15a) | Implemented |
+| [0021](0021-offline-key-rotation/PLAN.md) | Rotation journal and open safeguards (roadmap 1.15a) | Reviewed |
+| [0022](0022-rotation-replacement/PLAN.md) | Verified rotation replacement and snapshot inventory (roadmap 1.15b) | Implemented |

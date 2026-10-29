@@ -503,8 +503,9 @@ builds the replacement, snapshot inventory, installation/restart workflow and
 CLI, after fresh-context review of 1.15a. The whole-rotation criteria below
 remain required before 1.16.
 
-- [x] **1.15a plan:** [0021](../0021-offline-key-rotation/PLAN.md) (Implemented; fresh review pending).
-- [ ] **1.15b plan:** next fresh session, after 1.15a review and owner commit.
+- [x] **1.15a plan:** [0021](../0021-offline-key-rotation/PLAN.md) (Reviewed).
+- [x] **1.15b plan:** [0022](../0022-rotation-replacement/PLAN.md) (Implemented; fresh review pending) — verified private replacement and cross-generation snapshot inventory (split 2026-10-29).
+- [ ] **1.15c plan:** next fresh session after 1.15b review and owner commit — journal installation, restart/rollback, anchor generation step, inventory-aware snapshot policy, core lifecycle, `recovery rotate` CLI and crash injection at every journal step.
 - **Do:** Implement `recovery rotate` for vaults without remote sync: freeze
   writes, take a recovery snapshot, build the private replacement DB, reencrypt
   with logical IDs and clocks preserved, confirm the new phrase and password,
@@ -863,6 +864,19 @@ remain required before 1.16.
 
 ## Revisions
 
+- 2026-10-29 (phase 1.15b, plan 0022): split the remaining rotation work again
+  under the session-size rule (about 12 steps). **1.15b** builds and verifies the
+  private replacement generation from persisted bytes, reserves `.qvrotate`
+  names for ordinary opens, and adds the per-generation snapshot inventory
+  (codec, MAC, directory operations, fuzz target). Nothing is published.
+  **1.15c** publishes through the 1.15a journal: installation and restart,
+  anchor advancement, inventory-aware policy, core and CLI, and the
+  whole-rotation *Done when*. Same crates; no dependency, spec amendment or
+  `unsafe`. Keep the owner-commit and fresh-review boundary between them.
+  Development values for the 1.16 freeze: the inventory format, its
+  `qv/snapshot-inventory/v1` label, the `inventory-<vault>-<gen>.qvinv` name
+  and its 1 MiB / 4096-row bounds.
+
 - 2026-10-29: Owner delegated plan 0021 D1 choice; selected A and amended 0002
   §3.5.1 to defer offline-only recovery public-key derivation until needed.
   Split 1.15 into 1.15a (journal/open safeguards) and 1.15b (replacement,
@@ -914,6 +928,29 @@ remain required before 1.16.
 - 2026-10-26 (phase 1.10, plan 0011): the owner approved splitting 1.10 into 1.10a/1.10b and decisions D-1–D-6 of plan 0011 as recommended: `zxcvbn 3.1.1` in `qv-core` (0010 §3.2); `clap 4.6.7` builder API only; for 1.10b, `signal-hook 0.4.5` and `arboard 3.6.1` (X11 only, no image support) with per-crate `BSL-1.0` exceptions for `clipboard-win` and `error-code`; the recovery-phrase skip (0002 §4.2) recorded as vault settings key 3 `recovery_skipped_at` (development value for the 1.16 freeze). These dependencies are now approved for 1.10b's standing approval. Raised, not decided: 0011 has no command to adopt a vault with a missing or mismatched anchor (suggested for 1.13/1.14).
 
 ## Execution log
+
+- 2026-10-29: The clean-tree next-phase session reviewed committed phase
+  1.15a (`9c25a6a`, plan 0021): **Approved**, no fixes, no escalations; see
+  its REVIEW.md. Independent SPDX, fmt, Clippy and locked tests pass
+  (603 passed, 0 failed, 2 ignored, private Xvfb). Phase 1.15b was planned
+  as **0022** and split again under the session-size rule (1.15c:
+  installation, restart, core, CLI), then given standing approval.
+  **Phase 1.15b implemented as plan 0022:**
+  - ordinary opens refuse reserved `.qvrotate` names;
+  - `prepare_rotation` builds the next generation privately: a new VK,
+    phrase and slot; every object resealed under fresh IDs; logical state
+    preserved; one causal keyslot edit; head +1/+1 naming the old digest;
+  - it is verified again from persisted bytes as an unwritable,
+    never-anchored Candidate, with a full logical and attachment comparison;
+  - the per-generation MAC'd snapshot inventory, with hash-checked removal,
+    an independent vector and a fuzz target (local 61 s campaign:
+    473,987 runs, clean, no ASan).
+
+  Final SPDX, fmt, Clippy and locked tests pass: 619 passed, 0 failed,
+  2 pre-existing ignored, private Xvfb. No dependency, `unsafe`, profile,
+  schema or spec amendment. Network isolation is unavailable and not counted
+  as a pass. Nothing installs a replacement yet. The next fresh session
+  reviews 0022 before planning 1.15c. Changes are uncommitted.
 
 - 2026-10-29: Owner delegated D1; selected A and applied the narrow 0002
   offline public-key timing amendment. Split 1.15 under the session-size rule
