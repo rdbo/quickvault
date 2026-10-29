@@ -76,6 +76,7 @@ pub struct Write<'v> {
     touched: BTreeSet<RecordId>,
     new_kinds: Vec<(RecordId, RecordKind)>,
     staged: BTreeMap<RecordId, crate::attachment::StagedAttachment>,
+    password: Option<crate::slot::LocalSlot>,
     growth: u64,
     puts: usize,
     poisoned: bool,
@@ -184,6 +185,7 @@ impl UnlockedVault {
             touched: BTreeSet::new(),
             new_kinds: Vec::new(),
             staged: BTreeMap::new(),
+            password: None,
             growth: 0,
             puts: 0,
             poisoned: false,
@@ -193,6 +195,50 @@ impl UnlockedVault {
 }
 
 impl Write<'_> {
+    /// Stages a fresh operational password descriptor. The caller must write
+    /// the identical complete descriptor as the encrypted keyslot head in
+    /// this transaction; commit checks that binding before changing SQL state.
+    pub fn stage_password(
+        &mut self,
+        password: &qv_crypto::MasterPassword,
+        kdf: qv_crypto::PasswordKdfProfile,
+        wrap: qv_crypto::PasswordWrapProfile,
+    ) -> Result<qv_model::Keyslot, StoreError> {
+        if self.password.is_some() || self.poisoned {
+            self.poisoned = true;
+            return Err(StoreError::InvalidEdit);
+        }
+        // Any failed staging poisons the transaction until the complete slot exists.
+        self.poisoned = true;
+        let id = self.manifest.keyslot_id();
+        let entry = self.manifest.record(id).ok_or(StoreError::Integrity)?;
+        let [head] = entry.heads() else {
+            return Err(StoreError::InvalidEdit);
+        };
+        let version = self.vault.read_version(id, head.version_id())?;
+        let RecordBody::Live(Payload::PasswordKeyslot(mut keyslot)) = version.body else {
+            return Err(StoreError::Integrity);
+        };
+        let h = self.vault.file.header;
+        keyslot.slot = qv_crypto::PasswordSlot::create(
+            password,
+            &self.vault.vk,
+            h.vault_id,
+            h.key_generation,
+            qv_crypto::SlotId::generate()?,
+            kdf,
+            wrap,
+        )?;
+        let body = keyslot.encode()?;
+        self.password = Some(crate::slot::LocalSlot::from_stored(schema::StoredSlot {
+            slot_id: keyslot.slot.slot_id.0,
+            kind: crate::slot::PASSWORD_SLOT,
+            body: body.to_vec(),
+        })?);
+        self.poisoned = false;
+        Ok(keyslot)
+    }
+
     /// Streams bounded plaintext into encrypted objects in this transaction.
     /// Any failure poisons the write; commit requires matching metadata consumption.
     pub fn stage_attachment(
@@ -535,6 +581,64 @@ impl Write<'_> {
         if self.poisoned || !self.staged.is_empty() {
             return Err(StoreError::Internal);
         }
+        // A staged operational slot cannot be published without its matching
+        // encrypted causal record. Check the full descriptor, including extensions.
+        if self.touched.contains(&self.manifest.keyslot_id()) && self.password.is_none() {
+            return Err(StoreError::InvalidEdit);
+        }
+        let mut password_tag = None;
+        if let Some(slot) = &self.password {
+            let id = self.manifest.keyslot_id();
+            if !self.touched.contains(&id) {
+                return Err(StoreError::InvalidEdit);
+            }
+            let entry = self.manifest.record(id).ok_or(StoreError::Integrity)?;
+            let [head] = entry.heads() else {
+                return Err(StoreError::InvalidEdit);
+            };
+            let mut reader = schema::ObjectReader::new(&self.vault.file.conn)?;
+            let version = crate::vault::read_role(
+                &mut reader,
+                &self.keys,
+                &self.vault.file.header,
+                &self.manifest,
+                id,
+                head,
+                true,
+            )?;
+            let RecordBody::Live(Payload::PasswordKeyslot(descriptor)) = version.body else {
+                return Err(StoreError::Integrity);
+            };
+            if descriptor.encode()?.as_slice() != slot.body.as_slice() {
+                return Err(StoreError::InvalidEdit);
+            }
+            let h = &self.vault.file.header;
+            let (key, transcript) = crate::vault::header_tag(
+                &self.vault.vk,
+                h,
+                &self.vault.file.header_body,
+                &[slot.row()],
+            )?;
+            password_tag = Some(qv_crypto::mac(&key, h.mac_profile, &transcript)?);
+            let conn = &self.vault.file.conn;
+            conn.execute("DELETE FROM keyslot", [])
+                .map_err(|e| write_err(conn, &e, self.growth))?;
+            conn.execute(
+                "INSERT INTO keyslot (slot_id, type, body) VALUES (?1, 0, ?2)",
+                rusqlite::params![slot.slot_id.0.as_slice(), slot.body.as_slice()],
+            )
+            .map_err(|e| write_err(conn, &e, self.growth))?;
+            conn.execute(
+                "UPDATE header SET mac = ?1 WHERE id = 1",
+                [password_tag
+                    .as_ref()
+                    .ok_or(StoreError::Internal)?
+                    .as_bytes()
+                    .as_slice()],
+            )
+            .map_err(|e| write_err(conn, &e, self.growth))?;
+            point(CrashPoint::PasswordSlotWritten)?;
+        }
         let candidate_objects: Vec<_> = self
             .manifest
             .references()
@@ -614,12 +718,21 @@ impl Write<'_> {
             .map_err(w)?;
         }
         point(CrashPoint::Pruned)?;
+        let password_update = match (self.password.take(), password_tag) {
+            (Some(slot), Some(tag)) => Some((slot, tag)),
+            (None, None) => None,
+            _ => return Err(StoreError::Internal),
+        };
         if cancelled() {
             return Err(StoreError::Io);
         }
         conn.execute_batch("COMMIT").map_err(w)?;
         // Durable from here: the session follows the database.
         self.finished = true;
+        if let Some((slot, tag)) = password_update {
+            self.vault.file.slots = vec![slot];
+            self.vault.file.header_mac = tag;
+        }
         let replica = schema::StoredReplica {
             replica_id: self.vault.state.replica.replica_id,
             writer_id: self.writer.to_bytes(),

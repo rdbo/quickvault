@@ -624,12 +624,15 @@ impl Session {
     /// returns how many were removed. Unknown archive IDs are ignored, and a
     /// copy pinned by an in-progress destructive operation is never deleted.
     pub fn delete_snapshots(&self, ids: &[String]) -> Result<usize, CoreError> {
-        self.read(|ctx| {
+        self.mutate(|ctx| {
             let Some(policy) = ctx.open.snapshots.clone() else {
                 return Ok(0);
             };
             let pinned = ctx.open.pinned();
             let (rows, _) = authenticated(&policy, &ctx.open.vault)?;
+            #[cfg(test)]
+            crate::session::hooks::reached(crate::session::hooks::Point::BeforeCommit);
+            ctx.check_cancel()?;
             let mut deleted = 0;
             for (entry, header) in &rows {
                 let id = header.archive_id_hex();
@@ -641,6 +644,8 @@ impl Session {
                     Err(e) => return Err(e.into()),
                 }
             }
+            #[cfg(test)]
+            crate::session::hooks::reached(crate::session::hooks::Point::AfterCommit);
             Ok(deleted)
         })
     }

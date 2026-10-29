@@ -9,6 +9,28 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-29: `qvault passwd`, `recovery show` and `recover <existing.qvault>`
+  (plan 0020, phase 1.14). Password replacement atomically updates the complete
+  slot, encrypted keyslot record and header MAC through the existing transaction
+  and anchor path, preserving VK, generation and application object ciphertext.
+  Recovery-phrase redisplay reauthenticates and uses the terminal alternate
+  screen. Phrase recovery of a missing/mismatched anchor requires explicit
+  baseline consent and a verified recovery copy. After a successful password
+  change, the CLI names pre-change snapshots and offers deletion only after
+  separate confirmation; old slots and independent copies remain effective.
+  No new dependency, profile, format or schema. Standalone phrase/archive import
+  and generation rotation are not included.
+
+- 2026-10-29: Correct slot-bearing snapshot restore to return integrity exit 7
+  as specified, with a production CLI regression preserving source and anchors
+  (plan 0019 review remediation). Other unsupported archive features retain
+  their existing classification.
+
+- 2026-10-28: Independent review of snapshot restore (plan 0019) requests a
+  correction: selected slot-bearing archives are refused with exit 1 instead
+  of the specified exit 7. Phase 1.14 awaits correction and review; no product
+  behavior change in this review session.
+
 - 2026-10-28: `qvault snapshot restore <id> <new-path>` restores a local archive
   into a new private vault with fresh replica, writer and external anchor
   state (plan 0019, phase 1.13b). It preserves archived records, history,

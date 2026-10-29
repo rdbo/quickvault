@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-10-28 | 2026-10-28 (owner: fix then implement 1.13b; standing approval, roadmap 0002) | 0004 §3.6/§5/§6; 0007 §3.4; 0005 §5.4 (D5); 0011 §4–6; 0012 §1 |
+| Reviewed | 2026-10-28 | 2026-10-28 (owner: fix then implement 1.13b; standing approval, roadmap 0002) | 0004 §3.6/§5/§6; 0007 §3.4; 0005 §5.4 (D5); 0011 §4–6; 0012 §1 |
 
 ## Intent
 
@@ -151,6 +151,14 @@ the active vault or remove another file. No standalone recovery command here.
 
 ## Revisions
 
+2026-10-29: Owner requested fixing the review finding and proceeding to 1.14
+without an intervening commit. Classify password-slot-bearing archive headers
+as Integrity at the decoder's explicit slot rejection (0011 §4), preserving
+Unsupported for all other unsupported fields/profiles/versions. Update the two
+store error assertions to the specified classification and retain the CLI
+reproduction as a rejection regression checking source/anchor preservation.
+No format, dependency, cryptographic primitive or generic exit mapping change.
+
 2026-10-28: Reviewer inspection found new-path restore must use Session's
 mutation-result semantics: a lock requested after publication must not discard
 success and incorrectly report a cancelled read. Use the existing serialized
@@ -181,6 +189,20 @@ byte to the already fully authenticated archive before anchor/publication.
 
 
 ## Execution log
+
+2026-10-28: Fresh-context review of committed `f0e60d2`: **Changes requested**,
+see [REVIEW.md](REVIEW.md). Reproduced slot-bearing snapshot selection returning
+exit 1 instead of the spec 0011 / plan-required exit 7. Rejection leaves no
+destination and preserves the source. No product fix; status remains
+Implemented with approval withheld. Roadmap session stopped before phase 1.14
+under Session protocol step 2. Independent gate evidence is in REVIEW.md.
+
+Independent verification completed: SPDX, fmt and Clippy pass on restored
+source; private-Xvfb workspace tests pass (575 including the temporary diagnostic
+probe, 0 failed, 2 pre-existing ignored). After removing the probe, all 6
+retained CLI snapshot tests pass again; other inputs are unchanged. Logs in
+`/tmp/qv-next-review/`. Namespace creation fails with `No space left on device`;
+no networking-blocked pass claimed. Only review/documentation changes retained.
 
 2026-10-28: Approved under explicit owner continuation and standing approval,
 roadmap 0002; no unresolved decisions. Initial tree contains only this session's
@@ -250,3 +272,10 @@ smoke run is not an instrumented release campaign. No security proof, global
 freshness or secure-erasure claim. Independent fresh-context review of 0019
 remains the next roadmap session's prerequisite; status Implemented, not
 Reviewed. All changes are uncommitted; no commit, push or branch.
+
+2026-10-29: Owner-authorized correction complete. Slot-bearing archive headers
+now fail Integrity; other unsupported features retain Unsupported. CLI regression
+checks exit 7, no destination and unchanged source/anchors. Focused CLI/store
+archive tests and independent SPDX/fmt/Clippy/full locked tests pass with private
+Xvfb (/tmp/qv20/fix-*.log). Resumed reviewer inspection approves the correction;
+plan Reviewed. Owner explicitly authorizes continuing to 1.14 without commit.

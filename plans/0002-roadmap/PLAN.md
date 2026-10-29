@@ -461,7 +461,7 @@ writer/reader, the `verify` pass, snapshot policy and pruning, and the
 `snapshot ls`/`verify` commands) and **1.13b** (`snapshot restore` into a new
 vault path).
 - [x] **1.13a plan:** [0018](../0018-archives-snapshots-verify/PLAN.md) (Reviewed after owner-authorized remediation).
-- [x] **1.13b plan:** [0019](../0019-snapshot-restore/PLAN.md) (Implemented; owner explicitly authorized continuation in this session).
+- [x] **1.13b plan:** [0019](../0019-snapshot-restore/PLAN.md) (Reviewed after owner-authorized exit-code correction).
 - **Do:** Write the archive writer (verified objects only, temp file →
   re-read and verify → fsync → publish under a unique name) and the reader
   (fixed prefix and bounded header → VK → header MAC → manifest hash → frames
@@ -482,17 +482,17 @@ vault path).
 
 #### Phase 1.14 — Password change and recovery flows
 
-- [ ] **Do:** Implement `passwd` (new complete slot plus encrypted keyslot
+- [x] **Plan:** [0020](../0020-password-recovery/PLAN.md) (Implemented). **Do:** Implement `passwd` (new complete slot plus encrypted keyslot
   record, atomic, weak-password flow per 0011 §5.4), `recovery show` (after
   re-authentication, TTY only, alternate screen) and `recover <path>` (unlock
   with the phrase, set a new password). Handle the KDF-only profile migration
   path (0002 §2.1).
 - **Specs:** 0002 §2.1, §3.4, §4; 0011 §4 (Vault), §5.4.
 - **Depends on:** 1.13.
-- **Files:** `crates/qv-core/`, `crates/qv-cli/`.
+- **Files:** `crates/qv-core/`, `crates/qv-cli/`, `crates/qv-store/` (necessary transaction support; revision 2026-10-29).
 - **Done when:** the old password fails and the new one works after a crash at
   any point. A KDF-only upgrade leaves the data objects unchanged.
-- **Verify:** `cargo test --locked -p qv-core passwd recover`.
+- **Verify:** `cargo test --locked -p qv-core credentials`; `cargo test --locked -p qv-store credentials`; `cargo test --locked -p qv-cli --test credentials`.
 - **0012 rows:** Migration coupling (KDF part).
 
 #### Phase 1.15 — Offline VK rotation
@@ -855,6 +855,11 @@ vault path).
 
 ## Revisions
 
+- 2026-10-29: Owner requested fixing 0019 and implementing phase 1.14 without
+  an intervening commit. Plan 0020 includes the necessary existing qv-store
+  transaction/credential internals in addition to the core/CLI list for 1.14;
+  no new component, dependency, format or write path.
+
 - 2026-10-28 (phase 1.13, plan 0018): split 1.13 into **1.13a** and **1.13b**.
   1.13a: the D6 0007 amendment, the 0011 `snapshot ls`/`verify` amendment
   (owner-approved D1 on 2026-10-28), the archive header/writer/reader in
@@ -895,6 +900,34 @@ vault path).
 - 2026-10-26 (phase 1.10, plan 0011): the owner approved splitting 1.10 into 1.10a/1.10b and decisions D-1–D-6 of plan 0011 as recommended: `zxcvbn 3.1.1` in `qv-core` (0010 §3.2); `clap 4.6.7` builder API only; for 1.10b, `signal-hook 0.4.5` and `arboard 3.6.1` (X11 only, no image support) with per-crate `BSL-1.0` exceptions for `clipboard-win` and `error-code`; the recovery-phrase skip (0002 §4.2) recorded as vault settings key 3 `recovery_skipped_at` (development value for the 1.16 freeze). These dependencies are now approved for 1.10b's standing approval. Raised, not decided: 0011 has no command to adopt a vault with a missing or mismatched anchor (suggested for 1.13/1.14).
 
 ## Execution log
+
+- 2026-10-29: Owner requested fixing the 0019 finding and implementing the
+  phase without a commit boundary. Slot-bearing archives now fail integrity
+  exit 7; the retained CLI regression verifies source/anchor preservation.
+  Resumed fresh-context review of 0019 is Approved, plan Reviewed. Phase
+  **1.14 implemented as plan 0020**: atomic complete slot/keyslot-record/header
+  MAC replacement through the existing transaction/anchor path, protected
+  `passwd`, reauthenticated alternate-screen `recovery show` and phrase-based
+  `recover <existing.qvault>`. Missing/mismatched anchors require explicit
+  baseline consent and a mandatory verified recovery snapshot. Pre-change
+  snapshot deletion is offered after success with separate consent and copied-
+  key/erasure limits. Lock races preserve completed password/deletion outcomes.
+  Crash tests cover all nine slot/transaction/anchor boundaries; rewrap tests
+  preserve entry/history/attachment ciphertext and generation. Final SPDX,
+  fmt, Clippy and full locked tests pass: 591 passed, 0 failed, 2 pre-existing
+  ignored, including private Xvfb. Namespace isolation unavailable, not a pass.
+  No dependency, profile, format, schema or spec amendment. Standalone phrase/
+  archive import and VK rotation remain deferred. All changes uncommitted;
+  next fresh session reviews 0020 before phase 1.15, preserving the owner
+  commit boundary and independent review requirement.
+
+- 2026-10-28: Clean-tree next-phase session reviewed committed phase 1.13b
+  (plan 0019, `f0e60d2`): **Changes requested**, see its
+  [REVIEW.md](../0019-snapshot-restore/REVIEW.md). A selected slot-bearing
+  snapshot is safely refused but returns exit 1 instead of spec 0011's exit 7.
+  Reproduced through production CLI; no destination or source change. No
+  product fixes. Plan remains Implemented with approval withheld; stopped
+  under Session protocol step 2 before planning or implementing phase 1.14.
 
 - 2026-10-28: Owner requested “fix and then implement 1.13b”, authorizing
   remediation and continuation without an intervening commit. Revised plan

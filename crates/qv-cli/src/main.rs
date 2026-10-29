@@ -36,8 +36,13 @@
 //! `snapshot restore` writes a new vault and explicit recovery baseline,
 //! preserving the active vault and its anchor; it does not establish freshness.
 //!
-//! **Not in this phase:** `passwd`, `recover`,
-//! `recovery` (1.14–1.15); sync (2–3); colour output.
+//! `passwd`, `recovery show` and `recover <existing.qvault>` provide protected
+//! password replacement, reauthenticated phrase redisplay and phrase unlock.
+//! Existing snapshot deletion is offered separately after password replacement;
+//! old slots and independent copies are not revoked by a password change.
+//!
+//! **Not in this phase:** `recovery rotate` (1.15), standalone phrase/archive
+//! import, sync (2–3), colour output.
 
 #![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 

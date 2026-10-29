@@ -221,8 +221,8 @@ impl core::fmt::Debug for ArchiveStats {
 impl ArchiveHeader {
     /// Decodes and checks a header whose length the caller has bounded.
     ///
-    /// Unknown fields and a `password_slot` are [`StoreError::Unsupported`];
-    /// a missing or mistyped field is [`StoreError::Integrity`]; a count over
+    /// Unknown fields are [`StoreError::Unsupported`]; a `password_slot`,
+    /// missing or mistyped field is [`StoreError::Integrity`]; a count over
     /// its budget is [`StoreError::LimitExceeded`]. Nothing is allocated from
     /// a length before the decoder has checked it.
     pub fn decode(bytes: &[u8]) -> Result<Self, StoreError> {
@@ -262,7 +262,7 @@ impl ArchiveHeader {
                 9 => total_length = Some(d.uint().map_err(malformed)?),
                 // Refused before its value is looked at: a self-contained
                 // archive is an explicit phase 2 choice (0004 §6.4).
-                KEY_PASSWORD_SLOT => return Err(StoreError::Unsupported),
+                KEY_PASSWORD_SLOT => return Err(StoreError::Integrity),
                 KEY_HEADER_MAC => header_mac = Some(MacTag::from_bytes(digest32(&mut d)?)),
                 _ => return Err(StoreError::Unsupported),
             }
@@ -1677,7 +1677,7 @@ mod tests {
         // A present password_slot is refused before its value is read.
         assert_eq!(
             decode_err(&reencode(|e| e.push((KEY_PASSWORD_SLOT, vec![0xa0])))),
-            Some(StoreError::Unsupported)
+            Some(StoreError::Integrity)
         );
         // Every required field.
         for key in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, KEY_HEADER_MAC] {
@@ -2312,7 +2312,7 @@ mod tests {
                 &mut sink,
                 &|| false
             )),
-            StoreError::Unsupported
+            StoreError::Integrity
         );
         // A published snapshot opens with the vault key, never with a
         // password alone: another vault's key does not authenticate it.

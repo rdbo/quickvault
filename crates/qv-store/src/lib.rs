@@ -106,20 +106,29 @@
 //! - The `local-state` key MACs the head; encrypting sync state with it
 //!   comes with sync (milestone 3).
 //!
+//! Password replacement stages a fresh complete descriptor, encrypted causal
+//! keyslot record and header MAC inside the existing write transaction. Commit
+//! refuses an unstaged or mismatched descriptor; in-memory slots follow the
+//! durable database even if its anchor update fails. The same fixed-profile
+//! path can rewrap without changing VK, generation or application objects.
+//!
 //! # Errors
 //!
 //! [`StoreError`] carries no data. CLI exit codes (0011 §6):
-//! `WrongPassword` 3, `NotFound` 4, `Locked`/`Replaced`/`Changed` 6,
+//! `WrongPassword`/`WrongPhrase` 3, `NotFound` 4, `Locked`/`Replaced`/`Changed` 6,
 //! `Integrity`/`Rollback`/`NoAnchor` 7, `LimitExceeded` 9, and 1 for
 //! everything else. Only the slot yields `WrongPassword`; a header-MAC
-//! failure is always `Integrity`. `SQLITE_FULL` is `LimitExceeded` only at
+//! failure after password unlock is `Integrity`. Phrase recovery uses the
+//! header MAC for initial key confirmation: mismatch is `WrongPhrase` (which
+//! can also mean header damage); subsequent state failures remain Integrity.
+//! `SQLITE_FULL` is `LimitExceeded` only at
 //! the page limit, otherwise `Io` (a full disk).
 //!
 //! # Not yet implemented
 //!
 //! Received versions and merges of concurrent heads (2.2); archives that
 //! carry a password slot (0004 §6.4, phase 2), archive merge and exchange
-//! (2.2); password change (1.14);
+//! (2.2); standalone archive recovery using a phrase;
 //! rotation (1.15); sync state, outbox and checkpoints (milestones 2–3);
 //! quick-unlock slots (2.6); keystore-backed anchors (2.3, 2.6); Windows
 //! and macOS file safety (4.1 and later).
@@ -133,6 +142,8 @@ mod crash;
 #[cfg(test)]
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod crash_tests;
+#[cfg(all(test, any(target_os = "linux", target_os = "android")))]
+mod credentials;
 mod error;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod fs;

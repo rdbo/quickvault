@@ -18,6 +18,8 @@ pub(crate) enum CrashPoint {
     Begun,
     /// The first new object row is written.
     ObjectsWritten,
+    /// The complete replacement password row and header MAC are staged.
+    PasswordSlotWritten,
     /// The new manifest row is written and the old one deleted.
     ManifestWritten,
     /// The new head is written.

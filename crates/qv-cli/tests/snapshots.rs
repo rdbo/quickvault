@@ -269,3 +269,48 @@ fn snapshot_restore_preflight_and_addressing_errors() {
     assert_eq!(o.code, 7, "{}", o.stderr);
     assert!(!h.vaults().join("new.qvault").exists());
 }
+
+#[test]
+fn snapshot_restore_slot_bearing_header_is_integrity() {
+    let h = Home::new();
+    drop(h.create());
+    let listed = run(&h, &["snapshot", "ls"]);
+    assert_eq!(listed.code, 0, "{}", listed.stderr);
+    let id = &listed.stdout.lines().next().unwrap()[..32];
+    let archive_path = h.snapshots().join(format!("{id}.qvsnap"));
+    let original = std::fs::read(&archive_path).unwrap();
+    let len = u32::from_be_bytes(original[8..12].try_into().unwrap()) as usize;
+    let mut header = original[12..12 + len].to_vec();
+    assert_eq!(header[0], 0xab);
+    let mac_field = header.len() - 35;
+    assert_eq!(&header[mac_field..mac_field + 3], &[11, 0x58, 32]);
+    header[0] = 0xac;
+    header.splice(mac_field..mac_field, [10, 0xa0]);
+    let mut crafted = original[..8].to_vec();
+    crafted.extend_from_slice(&(header.len() as u32).to_be_bytes());
+    crafted.extend_from_slice(&header);
+    crafted.extend_from_slice(&original[12 + len..]);
+    std::fs::write(&archive_path, crafted).unwrap();
+    let target = h.vaults().join("review-restored.qvault");
+    let before = std::fs::read(h.vault()).unwrap();
+    let anchors: Vec<_> = std::fs::read_dir(h.anchors())
+        .unwrap()
+        .map(|e| {
+            let path = e.unwrap().path();
+            let bytes = std::fs::read(&path).unwrap();
+            (path, bytes)
+        })
+        .collect();
+    let result = run(&h, &["snapshot", "restore", id, &arg(&target)]);
+    // Spec 0011 requires integrity classification for slot-bearing selection.
+    assert_eq!(result.code, 7, "{}", result.stderr);
+    assert!(!target.exists());
+    assert_eq!(std::fs::read(h.vault()).unwrap(), before);
+    assert_eq!(
+        std::fs::read_dir(h.anchors()).unwrap().count(),
+        anchors.len()
+    );
+    for (path, bytes) in anchors {
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+}

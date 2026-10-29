@@ -146,6 +146,21 @@ are not attributed to invented device identities. Local purge is logical
 suppression, not erasure of snapshots, unseen concurrent history or independent
 copies. Configurable history-depth settings remain reserved; the implemented
 target is the default ten, which is not permission to violate safe floors.
+Password change and recovery (plan 0020, phase 1.14) now use the same durable
+mutation path: the complete operational password slot, encrypted causal keyslot
+record and header MAC change atomically, preserving VK, generation and existing
+data object envelopes. Core exposes current-password reauthentication for phrase
+redisplay and phrase-based unlock of an existing local vault. CLI `passwd`,
+`recovery show` and `recover <path>` use protected terminal input; redisplay uses
+the alternate screen. A missing/mismatched anchor requires explicit recovery
+baseline consent and a verified recovery snapshot before adoption. Password
+replacement offers deletion of the named pre-change local snapshots only after
+separate confirmation. Old slots, retained copies and independent snapshots
+remain capable of disclosing the same VK; deletion is not cryptographic erasure.
+The current registry still has only KDF/wrap profile 1; rewrapping exercises the
+KDF-only path without inventing a second profile. Standalone phrase-based archive
+import, generation rotation and remote credential adoption remain future work.
+
 Local snapshots (0007 §3) are archives built only from verified objects: the
 live SQLite file is never copied or normalized, and no password slot is
 written. On unlock, core may take one ordinary snapshot per hour and one on the

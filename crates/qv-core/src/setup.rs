@@ -320,6 +320,30 @@ impl Core {
         Ok(session)
     }
 
+    /// Unlocks an existing vault using its recovery phrase, without its old
+    /// password. A missing/mismatched anchor yields a read-only session until
+    /// explicit baseline adoption. No automatic snapshot/pruning runs here.
+    pub fn unlock_with_phrase(
+        &self,
+        path: &Path,
+        phrase: &[u8],
+        cancel: Option<&CancelToken>,
+    ) -> Result<(Session, AnchorStatus), CoreError> {
+        let (vault, status) = self.open(path, cancel, |f| {
+            f.unlock_with_phrase(phrase, &self.anchors)
+        })?;
+        let read_only = matches!(status, AnchorStatus::Missing | AnchorStatus::Mismatch);
+        let session = Session::open(
+            vault,
+            self.time.clone(),
+            status,
+            self.snapshots.clone(),
+            read_only,
+            cancel,
+        )?;
+        Ok((session, status))
+    }
+
     /// Unlocks a vault whose anchor is missing or mismatched (0005 §5.4):
     /// the session can be read, and writes fail until
     /// [`Session::adopt_baseline`] makes the current state the new baseline.

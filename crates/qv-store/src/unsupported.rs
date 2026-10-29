@@ -264,6 +264,15 @@ impl AnchorDir {
 
 impl VaultFile {
     /// Fails closed on unsupported targets.
+    pub fn unlock_with_phrase(
+        self,
+        _phrase: &[u8],
+        _anchors: &AnchorDir,
+    ) -> Result<(UnlockedVault, crate::AnchorStatus), StoreError> {
+        match self.0 {}
+    }
+
+    /// Fails closed on unsupported targets.
     pub fn create_from_archive<R: std::io::Read + std::io::Seek>(
         _path: &Path,
         _input: &mut R,
@@ -335,6 +344,14 @@ impl VaultFile {
 }
 
 impl UnlockedVault {
+    /// Unreachable on unsupported targets.
+    pub fn recovery_phrase(
+        &self,
+        _password: &MasterPassword,
+    ) -> Result<qv_crypto::RecoveryPhrase, StoreError> {
+        match self.0 {}
+    }
+
     /// Unreachable: no `UnlockedVault` exists on this target.
     pub fn verify_all(&self, _cancelled: &dyn Fn() -> bool) -> Result<VerifyCounts, StoreError> {
         match self.0 {}
@@ -431,6 +448,16 @@ impl UnlockedVault {
 }
 
 impl Write<'_> {
+    /// Unreachable on unsupported targets.
+    pub fn stage_password(
+        &mut self,
+        _password: &MasterPassword,
+        _kdf: qv_crypto::PasswordKdfProfile,
+        _wrap: qv_crypto::PasswordWrapProfile,
+    ) -> Result<qv_model::Keyslot, StoreError> {
+        match self.0 {}
+    }
+
     /// Unreachable: no Write exists on this target.
     pub fn commit_cancellable(self, _cancelled: &impl Fn() -> bool) -> Result<(), StoreError> {
         match self.0 {}

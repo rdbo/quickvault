@@ -17,7 +17,7 @@ use qv_model::ModelError;
 ///
 /// | Variant | Exit code |
 /// |---------|-----------|
-/// | [`WrongPassword`](Self::WrongPassword) | 3 |
+/// | [`WrongPassword`](Self::WrongPassword), [`WrongPhrase`](Self::WrongPhrase) | 3 |
 /// | [`NotFound`](Self::NotFound) | 4 |
 /// | [`Locked`](Self::Locked), [`Replaced`](Self::Replaced), [`Changed`](Self::Changed) | 6 |
 /// | [`Integrity`](Self::Integrity), [`Rollback`](Self::Rollback), [`NoAnchor`](Self::NoAnchor) | 7 |
@@ -28,6 +28,8 @@ use qv_model::ModelError;
 pub enum StoreError {
     /// The KEK commitment or the slot AEAD failed (0002 §8).
     WrongPassword,
+    /// Invalid recovery phrase or failed initial phrase-key confirmation.
+    WrongPhrase,
     /// The vault path does not exist.
     NotFound,
     /// Another open holds the vault's process lock, or SQLite is busy.
@@ -78,6 +80,7 @@ impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::WrongPassword => "wrong password",
+            Self::WrongPhrase => "wrong recovery phrase or damaged vault header",
             Self::NotFound => "vault not found",
             Self::Locked => "vault is locked by another process",
             Self::Replaced => "vault file was replaced on disk",
@@ -105,6 +108,7 @@ impl From<CryptoError> for StoreError {
     fn from(e: CryptoError) -> Self {
         match e {
             CryptoError::WrongPassword => Self::WrongPassword,
+            CryptoError::WrongPhrase => Self::WrongPhrase,
             CryptoError::Integrity => Self::Integrity,
             CryptoError::UnknownProfile => Self::Unsupported,
             CryptoError::LimitExceeded => Self::LimitExceeded,
@@ -219,7 +223,7 @@ mod tests {
             (CryptoError::UnknownProfile, StoreError::Unsupported),
             (CryptoError::LimitExceeded, StoreError::LimitExceeded),
             (CryptoError::Rng, StoreError::Rng),
-            (CryptoError::WrongPhrase, StoreError::Internal),
+            (CryptoError::WrongPhrase, StoreError::WrongPhrase),
             (CryptoError::InvalidPassword, StoreError::Internal),
             (CryptoError::Internal, StoreError::Internal),
         ];

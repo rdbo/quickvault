@@ -110,7 +110,7 @@ fn finish(session: &Session, path: &Path) -> Result<(), CliError> {
 
 /// The master password: the accepted suggestion, or a typed one that
 /// passed the strength rules.
-fn choose_password(tty: &Tty<'_>) -> Result<MasterPassword, CliError> {
+pub(crate) fn choose_password(tty: &Tty<'_>) -> Result<MasterPassword, CliError> {
     let suggestion = qv_core::generate(&GeneratorSettings::Passphrase(PassphraseSettings {
         words: 6,
         ..Default::default()
@@ -181,7 +181,7 @@ pub(crate) fn label(s: Strength) -> &'static str {
 }
 
 /// Shows the phrase on the alternate screen until a key is pressed.
-fn show_phrase(tty: &Tty<'_>, phrase: &RecoveryPhrase) -> Result<(), CliError> {
+pub(crate) fn show_phrase(tty: &Tty<'_>, phrase: &RecoveryPhrase) -> Result<(), CliError> {
     let _alt = AltScreen::enter()?;
     let mut o = Out::stdout();
     o.raw(

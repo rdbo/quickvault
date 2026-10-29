@@ -19,3 +19,5 @@ pub(crate) mod attach;
 pub(crate) mod history;
 pub(crate) mod snapshot;
 pub(crate) mod verify;
+
+pub(crate) mod credentials;

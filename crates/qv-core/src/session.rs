@@ -663,6 +663,64 @@ mod lock_tests {
     }
 
     #[test]
+    fn credentials_snapshot_deletion_reports_completed_work_after_lock() {
+        for point in [Point::BeforeCommit, Point::AfterCommit] {
+            let env = Env::new();
+            let s = Arc::new(env.unlock_with(Some(env.snapshot_policy())));
+            let id = s.snapshots().unwrap().snapshots[0].archive_id.clone();
+            let path = env
+                .dir
+                .path()
+                .join("snapshots")
+                .join(format!("{id}.qvsnap"));
+            assert!(path.exists());
+            let result = race(&s, point, move |s| s.delete_snapshots(&[id]));
+            let completed = point == Point::AfterCommit;
+            assert_eq!(
+                result,
+                if completed {
+                    Ok(1)
+                } else {
+                    Err(CoreError::Cancelled)
+                }
+            );
+            assert_eq!(path.exists(), !completed);
+        }
+    }
+
+    #[test]
+    fn credentials_password_lock_before_and_after_commit() {
+        for point in [Point::BeforeCommit, Point::AfterCommit] {
+            let env = Env::new();
+            let s = Arc::new(env.unlock());
+            let result = race(&s, point, |s| {
+                let _k = crate::testutil::kdf();
+                s.change_password(&crate::testutil::pw("new password after lock race"), None)
+            });
+            let durable = point == Point::AfterCommit;
+            assert_eq!(
+                result,
+                if durable {
+                    Ok(())
+                } else {
+                    Err(CoreError::Cancelled)
+                }
+            );
+            let _k = crate::testutil::kdf();
+            let password = if durable {
+                "new password after lock race"
+            } else {
+                crate::testutil::PASSWORD
+            };
+            assert!(
+                env.core()
+                    .unlock(&env.path, &crate::testutil::pw(password), None)
+                    .is_ok()
+            );
+        }
+    }
+
+    #[test]
     fn snapshot_restore_lock_before_and_after_publication() {
         for point in [Point::BeforeCommit, Point::AfterCommit] {
             let env = Env::new();

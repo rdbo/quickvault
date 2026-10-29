@@ -75,9 +75,9 @@ pub struct VaultFile {
     lock: LockedFile,
     path: PathBuf,
     pub(crate) header: Header,
-    header_body: Vec<u8>,
-    header_mac: MacTag,
-    slots: Vec<LocalSlot>,
+    pub(crate) header_body: Vec<u8>,
+    pub(crate) header_mac: MacTag,
+    pub(crate) slots: Vec<LocalSlot>,
     warnings: LocationWarnings,
     pub(crate) budget: StepBudget,
 }
@@ -395,6 +395,27 @@ impl VaultFile {
                 .slot
                 .unlock(password, self.header.vault_id, self.header.key_generation)?;
         self.verify_header(&vk)?;
+        self.finish_unlock(vk, anchors)
+    }
+
+    /// Opens an existing local vault using a bounded recovery phrase.
+    /// A failed initial header key confirmation cannot distinguish a wrong
+    /// phrase from header damage; failures after confirmation are Integrity.
+    /// Missing/mismatched anchors still require explicit baseline adoption.
+    pub fn unlock_with_phrase(
+        self,
+        phrase: &[u8],
+        anchors: &AnchorDir,
+    ) -> Result<(UnlockedVault, AnchorStatus), StoreError> {
+        if phrase.len() > 1024 {
+            return Err(StoreError::LimitExceeded);
+        }
+        let vk = VaultKey::from_recovery_phrase(phrase)?;
+        match self.verify_header(&vk) {
+            Err(StoreError::Integrity) => return Err(StoreError::WrongPhrase),
+            Err(e) => return Err(e),
+            Ok(()) => {}
+        }
         self.finish_unlock(vk, anchors)
     }
 
@@ -869,6 +890,24 @@ impl UnlockedVault {
         let keys = Keys::derive(&self.vk, header)?;
         let mut reader = ObjectReader::new(&self.file.conn)?;
         read_role(&mut reader, &keys, header, m, record, v, !is_head)
+    }
+}
+
+impl UnlockedVault {
+    /// Redisplays the recovery phrase only after reauthenticating the current
+    /// operational slot. The returned phrase uses protected memory.
+    pub fn recovery_phrase(
+        &self,
+        password: &MasterPassword,
+    ) -> Result<qv_crypto::RecoveryPhrase, StoreError> {
+        self.check_identity()?;
+        let vk = password_slot(&self.file.slots)?.keyslot.slot.unlock(
+            password,
+            self.file.header.vault_id,
+            self.file.header.key_generation,
+        )?;
+        self.file.verify_header(&vk)?;
+        Ok(qv_crypto::RecoveryPhrase::from_vault_key(&vk)?)
     }
 }
 

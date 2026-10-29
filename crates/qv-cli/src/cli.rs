@@ -64,6 +64,12 @@ pub(crate) fn command() -> Command {
                 .global(true)
                 .help("Skip destructive-action and plaintext-export confirmations (never the weak-password one)"),
         )
+        .subcommand(Command::new("passwd").about("Change the master password; old copied slots remain usable"))
+        .subcommand(Command::new("recover").about("Unlock an existing vault with its recovery phrase and set a new password")
+            .arg(Arg::new("path").required(true).value_parser(value_parser!(PathBuf))))
+        .subcommand(Command::new("recovery").about("Recovery-phrase operations")
+            .subcommand_required(true)
+            .subcommand(Command::new("show").about("Reauthenticate and show the phrase on the terminal alternate screen")))
         .subcommand(attach_command())
         .subcommand(history_command())
         .subcommand(Command::new("restore").about("Restore a retained entry version as a new causal edit")
@@ -494,6 +500,11 @@ pub(crate) fn run(args: impl IntoIterator<Item = OsString>, env: Environment) ->
 
 fn dispatch(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
     match m.subcommand() {
+        Some(("passwd", _)) => crate::cmd::credentials::passwd(ctx),
+        Some(("recover", s)) => crate::cmd::credentials::recover(ctx, s),
+        Some(("recovery", s)) if s.subcommand_name() == Some("show") => {
+            crate::cmd::credentials::show(ctx)
+        }
         Some(("init", s)) => crate::cmd::init::run(ctx, s),
         Some(("info", s)) => crate::cmd::info::run(ctx, s),
         Some(("ls", s)) => crate::cmd::ls::run(ctx, s),

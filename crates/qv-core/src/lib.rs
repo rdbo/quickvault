@@ -11,6 +11,7 @@
 //!
 //! | Module | Contents | Spec |
 //! |--------|----------|------|
+//! | `credentials` | Atomic [`Session::change_password`] and reauthenticated [`Session::recovery_phrase`] | 0002 §2–4 |
 //! | `setup` | [`Core`], [`CoreConfig`], [`TimeSource`], [`Protection`]: process hardening, create (with the recovery phrase), unlock, recovery unlock | 0004 §5.1, 0008 §1.1, 0005 §5.4 |
 //! | `session` | [`Session`], [`CancelToken`], the handles | 0008 §1.4, §4.1 |
 //! | `index` | The metadata index built from every head, with a 64 MiB budget | 0004 §5.1, 0008 §1.2 |
@@ -80,14 +81,22 @@
 //! baseline, preserving the active vault and its anchor. Restore unlock defers
 //! pruning until its input is safely restored; no global freshness is claimed.
 //!
+//! **Credentials**: password replacement stages the complete operational slot,
+//! encrypted causal keyslot record and header MAC through the same transaction
+//! and anchor path. Existing data objects, VK and generation stay unchanged.
+//! Phrase redisplay reauthenticates the current password. Phrase unlock opens
+//! an existing local vault and never silently adopts a missing/mismatched
+//! anchor. Initial phrase key confirmation cannot distinguish a wrong valid
+//! phrase from header damage; later authenticated failures are integrity errors.
+//!
 //! **Not yet implemented:** general conflict resolution and merges (2.2),
-//! production inactivity/OS lifecycle hooks (2.3), password change and rotation (1.14,
-//! 1.15).
+//! production inactivity/OS lifecycle hooks (2.3) and generation rotation (1.15).
 //!
 //! **Errors**: [`CoreError`] (its rustdoc maps variants to CLI exit codes)
 //! carries no data.
 
 mod attachment;
+mod credentials;
 mod edit;
 mod error;
 mod history;

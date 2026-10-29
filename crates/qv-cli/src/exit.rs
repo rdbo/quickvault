@@ -69,7 +69,7 @@ impl CliError {
 /// The exit code of a store error.
 pub(crate) fn store_code(e: StoreError) -> u8 {
     match e {
-        StoreError::WrongPassword => AUTH,
+        StoreError::WrongPassword | StoreError::WrongPhrase => AUTH,
         StoreError::NotFound => NOT_FOUND,
         StoreError::Locked | StoreError::Replaced | StoreError::Changed => BUSY,
         StoreError::Integrity | StoreError::Rollback | StoreError::NoAnchor => INTEGRITY,
@@ -104,7 +104,7 @@ fn hint(e: CoreError) -> Option<&'static str> {
     match e {
         CoreError::Store(StoreError::NoAnchor) => Some(
             "this device has no record of the vault's last state (it was copied here, or the \
-             state directory was lost); accepting its current state is not available in qvault yet",
+             state directory was lost); use explicit `qvault recover <path>` with your recovery phrase to accept a baseline",
         ),
         CoreError::Store(StoreError::Rollback) => Some(
             "the vault is older than this device last saw it, or was replaced: it may have been \
@@ -155,6 +155,7 @@ mod tests {
         let store = |e: StoreError| CliError::from(e).code;
         // 3
         assert_eq!(store(StoreError::WrongPassword), 3);
+        assert_eq!(store(StoreError::WrongPhrase), 3);
         assert_eq!(CliError::from(CryptoError::WrongPhrase).code, 3);
         // 4
         assert_eq!(store(StoreError::NotFound), 4);

@@ -57,4 +57,5 @@ plan, or a new plan that names the one it supersedes.
 | [0016](0016-attachments/PLAN.md) | Streaming attachments and CLI file operations (roadmap 1.11) | Reviewed |
 | [0017](0017-entry-history/PLAN.md) | Entry history, restore and purge (roadmap 1.12) | Reviewed |
 | [0018](0018-archives-snapshots-verify/PLAN.md) | Archives, local snapshots and `verify` (roadmap 1.13a) | Reviewed |
-| [0019](0019-snapshot-restore/PLAN.md) | Restore a local snapshot to a new vault (roadmap 1.13b) | Implemented |
+| [0019](0019-snapshot-restore/PLAN.md) | Restore a local snapshot to a new vault (roadmap 1.13b) | Reviewed |
+| [0020](0020-password-recovery/PLAN.md) | Password change and recovery flows (roadmap 1.14) | Implemented |
