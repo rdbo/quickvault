@@ -69,7 +69,8 @@ pub(crate) fn command() -> Command {
             .arg(Arg::new("path").required(true).value_parser(value_parser!(PathBuf))))
         .subcommand(Command::new("recovery").about("Recovery-phrase operations")
             .subcommand_required(true)
-            .subcommand(Command::new("show").about("Reauthenticate and show the phrase on the terminal alternate screen")))
+            .subcommand(Command::new("show").about("Reauthenticate and show the phrase on the terminal alternate screen"))
+            .subcommand(Command::new("rotate").about("Create a new key generation, phrase and password (resumable); always asks you to type `rotate`")))
         .subcommand(attach_command())
         .subcommand(history_command())
         .subcommand(Command::new("restore").about("Restore a retained entry version as a new causal edit")
@@ -411,13 +412,33 @@ impl Ctx {
     pub(crate) fn unlock_path(&self, path: &std::path::Path) -> Result<Session, CliError> {
         let core = select::core()?;
         let password = self.master_password()?;
-        let session = core.unlock(path, &password, None)?;
+        let session = core
+            .unlock(path, &password, None)
+            .map_err(|e| rotation_hint(&core, path, e))?;
         drop(password);
         crate::signals::check()?;
         warn_location(session.warnings()?);
         warn_snapshots(&session);
         Ok(session)
     }
+}
+
+/// An unlock error, with a hint when the refusal comes from an interrupted
+/// key rotation (`<path>.qvrotate`).
+pub(crate) fn rotation_hint(
+    core: &qv_core::Core,
+    path: &std::path::Path,
+    e: qv_core::CoreError,
+) -> CliError {
+    let mut err = CliError::from(e);
+    if e == qv_core::CoreError::Store(qv_core::StoreError::Integrity)
+        && core.rotation_pending(path).unwrap_or(false)
+    {
+        err.message.push_str(
+            "\nhint: an interrupted key rotation exists; run `qvault recovery rotate` to complete or roll it back",
+        );
+    }
+    err
 }
 
 /// Location warnings (0004 §1.1, 0011 *Security Considerations*).
@@ -504,6 +525,9 @@ fn dispatch(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
         Some(("recover", s)) => crate::cmd::credentials::recover(ctx, s),
         Some(("recovery", s)) if s.subcommand_name() == Some("show") => {
             crate::cmd::credentials::show(ctx)
+        }
+        Some(("recovery", s)) if s.subcommand_name() == Some("rotate") => {
+            crate::cmd::credentials::rotate(ctx)
         }
         Some(("init", s)) => crate::cmd::init::run(ctx, s),
         Some(("info", s)) => crate::cmd::info::run(ctx, s),

@@ -35,6 +35,7 @@
 //! | `rotation` | [`PreparedRotation`]: the verified private next-generation replacement | 0002 §2.2, §3.5 |
 //! | `rotation_guard` | `.qvrotate` marker and reserved-name refusal | 0002 §3.5.4 |
 //! | `rotation_journal` | [`RotationJournal`] codec and independent MACs | 0002 §3.5.4 |
+//! | `rotation_install` | [`PreparedRotation::install`], [`InterruptedRotation`] (restart: complete or roll back), pre-journal leftovers | 0002 §3.5.4; 0005 §5.4 |
 //! | `snapshot_inventory` | [`SnapshotInventory`]: cross-generation snapshot accounting | 0007 §3.2–3.3 |
 //! | `archive` | [`ArchiveHeader`], [`ArchiveScope`], framing, the archive writer and reader, [`SnapshotDir`] | 0004 §6; 0007 §3 |
 //! | `vault` | [`VaultFile`] (`create`, `open`, `unlock`, `unlock_for_recovery`) and [`UnlockedVault`] (verification, reads) | 0004 §3.6, §5.1, 0002 §8 |
@@ -143,8 +144,25 @@
 //! version and attachment with the source. [`SnapshotInventory`] (MAC'd with
 //! the new generation's local-state key, `qv/snapshot-inventory/v1`, at most
 //! 4096 rows / 1 MiB, `inventory-<vault>-<gen>.qvinv`) carries
-//! earlier-generation snapshots into budget accounting. Journal installation,
-//! restart, inventory-aware policy, core and the CLI are roadmap 1.15c.
+//! earlier-generation snapshots into budget accounting.
+//!
+//! Rotation installation (1.15c, plan 0023): [`PreparedRotation::install`]
+//! runs these steps, each followed by a crash point:
+//! 1. the candidate gets its `-new-` name;
+//! 2. the next inventory is published;
+//! 3. the journal is published at `<vault>.qvrotate` and stays locked;
+//! 4. the active file moves to `-old-`; 5. the candidate moves to active;
+//! 6. the anchor takes the generation step;
+//! 7. the old file is removed; 8. the old inventory is removed; 9. the
+//!    journal is removed.
+//!
+//! Before step 3 an error changes nothing visible. After step 6 a cleanup
+//! failure is success with cleanup pending. [`InterruptedRotation`] reads
+//! the locked journal and authenticates every copy it relies on with that
+//! copy's own password, both journal MACs, heads and the anchor. Only then
+//! does it classify the state (see `rotation_install`) and complete or roll
+//! back. A transition copy has the crate-private `Transition` role: never
+//! written or anchored by the ordinary paths.
 //!
 //! # Errors
 //!
@@ -160,10 +178,13 @@
 //!
 //! # Not yet implemented
 //!
-//! Received versions and merges of concurrent heads (2.2); archives that
+//! `VerifiedIncoming` authenticates a private stable archive copy; qv-sync can
+//! build validated merge metadata, but incoming acceptance/receipts still wait
+//! for 2.2b and must use the existing transaction/anchor path. Candidates alone
+//! do not authorize writes. Archives that
 //! carry a password slot (0004 §6.4, phase 2), archive merge and exchange
 //! (2.2); standalone archive recovery using a phrase;
-//! rotation installation and restart (1.15c); sync state, outbox and
+//! sync state, outbox and
 //! checkpoints (milestones 2–3);
 //! quick-unlock slots (2.6); keystore-backed anchors (2.3, 2.6); Windows
 //! and macOS file safety (4.1 and later).
@@ -186,6 +207,8 @@ mod error;
 mod fs;
 mod head;
 mod header;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod incoming;
 mod limits;
 mod location;
 mod manifest;
@@ -196,6 +219,7 @@ mod restore;
 mod rotation;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod rotation_guard;
+mod rotation_install;
 mod rotation_journal;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod schema;
@@ -233,6 +257,8 @@ pub use attachment::StagedAttachment;
 pub use error::StoreError;
 pub use head::AnchorStatus;
 pub use header::Header;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub use incoming::VerifiedIncoming;
 pub use limits::{
     MAX_ARCHIVE_MANIFEST_FRAME, MAX_ARCHIVE_OBJECT_FRAME, MAX_ARCHIVE_TOTAL_LENGTH, MAX_CHUNKS,
     MAX_CLOCK_COMPONENTS, MAX_DB_BYTES, MAX_HEADER_BYTES, MAX_MANIFEST_CIPHERTEXT, MAX_OBJECTS,
@@ -243,6 +269,11 @@ pub use manifest::{MANIFEST_FORMAT, Manifest, ObjectRef, RecordEntry, VersionRef
 pub use object::ObjectEnvelope;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use rotation::PreparedRotation;
+pub use rotation_install::{
+    InstallError, Installed, Leftovers, NeededPasswords, RotationChoice, RotationState,
+};
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub use rotation_install::{InterruptedRotation, needed_passwords, rotation_pending};
 pub use rotation_journal::{
     MAX_ROTATION_JOURNAL_BYTES, RotationJournal, RotationJournalBody, RotationSide,
 };
@@ -251,8 +282,8 @@ pub use snapshot_inventory::{
 };
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 pub use unsupported::{
-    AnchorDir, MAX_ANCHOR_BYTES, PreparedRotation, UnlockedVault, VAULT_EXTENSION, VaultFile,
-    VerifyCounts, Write,
+    AnchorDir, InterruptedRotation, MAX_ANCHOR_BYTES, PreparedRotation, UnlockedVault,
+    VAULT_EXTENSION, VaultFile, VerifyCounts, Write, needed_passwords, rotation_pending,
 };
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use vault::{UnlockedVault, VAULT_EXTENSION, VaultFile};

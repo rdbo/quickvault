@@ -510,8 +510,6 @@ mod platform {
 
         /// Removes one generation's inventory file (1.15c: after completion
         /// the superseded one, on rollback the unused new one). Absent is Ok.
-        // Called by the journal installer of roadmap 1.15c and by tests.
-        #[allow(dead_code)]
         pub(crate) fn remove_inventory(
             &self,
             vault_id: VaultId,

@@ -419,6 +419,7 @@ mod tests {
         }
     }
 
+    // 0012 §1: Hostile SQLite/CBOR
     #[test]
     fn rotation_journal_rejects_bad_shape_versions_and_unbounded_lengths() {
         let (old, new) = keys();

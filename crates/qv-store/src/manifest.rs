@@ -134,6 +134,61 @@ pub struct RecordEntry {
 }
 
 impl RecordEntry {
+    /// Assemble merge metadata, checking the record-local causal invariants.
+    /// References and cross-record budgets are checked by [`Manifest::candidate`].
+    pub fn from_parts(
+        record_id: RecordId,
+        heads: Vec<VersionRef>,
+        history: Vec<VersionRef>,
+        floor: HistoryFloor,
+    ) -> Result<Self, StoreError> {
+        if heads.len() > MAX_HEADS || heads.len().saturating_add(history.len()) > MAX_OBJECTS {
+            return Err(StoreError::LimitExceeded);
+        }
+        if heads.is_empty() {
+            return Err(StoreError::Integrity);
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        let mut clocks = std::collections::BTreeSet::new();
+        let mut components = floor.clock().pairs().len();
+        for list in [&heads, &history] {
+            if list.windows(2).any(|w| w[0].version_id >= w[1].version_id) {
+                return Err(StoreError::Integrity);
+            }
+            for v in list {
+                components = components.saturating_add(v.clock.pairs().len());
+                if components > MAX_CLOCK_COMPONENTS {
+                    return Err(StoreError::LimitExceeded);
+                }
+                if v.clock.is_empty()
+                    || !ids.insert(v.version_id)
+                    || !clocks.insert(v.clock.pairs())
+                {
+                    return Err(StoreError::Integrity);
+                }
+            }
+        }
+        for (i, a) in heads.iter().enumerate() {
+            if heads[i + 1..]
+                .iter()
+                .any(|b| a.clock.compare(&b.clock) != Causality::Concurrent)
+            {
+                return Err(StoreError::Integrity);
+            }
+        }
+        for h in &history {
+            if floor.suppresses(&h.clock) || !heads.iter().any(|v| v.clock.dominates(&h.clock)) {
+                return Err(StoreError::Integrity);
+            }
+        }
+        Ok(Self {
+            record_id,
+            heads,
+            history,
+            floor: floor.clock().clone(),
+        })
+    }
+
     /// The record ID.
     pub fn record_id(&self) -> RecordId {
         self.record_id
@@ -389,6 +444,40 @@ pub(crate) fn config_digest_for(
 }
 
 impl Manifest {
+    /// Whether the configuration and three fixed control-record identities
+    /// match. A successful comparison alone authenticates neither manifest.
+    pub fn same_configuration(&self, other: &Self) -> bool {
+        self.config_digest == other.config_digest
+            && self.vault_meta_id == other.vault_meta_id
+            && self.keyslot_id == other.keyslot_id
+            && self.root_group_id == other.root_group_id
+    }
+
+    /// Assemble and validate merge metadata using this manifest's control IDs
+    /// and configuration. This neither authenticates objects nor writes state.
+    /// Lists must be strictly sorted and complete; all existing budgets apply.
+    pub fn candidate(
+        &self,
+        records: Vec<RecordEntry>,
+        references: Vec<ObjectRef>,
+    ) -> Result<Self, StoreError> {
+        let candidate = Self {
+            config_digest: self.config_digest,
+            vault_meta_id: self.vault_meta_id,
+            keyslot_id: self.keyslot_id,
+            root_group_id: self.root_group_id,
+            records,
+            references,
+        };
+        candidate.validate()?;
+        if qv_crypto::sealed_len(candidate.encode()?.len())
+            .is_none_or(|n| n > MAX_MANIFEST_CIPHERTEXT)
+        {
+            return Err(StoreError::LimitExceeded);
+        }
+        Ok(candidate)
+    }
+
     /// A new vault's manifest: the control IDs, no records yet.
     pub(crate) fn empty(
         header: &Header,
@@ -796,9 +885,6 @@ impl Manifest {
         Ok(())
     }
 
-    /// Replaces every head of `record_id` with `head`; the old heads move to
-    /// history (0005 §2.1). The caller has checked that `head` dominates
-    /// them.
     /// The same records, roles, floors and conflicts under the generation of
     /// `header`: every object and chunk ID replaced by its entry in `map`
     /// (old ID → new reference) and the reference list replaced by the map's
@@ -875,6 +961,9 @@ impl Manifest {
         Ok(())
     }
 
+    /// Replaces every head of `record_id` with `head`; the old heads move to
+    /// history (0005 §2.1). The caller has checked that `head` dominates
+    /// them.
     pub(crate) fn replace_heads(
         &mut self,
         record_id: RecordId,
@@ -1248,6 +1337,55 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn manifest_candidate_assembly_checks_records_references_and_budgets() {
+        let m = sample();
+        let r = m.record(rid(4)).unwrap();
+        let assembled =
+            RecordEntry::from_parts(r.record_id(), r.heads.clone(), r.history.clone(), r.floor())
+                .unwrap();
+        assert_eq!(&assembled, r);
+        assert_eq!(
+            m.candidate(m.records.clone(), m.references.clone())
+                .unwrap(),
+            m
+        );
+        assert_eq!(
+            RecordEntry::from_parts(r.record_id(), vec![], vec![], r.floor()).unwrap_err(),
+            StoreError::Integrity
+        );
+        assert_eq!(
+            RecordEntry::from_parts(r.record_id(), r.heads.clone(), r.heads.clone(), r.floor())
+                .unwrap_err(),
+            StoreError::Integrity
+        );
+        assert_eq!(
+            RecordEntry::from_parts(
+                r.record_id(),
+                r.heads.clone(),
+                r.history.clone(),
+                HistoryFloor::new(r.heads[0].clock.clone())
+            )
+            .unwrap_err(),
+            StoreError::Integrity
+        );
+        let mut unsorted = m.records.clone();
+        unsorted.reverse();
+        assert_eq!(
+            m.candidate(unsorted, m.references.clone()).unwrap_err(),
+            StoreError::Integrity
+        );
+        assert_eq!(
+            m.candidate(m.records.clone(), vec![]).unwrap_err(),
+            StoreError::Integrity
+        );
+        assert_eq!(
+            m.candidate(vec![assembled; MAX_RECORDS + 1], vec![])
+                .unwrap_err(),
+            StoreError::LimitExceeded
+        );
+    }
+
+    #[test]
     fn manifest_round_trip() {
         let m = sample();
         let bytes = m.encode().unwrap();
@@ -1310,6 +1448,7 @@ pub(crate) mod tests {
         assert_eq!(m.records[i].floor(), floor);
     }
 
+    // 0012 §1: Self-referential/incomplete commitments
     #[test]
     fn manifest_structure_rejections() {
         let check = |f: &dyn Fn(&mut Manifest)| {
@@ -1434,6 +1573,7 @@ pub(crate) mod tests {
         e.finish().unwrap().to_vec()
     }
 
+    // 0012 §1: Hostile SQLite/CBOR
     #[test]
     fn manifest_key_rejections() {
         let good = sample().encode().unwrap().to_vec();
@@ -1808,6 +1948,7 @@ pub(crate) mod tests {
         m
     }
 
+    // 0012 §1: Budget inconsistency
     #[test]
     fn manifest_worst_case_fits_the_limit() {
         let m = worst_case();

@@ -313,6 +313,7 @@ impl Drop for Run {
     }
 }
 
+// 0012 §1: CLI argument leakage
 #[test]
 fn clipboard_binary_lifecycle_and_key_drop() {
     let _serial = common::serial();

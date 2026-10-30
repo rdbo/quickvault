@@ -156,10 +156,10 @@ impl core::fmt::Debug for Created {
 
 /// The single entry point for frontends.
 pub struct Core {
-    anchors: AnchorDir,
+    pub(crate) anchors: AnchorDir,
     time: Arc<dyn TimeSource>,
     process: ProcessHardening,
-    snapshots: Option<Arc<SnapshotPolicy>>,
+    pub(crate) snapshots: Option<Arc<SnapshotPolicy>>,
 }
 
 impl core::fmt::Debug for Core {

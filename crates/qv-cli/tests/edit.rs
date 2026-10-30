@@ -146,6 +146,7 @@ fn generated_entry_edits_preserve_ids_and_rejected_updates_preserve_state() {
     );
 }
 
+// 0012 §1: CLI argument leakage
 #[test]
 fn prompts_notes_interactive_and_cancellation() {
     let h = Home::new();

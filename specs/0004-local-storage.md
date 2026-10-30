@@ -55,16 +55,18 @@ of attacker-supplied SQL constraints.
 | `keyslot` | slot ID | type, device binding, KDF profile/salt, KEK commitment, wrapping profile, wrapped VK |
 | `object` | (key generation, object ID) | data profile, nonce, ciphertext |
 | `manifest` | manifest hash | generation, profile, nonce and encrypted manifest |
-| `local_head` | exactly one row | authenticated local state (§5.4 of 0005): sequence, previous digest, manifest hash, remote checkpoint |
+| `local_head` | exactly one row | authenticated local state (§5.4 of 0005): sequence, previous digest, manifest hash, remote checkpoint, `lan_links_digest` |
 | `sync_state` | remote ID | encrypted verified remote base, cursor and pending publication |
 | `replica` | exactly one row | local-only writer state (0005 §1.3): replica ID naming this DB's external anchor, writer ID, next counter; never in archives or sync |
+| `lan_link` | link ID | sealed pairwise LAN link key, label and creation time, bound by the local head's `lan_links_digest` (0013 §9.1); local-only, never in archives or sync |
+| `lan_hint` | link ID | sealed unauthenticated endpoint hints and last-success time (0013 §9.2); local-only, never in archives or sync |
 
 Server checkpoint fields and `sync_state` rows are optional server-mode state.
 Creating or operating an offline or LAN-only vault MUST NOT require a server
 identity, account, checkpoint or dummy server row. LAN exchanges use the same
 verified objects/manifests and local commit/anchor path; the local-only peer
-authorization/session-state schema remains to be specified with 0005 §6 and
-MUST NOT be inferred from the server `sync_state` layout.
+state is the `lan_link`/`lan_hint` schema of 0013 §9, which MUST NOT be
+inferred from the server `sync_state` layout.
 
 2.1. A record may have several active versions. The manifest defines active,
 historical and suppressed versions; a single record-ID primary key or upload
@@ -256,6 +258,7 @@ is unsupported ([SQLite warning](https://www.sqlite.org/howtocorrupt.html)).
 
 ## Changelog
 
+- 2026-10-30: Owner-delegated acceptance of 0013 (roadmap D10, plan 0025): add the local-only `lan_link` and `lan_hint` tables and `lan_links_digest` in `local_head`.
 - 2026-10-26: Add an aggregate budget of 1,048,576 clock components per
   manifest so the §4.2 worst case fits the 64 MiB manifest limit (256 writers
   per clock over 250,000 objects did not); history yields to it. Add the

@@ -276,6 +276,7 @@ mod tests {
 
     /// 0012 §1 "Password-slot partitioning oracle": a multi-key slot is
     /// rejected as a wrong password before decryption (0002 §3.2).
+    // 0012 §1: Password-slot partitioning oracle
     #[test]
     fn slot_partitioning_oracle_is_rejected_before_decryption() {
         let _guard = crate::memory::secrets_test_guard();
@@ -348,6 +349,7 @@ mod tests {
         assert_eq!(unlock(&s, &mk), Err(CryptoError::WrongPassword));
     }
 
+    // 0012 §1: Unpinned crypto
     #[test]
     fn slot_unknown_profiles_fail_at_parse_time() {
         assert_eq!(

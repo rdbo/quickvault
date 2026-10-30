@@ -19,6 +19,7 @@ what they say, and behaviour changes start with a spec change.
 | [0010](0010-password-generator.md) | Password Generator | Accepted |
 | [0011](0011-cli.md) | Command-Line Interface | Accepted |
 | [0012](0012-security-validation.md) | Security Validation and Release Gates | Accepted |
+| [0013](0013-lan-sync-protocol.md) | Direct LAN Sync Protocol | Accepted |
 
 0002 includes the owner-approved offline rotation amendment of 2026-10-29
 (plan 0021 D1 A): recovery public-key derivation may wait until sync needs it;
@@ -46,6 +47,13 @@ sync and background retries are deferred. LAN discovery, enrollment, sessions,
 peer-state persistence, listening lifecycle and peer removal remain explicit
 Open Questions; this amendment does not select a wire protocol or promote any
 Draft spec to Accepted.
+
+0013 (Accepted 2026-10-30, owner-delegated) specifies that LAN protocol: discovery only during
+explicit windows, out-of-band pairing into pairwise generation-bound link
+keys, an X-Wing session handshake, the exchange and peer state. Its
+amendments to 0001, 0002, 0004 and 0005 are applied. Acceptance does not
+authorize a LAN release: the 0012 §3 gate, including independent review,
+still applies.
 
 The Android-priority follow-up brings Android and Linux into initial shared-core
 and UI validation, with usable offline apps before the remote server. iOS stays

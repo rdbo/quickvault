@@ -34,8 +34,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use qv_model::Timestamp;
 use qv_store::{
-    AnchorStatus, ArchiveHeader, ArchiveScope, PublishedSnapshot, SnapshotDir, SnapshotEntry,
-    SnapshotKind, StoreError, UnlockedVault, VerifyCounts,
+    AnchorStatus, ArchiveHeader, ArchiveScope, InventoryRow, PublishedSnapshot, SnapshotDir,
+    SnapshotEntry, SnapshotKind, StoreError, UnlockedVault, VerifyCounts,
 };
 
 use crate::error::CoreError;
@@ -292,6 +292,70 @@ impl Drop for RecoverySnapshot {
     }
 }
 
+/// Earlier generations' snapshots, from the current generation's verified
+/// inventory (plan 0023; 0007 §3.2–3.3).
+enum OldRows {
+    /// The rows whose file is still present (stale rows are ignored).
+    Rows(Vec<InventoryRow>),
+    /// Generation ≥ 2 without a verifying inventory: policy fails closed,
+    /// writing no ordinary copy and pruning nothing.
+    Unavailable,
+}
+
+/// The current generation's inventory rows. Generation 1 has none.
+fn old_rows(policy: &SnapshotPolicy, vault: &UnlockedVault) -> OldRows {
+    if vault.header().key_generation.0 < 2 {
+        return OldRows::Rows(Vec::new());
+    }
+    let (Ok(Some(inventory)), Ok(entries)) = (policy.dir.inventory(vault), policy.dir.entries())
+    else {
+        return OldRows::Unavailable;
+    };
+    OldRows::Rows(
+        inventory
+            .rows()
+            .iter()
+            .filter(|r| {
+                let id = r.archive_id_hex();
+                entries.iter().any(|e| e.archive_id() == id)
+            })
+            .cloned()
+            .collect(),
+    )
+}
+
+/// The archive IDs of the verified inventory, for listings: those files are
+/// accounted for, not unreadable.
+fn inventoried(policy: &SnapshotPolicy, vault: &UnlockedVault) -> Vec<String> {
+    match old_rows(policy, vault) {
+        OldRows::Rows(rows) => rows.iter().map(InventoryRow::archive_id_hex).collect(),
+        OldRows::Unavailable => Vec::new(),
+    }
+}
+
+/// Removes one earlier-generation snapshot through its verified row: only an
+/// exact hash and size match is deleted. `false` (kept, reported as failed)
+/// on any mismatch.
+fn remove_row(
+    policy: &SnapshotPolicy,
+    vault: &UnlockedVault,
+    row: &InventoryRow,
+    report: &mut SnapshotReport,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<bool, CoreError> {
+    match policy.dir.remove_inventoried(vault, row, cancelled) {
+        Ok(()) | Err(StoreError::NotFound) => {
+            report.pruned.push(row.archive_id_hex());
+            Ok(true)
+        }
+        Err(StoreError::Integrity) => {
+            report.failed = true;
+            Ok(false)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// The auth outcome of one policy pass: only authenticated local snapshots
 /// of this vault ID and generation count.
 fn authenticated(
@@ -404,6 +468,32 @@ fn snapshot_pass(
     let mut report = SnapshotReport::default();
     let max_age_ms = policy.max_age_seconds.saturating_mul(MILLIS_PER_SECOND);
 
+    // Earlier generations count only through a verified inventory. Without
+    // one, no ordinary copy and no pruning; a recovery copy needs consent.
+    let mut old = match old_rows(policy, vault) {
+        OldRows::Rows(rows) => rows,
+        OldRows::Unavailable => {
+            if kind == SnapshotKind::Ordinary {
+                return Err(StoreError::Integrity.into());
+            }
+            let published = dir.publish(vault, kind, now, cancelled)?;
+            let new = published_summary(&published);
+            if !allow_over_budget {
+                match dir.remove(published.entry()) {
+                    Ok(()) | Err(StoreError::NotFound) => {}
+                    Err(e) => return Err(e.into()),
+                }
+                return Err(CoreError::SnapshotOverBudget { needed: new.size });
+            }
+            report.failed = true;
+            report.published = Some(new);
+            return Ok(Taken {
+                report,
+                entry: Some(published.entry().clone()),
+            });
+        }
+    };
+
     // 2. Write and verify the new copy (0004 §6.5).
     let published = dir.publish(vault, kind, now, cancelled)?;
     let new = published_summary(&published);
@@ -427,6 +517,21 @@ fn snapshot_pass(
         }
         remove_entry(dir, entry, &id, &mut report)?;
     }
+    // Earlier generations age out the same way; a mismatch stops pruning.
+    let mut kept = Vec::with_capacity(old.len());
+    for row in old.drain(..) {
+        if cancelled() {
+            return Err(CoreError::Cancelled);
+        }
+        if !report.failed && now.0.saturating_sub(row.created_at.0) > max_age_ms {
+            if !remove_row(policy, vault, &row, &mut report, cancelled)? {
+                kept.push(row);
+            }
+        } else {
+            kept.push(row);
+        }
+    }
+    let old = kept;
 
     // 4. Count and byte pruning as if the new copy were ordinary, oldest
     //    first; the pinned copy and the new copy are never candidates.
@@ -444,21 +549,41 @@ fn snapshot_pass(
             .checked_add(entry.size())
             .ok_or(StoreError::LimitExceeded)?;
         if id != new.archive_id && pinned != Some(id.as_str()) {
-            candidates.push((header.created_at(), id, entry.clone()));
+            candidates.push((header.created_at(), id, Candidate::Current(entry.clone())));
         }
+    }
+    // Earlier generations' copies are ordinary once no journal pins them
+    // (0007 §3.2), whatever their file prefix.
+    for row in old {
+        count = count.checked_add(1).ok_or(StoreError::LimitExceeded)?;
+        bytes = bytes
+            .checked_add(row.size)
+            .ok_or(StoreError::LimitExceeded)?;
+        candidates.push((row.created_at, row.archive_id_hex(), Candidate::Old(row)));
     }
     candidates.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
     let fits =
         |count: u64, bytes: u64| count <= u64::from(policy.max_count) && bytes <= policy.max_bytes;
     // A copy that cannot fit even alone never justifies deleting others.
     if new.size <= policy.max_bytes && policy.max_count > 0 {
-        for (_, id, entry) in candidates {
-            if fits(count, bytes) {
+        for (_, id, candidate) in candidates {
+            if fits(count, bytes) || report.failed {
                 break;
             }
-            remove_entry(dir, &entry, &id, &mut report)?;
+            let size = match &candidate {
+                Candidate::Current(entry) => {
+                    remove_entry(dir, entry, &id, &mut report)?;
+                    entry.size()
+                }
+                Candidate::Old(row) => {
+                    if !remove_row(policy, vault, row, &mut report, cancelled)? {
+                        break;
+                    }
+                    row.size
+                }
+            };
             count = count.saturating_sub(1);
-            bytes = bytes.saturating_sub(entry.size());
+            bytes = bytes.saturating_sub(size);
         }
     }
 
@@ -501,6 +626,14 @@ fn remove_entry(
     }
 }
 
+/// A pruning candidate of the count/byte pass.
+enum Candidate {
+    /// A snapshot of the current generation, authenticated by its header.
+    Current(SnapshotEntry),
+    /// An earlier generation's snapshot, by its verified inventory row.
+    Old(InventoryRow),
+}
+
 /// What one policy pass produced.
 struct Taken {
     report: SnapshotReport,
@@ -519,6 +652,10 @@ impl Session {
                 return Ok(SnapshotListing::default());
             };
             let (rows, unreadable) = authenticated(&policy, &ctx.open.vault)?;
+            // Earlier generations' copies are accounted for by the verified
+            // inventory: neither listed nor reported as unreadable.
+            let accounted = inventoried(&policy, &ctx.open.vault);
+            let unreadable = unreadable.saturating_sub(accounted.len() as u64);
             let mut snapshots: Vec<SnapshotSummary> =
                 rows.iter().map(|(e, h)| summary(e, h)).collect();
             snapshots.sort_by(|a, b| {
@@ -1282,6 +1419,7 @@ mod tests {
         );
     }
 
+    // 0012 §1: Live SQLite copying
     #[test]
     fn live_sqlite_copying_snapshots_never_copy_or_write_the_vault() {
         // 0012 §1 row "Live SQLite copying": the copy is a new archive stream
@@ -1317,6 +1455,7 @@ mod tests {
         }
     }
 
+    // 0012 §1: Snapshot disk growth
     #[test]
     fn snapshot_disk_growth_a_full_disk_aborts_the_mandatory_copy() {
         use std::os::unix::fs::PermissionsExt;

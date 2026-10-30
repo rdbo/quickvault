@@ -154,6 +154,7 @@ fn snapshot_inventory_every_byte_is_structural_or_authenticated() {
     }
 }
 
+// 0012 §1: Hostile SQLite/CBOR
 #[test]
 fn snapshot_inventory_rejects_bad_shape_bounds_and_rows() {
     let encoded = vector().encode().unwrap();

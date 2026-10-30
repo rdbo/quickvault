@@ -33,6 +33,32 @@ pub(crate) fn is_reserved(path: &Path) -> bool {
     })
 }
 
+/// The two rotation siblings of a vault path (plan 0021 names).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Sibling {
+    /// `<name>.qvrotate-old-<32 hex>`: the retained previous generation.
+    Old,
+    /// `<name>.qvrotate-new-<32 hex>`: the verified candidate.
+    New,
+}
+
+/// `<vault>.qvrotate`: the rotation journal, which is also the marker.
+pub(crate) fn marker(path: &Path) -> std::path::PathBuf {
+    fs::with_suffix(path, RESERVED)
+}
+
+/// A sibling name, built only from the vault path and the 16-byte suffix.
+pub(crate) fn sibling(path: &Path, which: Sibling, suffix: &[u8; 16]) -> std::path::PathBuf {
+    let kind = match which {
+        Sibling::Old => "-old-",
+        Sibling::New => "-new-",
+    };
+    let mut name = String::from(RESERVED);
+    name.push_str(kind);
+    name.push_str(&crate::archive::hex32(suffix));
+    fs::with_suffix(path, &name)
+}
+
 /// The marker test alone, for the rotation's own replacement file, whose name
 /// is reserved on purpose.
 pub(crate) fn check_marker(path: &Path) -> Result<(), StoreError> {

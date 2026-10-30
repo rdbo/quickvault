@@ -1,0 +1,57 @@
+# Extended fuzz campaigns (spec 0012 §3 offline gate; plan 0024): every
+# target for 30 minutes with AddressSanitizer (the cargo-fuzz default), weekly
+# and on demand. The per-push runs in ci.yml stay at 60 s each.
+# Actions are pinned by commit SHA; tools by exact version.
+name: fuzz-extended
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  NIGHTLY: nightly-2026-10-01
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: cbor_decode
+            max_len: 4096
+          - target: record_decode
+            max_len: 4096
+          - target: manifest_decode
+            max_len: 4096
+          - target: vault_open
+            max_len: 65536
+          - target: archive_read
+            max_len: 262144
+          - target: rotation_journal
+            max_len: 8192
+          - target: snapshot_inventory
+            max_len: 8192
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchains (rust-toolchain.toml and pinned nightly)
+        run: |
+          rustup toolchain install
+          rustup toolchain install "$NIGHTLY" --profile minimal
+      - name: Install cargo-fuzz
+        run: cargo install --locked cargo-fuzz --version 0.13.2
+      # `cargo fuzz run` has no --locked flag; this fails if fuzz/Cargo.lock is stale.
+      - name: Check fuzz lockfile
+        run: cargo fetch --locked --manifest-path fuzz/Cargo.toml
+      - name: Fuzz ${{ matrix.target }} (30 min, ASan)
+        run: >-
+          cargo +"$NIGHTLY" fuzz run ${{ matrix.target }} --
+          -max_total_time=1800 -max_len=${{ matrix.max_len }} -print_final_stats=1

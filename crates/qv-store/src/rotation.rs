@@ -76,7 +76,7 @@ fn check_cancel(cancelled: &dyn Fn() -> bool) -> Result<(), StoreError> {
 }
 
 /// Removes an unpublished replacement unless disarmed.
-struct Unpublished(Option<PathBuf>);
+pub(crate) struct Unpublished(pub(crate) Option<PathBuf>);
 
 impl Drop for Unpublished {
     fn drop(&mut self) {
@@ -91,16 +91,16 @@ impl Drop for Unpublished {
 ///
 /// It owns the still-locked source session and the locked replacement file.
 /// No accessor returns a key or a path. Dropping it removes the replacement
-/// (best effort); the source file and every anchor are unchanged. Installing
-/// it through the rotation journal is roadmap 1.15c.
+/// (best effort); the source file and every anchor are unchanged.
+/// [`PreparedRotation::install`] publishes it through the rotation journal.
 pub struct PreparedRotation {
     // Field order: the replacement's connection closes before its file is
     // removed by `cleanup`, and the source session stays locked until the end.
-    replacement: UnlockedVault,
-    _cleanup: Unpublished,
-    source: UnlockedVault,
-    phrase: RecoveryPhrase,
-    suffix: [u8; 16],
+    pub(crate) replacement: UnlockedVault,
+    pub(crate) _cleanup: Unpublished,
+    pub(crate) source: UnlockedVault,
+    pub(crate) phrase: RecoveryPhrase,
+    pub(crate) suffix: [u8; 16],
 }
 
 impl core::fmt::Debug for PreparedRotation {
@@ -135,13 +135,6 @@ impl PreparedRotation {
     /// The new VK (the inventory's MAC key).
     pub(crate) fn new_vault_key(&self) -> &VaultKey {
         &self.replacement.vk
-    }
-
-    /// The random suffix of the replacement's reserved final name.
-    // Read only by the journal installer of roadmap 1.15c and by tests.
-    #[allow(dead_code)]
-    pub(crate) fn suffix(&self) -> &[u8; 16] {
-        &self.suffix
     }
 }
 
@@ -296,11 +289,11 @@ impl UnlockedVault {
 
         // The replacement file under a reserved, never-published name.
         let suffix = qv_crypto::random_array::<16>().map_err(|_| StoreError::Rng)?;
-        let mut name = String::from(".qvrotate-new-");
-        for b in suffix {
-            name.push_str(&format!("{b:02x}"));
-        }
-        let final_path = fs::with_suffix(self.file.path(), &name);
+        let final_path = crate::rotation_guard::sibling(
+            self.file.path(),
+            crate::rotation_guard::Sibling::New,
+            &suffix,
+        );
         let (lock, temp) = fs::create_temp(&final_path)?;
         let cleanup = Unpublished(Some(temp.clone()));
 

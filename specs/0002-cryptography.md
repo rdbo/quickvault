@@ -28,6 +28,7 @@ not migrate record encryption, signatures or TLS.
 | stored-data / 1 | XChaCha20-Poly1305, 32-byte keys, random 24-byte nonce, 16-byte tag |
 | password-wrap / 1 | XChaCha20-Poly1305 with password KEK plus a 32-byte KEK commitment (§3.2) |
 | derivation / 1 | HKDF-SHA-512; canonical domain/context encoding (§3) |
+| lan / 1 | X-Wing draft-11, HKDF-SHA-512, MAC/1, XChaCha20-Poly1305 with per-direction counter nonces, SHA-256 transcripts (0013) |
 | MAC / 1 | HMAC-SHA-512 truncated to its first 32 bytes (not HMAC-SHA-512/256) |
 | object-hash / 1 | SHA-256 for immutable-object hashes and checkpoint IDs |
 | signature / 1 | Ed25519 (RFC 8032, strict verification) plus ML-DSA-65 (FIPS 204, pure, empty context); both verify the identical canonical transcript |
@@ -103,6 +104,7 @@ derivation_profile]`.
 | device-storage | Wrap local device signing bundles when bound to this vault |
 | recovery-ed25519 | Independent Ed25519 recovery-key seed |
 | recovery-mldsa65 | Independent ML-DSA-65 recovery-key seed |
+| lan-link | Root of pairwise LAN link keys (0013 §4.6) |
 
 Labels are never reused. Algorithm-specific seeds are separate derivations;
 do not reuse one signature algorithm's seed for another.
@@ -167,10 +169,11 @@ or device signing keys were also compromised, replace those credentials and
 server trust before distributing new VK. Missing trusted device approval uses
 recovery plus out-of-band verification; no automatic old-key-only transition.
 
-For LAN peers, propagation of approval removal and generation transitions is
-an open protocol decision (0005 OQ6). This amendment removes the account
-prerequisite for LAN-only rotation; it does not select that peer protocol or
-make server revocation effective on LAN.
+LAN peer approvals are pairwise link keys bound to one key generation
+(0013 §9, §12). A rotated vault has no links and old link keys fail
+authentication. Each remaining device re-pairs through 0013 §4 in
+new-device mode. Removal is local and is not compromise recovery. Server
+revocation does not affect LAN links.
 
 3.6. Derive record keys from the record purpose key with HKDF-SHA-512,
 salt=vault ID, 32-byte output, info=`["qv/record-key/v1", record_id]`.
@@ -292,6 +295,7 @@ password guessing and device compromise are separate from vault encryption.
 
 ## Changelog
 
+- 2026-10-30: Owner-delegated acceptance of 0013 (roadmap D10, plan 0025): add the `lan / 1` profile namespace and the `lan-link` purpose label; §3.5 states that LAN approvals are generation-bound link keys and that rotation requires re-pairing.
 - 2026-10-29: Owner approved plan 0021 D1 A: an offline-only rotation may
   defer recovery public-key derivation until sync configuration needs those
   identities. Independent signing seeds still change with VK; recovery identity

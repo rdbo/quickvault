@@ -106,6 +106,7 @@ fn describe(s: &Session) -> Vec<String> {
     out
 }
 
+// 0012 §1: Implicit server prerequisite
 #[test]
 fn offline_lifecycle() {
     let d = Dir::new();

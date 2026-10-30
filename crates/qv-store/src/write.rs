@@ -145,10 +145,10 @@ impl UnlockedVault {
         Ok(())
     }
 
-    /// A rotation replacement is verified but never written or anchored
-    /// before installation (plan 0022).
+    /// A rotation replacement or transition copy is verified but never
+    /// written or anchored by the ordinary paths (plans 0022, 0023).
     fn refuse_candidate(&self) -> Result<(), StoreError> {
-        if self.file.role == crate::vault::FileRole::Candidate {
+        if self.file.role != crate::vault::FileRole::Ordinary {
             return Err(StoreError::Integrity);
         }
         Ok(())

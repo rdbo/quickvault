@@ -176,6 +176,7 @@ mod tests {
         }
     }
 
+    // 0012 §1: Hostile SQLite/CBOR
     #[test]
     fn head_rejects_reserved_indefinite_and_truncated() {
         for info in 28..=30u8 {

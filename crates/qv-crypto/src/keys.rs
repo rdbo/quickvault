@@ -630,6 +630,7 @@ mod tests {
         );
     }
 
+    // 0012 §1: Ambiguous trust boundary
     #[test]
     fn keys_debug_is_redacted() {
         let _guard = crate::memory::secrets_test_guard();

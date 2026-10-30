@@ -296,6 +296,7 @@ mod tests {
         assert_eq!(worst, NFC_EXPANSION, "the bound is tight");
     }
 
+    // 0012 §1: Ambiguous trust boundary
     #[test]
     fn password_debug_is_redacted() {
         let _guard = crate::memory::secrets_test_guard();
@@ -330,6 +331,7 @@ mod tests {
         assert_eq!(empty.expose_secret(), "");
     }
 
+    // 0012 §1: Unpinned crypto
     #[test]
     fn password_rfc9106_argon2id_through_the_pinned_crate() {
         let records = crate::kat::parse(include_str!("../tests/vectors/rfc9106-argon2id.txt"));
@@ -361,6 +363,7 @@ mod tests {
 
     /// The one full-profile (256 MiB) KDF test in this module; the vector's
     /// MK was computed independently with OpenSSL.
+    // 0012 §1: Unpinned crypto
     #[test]
     fn password_kdf_v1_full_profile_matches_openssl() {
         let _guard = crate::memory::secrets_test_guard();

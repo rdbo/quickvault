@@ -90,7 +90,18 @@
 //! phrase from header damage; later authenticated failures are integrity errors.
 //!
 //! **Not yet implemented:** general conflict resolution and merges (2.2),
-//! production inactivity/OS lifecycle hooks (2.3) and generation rotation (1.15).
+//! production inactivity/OS lifecycle hooks (2.3).
+//!
+//! **Rotation** (0002 §3.5, offline path; plan 0023):
+//! - [`Session::begin_rotation`] pins a recovery snapshot, consumes the
+//!   session and returns a verified, unpublished [`Rotation`].
+//! - [`Rotation::install`] publishes it after [`ROTATION_CONFIRMATIONS`]
+//!   phrase words were confirmed.
+//! - [`Core::resume_rotation`] and [`Core::finish_rotation`] complete or
+//!   roll back an interrupted transition.
+//!
+//! Snapshot policy counts the earlier generations' copies listed in the
+//! verified inventory and fails closed without one.
 //!
 //! **Errors**: [`CoreError`] (its rustdoc maps variants to CLI exit codes)
 //! carries no data.
@@ -102,6 +113,7 @@ mod error;
 mod history;
 mod index;
 mod order;
+mod rotation;
 mod session;
 mod settings;
 mod setup;
@@ -113,6 +125,7 @@ mod views;
 
 pub use edit::{EntryDraft, GroupDraft, PurgeReport};
 pub use error::CoreError;
+pub use rotation::{ROTATION_CONFIRMATIONS, Rotation, RotationError, RotationOutcome};
 pub use session::{CancelToken, EntryHandle, FieldHandle, GroupHandle, ItemHandle, Session};
 pub use settings::{SettingsDraft, estimate, generate};
 pub use setup::{Core, CoreConfig, Created, Protection, SystemTime, TimeSource, VaultInfo, harden};
@@ -140,7 +153,8 @@ pub use qv_model::{
     SecretText, Settings, Text, Timestamp, TotpError, VaultMeta, VersionId, WriterId,
 };
 pub use qv_store::{
-    AnchorDir, AnchorStatus, LocationWarnings, SnapshotKind, StoreError, VAULT_EXTENSION,
+    AnchorDir, AnchorStatus, InterruptedRotation, Leftovers, LocationWarnings, NeededPasswords,
+    RotationChoice, RotationState, SnapshotKind, StoreError, VAULT_EXTENSION,
 };
 
 pub use attachment::{AttachmentHandle, AttachmentSummary};

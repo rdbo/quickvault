@@ -60,4 +60,8 @@ plan, or a new plan that names the one it supersedes.
 | [0019](0019-snapshot-restore/PLAN.md) | Restore a local snapshot to a new vault (roadmap 1.13b) | Reviewed |
 | [0020](0020-password-recovery/PLAN.md) | Password change and recovery flows (roadmap 1.14) | Reviewed |
 | [0021](0021-offline-key-rotation/PLAN.md) | Rotation journal and open safeguards (roadmap 1.15a) | Reviewed |
-| [0022](0022-rotation-replacement/PLAN.md) | Verified rotation replacement and snapshot inventory (roadmap 1.15b) | Implemented |
+| [0022](0022-rotation-replacement/PLAN.md) | Verified rotation replacement and snapshot inventory (roadmap 1.15b) | Reviewed |
+| [0023](0023-rotation-install/PLAN.md) | Rotation installation, restart and `recovery rotate` (roadmap 1.15c) | Reviewed |
+| [0024](0024-offline-release-evidence/PLAN.md) | Offline hardening evidence (roadmap 1.16) | Reviewed |
+| [0025](0025-lan-protocol-spec/PLAN.md) | LAN sync protocol spec 0013 (roadmap 2.1) | Reviewed (0013 Accepted) |
+| [0026](0026-conflicts-archive-exchange/PLAN.md) | Verified archive input and merge candidates (roadmap 2.2a) | Implemented |

@@ -827,6 +827,7 @@ mod tests {
         }
     }
 
+    // 0012 §1: Impossible generator
     #[test]
     fn generator_infeasible_character_settings() {
         use GeneratorError::{AlphabetTooSmall, NoClassEnabled, RequiredClassEmpty};
@@ -890,6 +891,7 @@ mod tests {
         );
     }
 
+    // 0012 §1: Impossible generator
     #[test]
     fn generator_too_few_positions() {
         assert_eq!(check_positions(3, 4), Err(GeneratorError::TooFewPositions));
@@ -1065,6 +1067,7 @@ mod tests {
         }
     }
 
+    // 0012 §1: Impossible generator
     #[test]
     fn generator_require_each_class_exhausts_without_patching() {
         let _guard = secrets_test_guard();

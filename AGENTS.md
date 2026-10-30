@@ -52,7 +52,8 @@ started with “next phase”. Its **Session protocol** governs: check the tree,
 review the previous phase unless already Reviewed, plan the current phase,
 apply standing approval only when no listed stop condition applies, implement,
 then update the roadmap. If the previous phase is uncommitted, ask the owner
-to commit it first. Preserve the fresh-context review requirement.
+to commit it first. Preserve the fresh-context review requirement for
+implementation; spec-only or plan-only work needs no separate review session.
 
 ## Documentation duties
 
@@ -77,6 +78,10 @@ to commit it first. Preserve the fresh-context review requirement.
   `cargo test --locked`. Run focused checks while editing, then all gates on
   the final tree before handoff. Repeat affected checks after further edits;
   old logs are not current evidence. Do not weaken tests to save tokens.
+- Tests that cover a 0012 §1 offline row carry `// 0012 §1: <exact row>`
+  above their attributes; `sh scripts/check-matrix.sh` (CI) checks the rows
+  in `tests/matrix-offline.txt`. Pre-1.0, formats stay volatile: no freeze
+  until the owner says so.
 - Dependency changes: justify in the plan, run `cargo deny check` and
   `cargo vet --locked` (0012 §3), retain `Cargo.lock` changes for owner commit,
   minimize security-critical crates. CI uses GitHub Actions, actions pinned

@@ -43,6 +43,32 @@ pub(crate) enum CrashPoint {
     /// `publish`: the temp archive is renamed to its published name; the
     /// snapshot directory is not yet synced.
     ArchivePublished,
+    /// Rotation I1: the candidate has its reserved final name (plan 0023).
+    RotationCandidateNamed,
+    /// Rotation I2: the next generation's inventory is published.
+    RotationInventoryPublished,
+    /// Rotation I3: the journal (marker) is published.
+    RotationJournalPublished,
+    /// Rotation I4: the active vault has its retained old name.
+    RotationActiveRetired,
+    /// Rotation I5: the candidate is at the active name.
+    RotationInstalled,
+    /// Rotation I6: the anchor names the new head.
+    RotationAnchored,
+    /// Rotation I7: the retained old vault is removed.
+    RotationOldRemoved,
+    /// Rotation I8: the superseded inventory is removed.
+    RotationInventoryRetired,
+    /// Rotation I9 (and rollback's last step): the journal is removed.
+    RotationJournalRemoved,
+    /// Rollback: the installed new vault is back at its candidate name.
+    RollbackNewRetired,
+    /// Rollback: the old vault is back at the active name.
+    RollbackOldRestored,
+    /// Rollback: the candidate is removed.
+    RollbackCandidateRemoved,
+    /// Rollback: the unused next-generation inventory is removed.
+    RollbackInventoryRemoved,
 }
 
 /// Marks an ordering point.
@@ -79,6 +105,9 @@ pub(crate) mod test {
         Vault { vault: PathBuf, anchors: PathBuf },
         /// `publish`: every file of one directory (the snapshot directory).
         Dir(PathBuf),
+        /// Rotation: every file of several directories, each copied into
+        /// `snapshot/<label>`.
+        Dirs(Vec<(PathBuf, String)>),
     }
 
     thread_local! {
@@ -114,6 +143,22 @@ pub(crate) mod test {
         });
     }
 
+    /// Arms `point` for the current thread. When reached, every file of each
+    /// directory is copied into `snapshot/<label>` (0700).
+    pub(crate) fn arm_dirs(point: CrashPoint, dirs: &[(&Path, &str)], snapshot: &Path) {
+        ARMED.with(|a| {
+            *a.borrow_mut() = Some(Armed {
+                point,
+                copy: Copy::Dirs(
+                    dirs.iter()
+                        .map(|(d, l)| ((*d).to_owned(), (*l).to_owned()))
+                        .collect(),
+                ),
+                snapshot: snapshot.to_owned(),
+            });
+        });
+    }
+
     /// Disarms without firing; `true` if the armed point was never reached.
     pub(crate) fn disarm() -> bool {
         ARMED.with(|a| a.borrow_mut().take().is_some())
@@ -122,6 +167,21 @@ pub(crate) mod test {
     fn copy_if_exists(from: &Path, to: &Path) {
         if from.exists() {
             std::fs::copy(from, to).unwrap();
+        }
+    }
+
+    /// Copies every regular file of `dir` into `to` (created 0700), keeping
+    /// modes so owner-only checks still pass on the copy.
+    fn copy_dir(dir: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        std::fs::set_permissions(to, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for e in entries {
+                let e = e.unwrap();
+                if e.file_type().unwrap().is_file() {
+                    copy_if_exists(&e.path(), &to.join(e.file_name()));
+                }
+            }
         }
     }
 
@@ -157,18 +217,10 @@ pub(crate) mod test {
                     }
                 }
             }
-            Copy::Dir(dir) => {
-                std::fs::create_dir_all(&a.snapshot).unwrap();
-                std::fs::set_permissions(
-                    &a.snapshot,
-                    std::os::unix::fs::PermissionsExt::from_mode(0o700),
-                )
-                .unwrap();
-                if let Ok(entries) = std::fs::read_dir(dir) {
-                    for e in entries {
-                        let e = e.unwrap();
-                        copy_if_exists(&e.path(), &a.snapshot.join(e.file_name()));
-                    }
+            Copy::Dir(dir) => copy_dir(dir, &a.snapshot),
+            Copy::Dirs(dirs) => {
+                for (dir, label) in dirs {
+                    copy_dir(dir, &a.snapshot.join(label));
                 }
             }
         }

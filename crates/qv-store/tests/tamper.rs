@@ -82,6 +82,7 @@ fn tamper_untouched_vault_opens() {
     assert_eq!(std::fs::read(&p).unwrap(), before);
 }
 
+// 0012 §1: Hostile SQLite/CBOR
 #[test]
 fn tamper_schema_changes_are_refused() {
     let cases: &[(&str, StoreError)] = &[
@@ -156,6 +157,7 @@ fn tamper_schema_changes_are_refused() {
     }
 }
 
+// 0012 §1: Hostile SQLite/CBOR
 #[test]
 fn tamper_pages_and_files_are_refused() {
     let good = vault_bytes();
@@ -219,6 +221,7 @@ fn write_mode(path: &Path, bytes: &[u8], mode: u32) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
 }
 
+// 0012 §1: Hostile SQLite/CBOR
 #[test]
 fn tamper_planted_sidecars_are_refused() {
     let d = Dir::new();

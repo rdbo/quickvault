@@ -4,6 +4,7 @@
 
 use qv_crypto::{Hardening, harden_process};
 
+// 0012 §1: Swap/hibernation leaks
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[test]
 fn process_hardening_applies_and_is_idempotent() {
@@ -22,6 +23,7 @@ fn process_hardening_applies_and_is_idempotent() {
     assert_eq!(dumpable_behavior().unwrap(), DumpableBehavior::NotDumpable);
 }
 
+// 0012 §1: Swap/hibernation leaks
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 #[test]
 fn process_hardening_reports_unsupported() {

@@ -91,6 +91,12 @@ pub(crate) enum FileRole {
     Ordinary,
     /// A rotation's private replacement under its reserved name.
     Candidate,
+    /// A copy taking part in a published transition (plan 0023): the
+    /// installer's and the restart's copies, opened only by paths derived
+    /// from the locked journal. No marker or reserved-name test (the marker
+    /// exists by definition, and the caller holds its lock); identity is
+    /// still checked. Never written or anchored ordinarily.
+    Transition,
 }
 
 /// Whether this session may write.
@@ -393,7 +399,29 @@ impl VaultFile {
                 crate::rotation_guard::check_marker(path)
             }
             FileRole::Candidate => Err(StoreError::Internal),
+            FileRole::Transition => Ok(()),
         }
+    }
+
+    /// Moves this locked file to `to` without replacing anything, syncs the
+    /// directory and follows the inode: identity checks then use `to`.
+    /// Only rotation installation and restart call it, on non-ordinary
+    /// roles.
+    pub(crate) fn relocate(&mut self, to: &Path) -> Result<(), StoreError> {
+        if self.role == FileRole::Ordinary {
+            return Err(StoreError::Internal);
+        }
+        self.lock.same_as_path(&self.path)?;
+        fs::rename_noreplace(&self.path, to)?;
+        self.path = to.to_owned();
+        fs::sync_dir(fs::parent_of(to))?;
+        self.lock.same_as_path(&self.path)
+    }
+
+    /// Switches this file to the transition role once its journal is
+    /// published (plan 0023).
+    pub(crate) fn enter_transition(&mut self) {
+        self.role = FileRole::Transition;
     }
 
     /// Unlocks with the master password: one KDF run, the header MAC, the
@@ -455,8 +483,6 @@ impl VaultFile {
         self.finish_unlock(vk, anchors)
     }
 
-    /// The unlock verification and anchor check, once VK is known and the
-    /// header MAC verified.
     /// The path this file was opened at.
     pub(crate) fn path(&self) -> &Path {
         &self.path
@@ -471,7 +497,7 @@ impl VaultFile {
         vk: VaultKey,
         anchors: &AnchorDir,
     ) -> Result<UnlockedVault, StoreError> {
-        if self.role != FileRole::Candidate {
+        if self.role == FileRole::Ordinary {
             return Err(StoreError::Internal);
         }
         self.check_identity()?;
@@ -494,6 +520,8 @@ impl VaultFile {
         })
     }
 
+    /// The unlock verification and anchor check, once VK is known and the
+    /// header MAC verified.
     fn finish_unlock(
         self,
         vk: VaultKey,
@@ -1584,6 +1612,7 @@ pub(crate) mod tests {
         assert!(VaultFile::open(&p).is_ok());
     }
 
+    // 0012 §1: Ambiguous trust boundary
     #[test]
     fn vault_unlocked_debug_is_redacted() {
         let (d, a) = (TestDir::new(), TestDir::new());

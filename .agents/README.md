@@ -52,7 +52,7 @@ provided; the roadmap itself is not an implementation plan.
 | `crates/<name>/` | Workspace crates (`ARCHITECTURE.md` §3) |
 | `deny.toml`, `supply-chain/` | `cargo deny` policy and `cargo vet` audits/exemptions |
 | `fuzz/` | cargo-fuzz targets; own workspace and lockfile, outside the shipped workspace; pinned nightly in CI |
-| `scripts/` | Repository checks (`check-spdx.sh`); Android SDK/NDK and Rust Android targets setup (`setup-android.sh`, versions pinned inside) |
+| `scripts/` | Repository checks (`check-spdx.sh`, `check-matrix.sh` for 0012 row tags); Android SDK/NDK and Rust Android targets setup (`setup-android.sh`, versions pinned inside) |
 | `third-party/` | Approved vendor provenance and patch maintenance; only x11rb 0.13.2 is authorized (plan 0015) |
 | `.github/workflows/` | CI (gates, supply chain, fuzzing), actions pinned by SHA |
 | `.agents/skills/` | Agent skills (source of truth) |

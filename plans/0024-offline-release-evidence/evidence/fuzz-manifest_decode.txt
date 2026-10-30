@@ -1,0 +1,13 @@
+# Fuzz campaign summary: manifest_decode (plan 0024 step 6)
+# nightly-2026-10-01, cargo-fuzz 0.13.2, -s none (no sanitizer; musl host), -use_cmp=0, -max_total_time=1800
+INFO: Seed: 1757377600
+INFO: Loaded 1 modules   (28770 inline 8-bit counters): 28770 [0x7fe6a01548d8, 0x7fe6a015b93a), 
+INFO: Loaded 1 PC tables (28770 PCs): 28770 [0x7fe6a015b940,0x7fe6a01cbf60), 
+#873045361	DONE   cov: 298 ft: 649 corp: 258/12956b lim: 4096 exec/s: 484755 rss: 37Mb
+Done 873045361 runs in 1801 second(s)
+stat::number_of_executed_units: 873045361
+stat::average_exec_per_sec:     484755
+stat::new_units_added:          450
+stat::slowest_unit_time_sec:    0
+stat::peak_rss_mb:              37
+findings (crash/timeout/oom/leak lines): 0

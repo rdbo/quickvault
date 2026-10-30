@@ -75,6 +75,7 @@ fn kat_parser_handles_empty_values_and_comments() {
     assert_eq!(r[1].get("c"), [1]);
 }
 
+// 0012 §1: Unpinned crypto
 #[test]
 fn kat_rfc4231_hmac_sha512() {
     let records = vectors!("rfc4231-hmac-sha512.txt");
@@ -89,6 +90,7 @@ fn kat_rfc4231_hmac_sha512() {
     }
 }
 
+// 0012 §1: Unpinned crypto
 #[test]
 fn kat_mac1_truncates_rfc4231_style_outputs() {
     // RFC 4231 has no 32-byte key; check truncation for 32-byte keys
@@ -102,6 +104,7 @@ fn kat_mac1_truncates_rfc4231_style_outputs() {
     }
 }
 
+// 0012 §1: Unpinned crypto
 #[test]
 fn kat_wycheproof_hkdf_sha512() {
     let records = vectors!("wycheproof-hkdf-sha512.txt");
@@ -120,6 +123,7 @@ fn kat_wycheproof_hkdf_sha512() {
     assert!(saw_empty_salt && saw_empty_info);
 }
 
+// 0012 §1: Unpinned crypto
 #[test]
 fn kat_sha256() {
     let records = vectors!("sha256.txt");
@@ -132,6 +136,7 @@ fn kat_sha256() {
     }
 }
 
+// 0012 §1: Unpinned crypto
 #[test]
 fn kat_xchacha20poly1305_draft_a_3_1() {
     let records = vectors!("xchacha20poly1305.txt");
@@ -191,6 +196,7 @@ mod dev {
 
     /// Every value in qv-dev-keys.txt (computed by crosscheck.py with the
     /// Python standard library) is reproduced by the Rust code.
+    // 0012 §1: Unpinned crypto
     #[test]
     fn kat_dev_keys_match_the_independent_python_values() {
         let _guard = crate::memory::secrets_test_guard();
@@ -300,6 +306,7 @@ mod dev {
 
     /// Regression pin for stored-data/1 (Rust-generated; the XChaCha
     /// primitive itself is covered by the upstream draft vector).
+    // 0012 §1: Unpinned crypto
     #[test]
     fn kat_dev_stored_data() {
         let _guard = crate::memory::secrets_test_guard();

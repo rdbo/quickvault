@@ -90,7 +90,7 @@ rather than creating unused workspace scaffolding.
 | qv-model | Canonical payloads, atomic records, deterministic tree projection |
 | qv-store | Hardened SQLite, immutable objects, manifests, transactions, authenticated archives (header, writer, role-verifying reader), new-path restore and the full `verify` pass |
 | qv-protocol | Bounded canonical LAN/server wire types, contexts and version registry |
-| qv-sync | Shared causal merge, direct LAN exchange, remote candidate state and publication orchestration |
+| qv-sync | Shared causal merge candidates (implemented); direct LAN exchange, remote candidate state and publication orchestration (planned) |
 | qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets and the `verify` report |
 | qv-platform | Native secure input, keystore, clipboard, verified OS autofill |
 | qv-cli / qv-app | Explicit user actions and views; no unrestricted crypto/file/SQL bridge |
@@ -159,13 +159,13 @@ separate confirmation. Old slots, retained copies and independent snapshots
 remain capable of disclosing the same VK; deletion is not cryptographic erasure.
 The current registry still has only KDF/wrap profile 1; rewrapping exercises the
 KDF-only path without inventing a second profile. Standalone phrase-based archive
-import, generation rotation and remote credential adoption remain future work.
+import and remote credential adoption remain future work.
 Rotation foundation (plan 0021, phase 1.15a) adds a bounded, canonical intent
 container with independently verified old/new local-state MACs. The container
 holds fixed-size metadata, never a key, password slot or path, and does not
 authorize installation. An existing `.qvrotate` sibling excludes ordinary
 open/create/restore and mutation paths before SQLite/anchor changes, even
-when the active path is absent. No production writer creates that marker yet.
+when the active path is absent.
 Phase 1.15b (plan 0022) builds the private replacement of the next generation.
 `UnlockedVault::prepare_rotation` reencrypts every retained object under a new
 VK with fresh object IDs, keeps every version ID, clock, floor and conflict, and
@@ -177,8 +177,19 @@ orphaned replacement or retained old copy can never advance that anchor. A
 per-generation snapshot inventory, MAC'd with the new local-state key, records
 earlier-generation snapshots (authenticated with the old VK) for budget
 accounting. A row's file is removed only when its hash matches.
-Installation through the journal, restart and rollback, inventory-aware
-snapshot policy, core and `recovery rotate` remain phase 1.15c. The owner-approved
+Phase 1.15c (plan 0023) publishes the replacement. In order: name the
+candidate, publish the next inventory, then the journal (also the marker),
+retire the active file to `-old-` and move the candidate in, both with
+no-replace renames, advance the anchor by its generation step, then remove
+the old file, the old inventory and the journal last. On restart, the
+locked journal is checked against every copy, each authenticated with its own
+password, and against the anchor. The rotation then completes or rolls back;
+a rollback is refused once the anchor names the new head. Core pins the
+mandatory recovery snapshot, consumes the session and installs only after
+three phrase words are confirmed. Snapshot policy counts inventoried copies
+of older generations and removes one only when its hash matches. A missing
+inventory fails closed. `qvault recovery rotate` drives both the new and the
+resumed flow. The owner-approved
 0002 amendment defers offline-only recovery public-key derivation until sync
 uses the identities; the independent seeds still change with the new VK.
 
@@ -217,6 +228,22 @@ remains. Four dependency advisory exceptions and initial vet exemptions are
 spike-only. It is outside default workspace members and is not a shipped frontend.
 Other components are planned and are created by the roadmap phase that first
 needs them.
+
+Roadmap 2.2a (plan 0026) adds `qv-sync`'s shared candidate merge and
+`qv-store::VerifiedIncoming`, an authenticated read capability over a bounded
+private encrypted archive copy. The private copy is unlinked before writing;
+a crash in the creation/unlink gap can leave an empty temporary file. Its
+reader rechecks complete-envelope commitments and role-bound AEAD on later
+reads. Candidates join complete versions and suppression floors, preserve
+conflicts, and map every retained object/chunk to its source without generating
+versions or changing ciphertext. They hold validated metadata, not publication
+authority. Logical duplicate identity comparisons use confidential SHA-256
+digests and constant-time comparison. A covered dominated final tombstone
+cannot be represented under the existing manifest history-floor rules; the
+candidate builder rejects that combination rather than forgetting it.
+No incoming state is accepted yet: source/candidate revalidation, durable
+filename receipts and transaction/anchor integration remain 2.2b; core/CLI
+resolution and export remain 2.2c. The existing format stays volatile.
 
 Frontends call qv-core. Core injects platform traits and orchestrates model,
 store, crypto and sync. Crypto/model have no dependency on frontends. Server
@@ -288,7 +315,14 @@ vaults are unlocked. Exchange bounded authenticated manifests and immutable
 objects, merge complete causal versions, and commit through the normal local
 transaction/anchor path. Each device retains its local edits and deletion
 knowledge; interrupted exchange is safe to retry. No server checkpoint is
-advanced by a LAN exchange.
+advanced by a LAN exchange. The proposed protocol is
+[0013](specs/0013-lan-sync-protocol.md) (Accepted 2026-10-30; release still needs the 0012 §3 LAN gate):
+- the user opens an explicit, time-boxed pairing or receive window;
+- out-of-band pairing (QR or a 26-character code, committed comparison
+  code) creates a pairwise link key bound to one key generation;
+- each session authenticates with that key and uses a fresh X-Wing
+  exchange;
+- removal is local, and rotation drops every link.
 
 **Remote sync:** stage and verify the remote state against the remembered remote
 base (no lower sequence; every remembered head, tombstone and floor still
@@ -313,8 +347,8 @@ explicitly approved vault generations.
 **Server revocation:** invalidate existing sessions, grants and pending transfers
 atomically; check revocation on every operation and before publication. Rotate
 VK if the departed device may hold it. Server revocation does not revoke a
-device's LAN access or erase its keys; LAN peer removal requires a separate
-policy (0005 Open Questions).
+device's LAN access or erase its keys. LAN peer removal is local per link
+(0013 §12).
 
 **Server-only recovery:** requires the separate account login plus a matching
 vault recovery phrase. Without a trusted checkpoint, freshness starts unverified.
@@ -336,7 +370,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Application signatures | Ed25519 + ML-DSA-65, both required |
 | Remote transport | TLS 1.3, X25519MLKEM768, pinned application server identity |
 | Remote account authentication | Pinned RFC 9807 OPAQUE application profile |
-| Direct LAN discovery / enrollment / transport | Not yet selected; requirements and open decisions in 0005 §6 |
+| Direct LAN discovery / enrollment / transport | Specified in 0013 (Accepted): DNS-SD only during explicit windows (`_qvault._tcp`, random instance), QR/manual pairing into pairwise link keys, X-Wing draft-11 + HKDF-SHA-512 + MAC/1 handshake, XChaCha20-Poly1305 counter-nonce records over TCP; crates chosen in roadmap 2.8–2.10 |
 | CLI / license | clap (builder API), rustix termios/poll for bounded no-echo prompts, signal-hook atomic flags for cancellation, own escaping and JSON writer, private X11 adapter over maintained x11rb 0.13.2 with protected transport buffers and framing budgets; `zxcvbn` (in `qv-core`) for typed master passwords / AGPL-3.0-or-later |
 
 OPAQUE and ordinary TLS certificates are explicit classical exceptions.
@@ -364,14 +398,34 @@ The phased implementation roadmap for these milestones is
 tracked in [plans/0002-roadmap](plans/0002-roadmap/PLAN.md). Offline rotation is split into
 roadmap 1.15a (journal/open safeguards), 1.15b (verified replacement and
 snapshot inventory) and 1.15c (durable install/restart, core and CLI), with
-the owner commit and fresh-review boundary between each.
+the owner commit and fresh-review boundary between each. All three are
+implemented and reviewed. Roadmap 1.16 (plan 0024) collects offline hardening
+evidence without freezing anything:
+- every offline 0012 row tied to a named test (`scripts/check-matrix.sh`);
+- permission, write-failure and redaction audits;
+- fuzzing, with a weekly CI campaign;
+- Linux budget benchmarks (`budget_bench`).
+
+It is implemented and reviewed.
+
+Roadmap 2.2 is split into 2.2a (verified private archive input and shared merge
+candidates, plan 0026), 2.2b (atomic acceptance and filename receipts), and
+2.2c (core/CLI conflict resolution and archive export). Preserve the owner
+commit and fresh-context review between these parts. Candidate construction
+alone does not complete archive exchange or authorize a release.
+
+The project is pre-1.0 and every format stays volatile (owner decision
+2026-10-30). The 0012 §3 format freeze, golden vectors and supported-device
+KDF tuning wait for an unscheduled pre-1.0 release step, after the owner's
+user testing.
 
 Future implementations must satisfy the acceptance criteria in
 [0012 — Security Validation](specs/0012-security-validation.md).
 These are specification requirements; no implementation or security validation
 has been completed by documenting them.
 
-Remaining implementation work includes KDF/mobile-budget benchmarks, reviewed
+Remaining implementation work includes supported-device KDF/mobile-budget
+benchmarks before release, reviewed
 platform-wrap backends, input/lifecycle validation, and independent
 protocol review. A witness service is optional future work; v1's documented
 fork/freeze limits do not depend on pretending it exists.
@@ -384,10 +438,13 @@ platform gates pass; do not weaken unlock policy to complete an app milestone.
 
 Open design decisions recorded for the owner (not yet decided):
 whether per-device signing identities are worth their complexity
-([0006](specs/0006-server-authentication.md) OQ2), plus LAN discovery/addressing,
-authenticated peer enrollment/session design, local peer-state persistence,
-LAN listening lifecycle and peer removal ([0005](specs/0005-synchronization.md)
-OQ3–OQ6). No LAN wire protocol has been selected by this direction change.
+([0006](specs/0006-server-authentication.md) OQ2).
+LAN discovery/addressing, enrollment and sessions, peer-state persistence,
+listening lifecycle and peer removal ([0005](specs/0005-synchronization.md)
+OQ3–OQ6, roadmap D10) were delegated by the owner on 2026-10-30 and are
+decided in [0013](specs/0013-lan-sync-protocol.md), accepted the same day
+by owner delegation. The independent protocol review (D12) is still
+pending and gates any LAN release.
 
 Decided on 2026-10-25 as owner decision D6 (roadmap 0002), recorded in
 [0007](specs/0007-history-and-backups.md) §3.1/§3.5 (plan 0018): password slots

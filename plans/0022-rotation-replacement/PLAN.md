@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-10-29 | 2026-10-29 (standing approval, roadmap 0002) | 0002 §2.2, §3.2–3.5; 0003 §2, §6; 0004 §1–6; 0005 §1, §5.4 (D5); 0007 §1–3; 0008 §1–3, §5 (D5); 0012 §1 |
+| Reviewed | 2026-10-29 | 2026-10-29 (standing approval, roadmap 0002) | 0002 §2.2, §3.2–3.5; 0003 §2, §6; 0004 §1–6; 0005 §1, §5.4 (D5); 0007 §1–3; 0008 §1–3, §5 (D5); 0012 §1 |
 
 ## Intent
 
@@ -708,3 +708,7 @@ of roadmap 1.15. All of that is 1.15c. This was a same-context
 implementation check only; the next fresh session reviews this plan before
 1.15c. Changes are uncommitted; no commit, push or branch.
 
+2026-10-30: Fresh-context review (next-phase session): **Approved with minor
+fixes**; status Reviewed. Reviewer added the anchor-Mismatch and
+unknown-extension replacement tests and moved two misplaced doc comments. The
+step-4 attachment-history case is unreachable. See REVIEW.md.

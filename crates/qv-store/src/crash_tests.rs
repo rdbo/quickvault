@@ -45,6 +45,7 @@ fn crashing_edit(u: &mut UnlockedVault, record: RecordId) -> Result<(), StoreErr
     w.commit()
 }
 
+// 0012 §1: Anchor crash windows
 #[test]
 fn crash_every_mutation_point() {
     use CrashPoint::*;
@@ -96,6 +97,7 @@ fn crash_every_mutation_point() {
     }
 }
 
+// 0012 §1: Rotation/purge ambiguity
 #[test]
 fn history_purge_crash_boundaries_preserve_heads_and_atomic_floor() {
     use CrashPoint::*;
@@ -178,6 +180,7 @@ fn crash_spilled_transaction_rolls_back() {
     assert!(!s.join("v.qvault-journal").exists());
 }
 
+// 0012 §1: Anchor crash windows
 #[test]
 fn crash_every_create_point() {
     for point in [CrashPoint::CreateBuilt, CrashPoint::CreateAnchored] {
@@ -205,6 +208,7 @@ fn anchor_file(a: &TestDir) -> PathBuf {
     a.join("anchors").join(&fixture().anchor.0)
 }
 
+// 0012 §1: Whole-file rollback
 #[test]
 fn rollback_two_commits_ahead() {
     let (d, a) = (TestDir::new(), TestDir::new());
@@ -220,6 +224,7 @@ fn rollback_two_commits_ahead() {
     assert_eq!(err(unlock(&p, &dir, PASSWORD)), StoreError::Rollback);
 }
 
+// 0012 §1: Whole-file rollback
 #[test]
 fn rollback_fork_and_old_copy() {
     // Two copies of one state (same replica), each one commit ahead.

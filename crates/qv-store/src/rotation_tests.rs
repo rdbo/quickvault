@@ -471,6 +471,69 @@ fn rotation_replacement_preserves_conflicting_entry_heads() {
     drop(d);
 }
 
+#[test]
+fn rotation_replacement_refuses_a_mismatched_anchor() {
+    // The anchor from two commits ago: an explicit-recovery session whose
+    // writes stay blocked, so rotation is refused with the same error.
+    let (d, a) = (TestDir::new(), TestDir::new());
+    let (path, anchors) = copy_fixture(&d, &a, "v.qvault");
+    let anchored = files(anchors.path());
+    {
+        let mut u = unlock(&path, &anchors, PASSWORD).unwrap();
+        edit(&mut u, <RecordId as RandomId>::generate().unwrap(), "one");
+        edit(&mut u, <RecordId as RandomId>::generate().unwrap(), "two");
+    }
+    for (file, bytes) in &anchored {
+        write_file(file, bytes, 0o600);
+    }
+    let (u, status) = {
+        let _k = kdf();
+        VaultFile::open(&path)
+            .unwrap()
+            .unlock_for_recovery(&pw(PASSWORD), &anchors)
+            .unwrap()
+    };
+    assert_eq!(status, crate::AnchorStatus::Mismatch);
+    let evidence = Evidence::of(&d, &anchors);
+    assert_eq!(err(prepare(u)), StoreError::Rollback);
+    evidence.unchanged(&d, &anchors);
+}
+
+#[test]
+fn rotation_replacement_preserves_unknown_extension_fields() {
+    let (d, a) = (TestDir::new(), TestDir::new());
+    let (path, anchors) = copy_fixture(&d, &a, "v.qvault");
+    let mut u = unlock(&path, &anchors, PASSWORD).unwrap();
+    let root = u.manifest().root_group_id();
+    // An entry version with an unknown envelope key (0003 §2.2), built by
+    // decoding, the only way extensions arise.
+    let extended = <RecordId as RandomId>::generate().unwrap();
+    let ext_version = {
+        let mut w = u.write().unwrap();
+        let counter = w.reserve_counter().unwrap();
+        let plain = entry_version(root, "ext", w.writer_id(), counter, &[]);
+        let mut bytes = plain.encode().unwrap().to_vec();
+        assert!((0xa0..0xb7).contains(&bytes[0]), "small map header");
+        bytes[0] += 1;
+        bytes.extend_from_slice(&[0x14, 0x61, 0x78]); // 20: "x"
+        let v = RecordVersion::decode(&bytes).unwrap();
+        assert_eq!(v.ext.len(), 1);
+        let id = v.version_id;
+        w.put_local(extended, v).unwrap();
+        w.commit().unwrap();
+        id
+    };
+    let source_ext = u.read_version(extended, ext_version).unwrap();
+    let evidence = Evidence::of(&d, &anchors);
+
+    let p = prepare(u).unwrap();
+    let replaced = p.replacement.read_version(extended, ext_version).unwrap();
+    assert_eq!(replaced.ext.len(), 1);
+    assert!(replaced.ext.content_eq(&source_ext.ext));
+    drop(p);
+    evidence.unchanged(&d, &anchors);
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: 6, ..ProptestConfig::default() })]
     #[test]

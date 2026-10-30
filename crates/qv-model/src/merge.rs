@@ -663,6 +663,7 @@ mod tests {
                 prop_assert_eq!(m.heads().len() + m.dominated().len(), h.len());
             }
 
+            // 0012 §1: Order-dependent merges
             #[test]
             fn merge_is_permutation_invariant(
                 (h, shuffled) in arb_history().prop_flat_map(|h| (Just(h.clone()), Just(h).prop_shuffle()))
@@ -674,6 +675,7 @@ mod tests {
                 prop_assert_eq!(ids(a.dominated()), ids(b.dominated()));
             }
 
+            // 0012 §1: Order-dependent merges
             #[test]
             fn merge_regrouping_converges(h in arb_history(), split in any::<u32>(), split2 in any::<u32>()) {
                 let all = head_ids(h.clone());
@@ -691,6 +693,7 @@ mod tests {
                 prop_assert_eq!(head_ids(left.into_iter().chain(b2)), all);
             }
 
+            // 0012 §1: Order-dependent merges
             #[test]
             fn merge_ignores_duplicate_delivery(h in arb_history(), reps in proptest::collection::vec(1usize..=3, 24)) {
                 let all = head_ids(h.clone());
@@ -806,6 +809,7 @@ mod tests {
         }
 
         /// 0012 row "Old-date concurrent edits".
+        // 0012 §1: Old-date concurrent edits
         #[test]
         fn scenario_old_date_concurrent_edit_survives() {
             let creds = |p| ("a", p, "otpauth://totp/a?secret=AA");
@@ -820,6 +824,7 @@ mod tests {
         }
 
         /// 0012 row "Mixed credentials": no synthetic combination.
+        // 0012 §1: Mixed credentials
         #[test]
         fn scenario_mixed_credentials_stay_whole() {
             let a = || {
@@ -872,6 +877,7 @@ mod tests {
         }
 
         /// 0012 row "Deleted-entry resurrection" (model level).
+        // 0012 §1: Deleted-entry resurrection
         #[test]
         fn scenario_deleted_entry_stays_deleted() {
             let creds = ("u", "p", "otpauth://totp/x?secret=AA");

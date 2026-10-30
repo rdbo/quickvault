@@ -65,6 +65,7 @@ fn snapshot_ls_lists_authenticated_local_snapshots() {
     assert_eq!(o.stdout.lines().count(), 1, "{}", o.stdout);
 }
 
+// 0012 §1: Hostile files from sync folders
 #[test]
 fn hostile_files_from_sync_folders_are_warnings_not_rows() {
     // 0012 §1 row "Hostile files from sync folders": an unauthenticatable
@@ -133,6 +134,7 @@ fn trash_empty_takes_a_recovery_snapshot_before_the_deletion() {
     );
 }
 
+// 0012 §1: Snapshot disk growth
 #[test]
 fn snapshot_disk_growth_a_snapshot_failure_aborts_the_destructive_operation() {
     // 0012 §1 row "Snapshot disk growth": the mandatory recovery copy cannot

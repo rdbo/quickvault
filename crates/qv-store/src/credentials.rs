@@ -41,6 +41,7 @@ fn replace_cancellable(
     w.commit_cancellable(&|| cancel)
 }
 
+// 0012 §1: Migration coupling
 #[test]
 fn credentials_rewrap_preserves_objects_and_phrase_and_reauthenticates_current_slot() {
     // Exercise real entry history and multi-chunk attachment envelopes as well

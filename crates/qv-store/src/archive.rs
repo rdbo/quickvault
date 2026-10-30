@@ -2001,6 +2001,7 @@ mod tests {
         }
     }
 
+    // 0012 §1: Live SQLite copying
     #[test]
     fn archive_writer_aborts_on_a_corrupt_object_with_nothing_published() {
         // 0012 §1 row "Live SQLite copying": only verified objects are written.
@@ -2027,6 +2028,7 @@ mod tests {
         }
     }
 
+    // 0012 §1: Live SQLite copying
     #[test]
     fn live_sqlite_copying_archive_is_built_from_verified_objects() {
         // 0012 §1 row "Live SQLite copying": the archive is a new stream of
@@ -2054,6 +2056,7 @@ mod tests {
         assert_eq!(s.frames.len(), 1 + u.manifest().references().len());
     }
 
+    // 0012 §1: Live SQLite copying
     #[test]
     fn archive_during_a_concurrent_writer_is_safe() {
         // 0012 §1 row "Live SQLite copying": a concurrent writer attempt and a
@@ -2239,6 +2242,7 @@ mod tests {
         assert!(leftovers.is_empty(), "a failed publish left a file");
     }
 
+    // 0012 §1: Live SQLite copying
     #[test]
     fn snapshot_publish_crash_points_leave_no_partial_archive() {
         for point in [CrashPoint::ArchiveVerified, CrashPoint::ArchivePublished] {
@@ -2275,6 +2279,7 @@ mod tests {
         }
     }
 
+    // 0012 §1: Exchange-file password guessing
     #[test]
     fn exchange_file_password_guessing_archives_carry_no_slot() {
         // 0012 §1 row "Exchange-file password guessing": nothing this crate
@@ -2348,6 +2353,7 @@ mod tests {
 
     // --- The reader's rejection matrix -----------------------------------
 
+    // 0012 §1: Hostile files from sync folders
     #[test]
     fn hostile_archive_files_are_rejected_before_any_sqlite_call() {
         // 0012 §1 row "Hostile files from sync folders": every mutation is a
@@ -2616,6 +2622,7 @@ mod tests {
         }
     }
 
+    // 0012 §1: Self-referential/incomplete commitments
     #[test]
     fn archive_rejects_wrong_reference_digest_before_sink() {
         let d = crate::fs::test_dir::TestDir::new();

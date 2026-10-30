@@ -640,6 +640,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "qv-sync"
+version = "0.0.0"
+dependencies = [
+ "qv-crypto",
+ "qv-encoding",
+ "qv-model",
+ "qv-store",
+]
+
+[[package]]
 name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

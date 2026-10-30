@@ -49,7 +49,11 @@ The session then works without further prompting:
    are done.
 2. **Review the previous phase** (`quickvault-reviewer`) unless its plan is
    already `Reviewed`. A fresh context makes the review independent. If the
-   review escalates problems, stop and report them.
+   review escalates problems, stop and report them. Only implementation
+   (code, tests, scripts, CI) gets this review. A spec-only or plan-only
+   phase is checked in its own session and needs no separate review session
+   (owner direction 2026-10-30). The external D12 protocol review is
+   unaffected.
 3. **Plan this phase** (`quickvault-architect`): read the phase entry, the cited
    spec sections and the existing code, and write `plans/NNNN-slug/PLAN.md`.
 4. **Standing approval.** The plan is approved without asking the owner
@@ -167,7 +171,15 @@ at the phase that needs them.
    Resolution: owner accepted option A on 2026-10-25. The 0011 amendment is the first step of phase 1.11.
 10. **D10 — 0005 OQ3–OQ6: LAN discovery, trust/session protocol, listening,
     peer removal.** Worked through in phase 2.1 with `quickvault-thinker`.
-    Blocks: 2.8–2.10. Resolution: pending.
+    Blocks: 2.8–2.10. Resolution: the owner delegated on 2026-10-30
+    ("whatever you think is best"). Chosen in plan 0025, spec 0013:
+    - QR or manual endpoints, with discovery only in a receive window;
+    - pairwise link keys from an out-of-band pairing (existing profiles
+      only, no device signing identities);
+    - explicit time-boxed receive windows;
+    - local generation-bound link removal, with rotation for compromise.
+
+    0013 was accepted the same day, also by owner delegation.
 11. **D11 — 0006 OQ2: per-device signing identities.** Settled in phase 3.1.
     Blocks: 3.2 on. Resolution: pending.
 12. **D12 — Independent protocol review.** 0012 §3 requires an external review
@@ -175,6 +187,13 @@ at the phase that needs them.
     The owner must choose and engage a reviewer. Lead time is long, so start
     when 2.1 / 3.1 produce a spec. Blocks: 2.11, 3.9 (release only, not
     implementation). Resolution: pending.
+13. **D13 — Owner architecture review before the GUI.** The owner wants to
+    re-verify the architecture (`ARCHITECTURE.md`, component boundaries, D8
+    and the app/platform phases 2.3–2.5) before any production GUI work. The
+    session that reaches phase 2.4 stops before planning it. It reminds the
+    owner, summarizes the current architecture and what has changed since D8,
+    and waits for the owner's explicit go-ahead. Blocks: 2.4 (and so 2.5–2.7).
+    Resolution: pending.
 
 ## Design
 
@@ -504,8 +523,8 @@ CLI, after fresh-context review of 1.15a. The whole-rotation criteria below
 remain required before 1.16.
 
 - [x] **1.15a plan:** [0021](../0021-offline-key-rotation/PLAN.md) (Reviewed).
-- [x] **1.15b plan:** [0022](../0022-rotation-replacement/PLAN.md) (Implemented; fresh review pending) — verified private replacement and cross-generation snapshot inventory (split 2026-10-29).
-- [ ] **1.15c plan:** next fresh session after 1.15b review and owner commit — journal installation, restart/rollback, anchor generation step, inventory-aware snapshot policy, core lifecycle, `recovery rotate` CLI and crash injection at every journal step.
+- [x] **1.15b plan:** [0022](../0022-rotation-replacement/PLAN.md) (Reviewed) — verified private replacement and cross-generation snapshot inventory (split 2026-10-29).
+- [x] **1.15c plan:** [0023](../0023-rotation-install/PLAN.md) (Reviewed) — journal installation, restart/rollback, anchor generation step, inventory-aware snapshot policy, core lifecycle, `recovery rotate` CLI and crash injection at every journal step.
 - **Do:** Implement `recovery rotate` for vaults without remote sync: freeze
   writes, take a recovery snapshot, build the private replacement DB, reencrypt
   with logical IDs and clocks preserved, confirm the new phrase and password,
@@ -521,27 +540,49 @@ remain required before 1.16.
 - **Verify:** `cargo test --locked -p qv-core rotate`.
 - **0012 rows:** Rotation/purge ambiguity (interrupted rotation), Migration coupling (data part).
 
-#### Phase 1.16 — Offline hardening, benchmarks and format freeze
+#### Phase 1.16 — Offline hardening and benchmarks
 
-- [ ] **Do:** Run the offline release gate (0012 §3). Extended fuzz campaigns
-  (CBOR, SQLite, archive). KDF and budget benchmarks on the D7 devices, with the
-  profile and budgets adjusted *before* the freeze if needed. Freeze the
-  physical DDL, CBOR field registry, profile IDs/parameters and archive format,
-  and publish the golden vectors, including the worst-case manifest. Audit
-  permissions, disk-full behaviour and redacted errors. Record the dependency
-  audit status. Set the specs that are fully implemented to `Implemented`.
-- **Specs:** 0012 §1 (offline rows), §3 (offline gate); 0002 OQ1; 0004 OQ1.
-- **Depends on:** 1.9 (Android numbers), 1.15.
-- **Files:** `tests/vectors/`, specs (status and benchmark results), `CHANGELOG.md`.
+Owner decision 2026-10-30: QuickVault is pre-1.0, and every format stays
+volatile until the owner declares it ready and has user-tested it. The
+format freeze therefore leaves this phase:
+- the physical DDL, CBOR registry, profile IDs/parameters, archive and
+  journal formats, and final format numbers;
+- golden vectors, including the worst-case manifest;
+- closing 0002 OQ1/0004 OQ1;
+- `Implemented` statuses.
+
+They move to an unscheduled pre-1.0 release step, as do the supported-device
+KDF benchmarks, whose only purpose is tuning before the freeze. The planned
+1.16b is dropped. The 0012 §3 offline gate still applies before that
+release; it is not weakened.
+
+- [x] **1.16 plan:** [0024](../0024-offline-release-evidence/PLAN.md) (Reviewed) — offline matrix tags and checker, mode/write-failure/redaction audits, networking-blocked CI requirement, fuzz campaigns (local runs plus a weekly CI job), Linux budget benchmarks, dependency audit status. Android benchmarks are deferred to the release step.
+- **Do:** Collect the offline hardening evidence that does not depend on a
+  frozen format:
+  - every offline 0012 row tied to a named test;
+  - permission, write-failure and redacted-error audits;
+  - fuzzing in CI;
+  - Linux budget benchmarks;
+  - the dependency audit status.
+- **Specs:** 0012 §1 (offline rows), §3 (offline gate, evidence part); 0004 §4.
+- **Depends on:** 1.15.
+- **Files:** `scripts/`, `tests/`, crate tests, `crates/qv-core/examples/`,
+  `.github/workflows/`, the plan's report, `CHANGELOG.md`.
 - **Done when:** every offline row of the 0012 matrix has a passing test that
-  names it. The format version is final. The benchmark report is committed.
-- **Verify:** full test suite; fuzz campaign logs; `cargo deny check`; `cargo vet`.
+  names it, the audits pass, and the benchmark report is in the plan.
+- **Verify:** full test suite; `sh scripts/check-matrix.sh`; fuzz summaries;
+  `cargo deny check`; `cargo vet`.
 
 ### Milestone 2 — Offline Android and Linux apps, LAN sync, conflicts, archive exchange
 
 #### Phase 2.1 — LAN sync protocol design (spec only)
 
-- [ ] **Do:** With `quickvault-thinker`, settle 0005 OQ3–OQ6 (D10). Then write
+- [x] **Plan:** [0025](../0025-lan-protocol-spec/PLAN.md) (Reviewed): spec
+  [0013](../../specs/0013-lan-sync-protocol.md) **Accepted** 2026-10-30 by
+  owner delegation, with its amendments applied. Not done: the owner has
+  not sent the D12 review request (text in plan 0025). D12 blocks only the
+  2.11 release evidence.
+- **Do:** With `quickvault-thinker`, settle 0005 OQ3–OQ6 (D10). Then write
   the LAN protocol spec: discovery/addressing, out-of-band enrollment, peer
   identity, session protection, bounded messages, peer-state schema,
   initialization, removal, generation transitions and error transitions. Give
@@ -551,22 +592,51 @@ remain required before 1.16.
 - **Depends on:** milestone 1 complete (it can start in parallel with 2.2–2.7).
 - **Files:** `specs/`, `ARCHITECTURE.md` §3/§6, `specs/README.md`.
 - **Done when:** the spec is `Accepted` and lists byte-level messages. The review request has been sent.
-- **Verify:** spec review by `quickvault-reviewer`.
+- **Verify:** spec check by `quickvault-reviewer` in the same session
+  (done, plan 0025 REVIEW.md; no separate session, owner direction
+  2026-10-30).
 
-#### Phase 2.2 — Conflict resolution and archive exchange
+#### Phase 2.2a — Verified archive input and shared merge candidates
 
-- [ ] **Do:** Create `qv-sync` with the shared merge of incoming manifests and
-  objects into a local candidate, committed through the 1.7 write path. Add the
-  commands `conflicts`, `resolve`, `merge <archive>` (private copy, same vault
-  and generation, authenticate, merge) and `snapshot export [--self-contained]`.
-- **Specs:** 0005 §2.3–2.4, §4 (D5); 0004 §6.4; 0011 §4 (phase-2 rows).
+- [x] **Plan:** [0026](../0026-conflicts-archive-exchange/PLAN.md) (Implemented).
+- **Do:** Create qv-sync's bounded whole-record candidate merge and qv-store's
+  private fully authenticated stable archive input. No incoming publication yet.
+- **Specs:** 0005 §1–2, §4 (owner go-ahead); 0004 §3–4, §6; 0007 §1–2.
 - **Depends on:** 1.16.
-- **Files:** `crates/qv-sync/`, `crates/qv-core/`, `crates/qv-cli/`.
-- **Done when:** merging a years-old archive revives no tombstone or suppressed
-  history. A concurrent delete and edit stays a conflict. A reused filename
-  with different bytes is an error.
-- **Verify:** `cargo test --locked -p qv-sync`.
-- **0012 rows:** Deleted-entry resurrection, Order-dependent merges (storage level), Hostile files from sync folders (merge path).
+- **Files:** `crates/qv-sync/`, `crates/qv-store/`, workspace metadata.
+- **Done when:** candidate merge preserves concurrent deletion/edit, monotonic
+  floors and tombstones; malformed/private-copy inputs fail closed.
+- **Verify:** `cargo test --locked -p qv-sync`, incoming store tests.
+- **0012 rows:** Deleted-entry resurrection, Order-dependent merges,
+  Hostile files from sync folders (candidate/input coverage only).
+
+#### Phase 2.2b — Atomic incoming acceptance and filename receipts
+
+- [ ] **Do:** Integrate candidate staging through the existing 1.7 write path;
+  persist protected filename receipts atomically, bound by the local head;
+  keep restore/rotation/restart and anchor handling consistent. Amend the
+  normative storage contracts first, under owner delegation recorded in 0026.
+- **Specs:** 0005 §2, §4, §5.4; 0004 §2–5; 0007 §1–3.
+- **Depends on:** 2.2a, its fresh-context review and owner commit.
+- **Files:** `crates/qv-store/`, `crates/qv-sync/`, relevant specs.
+- **Done when:** storage-level permutation/redelivery converges; years-old
+  input revives neither tombstones nor suppressed history; filename reuse
+  with different bytes is an error across restart; acceptance crash matrix passes.
+- **Verify:** qv-sync/store tests and required gates.
+
+#### Phase 2.2c — Conflict resolution and archive-exchange commands
+
+- [ ] **Do:** Core capabilities and CLI `conflicts`, `resolve`, `merge
+  <archive>`, `snapshot export <directory> [--self-contained]`. Specify exact
+  CLI contracts first under owner delegation (0026); preserve complete versions,
+  keyslot reauthentication, mandatory pre-import recovery snapshots and lock races.
+- **Specs:** 0005 §2.3–2.6, §4; 0004 §6; 0007 §3; 0011 §3–6.
+- **Depends on:** 2.2b, its fresh-context review and owner commit.
+- **Files:** `crates/qv-store/`, `crates/qv-core/`, `crates/qv-cli/`, specs.
+- **Done when:** original 2.2 end-to-end requirements pass: an old archive
+  revives no tombstone/suppressed history, concurrent delete/edit stays a
+  conflict, reused filenames reject, self-contained exports need explicit consent.
+- **Verify:** affected crate tests and required gates.
 
 #### Phase 2.3 — Platform adapters: traits and Linux
 
@@ -576,7 +646,7 @@ remain required before 1.16.
   single instance, and swap/hibernation configuration detection. Quick unlock
   stays disabled on Linux unless a backend meets 0002 §5.2.
 - **Specs:** 0009 §1.6, §5; 0008 §1.3–1.4, §3.
-- **Depends on:** 2.2, D8.
+- **Depends on:** 2.2c, D8.
 - **Files:** `crates/qv-platform/`, `crates/qv-core/`.
 - **Done when:** a screen lock locks the session in an integration test (or a
   documented manual test). The reduced-protection mode is reported.
@@ -591,7 +661,8 @@ remain required before 1.16.
   create (with recovery phrase), unlock, lock, recover. Android adapters:
   lifecycle, FLAG_SECURE, keyboard flags.
 - **Specs:** 0008 §4; 0009 §1.6; 0002 §4.2.
-- **Depends on:** 2.3, D8.
+- **Depends on:** 2.3, D8, **D13 (owner architecture review: stop and remind
+  the owner before planning this phase)**.
 - **Files:** `crates/qv-app/`, `crates/qv-platform/`, Android packaging.
 - **Done when:** injection tests (HTML, URL, IPC) fail safely, remote
   navigation is blocked, and secret input is bounded, converted promptly and cleared on submit/lock.
@@ -848,8 +919,9 @@ remain required before 1.16.
 - **Scope creep:** a phase plan that needs a new crate, a trust boundary or a
   dependency not anticipated here records it in its own plan and in a
   *Revisions* entry here.
-- **Format churn:** until 1.16, no data compatibility is promised. A phase
-  that wants to preserve old dev vaults must ask first.
+- **Format churn:** until 1.0, no data compatibility is promised (owner
+  decision 2026-10-30; the freeze is a pre-1.0 release step, not 1.16). A
+  phase that wants to preserve old dev vaults must ask first.
 - **Session size:** if a phase plan grows past roughly 8–10 steps, split it
   rather than leave half-done steps at a session boundary.
 
@@ -863,6 +935,49 @@ remain required before 1.16.
 - [ ] `plans/README.md` — index row (done)
 
 ## Revisions
+
+- 2026-10-30 (plan 0026, before code): owner approved the receipt/CLI
+  recommendations and delegated remaining choices (“Just do whatever you feel
+  is right and go ahead”). Split 2.2 under the session-size rule into 2.2a
+  (verified archive input/shared candidates), 2.2b (atomic acceptance/receipts),
+  2.2c (core/CLI resolution/export). The original nine steps hid independent
+  schema/head/generation-transition and selected-slot reauthentication work.
+  Original overall scope retained; keep owner-commit/fresh-review boundaries.
+
+- 2026-10-30 (owner direction): the fresh-context review in *Session
+  protocol* step 2 applies only to implementation (code, tests, scripts,
+  CI). Spec-only and plan-only phases are checked in their own session.
+  The external protocol review (D12) and every release gate are unchanged.
+
+- 2026-10-30 (owner decision, during phase 1.16): pre-1.0, everything is
+  volatile, and there is no format freeze until the owner declares the
+  product ready and has user-tested it. Removed from 1.16 and moved to an
+  unscheduled pre-1.0 release step:
+  - the freeze and its final format numbers;
+  - the golden vectors;
+  - closing 0002 OQ1/0004 OQ1;
+  - `Implemented` statuses;
+  - supported-device KDF benchmarks.
+
+  1.16b is dropped, and plan 0024 is the whole of 1.16. This supersedes the
+  1.16 split entry below. No spec change: 0012 §3 requires the freeze only
+  before an offline release.
+
+- 2026-10-30 (phase 1.16, plan 0024): split 1.16 under the session-size
+  rule. **1.16a** collects the evidence and changes no format, parameter or
+  spec: matrix row tags and `scripts/check-matrix.sh`, CLI audits (modes,
+  write failure under a file-size limit, canary redaction), the
+  networking-blocked test required in CI, 7 × 30-minute fuzz campaigns plus
+  a weekly CI job, and the `budget_bench` example measured on Linux and the
+  owner's phone. **1.16b** freezes the formats and records the benchmarks
+  in the specs; its spec amendments need the owner's approval. No
+  dependency or `unsafe`. Keep the fresh-review and owner-commit boundary
+  between them.
+
+- 2026-10-30: Owner request: remind the owner and wait for an architecture
+  re-verification before the production GUI starts. Added D13, which blocks
+  phase 2.4, so standing approval cannot skip it. No other scope, order or
+  approval change.
 
 - 2026-10-29 (phase 1.15b, plan 0022): split the remaining rotation work again
   under the session-size rule (about 12 steps). **1.15b** builds and verifies the
@@ -928,6 +1043,114 @@ remain required before 1.16.
 - 2026-10-26 (phase 1.10, plan 0011): the owner approved splitting 1.10 into 1.10a/1.10b and decisions D-1–D-6 of plan 0011 as recommended: `zxcvbn 3.1.1` in `qv-core` (0010 §3.2); `clap 4.6.7` builder API only; for 1.10b, `signal-hook 0.4.5` and `arboard 3.6.1` (X11 only, no image support) with per-crate `BSL-1.0` exceptions for `clipboard-win` and `error-code`; the recovery-phrase skip (0002 §4.2) recorded as vault settings key 3 `recovery_skipped_at` (development value for the 1.16 freeze). These dependencies are now approved for 1.10b's standing approval. Raised, not decided: 0011 has no command to adopt a vault with a missing or mismatched anchor (suggested for 1.13/1.14).
 
 ## Execution log
+
+- 2026-10-30: Owner approved plan 0026's receipt/CLI recommendations and
+  delegated remaining design choices. Before code, split 2.2 into a/b/c under
+  the session-size rule. **2.2a implemented as 0026:** bounded authenticated
+  private archive input, validated manifest assembly and qv-sync's shared
+  whole-record candidate merge. Preserves complete versions, conflicts,
+  monotonic floors and referenced attachment chunks without accepted-state
+  changes or receive-time re-encryption/counters. A covered dominated final
+  tombstone fails closed rather than being forgotten; see 0026's limitation.
+  Fourteen new tests include real encrypted archive/store integration,
+  convergence, identity/role collisions, resource bounds and private-copy
+  filesystem/rejection paths. Final SPDX/fmt/Clippy/locked tests, matrix and
+  deny/vet pass: **663 passed, 0 failed, 2 pre-existing ignored**, private
+  Xvfb. No new external dependency, unsafe, format or normative spec change.
+  Next: owner commit, fresh-context review of 0026, then 2.2b (atomic
+  acceptance/filename receipts). Core/CLI resolution/export remain 2.2c.
+  All changes uncommitted; no independent review or release claim.
+
+- 2026-10-30: Clean-tree next-phase session selected 2.2. Previous phase 2.1
+  (0025) is Reviewed and spec-only. Wrote Proposed plan 0026 after inspecting
+  existing merge/storage/archive/core interfaces. Standing approval withheld:
+  durable filename-reuse detection needs a local-state schema/head amendment,
+  and conflict/merge/export commands need precise CLI contracts. Plan D1–D3
+  contain recommendations for owner approval. No implementation or normative
+  amendment; phase remains unticked.
+
+- 2026-10-30: Clean-tree next-phase session (1.16 committed as `210c86c`).
+  - **Reviewed 0024** with fresh context: Approved with minor fixes, see its
+    REVIEW.md. The networking-blocked offline CLI test now also runs
+    `recover` (the 0012 "Implicit server prerequisite" row names recovery).
+    The canary audit gained the planned new-password canary. Final gates
+    pass: 649 passed, 0 failed, 2 pre-existing ignored, private Xvfb.
+  - **Phase 2.1:** `quickvault-thinker` laid out the D10 options. The owner
+    delegated the choice ("whatever you think is best"). Plan 0025 records
+    the choice: pairwise link keys, QR or manual endpoints with
+    window-only discovery, explicit receive windows, and local
+    generation-bound removal.
+  - **Wrote Draft spec 0013**: messages, key schedule, bounds, exchange,
+    peer state, windows, errors, rotation, and §13 with the exact
+    amendments to 0001, 0002, 0004 and 0005 to apply on acceptance.
+  - **Self-check:** four fixes, the main one being B's confirmation before
+    joining in new-device mode. SPDX passes and `git diff --check` is
+    clean.
+  - **The phase stays unticked.** Its *Done when* needs the owner's
+    acceptance of 0013 and the D12 review request (text drafted in plan
+    0025). Owner direction (same day): spec-only and plan-only work needs
+    no separate fresh-context review session; only implementation does.
+    The session protocol now says so.
+  - **0013 accepted** by owner delegation ("whatever you feel is best").
+    The §13 amendments to 0001, 0002, 0004 and 0005 are applied with
+    Changelog lines, and phase 2.1 is ticked. The D12 request (drafted in
+    plan 0025) is the owner's to send. The next phase is 2.2. Phases 2.2–2.3 can proceed in parallel
+    (2.1 entry). Changes are uncommitted.
+
+- 2026-10-30: Clean-tree next-phase session (1.15c committed as
+  `c7b6c1d`).
+  - **Reviewed 0023** with fresh context: Approved with minor fixes, see
+    its REVIEW.md. A failed directory fsync after the journal's rename is
+    now reported as published; three hostile restart tests added; one stale
+    doc comment corrected.
+  - **Planned 1.16 as 0024** with standing approval. It was first split
+    into 1.16a/1.16b. During the phase the owner decided there is no
+    format freeze before 1.0, so 1.16b and the Android benchmarks moved to
+    an unscheduled pre-1.0 release step (see *Revisions*).
+
+  **Phase 1.16 implemented as plan 0024:**
+  - all 23 offline 0012 rows have tagged passing tests, checked in CI;
+  - mode, write-failure and canary audits pass;
+  - the networking-blocked test is required in CI;
+  - eight clean 30-minute fuzz runs and a weekly CI campaign;
+  - Linux budget benchmarks at the record and ciphertext caps;
+  - the dependency audit status is recorded.
+
+  Final gates pass: 649 passed, 0 failed, 2 pre-existing ignored, private
+  Xvfb. No dependency, `unsafe`, format or spec change. Next: a fresh
+  review of 0024, then phase 2.1. Changes are uncommitted.
+
+- 2026-10-30: Next-phase session. The tree held only the owner's
+  uncommitted D13 roadmap revision (not phase work). It reviewed committed
+  phase 1.15b (`5fe3495`, plan 0022) with fresh context: **Approved with
+  minor fixes**, see its REVIEW.md. Fixes: two missing replacement tests
+  (anchor mismatch, unknown extension fields) and two misplaced doc
+  comments. Independent gates pass (621 passed, 0 failed, 2 ignored,
+  private Xvfb). One clipboard Xvfb startup timeout in the first final run
+  passed on rerun; it is recorded in that review. Phase 1.15c was planned
+  as **0023** (9 steps; no decision, amendment, dependency, `unsafe` or
+  deviation), with standing approval.
+  **Phase 1.15c implemented as plan 0023:**
+  - journal installation with crash points I1–I9: no-replace renames and
+    one anchor generation step;
+  - authenticated restart: each copy with its own password, both journal
+    MACs and the anchor, then complete or roll back (rollback refused once
+    committed);
+  - removal of pre-journal leftovers;
+  - inventory-aware snapshot budgets that fail closed without an
+    inventory;
+  - the core `Rotation` lifecycle: pinned recovery snapshot, session
+    consumed, three phrase words;
+  - `qvault recovery rotate` for new and resumed rotations;
+  - the crash matrix at every installation step and at second-level
+    crashes during completion and rollback.
+
+  Final SPDX, fmt, Clippy and locked tests pass: 645 passed, 0 failed,
+  2 pre-existing ignored, private Xvfb. No dependency, `unsafe`, profile,
+  schema or spec amendment. This completes the whole-rotation scope of
+  roadmap 1.15. Phase 1.16 follows after the fresh-context review of 0023
+  and an owner commit. Network isolation is unavailable and not counted as
+  a pass. Changes are uncommitted.
 
 - 2026-10-29: The clean-tree next-phase session reviewed committed phase
   1.15a (`9c25a6a`, plan 0021): **Approved**, no fixes, no escalations; see

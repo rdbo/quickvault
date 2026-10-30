@@ -4,6 +4,7 @@
 //! `mlock` fails, and checks that the failure is reported as reduced
 //! protection rather than hidden.
 
+// 0012 §1: Swap/hibernation leaks
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[test]
 fn memory_lock_failure_under_real_limit_is_reported() {

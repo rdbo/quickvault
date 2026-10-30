@@ -120,9 +120,8 @@ explicitly self-contained backup. No ORAM or traffic-hiding promise.
 Views containing titles/usernames/URLs are confidential A2 data, not public data.
 
 On LAN, network observers can see communicating addresses, connection timing
-and traffic sizes; enabled discovery may also expose service presence. Exact
-advertisements and enrollment metadata remain to be specified in 0005; they
-MUST NOT expose vault secrets or confidential A2 metadata. An approved peer
+and traffic sizes; enabled discovery may also expose service presence. Advertisements
+and pairing metadata are specified in 0013 §3–§4; they MUST NOT expose vault secrets or confidential A2 metadata. An approved peer
 receives the shared vault's contents and authenticated causal metadata. LAN
 sync makes no traffic-hiding or protection-from-an-approved-VK-holder claim.
 
@@ -140,6 +139,7 @@ required implementation evidence under 0012.
 
 ## Changelog
 
+- 2026-10-30: Owner-delegated acceptance of 0013 (roadmap D10, plan 0025): LAN advertisement and pairing metadata now point to 0013.
 - 2026-10-24: Cover direct LAN sync and standalone use explicitly; reject
   network presence as trust, distinguish server revocation from LAN/key access,
   and document LAN traffic/discovery leakage.

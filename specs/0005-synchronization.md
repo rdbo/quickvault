@@ -251,7 +251,8 @@ checkpoint. Referenced data is verified independently (0004 §3.6).
 
 5.4. **Local head and anchor.** Every commit writes one authenticated local head
 (0004 `local_head`): `{ vault_id, key_generation, local_seq, previous_digest,
-manifest_hash, remote_checkpoint_id?, remote_sequence? }`, MAC'd under the
+manifest_hash, remote_checkpoint_id?, remote_sequence?, lan_links_digest }`
+(0013 §9.1), MAC'd under the
 local-state key. `local_seq` increases by one per commit; `local_digest` is
 SHA-256 of the canonical head including its MAC. The external anchor, in private
 state outside the DB and archives (keystore-backed where available), stores `{
@@ -347,6 +348,8 @@ remote sync or losing account access MUST NOT disable existing LAN use.
 specification. Resolve Open Questions 3–6, specify bounded messages, peer-state
 durability and failure transitions, and satisfy 0012's LAN gates before shipping
 LAN synchronization. No new crypto profile or message layout is selected here.
+The protocol is [0013](0013-lan-sync-protocol.md) (Accepted 2026-10-30). It
+resolves Open Questions 3–6. Release still requires the 0012 §3 LAN gate.
 
 ## Security Considerations
 
@@ -421,9 +424,21 @@ Resource budgets and transactional acceptance apply even to authenticated data.
    decryption/forging ability. Recommendation: distinguish local peer blocking
    from compromise recovery, requiring VK rotation and fresh independent
    approval for the latter (0002 §3.5). Not yet selected.
+7. **Resolution of 3–6 (2026-10-30, roadmap D10, delegated by the
+   owner):** [0013](0013-lan-sync-protocol.md) (Accepted):
+   - QR or manual endpoints, with DNS-SD only during an open window;
+   - pairwise generation-bound link keys from an out-of-band pairing with a
+     committed comparison code;
+   - explicit time-boxed pairing and receive windows;
+   - local link removal, with rotation plus re-pairing for compromise.
+
+   Questions 3–6 are resolved by 0013.
 
 ## Changelog
 
+- 2026-10-30: Owner-delegated acceptance of 0013 (roadmap D10, plan 0025): Open Questions 3–6 resolved by 0013; the local head gains `lan_links_digest`.
+- 2026-10-30: Point §6.7 and Open Questions 3–6 to the proposed LAN protocol
+  spec 0013 (Draft). No normative change to this spec until 0013 is accepted.
 - 2026-10-24: Follow-up direction: manual initiation first for both LAN and
   remote sync. Remove unlock/edit/timer triggers, defer automatic scheduling
   and background retries, and retain LAN discovery/listening as open decisions.

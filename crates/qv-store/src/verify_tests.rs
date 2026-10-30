@@ -95,6 +95,7 @@ fn verify_reports_exact_counts_on_a_healthy_vault() {
     assert!(!format!("{:?}", VerifyCounts::default()).is_empty());
 }
 
+// 0012 §1: Whole-file rollback
 #[test]
 fn verify_rejects_missing_short_long_flipped_and_substituted_objects() {
     // Every way a disk or a storage layer can damage one object row.
@@ -122,6 +123,7 @@ fn verify_rejects_missing_short_long_flipped_and_substituted_objects() {
     }
 }
 
+// 0012 §1: Self-referential/incomplete commitments
 #[test]
 fn verify_rejects_a_truncated_history_version() {
     // The history object alone goes away or changes length: the head still
@@ -150,6 +152,7 @@ fn verify_rejects_a_truncated_history_version() {
     assert_eq!(err(u.verify_all(&|| false)), StoreError::Integrity);
 }
 
+// 0012 §1: Self-referential/incomplete commitments
 #[test]
 fn verify_rejects_a_corrupt_attachment_chunk() {
     let (_d, _a, u, _record) = setup();

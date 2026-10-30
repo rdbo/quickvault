@@ -359,6 +359,18 @@ impl Session {
         r
     }
 
+    /// Takes the open state out and locks the session: every later call is
+    /// [`CoreError::SessionLocked`] and handles are stale. Rotation consumes
+    /// the unlocked vault this way (plan 0023).
+    pub(crate) fn take_open(&self) -> Result<Open, CoreError> {
+        if self.locking.load(Ordering::SeqCst) {
+            return Err(CoreError::SessionLocked);
+        }
+        let mut guard = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        self.locking.store(true, Ordering::SeqCst);
+        guard.take().ok_or(CoreError::SessionLocked)
+    }
+
     /// Locks the session (0008 §1.4): running calls stop at their next
     /// check, then the vault, keys and views are dropped and zeroized.
     /// Idempotent; a locked session stays locked.

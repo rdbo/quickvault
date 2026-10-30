@@ -469,6 +469,7 @@ mod tests {
         registry().get(&addr).map_or(0, |p| p.refs)
     }
 
+    // 0012 §1: Ambiguous trust boundary
     #[test]
     fn memory_debug_is_redacted() {
         let _s = serial();

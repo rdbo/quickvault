@@ -108,6 +108,7 @@ fn verify_wrong_password_and_a_damaged_vault_exit_3_and_7() {
     assert_eq!(std::fs::read(h.vault()).unwrap(), damaged);
 }
 
+// 0012 §1: Exchange-file password guessing
 #[test]
 fn exchange_file_password_guessing_a_snapshot_does_not_open_with_the_password() {
     // 0012 §1 row "Exchange-file password guessing": a local snapshot carries

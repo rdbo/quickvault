@@ -1,0 +1,13 @@
+# Fuzz campaign summary: cbor_decode (plan 0024 step 6)
+# nightly-2026-10-01, cargo-fuzz 0.13.2, -s none (no sanitizer; musl host), -use_cmp=0, -max_total_time=1800
+INFO: Seed: 1763478867
+INFO: Loaded 1 modules   (951 inline 8-bit counters): 951 [0x7f728caa31f8, 0x7f728caa35af), 
+INFO: Loaded 1 PC tables (951 PCs): 951 [0x7f728caa35b0,0x7f728caa7120), 
+#124179865	DONE   cov: 305 ft: 2072 corp: 386/109Kb lim: 4096 exec/s: 68950 rss: 37Mb
+Done 124179865 runs in 1801 second(s)
+stat::number_of_executed_units: 124179865
+stat::average_exec_per_sec:     68950
+stat::new_units_added:          2697
+stat::slowest_unit_time_sec:    0
+stat::peak_rss_mb:              37
+findings (crash/timeout/oom/leak lines): 0

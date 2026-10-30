@@ -1,0 +1,13 @@
+# Fuzz campaign summary: snapshot_inventory (plan 0024 step 6)
+# nightly-2026-10-01, cargo-fuzz 0.13.2, -s none (no sanitizer; musl host), -use_cmp=0, -max_total_time=1800
+INFO: Seed: 815997563
+INFO: Loaded 1 modules   (28777 inline 8-bit counters): 28777 [0x7f93cc9558f8, 0x7f93cc95c961), 
+INFO: Loaded 1 PC tables (28777 PCs): 28777 [0x7f93cc95c968,0x7f93cc9ccff8), 
+#292469502	DONE   cov: 419 ft: 867 corp: 231/9630b lim: 8192 exec/s: 162392 rss: 37Mb
+Done 292469502 runs in 1801 second(s)
+stat::number_of_executed_units: 292469502
+stat::average_exec_per_sec:     162392
+stat::new_units_added:          1658
+stat::slowest_unit_time_sec:    0
+stat::peak_rss_mb:              37
+findings (crash/timeout/oom/leak lines): 0

@@ -9,6 +9,89 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-30: Roadmap 2.2a (plan 0026): authenticated private archive input
+  and the shared `qv-sync` merge-candidate engine. Candidates preserve complete
+  versions, concurrent deletion/edit, attachment references and monotonic
+  suppression floors without accepting state or rewriting ciphertext.
+  Rejection/convergence tests include real encrypted archive/store integration.
+  Owner-approved 2.2 is split under the session-size rule: atomic acceptance
+  and durable filename receipts remain 2.2b; core/CLI conflict resolution and
+  archive export remain 2.2c, each after an owner commit and fresh review.
+
+- 2026-10-30: Spec 0013 (direct LAN sync protocol) is **Accepted**, by owner
+  delegation. Its amendments are applied:
+  - 0001: the LAN advertisement and pairing metadata reference;
+  - 0002: the `lan / 1` profile, the `lan-link` purpose key, and
+    generation-bound LAN approvals under rotation;
+  - 0004: the local-only `lan_link`/`lan_hint` tables and
+    `lan_links_digest`;
+  - 0005: OQ3–OQ6 resolved, and the local head field.
+
+  No LAN release is authorized: the 0012 §3 gate, including the D12
+  independent review, still applies.
+
+- 2026-10-30: Draft spec 0013, the direct LAN sync protocol (roadmap 2.1,
+  plan 0025). It proposes the resolution of 0005 OQ3–OQ6, which the owner
+  delegated as D10:
+  - discovery only during explicit, time-boxed windows;
+  - QR or manual-code pairing with a committed comparison code, creating
+    pairwise link keys bound to one key generation;
+  - an X-Wing session handshake and a counter-nonce record layer;
+  - full-manifest exchange through the local commit path;
+  - local link removal, with rotation for compromise.
+
+  It is not yet accepted. It lists the amendments to 0001, 0002, 0004 and
+  0005 that are applied on acceptance. No code changed.
+
+- 2026-10-30: Fresh-context review of phase 1.16 (plan 0024): Approved with
+  minor fixes. The networking-blocked offline CLI test now also recovers the
+  vault with its phrase, as the 0012 "Implicit server prerequisite" row
+  requires. The canary audit now covers a new master password.
+
+- 2026-10-30: Offline hardening evidence (plan 0024, roadmap 1.16):
+  - `scripts/check-matrix.sh` and `tests/matrix-offline.txt`: every offline
+    0012 row has a tagged, passing test (CI-checked);
+  - CLI audits for owner-only modes under `umask 000`, fail-closed write
+    failures under a file-size limit, and canary secrets never reaching
+    output or files;
+  - the networking-blocked test is required in CI (`QV_REQUIRE_NETNS`);
+  - a weekly 30-minute-per-target fuzz workflow with ASan, and a
+    `vault_open` fuzz target that now mutates a real vault built per
+    process, not only raw bytes;
+  - the `budget_bench` example and Linux benchmarks at the record and
+    ciphertext caps;
+  - a recorded dependency audit status.
+
+  Owner decision: pre-1.0, every format stays volatile. The format freeze,
+  golden vectors and supported-device KDF tuning move to a pre-1.0 release
+  step after the owner's user testing; roadmap 1.16b is dropped.
+
+- 2026-10-30: Fresh-context review of phase 1.15c (plan 0023): Approved with
+  minor fixes. A failed directory fsync after the journal's rename is now
+  reported as a published (partly applied) rotation. Added three hostile
+  restart tests (swapped suffix, another vault's journal, stale old copy)
+  and corrected a stale doc comment.
+
+- 2026-10-30: Offline key rotation is complete (plan 0023, phase 1.15c):
+  `qvault recovery rotate`. The command:
+  - takes a pinned recovery snapshot;
+  - builds and verifies the next generation;
+  - shows the new phrase and requires three confirmed words;
+  - publishes through the rotation journal with no-replace renames and one
+    anchor generation step.
+
+  Restart completes or rolls back an interrupted rotation through the same
+  command, with each copy authenticated by its own password; rollback is
+  refused once committed. Snapshot budgets now count older generations'
+  copies from the authenticated inventory, and a missing inventory fails
+  closed. Ordinary opens of an interrupted vault get a `recovery rotate`
+  hint (exit 7). Crash injection covers every journal step, for
+  installation and both restart choices.
+
+- 2026-10-30: Fresh-context review of phase 1.15b (plan 0022): Approved with
+  minor fixes: two replacement tests (anchor mismatch, unknown extension
+  fields) and two misplaced doc comments.
+
 - 2026-10-29: Verified rotation replacement (plan 0022, phase 1.15b). The store
   builds a private next-generation database: a new VK, phrase and password
   slot; every object reencrypted under fresh IDs; logical IDs, clocks, history,

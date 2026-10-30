@@ -89,6 +89,31 @@ impl LockedFile {
         Ok(Self { fd, identity })
     }
 
+    /// Reads the whole locked file from offset 0 through a duplicate
+    /// descriptor (the lock is kept). [`StoreError::Integrity`] if its
+    /// size, checked by `fstat` before reading, or the bytes read exceed
+    /// `max` (the rotation journal, plan 0023).
+    pub(crate) fn read_bounded(&self, max: usize) -> Result<Vec<u8>, StoreError> {
+        let st = fstat(&self.fd).map_err(errno_err)?;
+        let len = usize::try_from(st.st_size).map_err(|_| StoreError::Integrity)?;
+        if len > max {
+            return Err(StoreError::Integrity);
+        }
+        let dup = self.fd.try_clone().map_err(|_| StoreError::Io)?;
+        let mut file = std::fs::File::from(dup);
+        std::io::Seek::seek(&mut file, std::io::SeekFrom::Start(0)).map_err(|_| StoreError::Io)?;
+        let mut bytes = Vec::with_capacity(len);
+        std::io::Read::read_to_end(
+            &mut std::io::Read::take(&mut file, max as u64 + 1),
+            &mut bytes,
+        )
+        .map_err(|_| StoreError::Io)?;
+        if bytes.len() > max {
+            return Err(StoreError::Integrity);
+        }
+        Ok(bytes)
+    }
+
     /// Takes the descriptor out of the guard, for a temporary file that is
     /// written, re-read and published (archives, 0004 §6.5). Giving up the
     /// descriptor also gives up the lock, which a temp file does not need:

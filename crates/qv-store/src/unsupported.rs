@@ -364,7 +364,88 @@ impl PreparedRotation {
     }
 }
 
+impl PreparedRotation {
+    /// Unreachable on unsupported targets.
+    pub fn install(
+        self,
+        _snapshots: &SnapshotDir,
+        _inventory: &crate::SnapshotInventory,
+        _snapshot_id: [u8; 16],
+        _cancelled: &dyn Fn() -> bool,
+    ) -> Result<crate::Installed, crate::InstallError> {
+        match self.0 {}
+    }
+}
+
+/// An interrupted rotation (unavailable on this target).
+pub struct InterruptedRotation(Never);
+
+impl fmt::Debug for InterruptedRotation {
+    fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {}
+    }
+}
+
+impl InterruptedRotation {
+    /// Fails closed: [`StoreError::Unsupported`].
+    pub fn open(
+        _path: &Path,
+        _anchors: &AnchorDir,
+        _old: Option<&MasterPassword>,
+        _new: Option<&MasterPassword>,
+        _cancelled: &dyn Fn() -> bool,
+    ) -> Result<Self, StoreError> {
+        Err(StoreError::Unsupported)
+    }
+
+    /// Unreachable on unsupported targets.
+    pub fn state(&self) -> crate::RotationState {
+        match self.0 {}
+    }
+
+    /// Unreachable on unsupported targets.
+    pub fn old_generation(&self) -> qv_crypto::KeyGeneration {
+        match self.0 {}
+    }
+
+    /// Unreachable on unsupported targets.
+    pub fn new_generation(&self) -> qv_crypto::KeyGeneration {
+        match self.0 {}
+    }
+
+    /// Unreachable on unsupported targets.
+    pub fn finish(
+        self,
+        _choice: crate::RotationChoice,
+        _snapshots: &SnapshotDir,
+        _cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), StoreError> {
+        match self.0 {}
+    }
+}
+
+/// Fails closed: [`StoreError::Unsupported`].
+pub fn rotation_pending(_path: &Path) -> Result<bool, StoreError> {
+    Err(StoreError::Unsupported)
+}
+
+/// Fails closed: [`StoreError::Unsupported`].
+pub fn needed_passwords(
+    _path: &Path,
+    _anchors: &AnchorDir,
+) -> Result<crate::NeededPasswords, StoreError> {
+    Err(StoreError::Unsupported)
+}
+
 impl UnlockedVault {
+    /// Unreachable: no `UnlockedVault` exists on this target.
+    pub fn remove_rotation_leftovers(
+        &self,
+        _snapshots: &SnapshotDir,
+    ) -> Result<crate::Leftovers, StoreError> {
+        match self.0 {}
+    }
+
     /// Unreachable: no `UnlockedVault` exists on this target.
     pub fn prepare_rotation(
         self,

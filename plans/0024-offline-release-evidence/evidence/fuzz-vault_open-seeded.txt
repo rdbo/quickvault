@@ -1,0 +1,13 @@
+# Fuzz campaign summary: vault_open seeded with two real vault files (plan 0024 step 6)
+# nightly-2026-10-01, cargo-fuzz 0.13.2, -s none (no sanitizer; musl host), -use_cmp=0, -max_total_time=1800
+INFO: Seed: 1145309762
+INFO: Loaded 1 modules   (28880 inline 8-bit counters): 28880 [0x7fa6869569b8, 0x7fa68695da88), 
+INFO: Loaded 1 PC tables (28880 PCs): 28880 [0x7fa68695da88,0x7fa6869ce788), 
+#17463179	DONE   cov: 663 ft: 1035 corp: 110/3832Kb lim: 65536 exec/s: 9696 rss: 37Mb
+Done 17463179 runs in 1801 second(s)
+stat::number_of_executed_units: 17463179
+stat::average_exec_per_sec:     9696
+stat::new_units_added:          193
+stat::slowest_unit_time_sec:    0
+stat::peak_rss_mb:              37
+findings (crash/timeout/oom/leak lines): 0

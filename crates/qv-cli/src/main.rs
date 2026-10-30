@@ -41,8 +41,17 @@
 //! Existing snapshot deletion is offered separately after password replacement;
 //! old slots and independent copies are not revoked by a password change.
 //!
-//! **Not in this phase:** `recovery rotate` (1.15), standalone phrase/archive
-//! import, sync (2–3), colour output.
+//! `recovery rotate` creates a new key generation:
+//! - it asks the user to type `rotate`, which `--yes` never skips;
+//! - it shows the new phrase on the alternate screen;
+//! - it installs only after three words are confirmed; there is no skip,
+//!   because cancelling changes nothing.
+//!
+//! On an interrupted rotation, the same command asks for the passwords it
+//! needs and for a typed `complete` or `rollback`.
+//!
+//! **Not in this phase:** standalone phrase/archive import, sync (2–3),
+//! colour output.
 
 #![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 
