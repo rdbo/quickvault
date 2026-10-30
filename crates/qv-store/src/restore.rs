@@ -198,6 +198,12 @@ fn build<R: Read + Seek>(
                 previous_digest: None,
                 manifest_hash: manifest.hash,
                 remote: None,
+                archive_receipts_digest: crate::receipt_store::initialize(
+                    tx,
+                    &keys,
+                    header,
+                    &replica.replica_id,
+                )?,
             };
             let (head, _) = sign_head(&keys, header, &head)?;
             Ok(creation::Filled { manifest, head })

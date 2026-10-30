@@ -22,6 +22,8 @@ pub(crate) enum CrashPoint {
     PasswordSlotWritten,
     /// The new manifest row is written and the old one deleted.
     ManifestWritten,
+    /// Incoming acceptance has staged its receipt envelope, before the head/commit.
+    ReceiptsWritten,
     /// The new head is written.
     HeadWritten,
     /// The counter is updated and unreferenced objects are pruned.

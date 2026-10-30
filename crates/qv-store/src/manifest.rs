@@ -20,14 +20,16 @@
 //! | 4 | references | `[[object_id, data_profile, ciphertext_length, sha256], …]`, strictly ascending by object ID |
 //!
 //! A version reference is `[version_id, clock, object_id]`, plus a fourth
-//! element `[chunk_object_id, …]` for an `attachment_meta` version. `heads`
+//! element `[chunk_object_id, …]` for an `attachment_meta` version, or
+//! `true` for a permanent tombstone. `heads`
 //! (1 to 256) and `history` are strictly ascending by version ID; `floor` is
 //! a clock (empty: no floor).
 //!
 //! Validation, before anything is trusted: sort orders and uniqueness; every
 //! budget (checked against the count before allocating); version clocks
 //! non-empty and unique within the record; heads pairwise concurrent;
-//! every history version strictly dominated by a head and not suppressed by
+//! every history version strictly dominated by a head; only marked permanent
+//! tombstones may be covered by
 //! the floor; every role (version object or chunk) resolves to exactly one
 //! reference and every reference to exactly one role; role-dependent object
 //! lengths; the control records present and distinct.
@@ -60,7 +62,7 @@ use crate::limits::{
 use crate::object::Scope;
 
 /// The development manifest format.
-pub const MANIFEST_FORMAT: u64 = 0x7FFF_0001;
+pub const MANIFEST_FORMAT: u64 = 0x7FFF_0002;
 
 const AAD_LABEL: &str = "qv/manifest/v1";
 const CONFIG_LABEL: &str = "qv/config/v1";
@@ -85,6 +87,7 @@ pub struct VersionRef {
     clock: Clock,
     object_id: ObjectId,
     chunks: Option<Vec<ObjectId>>,
+    tombstone: bool,
 }
 
 impl VersionRef {
@@ -94,12 +97,23 @@ impl VersionRef {
             clock,
             object_id,
             chunks: None,
+            tombstone: false,
         }
     }
 
     /// The same role with an attachment's chunk list.
     pub(crate) fn with_chunks(mut self, chunks: Vec<ObjectId>) -> Self {
         self.chunks = Some(chunks);
+        self
+    }
+
+    /// Whether this role permanently retains a final tombstone.
+    pub fn is_tombstone(&self) -> bool {
+        self.tombstone
+    }
+
+    pub(crate) fn with_tombstone(mut self) -> Self {
+        self.tombstone = true;
         self
     }
 
@@ -177,7 +191,9 @@ impl RecordEntry {
             }
         }
         for h in &history {
-            if floor.suppresses(&h.clock) || !heads.iter().any(|v| v.clock.dominates(&h.clock)) {
+            if (floor.suppresses(&h.clock) && !h.tombstone)
+                || !heads.iter().any(|v| v.clock.dominates(&h.clock))
+            {
                 return Err(StoreError::Integrity);
             }
         }
@@ -361,7 +377,11 @@ fn decode_version(d: &mut Decoder<'_>, counts: &mut Counts) -> Result<VersionRef
     let clock = Clock::decode(d)?;
     counts.add_clock(&clock)?;
     let object_id = read_id(d)?;
-    let chunks = if n == 4 {
+    let tombstone = n == 4 && d.peek_kind().map_err(malformed)? == qv_encoding::Kind::Bool;
+    if tombstone && !d.bool().map_err(malformed)? {
+        return Err(StoreError::Integrity);
+    }
+    let chunks = if n == 4 && !tombstone {
         let count = read_len(d, MAX_CHUNKS)?;
         let mut chunks = Vec::with_capacity(count);
         for _ in 0..count {
@@ -376,6 +396,7 @@ fn decode_version(d: &mut Decoder<'_>, counts: &mut Counts) -> Result<VersionRef
         clock,
         object_id,
         chunks,
+        tombstone,
     })
 }
 
@@ -384,6 +405,9 @@ fn encode_version(v: &VersionRef, e: &mut Encoder) -> Result<(), qv_encoding::En
         a.bytes(&v.version_id.to_bytes());
         v.clock.encode(a)?;
         a.bytes(&v.object_id.to_bytes());
+        if v.tombstone {
+            a.bool(true);
+        }
         if let Some(chunks) = &v.chunks {
             a.array(|c| {
                 for id in chunks {
@@ -788,7 +812,7 @@ impl Manifest {
                 .checked_add(all.len())
                 .ok_or(StoreError::LimitExceeded)?;
             for v in &all {
-                if v.clock.is_empty() {
+                if v.clock.is_empty() || (v.tombstone && v.chunks.is_some()) {
                     return Err(StoreError::Integrity);
                 }
                 components = components
@@ -831,7 +855,7 @@ impl Manifest {
             let floor = HistoryFloor::new(r.floor.clone());
             for h in &r.history {
                 if !r.heads.iter().any(|head| head.clock.dominates(&h.clock))
-                    || floor.suppresses(&h.clock)
+                    || (floor.suppresses(&h.clock) && !h.tombstone)
                 {
                     return Err(StoreError::Integrity);
                 }
@@ -913,6 +937,7 @@ impl Manifest {
                 version_id: v.version_id,
                 clock: v.clock.clone(),
                 object_id: id(&v.object_id)?,
+                tombstone: v.tombstone,
                 chunks: match &v.chunks {
                     Some(c) => Some(c.iter().map(id).collect::<Result<_, _>>()?),
                     None => None,
@@ -1005,10 +1030,15 @@ impl Manifest {
         let mut dropped = Vec::new();
         for v in old_heads.into_iter().chain(old_history) {
             floor = floor.join(&v.clock)?;
+            if v.tombstone {
+                r.history.push(v);
+                continue;
+            }
             dropped.push(v.object_id);
             dropped.extend(v.chunks.into_iter().flatten());
         }
         r.floor = floor;
+        r.history.sort_by_key(|v| v.version_id);
         for id in dropped {
             let k = self
                 .references
@@ -1080,6 +1110,10 @@ impl Manifest {
         let old = core::mem::take(&mut r.history);
         let mut dropped = std::collections::BTreeSet::new();
         for v in old {
+            if v.tombstone {
+                r.history.push(v);
+                continue;
+            }
             let ids = core::iter::once(v.object_id).chain(v.chunks.into_iter().flatten());
             dropped.extend(ids);
         }
@@ -1102,7 +1136,7 @@ impl Manifest {
         let suppressed = HistoryFloor::new(r.floor.clone());
         let mut dropped = std::collections::BTreeSet::new();
         r.history.retain(|v| {
-            if eligible.contains(&v.version_id) && suppressed.suppresses(&v.clock) {
+            if !v.tombstone && eligible.contains(&v.version_id) && suppressed.suppresses(&v.clock) {
                 dropped.insert(v.object_id);
                 dropped.extend(v.chunks.iter().flatten().copied());
                 false
@@ -1923,7 +1957,7 @@ pub(crate) mod tests {
                     Clock::from_pairs(vec![(writers[0], big + i as u64)]).unwrap()
                 };
                 let vid = VersionId::from_bytes(id16(0x3000_0000 + k32 * 8 + i as u32)).unwrap();
-                versions.push(VersionRef::new(vid, clock, oid(object)));
+                versions.push(VersionRef::new(vid, clock, oid(object)).with_tombstone());
                 let length = if (object as usize) < long_refs {
                     65_536
                 } else {

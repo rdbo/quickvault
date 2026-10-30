@@ -3,9 +3,9 @@
 //! The authenticated local head (spec 0005 §5.4, 0004 §2).
 //!
 //! Every commit writes one head: `{ vault_id, key_generation, local_seq,
-//! previous_digest, manifest_hash, remote_checkpoint_id?, remote_sequence? }`,
+//! previous_digest, manifest_hash, remote_checkpoint_id?, remote_sequence?, archive_receipts_digest }`,
 //! MAC'd under the `local-state` purpose key. Body (canonical CBOR map;
-//! unknown keys fail closed). Development values, frozen in phase 1.16:
+//! unknown keys fail closed). Development values, volatile until the pre-1.0 freeze:
 //!
 //! | Key | Field | CBOR |
 //! |-----|-------|------|
@@ -16,6 +16,8 @@
 //! | 4 | manifest_hash | bstr 32 |
 //! | 5 | remote_checkpoint_id | bstr 32, optional (server mode; never written yet) |
 //! | 6 | remote_sequence | uint, present iff key 5 is |
+//! | 7 | archive_receipts_digest | bstr 32, mandatory (0004 §2.3) |
+//! | 8 | reserved for future LAN-link digest | not implemented |
 //!
 //! MAC: MAC/1 over `["qv/local-head/v1", body]`. `local_digest` is SHA-256
 //! of the canonical `[body, mac]`.
@@ -72,6 +74,7 @@ pub(crate) struct LocalHead {
     pub(crate) previous_digest: Option<[u8; 32]>,
     pub(crate) manifest_hash: [u8; 32],
     pub(crate) remote: Option<([u8; 32], u64)>,
+    pub(crate) archive_receipts_digest: [u8; 32],
 }
 
 fn malformed<E>(_: E) -> StoreError {
@@ -119,6 +122,10 @@ impl LocalHead {
                     Ok(())
                 })?;
             }
+            m.entry(7, |e| {
+                e.bytes(&self.archive_receipts_digest);
+                Ok(())
+            })?;
             Ok(())
         })
         .map_err(|_| StoreError::Internal)?;
@@ -133,7 +140,7 @@ impl LocalHead {
         let mut d = Decoder::new(input).map_err(malformed)?;
         let (mut vault_id, mut generation, mut seq, mut previous, mut manifest) =
             (None, None, None, None, None);
-        let (mut checkpoint, mut remote_seq) = (None, None);
+        let (mut checkpoint, mut remote_seq, mut receipts) = (None, None, None);
         for _ in 0..d.map().map_err(malformed)? {
             match d.int().map_err(malformed)? {
                 0 => {
@@ -150,6 +157,7 @@ impl LocalHead {
                 4 => manifest = Some(digest32(&mut d)?),
                 5 => checkpoint = Some(digest32(&mut d)?),
                 6 => remote_seq = Some(d.uint().map_err(malformed)?),
+                7 => receipts = Some(digest32(&mut d)?),
                 _ => return Err(StoreError::Unsupported),
             }
         }
@@ -174,6 +182,7 @@ impl LocalHead {
             previous_digest: previous,
             manifest_hash: manifest.ok_or(StoreError::Integrity)?,
             remote,
+            archive_receipts_digest: receipts.ok_or(StoreError::Integrity)?,
         })
     }
 }
@@ -261,6 +270,7 @@ mod tests {
             previous_digest: (seq > 1).then_some([seq as u8; 32]),
             manifest_hash: [0xee; 32],
             remote: None,
+            archive_receipts_digest: [0xab; 32],
         }
     }
 
@@ -277,10 +287,12 @@ mod tests {
     fn head_round_trip_and_golden() {
         let h = head(1);
         let body = h.encode().unwrap();
-        let mut expected = vec![0xa4, 0x00, 0x50];
+        let mut expected = vec![0xa5, 0x00, 0x50];
         expected.extend_from_slice(&v4(1));
         expected.extend_from_slice(&[0x01, 0x01, 0x02, 0x01, 0x04, 0x58, 0x20]);
         expected.extend_from_slice(&[0xee; 32]);
+        expected.extend_from_slice(&[0x07, 0x58, 0x20]);
+        expected.extend_from_slice(&[0xab; 32]);
         assert_eq!(body, expected);
         assert_eq!(LocalHead::decode(&body).unwrap(), h);
         let mut r = head(7);
@@ -337,23 +349,23 @@ mod tests {
         let id = |e: &mut Encoder| e.bytes(&v4(1));
         let one = |e: &mut Encoder| e.uint(1);
         let d32 = |e: &mut Encoder| e.bytes(&[0; 32]);
-        let base: Vec<Entry<'_>> = vec![(0, &id), (1, &one), (2, &one), (4, &d32)];
+        let base: Vec<Entry<'_>> = vec![(0, &id), (1, &one), (2, &one), (4, &d32), (7, &d32)];
         assert!(LocalHead::decode(&raw(&base)).is_ok());
         let mut only6 = base.clone();
-        only6.push((6, &one));
+        only6.insert(4, (6, &one));
         assert_eq!(
             LocalHead::decode(&raw(&only6)).err(),
             Some(StoreError::Integrity)
         );
         let mut only5 = base.clone();
-        only5.push((5, &d32));
+        only5.insert(4, (5, &d32));
         assert_eq!(
             LocalHead::decode(&raw(&only5)).err(),
             Some(StoreError::Integrity)
         );
         // Unknown key; missing manifest hash; oversized.
         let mut unknown = base.clone();
-        unknown.push((7, &one));
+        unknown.push((9, &one));
         assert_eq!(
             LocalHead::decode(&raw(&unknown)).err(),
             Some(StoreError::Unsupported)

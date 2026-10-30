@@ -351,6 +351,12 @@ impl UnlockedVault {
                     previous_digest: Some(self.state.digest),
                     manifest_hash: sealed.hash,
                     remote: None,
+                    archive_receipts_digest: crate::receipt_store::initialize(
+                        tx,
+                        &new_keys,
+                        &header,
+                        &replica.replica_id,
+                    )?,
                 };
                 let (head, digest) = sign_head(&new_keys, &header, &head)?;
                 #[cfg(test)]

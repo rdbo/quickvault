@@ -17,12 +17,17 @@ Purging retained payloads is not cryptographic erasure of external copies.
 1.1. Dominated complete versions become history. Keep the last N (default 10)
 by deterministic (modified_at, version_id) order, subject to resource budgets.
 Unresolved heads remain active and MUST NOT be pruned, including during rotation.
-Dates do not establish causality or override suppression rules.
+Dates do not establish causality or override suppression rules. Permanent
+tombstones are retained causal metadata, not restorable historical payloads;
+payload-history listings omit those roles.
 
 1.2. Each record retains a monotonic `history_floor` version vector in the
 manifest. Merge floors componentwise by maximum. A historical version whose
 clock is at most the floor is suppressed, even if reintroduced by an old peer.
 The floor does not hide active heads or remove permanent tombstones.
+Marked historical tombstones (0004 §3.4.1) remain indefinitely, including
+when covered by a joined or explicitly purged floor; later final deletion
+preserves earlier permanent tombstone versions as well.
 Missing floor metadata means zero only for a genuinely new record, not when
 a reference to existing suppression metadata is missing or fails verification.
 
@@ -159,6 +164,10 @@ reference set. Purge acknowledgements must not imply independent copies vanished
    explicit, warned user choice (0004 §6.4).*
 
 ## Changelog
+
+- 2026-10-30: Clarify indefinite preservation of dominated marked tombstones
+  through purge and later final deletion, and omit non-restorable tombstones
+  from payload-history views (combined 2.2b, plan 0027).
 
 - 2026-10-27: Resolve OQ1 per owner decision D6. Local snapshots carry no
   password slot and open with the vault key or the recovery phrase; add §3.5

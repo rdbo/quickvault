@@ -203,7 +203,8 @@ copy, require the same vault ID and key generation, authenticate it as in
 0004 §6.3 (header MAC and manifest before any object is decoded), then merge
 using §2. No SQLite file from an exchange location is ever opened. Bound
 reads of incomplete files and retry later. A reused filename with different
-bytes is an error. Do not automatically
+bytes is an error, persisted using the bounded sealed per-replica/generation
+receipts of 0004 §2.3, atomically with acceptance. Do not automatically
 delete archives or interpret file absence as a record deletion.
 
 4.4. Same-generation old backups may be merged without reviving covered
@@ -251,8 +252,9 @@ checkpoint. Referenced data is verified independently (0004 §3.6).
 
 5.4. **Local head and anchor.** Every commit writes one authenticated local head
 (0004 `local_head`): `{ vault_id, key_generation, local_seq, previous_digest,
-manifest_hash, remote_checkpoint_id?, remote_sequence?, lan_links_digest }`
-(0013 §9.1), MAC'd under the
+manifest_hash, remote_checkpoint_id?, remote_sequence?, archive_receipts_digest,
+lan_links_digest }`
+(0004 §2.3, 0013 §9.1), MAC'd under the
 local-state key. `local_seq` increases by one per commit; `local_digest` is
 SHA-256 of the canonical head including its MAC. The external anchor, in private
 state outside the DB and archives (keystore-backed where available), stores `{
@@ -435,6 +437,9 @@ Resource budgets and transactional acceptance apply even to authenticated data.
    Questions 3–6 are resolved by 0013.
 
 ## Changelog
+
+- 2026-10-30: Bind durable archive filename receipts to the local head and
+  acceptance transaction through 0004 §2.3 (owner delegation in 0026; plan 0027).
 
 - 2026-10-30: Owner-delegated acceptance of 0013 (roadmap D10, plan 0025): Open Questions 3–6 resolved by 0013; the local head gains `lan_links_digest`.
 - 2026-10-30: Point §6.7 and Open Questions 3–6 to the proposed LAN protocol

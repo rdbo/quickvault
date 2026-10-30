@@ -238,12 +238,25 @@ reads. Candidates join complete versions and suppression floors, preserve
 conflicts, and map every retained object/chunk to its source without generating
 versions or changing ciphertext. They hold validated metadata, not publication
 authority. Logical duplicate identity comparisons use confidential SHA-256
-digests and constant-time comparison. A covered dominated final tombstone
-cannot be represented under the existing manifest history-floor rules; the
-candidate builder rejects that combination rather than forgetting it.
-No incoming state is accepted yet: source/candidate revalidation, durable
-filename receipts and transaction/anchor integration remain 2.2b; core/CLI
-resolution and export remain 2.2c. The existing format stays volatile.
+digests and constant-time comparison. Permanent tombstones now have explicit authenticated role markers and remain
+retained even as dominated, floor-covered history. Retention, purge, later final
+deletion and rotation preserve those roles; payload-history views omit their
+non-restorable metadata.
+
+Roadmap 2.2b (plan 0027), recombined at the owner's direction, adds bounded
+sealed `archive_receipts` with protected canonical raw paths and complete-stream
+digests, bound to the local head and replica/generation. VerifiedIncoming opens
+every source component through pinned no-follow directory descriptors and owns
+its normalized receipt name. qv-sync computes candidates through transaction-local
+reads; qv-store independently validates the complete conservative projection and
+rechecks object/role/chunk commitments before acceptance. Objects, receipt envelope,
+manifest and head share the existing Write commit, followed by the anchor.
+Identical redelivery creates no new commit; pending anchors finish first.
+Working local password slots, writer counters and remote checkpoints remain
+unchanged by receipt. Creation/restore/rotation initialize fresh empty receipts.
+The volatile schema/header is 0x7FFF0003 and manifest 0x7FFF0002, with no migration.
+Core/CLI exchange commands, recovery-snapshot policy at that operation boundary,
+explicit conflict/slot resolution and export remain 2.2c. Formats stay volatile.
 
 Frontends call qv-core. Core injects platform traits and orchestrates model,
 store, crypto and sync. Crypto/model have no dependency on frontends. Server
@@ -409,7 +422,7 @@ evidence without freezing anything:
 It is implemented and reviewed.
 
 Roadmap 2.2 is split into 2.2a (verified private archive input and shared merge
-candidates, plan 0026), 2.2b (atomic acceptance and filename receipts), and
+candidates, plan 0026), 2.2b (receipt storage and atomic acceptance, plan 0027), and
 2.2c (core/CLI conflict resolution and archive export). Preserve the owner
 commit and fresh-context review between these parts. Candidate construction
 alone does not complete archive exchange or authorize a release.

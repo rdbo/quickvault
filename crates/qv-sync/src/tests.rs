@@ -173,6 +173,9 @@ fn build(extra: Vec<Record>, salt: u8) -> State {
                                         x.bytes(&v.version_id.to_bytes());
                                         v.clock.encode(x)?;
                                         x.bytes(&object);
+                                        if v.deletion() == Deletion::Final {
+                                            x.bool(true);
+                                        }
                                         if let RecordBody::Live(Payload::AttachmentMeta(meta)) =
                                             &v.body
                                         {
@@ -627,16 +630,11 @@ fn covered_dominated_permanent_tombstone_is_never_silently_forgotten() {
     let mut r = record(vec![entry(101, &[(10, 2)], "later")]);
     r.floor = clock(&[(10, 1)]);
     let b = build(vec![r], 1);
-    assert_eq!(
-        merge(
-            &a.manifest,
-            &b.manifest,
-            &mut |s, r, v| read(if s == Source::Local { &a } else { &b }, r, v),
-            &|| false
-        )
-        .unwrap_err(),
-        StoreError::Integrity
-    );
+    let result = combine(&a, &b);
+    let retained = result.manifest().record(rid(4)).unwrap();
+    assert_eq!(retained.history().len(), 1);
+    assert!(retained.history()[0].is_tombstone());
+    assert!(retained.floor().suppresses(retained.history()[0].clock()));
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -773,4 +771,176 @@ fn attachments_keep_complete_chunk_references_and_reject_role_substitution() {
         .unwrap_err(),
         StoreError::Integrity
     );
+}
+
+// 0012 §1: Order-dependent merges
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[test]
+fn accepted_archive_permutations_preserve_conflicts_tombstones_chunks_and_receipts() {
+    use qv_crypto::MasterPassword;
+    use qv_store::{AnchorDir, ArchiveScope, VaultFile, VerifiedIncoming};
+    use std::os::unix::fs::DirBuilderExt;
+    struct Dir(std::path::PathBuf);
+    impl Drop for Dir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let d = Dir(std::env::temp_dir().join(format!(
+        "qv-accept-{}",
+        u64::from_be_bytes(qv_crypto::random_array().unwrap())
+    )));
+    std::fs::DirBuilder::new().mode(0o700).create(&d.0).unwrap();
+    let private = d.0.join("private");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&private)
+        .unwrap();
+    let anchors = AnchorDir::open(&d.0.join("anchors")).unwrap();
+    let password = MasterPassword::from_utf8(b"test fixture password").unwrap();
+    let mut base = VaultFile::create(
+        &d.0.join("base.qvault"),
+        &password,
+        "acceptance fixture",
+        &anchors,
+    )
+    .unwrap();
+    let record = <RecordId as RandomId>::generate().unwrap();
+    let attachment = <RecordId as RandomId>::generate().unwrap();
+    let put = |vault: &mut qv_store::UnlockedVault, deleted: bool, n: u32| {
+        let root = vault.manifest().root_group_id();
+        let mut w = vault.write().unwrap();
+        let counter = w.reserve_counter().unwrap();
+        let mut v = entry(n, &[(10, 1)], "whole credential");
+        v.version_id = VersionId::generate().unwrap();
+        v.clock = Clock::for_edit(w.head_clocks(record).iter(), w.writer_id(), counter).unwrap();
+        if deleted {
+            v.body = RecordBody::Tombstone(RecordKind::Entry);
+        } else if let RecordBody::Live(Payload::Entry(e)) = &mut v.body {
+            e.group = root;
+        }
+        w.put_local(record, v).unwrap();
+        w.commit().unwrap();
+    };
+    put(&mut base, false, 100);
+    let mut baseline = Vec::new();
+    base.write_archive(&mut baseline, Timestamp(1), &|| false)
+        .unwrap();
+    let scope = ArchiveScope::new(base.header().vault_id, base.header().key_generation);
+    let content = vec![23u8; 70000];
+    for branch in 0..3 {
+        let path = d.0.join(format!("branch{branch}.qvault"));
+        VaultFile::create_from_archive(
+            &path,
+            &mut std::io::Cursor::new(&baseline),
+            scope,
+            base.vault_key(),
+            &anchors,
+            &|| false,
+        )
+        .unwrap();
+        let mut vault = VaultFile::open(&path)
+            .unwrap()
+            .unlock(&password, &anchors)
+            .unwrap();
+        put(&mut vault, branch == 1, 101 + branch);
+        if branch == 0 {
+            let mut w = vault.write().unwrap();
+            let staged = w
+                .stage_attachment(attachment, &mut std::io::Cursor::new(&content), &|| false)
+                .unwrap();
+            let counter = w.reserve_counter().unwrap();
+            let v = RecordVersion {
+                version_id: VersionId::generate().unwrap(),
+                clock: Clock::for_edit(std::iter::empty::<&Clock>(), w.writer_id(), counter)
+                    .unwrap(),
+                modified_at: Timestamp(0),
+                body: RecordBody::Live(Payload::AttachmentMeta(staged.into_meta(
+                    record,
+                    Text::new("bytes").unwrap(),
+                    Text::new("application/octet-stream").unwrap(),
+                ))),
+                ext: Extensions::new(),
+            };
+            w.put_local(attachment, v).unwrap();
+            w.commit().unwrap();
+        }
+        vault
+            .write_archive(
+                std::fs::File::create(d.0.join(format!("archive{branch}.qvsnap"))).unwrap(),
+                Timestamp(1),
+                &|| false,
+            )
+            .unwrap();
+    }
+    let mut expected = None;
+    for (number, order) in [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let path = d.0.join(format!("local{number}.qvault"));
+        VaultFile::create_from_archive(
+            &path,
+            &mut std::io::Cursor::new(&baseline),
+            scope,
+            base.vault_key(),
+            &anchors,
+            &|| false,
+        )
+        .unwrap();
+        let mut vault = VaultFile::open(&path)
+            .unwrap()
+            .unlock(&password, &anchors)
+            .unwrap();
+        let writer = vault.writer_id();
+        let seq = vault.local_seq();
+        for branch in order {
+            let source = d.0.join(format!("archive{branch}.qvsnap"));
+            let mut input =
+                VerifiedIncoming::open(&source, &private, scope, vault.vault_key(), &|| false)
+                    .unwrap();
+            assert!(accept_archive(&mut vault, &mut input, &|| false).unwrap());
+            assert!(!accept_archive(&mut vault, &mut input, &|| false).unwrap());
+        }
+        assert_eq!(vault.local_seq(), seq + 3);
+        assert_eq!(vault.writer_id(), writer);
+        let r = vault.manifest().record(record).unwrap();
+        assert_eq!(r.heads().len(), 3);
+        assert!(r.heads().iter().any(|v| v.is_tombstone()));
+        let version = vault.manifest().record(attachment).unwrap().heads()[0].version_id();
+        let mut got = Vec::new();
+        vault
+            .read_attachment(attachment, version, &mut got, &|| false)
+            .unwrap();
+        assert_eq!(got, content);
+        vault.verify_all(&|| false).unwrap();
+        let encoded = vault.manifest().encode().unwrap();
+        if let Some(prior) = &expected {
+            assert_eq!(&encoded, prior);
+        } else {
+            expected = Some(encoded);
+        }
+        drop(vault);
+        let mut vault = VaultFile::open(&path)
+            .unwrap()
+            .unlock(&password, &anchors)
+            .unwrap();
+        let mut input = VerifiedIncoming::open(
+            &d.0.join("archive0.qvsnap"),
+            &private,
+            scope,
+            vault.vault_key(),
+            &|| false,
+        )
+        .unwrap();
+        assert!(!accept_archive(&mut vault, &mut input, &|| false).unwrap());
+        assert_eq!(vault.local_seq(), seq + 3);
+    }
 }

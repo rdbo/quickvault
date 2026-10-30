@@ -598,7 +598,7 @@ release; it is not weakened.
 
 #### Phase 2.2a — Verified archive input and shared merge candidates
 
-- [x] **Plan:** [0026](../0026-conflicts-archive-exchange/PLAN.md) (Implemented).
+- [x] **Plan:** [0026](../0026-conflicts-archive-exchange/PLAN.md) (Reviewed).
 - **Do:** Create qv-sync's bounded whole-record candidate merge and qv-store's
   private fully authenticated stable archive input. No incoming publication yet.
 - **Specs:** 0005 §1–2, §4 (owner go-ahead); 0004 §3–4, §6; 0007 §1–2.
@@ -612,17 +612,17 @@ release; it is not weakened.
 
 #### Phase 2.2b — Atomic incoming acceptance and filename receipts
 
-- [ ] **Do:** Integrate candidate staging through the existing 1.7 write path;
-  persist protected filename receipts atomically, bound by the local head;
-  keep restore/rotation/restart and anchor handling consistent. Amend the
-  normative storage contracts first, under owner delegation recorded in 0026.
-- **Specs:** 0005 §2, §4, §5.4; 0004 §2–5; 0007 §1–3.
-- **Depends on:** 2.2a, its fresh-context review and owner commit.
-- **Files:** `crates/qv-store/`, `crates/qv-sync/`, relevant specs.
-- **Done when:** storage-level permutation/redelivery converges; years-old
-  input revives neither tombstones nor suppressed history; filename reuse
-  with different bytes is an error across restart; acceptance crash matrix passes.
-- **Verify:** qv-sync/store tests and required gates.
+- [x] **Plan:** [0027](../0027-archive-receipt-state/PLAN.md) (Implemented).
+- **Do:** Sealed receipt state and lifecycle, safe source paths and verified
+  candidate/object staging through the existing write/anchor path. Preserve
+  all permanent tombstones, including dominated floor-covered ones.
+- **Specs:** 0004 §2–6; 0005 §2, §4, §5.4; 0007 §1–3.
+- **Depends on:** 2.2a (Reviewed and committed).
+- **Files:** qv-store, qv-sync, existing LocalState AEAD use, specs, tests/fuzz/CI.
+- **Done when:** atomic acceptance/redelivery/restart converges; changed reused
+  filenames fail; old input revives neither tombstones nor suppressed history;
+  full acceptance crash matrix and all gates pass.
+- **Verify:** store/sync suites and required gates.
 
 #### Phase 2.2c — Conflict resolution and archive-exchange commands
 
@@ -936,6 +936,17 @@ release; it is not weakened.
 
 ## Revisions
 
+- 2026-10-30: Owner: “Do both Bs already.” Recombine b1/b2 as 2.2b,
+  continuing 0027 on the staged tree in this session. This explicitly overrides
+  the intermediate commit/fresh-review/session split; C remains separate.
+
+- 2026-10-30: Split 2.2b before implementation under the session-size rule:
+  b1 (0027) establishes sealed receipt storage/head/lifecycle; b2 publishes
+  incoming candidates with atomic receipts and the acceptance crash matrix.
+  Together these exceed 8–10 implementation steps. The receipt design and
+  normative amendment are covered by owner delegation in 0026. Each code
+  subphase retains the owner commit and fresh-context review boundary.
+
 - 2026-10-30 (plan 0026, before code): owner approved the receipt/CLI
   recommendations and delegated remaining choices (“Just do whatever you feel
   is right and go ahead”). Split 2.2 under the session-size rule into 2.2a
@@ -1043,6 +1054,43 @@ release; it is not weakened.
 - 2026-10-26 (phase 1.10, plan 0011): the owner approved splitting 1.10 into 1.10a/1.10b and decisions D-1–D-6 of plan 0011 as recommended: `zxcvbn 3.1.1` in `qv-core` (0010 §3.2); `clap 4.6.7` builder API only; for 1.10b, `signal-hook 0.4.5` and `arboard 3.6.1` (X11 only, no image support) with per-crate `BSL-1.0` exceptions for `clipboard-win` and `error-code`; the recovery-phrase skip (0002 §4.2) recorded as vault settings key 3 `recovery_skipped_at` (development value for the 1.16 freeze). These dependencies are now approved for 1.10b's standing approval. Raised, not decided: 0011 has no command to adopt a vault with a missing or mismatched anchor (suggested for 1.13/1.14).
 
 ## Execution log
+
+- 2026-10-30: Owner explicitly requested both Bs without the intermediate
+  split. Continued 0027 on the staged tree and recombined **2.2b, Implemented**:
+  atomic storage-level incoming acceptance, capability-bound safe normalized
+  paths, durable encrypted filename receipts, independent conservative
+  candidate and encrypted object/chunk validation, idempotent redelivery,
+  unchanged working slots/counters/checkpoints and the existing commit/anchor
+  path. Permanent tombstones have explicit role markers and survive covered
+  dominated history, purge, later final deletion, restore and rotation;
+  payload-history views omit their non-restorable metadata. Volatile manifest
+  format is 0x7FFF0002; schema/header stays 0x7FFF0003, no migration.
+  Eight acceptance tests cover nine crash points, cancellation, restart,
+  changed filenames, bounds, malicious candidates and operational slots;
+  real archive acceptance converges in all six orders with concurrent
+  deletion/edit and attachments. Final SPDX/matrix/fmt/Clippy/locked suite pass:
+  **679 passed, 0 failed, 2 pre-existing ignored**, private Xvfb. Affected fuzz
+  compile/format pass. No dependency/unsafe/primitive change or release claim.
+  C remains separate as originally scoped; no further B work is deferred.
+  Changes remain uncommitted, original staged index preserved. Fresh review
+  of the complete B implementation is still due before C under the ordinary
+  roadmap protocol; no intermediate B review/commit was requested.
+
+- 2026-10-30: Clean-tree next-phase session reviewed committed 0026
+  (5b3462f), **Approved**, no code fixes/blocking findings. Independent gates
+  pass (663 passed, 0 failed, 2 existing ignored), including matrix/deny/vet.
+  Split 2.2b under the session-size rule before code. **2.2b1 implemented as
+  0027**, under owner delegation preserved in 0026: bounded protected receipt
+  metadata, canonical envelope/AAD and normative storage contracts, sealed
+  singleton/head binding, restart/write preservation and restore/rotation
+  resets. Volatile schema/header is 0x7FFF0003; older dev files reject without
+  migration. No dependency, unsafe or primitive change. Six new tests plus
+  parser fuzz target/CI; final SPDX/matrix/fmt/Clippy/locked tests pass:
+  **669 passed, 0 failed, 2 pre-existing ignored**, private Xvfb. Fuzz build,
+  format and 10,000-input uninstrumented smoke pass; no release claim.
+  Actual incoming acceptance/filename recording, safe source-path traversal
+  and tombstone-representation implications remain 2.2b2. Next: owner commit,
+  fresh-context review of 0027, then plan b2. Changes remain uncommitted.
 
 - 2026-10-30: Owner approved plan 0026's receipt/CLI recommendations and
   delegated remaining design choices. Before code, split 2.2 into a/b/c under

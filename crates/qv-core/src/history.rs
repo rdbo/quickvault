@@ -245,6 +245,7 @@ impl Session {
                 .ok_or(CoreError::NotFound)?
                 .history()
                 .iter()
+                .filter(|v| !v.is_tombstone())
                 .map(|v| v.version_id())
                 .collect();
             let initial = versions
@@ -399,6 +400,56 @@ mod tests {
         d.entry_mut().fields[0].value = FieldValue::text(&format!("secret-{n}")).unwrap();
         s.save_entry(d).unwrap();
     }
+    // 0012 §1: Deleted-entry resurrection
+    #[test]
+    fn history_omits_permanent_metadata_after_causal_restore_without_discarding_it() {
+        let env = Env::new();
+        let s = env.unlock();
+        let e = create(&s);
+        s.mutate(|ctx| {
+            let original = ctx
+                .open
+                .vault
+                .read_version(e.record, ctx.open.index.records[&e.record].shown.unwrap())?;
+            crate::edit::commit(
+                ctx,
+                vec![crate::edit::Change {
+                    record: e.record,
+                    kind: RecordKind::Entry,
+                    body: RecordBody::Tombstone(RecordKind::Entry),
+                    ext: Extensions::new(),
+                }],
+            )?;
+            crate::edit::commit(
+                ctx,
+                vec![crate::edit::Change {
+                    record: e.record,
+                    kind: RecordKind::Entry,
+                    body: original.body,
+                    ext: original.ext,
+                }],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(s.history(e).unwrap().is_empty());
+        s.purge_history(e).unwrap();
+        s.read(|ctx| {
+            let history = ctx
+                .open
+                .vault
+                .manifest()
+                .record(e.record)
+                .unwrap()
+                .history();
+            assert_eq!(history.len(), 1);
+            assert!(history[0].is_tombstone());
+            Ok(())
+        })
+        .unwrap();
+        assert!(s.history(e).unwrap().is_empty());
+    }
+
     #[test]
     fn history_retention_restore_purge_and_handle_capabilities() {
         let env = Env::new();

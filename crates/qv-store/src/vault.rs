@@ -224,6 +224,13 @@ pub(crate) fn load_state(
         return Err(StoreError::Integrity);
     }
     let digest = local_digest(&stored.head.body, &head_tag)?;
+    crate::receipt_store::open(
+        &stored.receipts,
+        &head.archive_receipts_digest,
+        &keys,
+        header,
+        &stored.replica.replica_id,
+    )?;
 
     // The manifest the head names.
     let m = &stored.manifest;
@@ -273,6 +280,20 @@ pub(crate) fn load_state(
             kind = Some(k);
             check_head(&manifest, rec.record_id(), h, &version)?;
         }
+        for role in rec.history().iter().filter(|v| v.is_tombstone()) {
+            let version = read_role(
+                &mut reader,
+                &keys,
+                header,
+                &manifest,
+                rec.record_id(),
+                role,
+                true,
+            )?;
+            if kind != Some(version.kind()) {
+                return Err(StoreError::Integrity);
+            }
+        }
         kinds.insert(rec.record_id(), kind.ok_or(StoreError::Integrity)?);
     }
     check_control_kinds(&manifest, &kinds)?;
@@ -317,14 +338,16 @@ pub(crate) fn read_role(
         clock: v.clock(),
         object: v.object_id(),
     };
-    open_record(
+    let decoded = open_record(
         &keys.record,
         scope(header),
         &role,
         r.data_profile(),
         &nonce,
         &ciphertext,
-    )
+    )?;
+    check_head(manifest, record, v, &decoded)?;
+    Ok(decoded)
 }
 
 impl VaultFile {
@@ -819,6 +842,11 @@ fn build(
         objects.push(o);
     }
     let sealed = seal_manifest(&keys.manifest, s, header.data_profile, &manifest)?;
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|e| crate::error::sqlite_err(&e))?;
+    let w = |e: rusqlite::Error| write_err(&tx, &e, 0);
+    schema::install(&tx)?;
     let head = LocalHead {
         vault_id,
         key_generation: header.key_generation,
@@ -826,14 +854,15 @@ fn build(
         previous_digest: None,
         manifest_hash: sealed.hash,
         remote: None,
+        archive_receipts_digest: crate::receipt_store::initialize(
+            &tx,
+            &keys,
+            &header,
+            &replica_id,
+        )?,
     };
     let (stored_head, digest) = sign_head(&keys, &header, &head)?;
 
-    let tx = conn
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|e| crate::error::sqlite_err(&e))?;
-    let w = |e: rusqlite::Error| write_err(&tx, &e, 0);
-    schema::install(&tx)?;
     tx.execute(
         "INSERT INTO header (id, body, mac) VALUES (1, ?1, ?2)",
         rusqlite::params![body.as_slice(), tag.as_bytes().as_slice()],
@@ -1270,7 +1299,7 @@ pub(crate) mod tests {
         let (p, dir) = copy_fixture(&d, &a, "v.qvault");
         let header = {
             let f = VaultFile::open(&p).unwrap();
-            assert_eq!(f.schema_version(), 0x7FFF_0002);
+            assert_eq!(f.schema_version(), 0x7FFF_0003);
             assert_eq!(f.password_kdf(), Ok(PasswordKdfProfile::V1));
             *f.header()
         };

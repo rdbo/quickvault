@@ -17,14 +17,7 @@ use qv_model::{
 };
 use qv_store::{Manifest, ObjectRef, RecordEntry, StoreError, VersionRef};
 
-/// Which stable input supplies an encrypted object or authenticated record.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Source {
-    /// Current local accepted state.
-    Local,
-    /// Fully authenticated private incoming archive.
-    Incoming,
-}
+pub use qv_store::IncomingSource as Source;
 
 /// Validated merged metadata and the source of each retained encrypted object.
 /// No plaintext records, keys, timestamps or synthetic versions are retained.
@@ -223,17 +216,11 @@ fn merge_record(
     check_cancel(cancelled)?;
     let mut history = Vec::new();
     for v in dominated {
-        if floor.suppresses(v.clock()) {
-            // Permanent tombstones cannot be removed by a history floor. The
-            // current manifest format cannot retain covered dominated roles;
-            // fail closed instead of forgetting final-deletion knowledge.
-            if v.deletion == Deletion::Final {
-                return Err(StoreError::Integrity);
-            }
-        } else {
+        if v.deletion == Deletion::Final || !floor.suppresses(v.clock()) {
             history.push(v);
         }
     }
+
     let record = RecordEntry::from_parts(
         id,
         heads.iter().map(|v| v.role.clone()).collect(),
@@ -250,7 +237,10 @@ fn check_version(
     role: &VersionRef,
     version: &RecordVersion,
 ) -> Result<(), StoreError> {
-    if version.version_id != role.version_id() || &version.clock != role.clock() {
+    if version.version_id != role.version_id()
+        || &version.clock != role.clock()
+        || role.is_tombstone() != (version.deletion() == Deletion::Final)
+    {
         return Err(StoreError::Integrity);
     }
     let expected = if id == manifest.vault_meta_id() {
@@ -292,3 +282,21 @@ fn check_version(
 
 #[cfg(test)]
 mod tests;
+
+/// Atomically accept one verified archive, recording its capability-bound name.
+/// Returns false for identical redelivery; pending anchor work finishes first.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub fn accept_archive(
+    vault: &mut qv_store::UnlockedVault,
+    incoming: &mut qv_store::VerifiedIncoming,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<bool, StoreError> {
+    vault.accept_incoming(
+        incoming,
+        &mut |local, incoming, read| {
+            merge(local, incoming, &mut |s, r, v| read(s, r, v), cancelled)
+                .map(|candidate| candidate.manifest)
+        },
+        cancelled,
+    )
+}

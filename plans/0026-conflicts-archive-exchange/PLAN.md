@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-10-30 | 2026-10-30 | 0005 §1–2, §4; 0004 §3–4, §6; 0007 §1–2; 0008 §1–3, §5; 0012 §1 |
+| Reviewed | 2026-10-30 | 2026-10-30 | 0005 §1–2, §4; 0004 §3–4, §6; 0007 §1–2; 0008 §1–3, §5; 0012 §1 |
 
 ## Intent
 
@@ -292,3 +292,7 @@ boundary before 2.2b, as required by the roadmap split rule.
   normative format/status change. Next fresh session reviews this implementation
   before planning 2.2b; the owner must commit first. Nothing committed/pushed/
   branched. No independent review or security-validation claim.
+
+- 2026-10-30: Fresh-context review Approved; see REVIEW.md. Independent gates
+  pass (663 passed, 0 failed, 2 existing ignored), including private Xvfb,
+  matrix, deny and vet. No code fixes or blocking findings.

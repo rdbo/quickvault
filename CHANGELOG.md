@@ -9,6 +9,26 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-30: Completed both parts of roadmap 2.2b under plan 0027, combined
+  at the owner's direction: atomic archive-candidate acceptance and durable
+  filename receipts through the existing commit/anchor path, descriptor-pinned
+  source traversal and normalized protected paths, idempotent redelivery and
+  independent candidate/object/chunk validation. Permanent tombstones now have
+  authenticated role markers and survive dominated/floor-covered history,
+  purge, later final deletion, restore and rotation. Payload-history listings
+  omit those non-restorable metadata roles. Volatile manifest format is
+  0x7FFF0002; schema/header stays 0x7FFF0003, without migration. Core/CLI exchange
+  and conflict-resolution workflows remain 2.2c.
+
+- 2026-10-30: Roadmap 2.2b1 (plan 0027): bounded confidential archive receipt
+  metadata and a sealed local-only SQLite singleton, authenticated by the local
+  head and bound to the replica/generation. Ordinary writes preserve it;
+  creation, new-path restore and rotation initialize empty receipts. The
+  volatile development schema/header is 0x7FFF0003, without old-format migration.
+  Parser, tampering, capacity, restart and lifecycle tests plus a CI fuzz target.
+  Atomic incoming acceptance and actual filename receipt recording remain
+  2.2b2; core/CLI workflows remain 2.2c. Fresh review of 0026 is Approved.
+
 - 2026-10-30: Roadmap 2.2a (plan 0026): authenticated private archive input
   and the shared `qv-sync` merge-candidate engine. Candidates preserve complete
   versions, concurrent deletion/edit, attachment references and monotonic

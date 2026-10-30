@@ -2,9 +2,10 @@
 
 //! The vault schema and its validation (spec 0004 §1.2, §2, §4.1).
 //!
-//! Development schema 2 (all tables `STRICT`):
+//! Development schema 3 (all tables `STRICT`):
 //!
 //! ```sql
+//! CREATE TABLE archive_receipts (id INTEGER PRIMARY KEY CHECK (id = 1), sealed BLOB NOT NULL) STRICT
 //! CREATE TABLE header (id INTEGER PRIMARY KEY CHECK (id = 1), body BLOB NOT NULL, mac BLOB NOT NULL) STRICT
 //! CREATE TABLE keyslot (slot_id BLOB PRIMARY KEY CHECK (length(slot_id) = 16), type INTEGER NOT NULL, body BLOB NOT NULL) STRICT, WITHOUT ROWID
 //! CREATE TABLE object (key_generation INTEGER NOT NULL, object_id BLOB NOT NULL CHECK (length(object_id) = 16), data_profile INTEGER NOT NULL, nonce BLOB NOT NULL CHECK (length(nonce) = 24), ciphertext BLOB NOT NULL, PRIMARY KEY (key_generation, object_id)) STRICT
@@ -54,8 +55,11 @@ const MANIFEST_DDL: &str = "CREATE TABLE manifest (manifest_hash BLOB PRIMARY KE
 const LOCAL_HEAD_DDL: &str = "CREATE TABLE local_head (id INTEGER PRIMARY KEY CHECK (id = 1), body BLOB NOT NULL, mac BLOB NOT NULL) STRICT";
 const REPLICA_DDL: &str = "CREATE TABLE replica (id INTEGER PRIMARY KEY CHECK (id = 1), replica_id BLOB NOT NULL CHECK (length(replica_id) = 16), writer_id BLOB NOT NULL CHECK (length(writer_id) = 16), next_counter INTEGER NOT NULL) STRICT";
 
+const RECEIPTS_DDL: &str = "CREATE TABLE archive_receipts (id INTEGER PRIMARY KEY CHECK (id = 1), sealed BLOB NOT NULL) STRICT";
+
 /// Every table's DDL, in creation order.
-const TABLES: [&str; 6] = [
+const TABLES: [&str; 7] = [
+    RECEIPTS_DDL,
     HEADER_DDL,
     KEYSLOT_DDL,
     OBJECT_DDL,
@@ -66,7 +70,13 @@ const TABLES: [&str; 6] = [
 
 /// The exact `sqlite_schema` rows `(type, name, tbl_name, sql)`, sorted by
 /// name.
-const EXPECTED: [(&str, &str, &str, Option<&str>); 8] = [
+const EXPECTED: [(&str, &str, &str, Option<&str>); 9] = [
+    (
+        "table",
+        "archive_receipts",
+        "archive_receipts",
+        Some(RECEIPTS_DDL),
+    ),
     ("table", "header", "header", Some(HEADER_DDL)),
     ("table", "keyslot", "keyslot", Some(KEYSLOT_DDL)),
     ("table", "local_head", "local_head", Some(LOCAL_HEAD_DDL)),
@@ -310,8 +320,9 @@ pub(crate) struct StoredHead {
     pub(crate) mac: [u8; 32],
 }
 
-/// The three singleton rows unlock reads.
+/// The four local singleton rows unlock reads.
 pub(crate) struct StoredState {
+    pub(crate) receipts: Vec<u8>,
     pub(crate) head: StoredHead,
     pub(crate) manifest: StoredManifest,
     pub(crate) replica: StoredReplica,
@@ -322,9 +333,10 @@ fn count(conn: &Connection, table: &str) -> Result<i64, StoreError> {
         .map_err(v)
 }
 
-/// Exactly one `local_head`, `manifest` and `replica` row, with the right
+/// Exactly one `local_head`, `manifest`, `replica` and `archive_receipts` row, with the right
 /// value types and lengths; no value is read.
 fn check_singletons(conn: &Connection) -> Result<(), StoreError> {
+    crate::receipt_store::check(conn)?;
     for table in ["local_head", "manifest", "replica"] {
         if count(conn, table)? != 1 {
             return Err(StoreError::Integrity);
@@ -457,6 +469,7 @@ pub(crate) fn read_replica(conn: &Connection) -> Result<StoredReplica, StoreErro
 pub(crate) fn read_state(conn: &Connection) -> Result<StoredState, StoreError> {
     check_singletons(conn)?;
     Ok(StoredState {
+        receipts: crate::receipt_store::read(conn)?,
         head: read_head(conn)?,
         manifest: read_manifest(conn)?,
         replica: read_replica(conn)?,
@@ -627,6 +640,8 @@ pub(crate) mod tests {
 
     /// Inserts well-shaped `local_head`, `manifest` and `replica` rows.
     pub(crate) fn fill_singletons(conn: &Connection) {
+        conn.execute("INSERT INTO archive_receipts VALUES (1, x'00')", [])
+            .unwrap();
         conn.execute_batch(
             "INSERT INTO local_head VALUES (1, x'a0', zeroblob(32));
              INSERT INTO manifest VALUES (zeroblob(32), 1, 1, zeroblob(24), x'00');

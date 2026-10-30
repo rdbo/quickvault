@@ -21,6 +21,15 @@ what they say, and behaviour changes start with a spec change.
 | [0012](0012-security-validation.md) | Security Validation and Release Gates | Accepted |
 | [0013](0013-lan-sync-protocol.md) | Direct LAN Sync Protocol | Accepted |
 
+0004 §3.4.1 and 0007 also specify permanent tombstone role markers and
+indefinite covered-history retention (combined 2.2b, owner-directed plan 0027).
+
+0004 §2.3 and 0005 §4/§5.4 include the owner-approved local archive receipt
+contract (2026-10-30, plan 0027; delegation in 0026): bounded confidential paths,
+complete-stream digests, sealed singleton state and authenticated-head binding.
+Combined 2.2b implements atomic storage acceptance and receipts through the
+existing Write/anchor path, with source paths bound to verified capabilities.
+
 0002 includes the owner-approved offline rotation amendment of 2026-10-29
 (plan 0021 D1 A): recovery public-key derivation may wait until sync needs it;
 the independently derived signing seeds still change with VK.

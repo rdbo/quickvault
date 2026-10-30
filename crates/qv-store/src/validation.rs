@@ -53,7 +53,7 @@ pub(crate) fn check_head(
         }
         _ => v.chunks().is_none(),
     };
-    if !chunks_ok {
+    if !chunks_ok || v.is_tombstone() != (version.deletion() == qv_model::Deletion::Final) {
         return Err(StoreError::Integrity);
     }
     if record == manifest.root_group_id() {

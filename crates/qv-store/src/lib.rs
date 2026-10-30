@@ -27,6 +27,7 @@
 //! | `slot` | local password slots (the `qv_model::Keyslot` descriptor) | 0002 §3.2 |
 //! | `object` | [`ObjectEnvelope`], record AAD, record encryption | 0004 §2.2, §3.2 |
 //! | `manifest` | [`Manifest`]: codec, validation, budgets, digests, encryption, envelope hash | 0004 §3.4–3.5, §4.1–4.2 |
+//! | `receipts` / `receipt_store` | Bounded protected receipt metadata, sealed singleton and head/replica binding; no incoming acceptance yet | 0004 §2.3 |
 //! | `head` | the local head, its MAC and digest, the head-versus-anchor table ([`AnchorStatus`]) | 0005 §5.4 |
 //! | `anchor` | [`AnchorDir`]: anchor files, atomic replacement | 0005 §5.4 |
 //! | `archive_verify` / `validation` | Bounded role-aware archive authentication and shared record checks | 0004 §3.6, §6 |
@@ -44,13 +45,14 @@
 //! | `crash` | crash-injection points (active in this crate's tests only) | — |
 //! | `unsupported` | the same API failing closed on targets other than Linux/Android | — |
 //!
-//! # Development format (unstable until phase 1.16)
+//! # Development format (volatile until the owner's pre-1.0 freeze)
 //!
 //! | Item | Value |
 //! |------|-------|
 //! | `application_id` | `0x5156_4C54` ("QVLT") |
-//! | `user_version` and header `format` | `0x7FFF_0002` (schema 2) |
-//! | manifest and anchor `format` | `0x7FFF_0001` |
+//! | `user_version` and header `format` | `0x7FFF_0003` (schema 3) |
+//! | manifest `format` | `0x7FFF_0002` (permanent-tombstone roles) |
+//! | anchor `format` | `0x7FFF_0001` |
 //! | page size | 4096 |
 //! | [`MAX_DB_BYTES`] | 2 GiB, checked before SQLite opens the file |
 //! | [`MAX_HEADER_BYTES`], [`MAX_SLOTS`] | 64 KiB, 64 (0004 §4.1) |
@@ -61,11 +63,11 @@
 //! | labels | `qv/record/v1`, `qv/manifest/v1`, `qv/config/v1`, `qv/local-head/v1`, `qv/header-mac/v1`, [`ARCHIVE_HEADER_LABEL`] |
 //!
 //! Tables (all `STRICT`; see `schema`): `header`, `keyslot`, `object`,
-//! `manifest`, `local_head`, `replica`. The header MAC is MAC/1 under the
+//! `manifest`, `local_head`, `replica`, `archive_receipts`. The header MAC is MAC/1 under the
 //! `header-mac` purpose key over `["qv/header-mac/v1", header_body,
 //! [[slot_id, type, body], …]]`, slots sorted by ID, exact stored bytes. The
 //! manifest, head and anchor layouts are in their modules. A worst-case
-//! manifest at every budget is 52,391,657 bytes (50.0 MiB sealed), inside
+//! manifest upper bound including all permanent-tombstone markers is inside
 //! the 64 MiB limit (0004 §4.2; test `manifest_worst_case_fits_the_limit`).
 //!
 //! # Readings of the specs (plans 0008, 0009)
@@ -209,10 +211,15 @@ mod head;
 mod header;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod incoming;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod incoming_path;
 mod limits;
 mod location;
 mod manifest;
 mod object;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod receipt_store;
+mod receipts;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod restore;
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -265,6 +272,11 @@ pub use limits::{
     MAX_RECORD_CIPHERTEXT, MAX_RECORDS, MAX_SLOTS, MAX_TOTAL_CIPHERTEXT, PAGE_SIZE,
 };
 pub use location::LocationWarnings;
+pub use receipts::{
+    ArchiveReceipts, MAX_ARCHIVE_RECEIPTS, MAX_RECEIPT_CIPHERTEXT, MAX_RECEIPT_ENVELOPE,
+    MAX_RECEIPT_PATH_BYTES,
+};
+
 pub use manifest::{MANIFEST_FORMAT, Manifest, ObjectRef, RecordEntry, VersionRef};
 pub use object::ObjectEnvelope;
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -333,3 +345,20 @@ mod tests {
         assert_eq!(rusqlite::version(), "3.53.2");
     }
 }
+
+/// Authenticated input selected by a transaction-local incoming merge reader.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IncomingSource {
+    /// The current local accepted manifest.
+    Local,
+    /// The capability's fully verified private archive copy.
+    Incoming,
+}
+
+/// Role-bound source reader supplied by the incoming acceptance transaction.
+pub type IncomingRead<'a> = dyn FnMut(
+        IncomingSource,
+        qv_crypto::RecordId,
+        qv_model::VersionId,
+    ) -> Result<qv_model::RecordVersion, StoreError>
+    + 'a;

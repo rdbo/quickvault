@@ -407,7 +407,7 @@ mod tests {
         let info = core.inspect(&env.path).unwrap();
         assert_eq!(info.vault_id.len(), 32);
         assert!(info.vault_id.bytes().all(|b| b.is_ascii_hexdigit()));
-        assert_eq!(info.schema_version, 0x7FFF_0002);
+        assert_eq!(info.schema_version, 0x7FFF_0003);
         assert_eq!(info.key_generation, 1);
         assert_eq!(
             (info.data_profile, info.derivation_profile, info.mac_profile),

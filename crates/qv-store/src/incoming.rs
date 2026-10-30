@@ -10,7 +10,7 @@ use std::{
 
 use qv_crypto::{ObjectHashProfile, ObjectHasher, RecordId, SecretArray, VaultKey, purpose};
 use qv_model::{ObjectId, RecordVersion, VersionId};
-use rustix::fs::{FileType, OFlags};
+use rustix::fs::FileType;
 
 use crate::{
     ArchiveHeader, ArchiveScope, Manifest, ObjectEnvelope, OpenedArchive, StoreError,
@@ -27,6 +27,7 @@ pub struct VerifiedIncoming {
     file: File,
     opened: OpenedArchive,
     digest: [u8; 32],
+    pub(crate) path: qv_crypto::SecretBytes,
 }
 
 impl core::fmt::Debug for VerifiedIncoming {
@@ -52,12 +53,8 @@ impl VerifiedIncoming {
             return Err(StoreError::Io);
         }
         fs::check_private_dir(private_dir)?;
-        let fd = rustix::fs::open(
-            source,
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-            rustix::fs::Mode::empty(),
-        )
-        .map_err(crate::error::errno_err)?;
+        let path = crate::incoming_path::normalize(source)?;
+        let fd = crate::incoming_path::open_source(&path)?;
         let stat = rustix::fs::fstat(&fd).map_err(crate::error::errno_err)?;
         if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
             return Err(StoreError::UnsafeFile);
@@ -104,6 +101,7 @@ impl VerifiedIncoming {
             file,
             opened,
             digest: hash.finalize().0,
+            path,
         })
     }
 

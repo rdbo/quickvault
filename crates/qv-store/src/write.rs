@@ -81,6 +81,7 @@ pub struct Write<'v> {
     puts: usize,
     poisoned: bool,
     finished: bool,
+    receipt_blob: Option<Vec<u8>>,
 }
 
 impl core::fmt::Debug for Write<'_> {
@@ -163,8 +164,13 @@ impl UnlockedVault {
             .conn
             .execute_batch("BEGIN IMMEDIATE")
             .map_err(|e| sqlite_err(&e))?;
-        let fresh = schema::read_head(&self.file.conn)
-            .and_then(|h| Ok((h, schema::read_replica(&self.file.conn)?)));
+        let fresh = schema::read_head(&self.file.conn).and_then(|h| {
+            let blob = crate::receipt_store::read(&self.file.conn)?;
+            if crate::receipt_store::digest(&blob) != self.state.head.archive_receipts_digest {
+                return Err(StoreError::Integrity);
+            }
+            Ok((h, schema::read_replica(&self.file.conn)?))
+        });
         match fresh {
             Ok((head, replica))
                 if head == self.state.stored_head && replica == self.state.replica => {}
@@ -202,6 +208,7 @@ impl UnlockedVault {
             puts: 0,
             poisoned: false,
             finished: false,
+            receipt_blob: None,
         })
     }
 }
@@ -452,6 +459,9 @@ impl Write<'_> {
         )?;
         let reference = ObjectRef::new(object.object_id, object.data_profile, &object.ciphertext)?;
         let mut role = VersionRef::new(version.version_id, version.clock.clone(), object.object_id);
+        if version.deletion() == Deletion::Final {
+            role = role.with_tombstone();
+        }
         if let RecordBody::Live(Payload::AttachmentMeta(a)) = &version.body {
             role = role.with_chunks(a.chunk_object_ids.clone());
         }
@@ -678,6 +688,12 @@ impl Write<'_> {
             previous_digest: Some(old.digest),
             manifest_hash: sealed.hash,
             remote: old.head.remote,
+            archive_receipts_digest: self
+                .receipt_blob
+                .as_ref()
+                .map_or(old.head.archive_receipts_digest, |b| {
+                    crate::receipt_store::digest(b)
+                }),
         };
         let (stored_head, digest) = sign_head(&self.keys, &header, &head)?;
         let old_hash = old.head.manifest_hash;
@@ -685,6 +701,14 @@ impl Write<'_> {
 
         let conn = &self.vault.file.conn;
         let w = |e: rusqlite::Error| write_err(conn, &e, growth);
+        if let Some(blob) = &self.receipt_blob {
+            conn.execute(
+                "UPDATE archive_receipts SET sealed = ?1 WHERE id = 1",
+                [blob],
+            )
+            .map_err(w)?;
+            point(CrashPoint::ReceiptsWritten)?;
+        }
         insert_manifest(conn, &sealed)?;
         conn.execute(
             "DELETE FROM manifest WHERE manifest_hash = ?1",
@@ -806,6 +830,9 @@ impl Write<'_> {
             let r = self.manifest.record(*id).ok_or(StoreError::Internal)?;
             let mut sorted = Vec::with_capacity(r.history().len());
             for role in r.history() {
+                if role.is_tombstone() {
+                    continue;
+                }
                 if cancelled() {
                     return Err(StoreError::Io);
                 }
@@ -953,6 +980,7 @@ mod tests {
         let mut u = unlock(&p, &dir, PASSWORD).unwrap();
         let r = new_record();
         let mut versions = Vec::new();
+        let mut oldest = None;
         for n in 0..15 {
             let root = u.manifest().root_group_id();
             let mut w = u.write().unwrap();
@@ -960,6 +988,9 @@ mod tests {
             let mut v = entry_version(root, "value", w.writer_id(), c, &w.head_clocks(r));
             v.modified_at = Timestamp(n);
             versions.push((v.version_id, v.clock.clone()));
+            if n == 0 {
+                oldest = Some(v.encode().unwrap());
+            }
             w.put_local(r, v).unwrap();
             w.commit().unwrap();
         }
@@ -987,19 +1018,10 @@ mod tests {
         let new = edit(&mut u, r, "new");
         assert!(u.manifest().record(r).unwrap().history().is_empty());
         let live = u.read_version(r, new).unwrap();
-        let old_clock = versions[0].1.clone();
-        let tv = |id, clock| qv_model::RecordVersion {
-            version_id: id,
-            clock,
-            modified_at: Timestamp(0),
-            body: RecordBody::Tombstone(RecordKind::Entry),
-            ext: Extensions::new(),
-        };
-        let merged = qv_model::merge_record(vec![
-            tv(live.version_id, live.clock),
-            tv(versions[0].0, old_clock),
-        ])
-        .unwrap();
+        // Use the actual historical payload. A final tombstone is permanent
+        // metadata and must never stand in for prunable payload history.
+        let old = qv_model::RecordVersion::decode(&oldest.unwrap()).unwrap();
+        let merged = qv_model::merge_record(vec![live, old]).unwrap();
         let (retained, suppressed) = merged.split_history(&u.manifest().record(r).unwrap().floor());
         assert!(retained.is_empty());
         assert_eq!(suppressed.len(), 1);
@@ -2047,3 +2069,6 @@ mod attachment_crash_tests {
         }
     }
 }
+
+#[path = "acceptance.rs"]
+mod acceptance;

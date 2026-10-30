@@ -182,8 +182,7 @@ pub mod purpose {
         Manifest = "manifest";
         /// Remote checkpoint MACs.
         StateCommit = "state-commit";
-        /// MACs the local head; encrypting sync/outbox state comes with
-        /// sync (later phases).
+        /// MACs the local head and encrypts local sync/receipt state (0002 §3.3).
         LocalState = "local-state";
         /// Wraps local device signing bundles (uses come in later phases).
         DeviceStorage = "device-storage";
@@ -400,7 +399,7 @@ macro_rules! mac_purposes {
     )+};
 }
 
-aead_purposes!(Manifest);
+aead_purposes!(Manifest, LocalState);
 mac_purposes!(HeaderMac, StateCommit, LocalState);
 
 /// Computes a MAC under `profile`.

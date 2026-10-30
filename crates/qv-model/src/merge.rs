@@ -230,7 +230,7 @@ impl<V: Versioned> Merged<V> {
     pub fn split_history(&self, floor: &HistoryFloor) -> (Vec<&V>, Vec<&V>) {
         self.dominated
             .iter()
-            .partition(|v| !floor.suppresses(v.clock()))
+            .partition(|v| v.deletion() == Deletion::Final || !floor.suppresses(v.clock()))
     }
 }
 
@@ -586,6 +586,12 @@ mod tests {
         let m2 = merge([tv(9, &[(1, 5)])]).unwrap();
         assert_eq!(m2.heads().len(), 1);
         assert!(m2.split_history(&covering).1.is_empty());
+        let mut final_version = tv(1, &[(1, 1)]);
+        final_version.deletion = Deletion::Final;
+        let tombstones = merge([final_version, tv(2, &[(1, 2)])]).unwrap();
+        let (retained, suppressed) = tombstones.split_history(&covering);
+        assert_eq!(retained.len(), 1);
+        assert!(suppressed.is_empty());
     }
 
     // ---- Step 6: properties over honest histories and 0012 scenarios ----

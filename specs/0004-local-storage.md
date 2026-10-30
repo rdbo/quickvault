@@ -55,8 +55,9 @@ of attacker-supplied SQL constraints.
 | `keyslot` | slot ID | type, device binding, KDF profile/salt, KEK commitment, wrapping profile, wrapped VK |
 | `object` | (key generation, object ID) | data profile, nonce, ciphertext |
 | `manifest` | manifest hash | generation, profile, nonce and encrypted manifest |
-| `local_head` | exactly one row | authenticated local state (§5.4 of 0005): sequence, previous digest, manifest hash, remote checkpoint, `lan_links_digest` |
+| `local_head` | exactly one row | authenticated local state (§5.4 of 0005): sequence, previous digest, manifest hash, remote checkpoint, `archive_receipts_digest`, `lan_links_digest` |
 | `sync_state` | remote ID | encrypted verified remote base, cursor and pending publication |
+| `archive_receipts` | exactly one row | sealed local filename/complete-archive digest set (§2.3), bound by `local_head`; never in archives or sync |
 | `replica` | exactly one row | local-only writer state (0005 §1.3): replica ID naming this DB's external anchor, writer ID, next counter; never in archives or sync |
 | `lan_link` | link ID | sealed pairwise LAN link key, label and creation time, bound by the local head's `lan_links_digest` (0013 §9.1); local-only, never in archives or sync |
 | `lan_hint` | link ID | sealed unauthenticated endpoint hints and last-success time (0013 §9.2); local-only, never in archives or sync |
@@ -84,6 +85,57 @@ records, attachments or edit histories from routing data. Header/keyslot
 metadata is MAC'd. Kinds, clocks, names, dates and deletions are encrypted.
 Public server reference lists reveal object liveness and sizes as accepted
 leakage (0001), not record linkage.
+
+2.3. **Local archive receipts.** Filename-reuse detection (0005 §4.3) retains
+at most 4,096 receipts per local replica and key generation, without silent
+eviction. Each receipt maps a lexically normalized absolute path, encoded as
+raw OS bytes (at most 4,096 bytes), to SHA-256 of the entire authenticated
+private archive copy, including its header and framing. Identical redelivery
+succeeds even at capacity; changed bytes at the same path are an integrity
+error. Capacity exhaustion aborts before changing accepted state. Different
+paths are independent; hard-link/inode identity is not the receipt key.
+
+On Linux/Android, canonical stored paths start with `/`, name a file (not `/`),
+and contain no NUL, empty, `.` or `..` component or trailing separator. Non-UTF-8
+bytes are valid. Resolve relative input against the operation's captured
+absolute working directory, remove `.` and repeated separators, and resolve
+`..` lexically (clamping at root); bound both input and result before allocating.
+Open the resulting source path component by component without following
+symlinks, and use that same normalized byte path as the receipt key. The
+receipt codec itself does not access the filesystem.
+
+The STRICT singleton table is
+`archive_receipts(id INTEGER PRIMARY KEY CHECK(id = 1), sealed BLOB NOT NULL)`.
+Exactly one row with ID 1 and a bounded BLOB is required, checked independently
+of SQL constraints before reading its value. The canonical plaintext is
+`[1, [[path:bstr, archive_sha256:bstr32], ...]]`, strictly ascending and unique
+by raw path bytes. Paths and plaintext serialization use protected secret
+containers; Debug and errors MUST NOT reveal paths or receipt contents.
+
+The canonical sealed envelope is
+`[1, data_profile:uint, nonce:bstr24, ciphertext:bstr]`. Use stored-data/1
+framing, Padmé and AEAD under the generation's existing `local-state` purpose
+key, a fresh random nonce, and canonical AAD
+`["qv/archive-receipts/v1", vault_id:bstr16, key_generation:uint,
+replica_id:bstr16, data_profile:uint]`. Ciphertext is at most 32 MiB and the
+complete envelope at most 32 MiB + 128 bytes; the maximal plaintext under the
+row/path limits is below 17 MiB. Unknown versions/profiles fail closed.
+`archive_receipts_digest` is object-hash/1 (SHA-256) of the complete canonical
+envelope. It is mandatory local-head CBOR key 7; key 8 is reserved for the
+future `lan_links_digest` binding. Verify the head MAC and envelope digest,
+then authenticate/decrypt the envelope before parsing receipt plaintext.
+Missing or invalid receipt state MUST NOT become an empty default.
+
+Creation, new-path restore and a rotation replacement initialize fresh empty
+receipts, sealed for their replica and generation, in the same unpublished
+DB transaction as the head. Ordinary writes preserve them. Incoming acceptance
+updates receipts together with objects, manifest and head in the existing
+single transaction; anchor replacement follows durable commit before reporting
+success (0005 §5.4). A failed attempt before commit records no receipt. Retry
+after a durable commit must finish its pending anchor update first. Receipts
+are local-only and never enter an archive, portable manifest or peer exchange.
+The development schema/header version for this table is `0x7FFF0003`; older
+development files are rejected, without a migration or compatibility promise.
 
 ### 3. Encoding and encryption
 
@@ -126,6 +178,17 @@ records; local operational slot selection and quick slots are bound by the
 local header MAC, not a remote configuration digest. Local sync state uses a
 separate purpose key and is excluded from archives. Manifests, checkpoints,
 sync state and anchors are not ordinary records.
+
+3.4.1. Permanent tombstone roles have canonical encoding
+`[version_id, clock, object_id, true]`; ordinary roles omit the fourth item,
+and attachment metadata roles use a chunk-ID array there instead. The marker
+MUST equal the decrypted version's Final deletion state, checked on every role
+read and archive verification. Marked dominated tombstones remain retained
+history even at/below the history floor; no other covered history is valid.
+Ordinary unlock authenticates marked historical tombstones as well as heads.
+Pruning, purge and later final deletion MUST preserve all such roles/objects;
+rotation preserves their markers. The volatile manifest format is 0x7FFF0002
+(no migration); combined receipt/acceptance schema/header remains 0x7FFF0003.
 
 3.5. `manifest_hash = SHA256(canonical manifest envelope including ciphertext)`.
 `reference_digest = SHA256(canonical sorted reference list)`; publish the list
@@ -257,6 +320,14 @@ is unsupported ([SQLite warning](https://www.sqlite.org/howtocorrupt.html)).
    format. Changes require documented policy/version updates.
 
 ## Changelog
+
+- 2026-10-30: Combined 2.2b (owner direction): explicit permanent-tombstone
+  role markers allow indefinite retention below floors; authenticate and
+  preserve them through cleanup, archive operations and rotation (0027).
+
+- 2026-10-30: Define owner-approved local archive receipt storage, bounded
+  canonical paths/plaintext, AEAD transcript, head digest and lifecycle resets
+  (plan 0027; delegation recorded in 0026). Formats remain volatile.
 
 - 2026-10-30: Owner-delegated acceptance of 0013 (roadmap D10, plan 0025): add the local-only `lan_link` and `lan_hint` tables and `lan_links_digest` in `local_head`.
 - 2026-10-26: Add an aggregate budget of 1,048,576 clock components per
