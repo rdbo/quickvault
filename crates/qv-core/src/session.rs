@@ -261,8 +261,9 @@ impl<'a> Ctx<'a> {
 /// takes `&self` and calls are serialized.
 pub struct Session {
     tag: SessionTag,
-    locking: AtomicBool,
-    state: Mutex<Option<Open>>,
+    locking: Arc<AtomicBool>,
+    state: Arc<Mutex<Option<Open>>>,
+    platform_watch: Option<Box<dyn qv_platform::Watch>>,
     time: Arc<dyn TimeSource>,
 }
 
@@ -293,8 +294,9 @@ impl Session {
         let auto_snapshot = snapshots.is_none().then(SnapshotReport::disabled);
         Ok(Session {
             tag,
-            locking: AtomicBool::new(false),
-            state: Mutex::new(Some(Open {
+            locking: Arc::new(AtomicBool::new(false)),
+            platform_watch: None,
+            state: Arc::new(Mutex::new(Some(Open {
                 vault,
                 index,
                 read_only,
@@ -302,9 +304,51 @@ impl Session {
                 snapshots,
                 auto_snapshot,
                 pin: Arc::new(Mutex::new(None)),
-            })),
+            }))),
             time,
         })
+    }
+
+    pub(crate) fn attach_platform(
+        &mut self,
+        services: &dyn qv_platform::PlatformServices,
+    ) -> Result<(), qv_platform::PlatformError> {
+        let state = Arc::downgrade(&self.state);
+        let locking = Arc::downgrade(&self.locking);
+        self.platform_watch = Some(services.lifecycle().watch(Arc::new(move |_| {
+            if let (Some(locking), Some(state)) = (locking.upgrade(), state.upgrade()) {
+                locking.store(true, Ordering::SeqCst);
+                *state.lock().unwrap_or_else(PoisonError::into_inner) = None;
+            }
+        }))?);
+        Ok(())
+    }
+
+    /// Hold a clipboard value bound to this session. A lock cancels ownership
+    /// even while no other core operation is running; no session mutex is held
+    /// while serving the clipboard. The value is consumed and cleared on exit.
+    pub fn hold_clipboard(
+        &self,
+        clipboard: &dyn qv_platform::Clipboard,
+        value: qv_crypto::SecretBytes,
+        timeout: std::time::Duration,
+        cancel: Option<&CancelToken>,
+        progress: &mut dyn FnMut(u64) -> Result<(), qv_platform::PlatformError>,
+    ) -> Result<(), CoreError> {
+        self.read(|ctx| ctx.check_cancel())?;
+        let locking = self.locking.clone();
+        let external = cancel.cloned();
+        clipboard
+            .hold(
+                value,
+                timeout,
+                Arc::new(move || {
+                    locking.load(Ordering::SeqCst)
+                        || external.as_ref().is_some_and(CancelToken::is_cancelled)
+                }),
+                progress,
+            )
+            .map_err(crate::platform::error)
     }
 
     /// Runs a read: its result is dropped if a lock was requested meanwhile.
@@ -877,5 +921,14 @@ mod lock_tests {
         let again = env.unlock();
         assert_eq!(seq(&again), before);
         assert!(again.trash().unwrap().is_empty());
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        // Drop subscriptions after releasing session state: their callbacks may
+        // be finishing a concurrent lock. Weak references never retain keys.
+        self.lock();
+        self.platform_watch.take();
     }
 }

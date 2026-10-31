@@ -92,7 +92,7 @@ rather than creating unused workspace scaffolding.
 | qv-protocol | Bounded canonical LAN/server wire types, contexts and version registry |
 | qv-sync | Shared causal merge candidates (implemented); direct LAN exchange, remote candidate state and publication orchestration (planned) |
 | qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets and the `verify` report |
-| qv-platform | Native secure input, keystore, clipboard, verified OS autofill |
+| qv-platform | Injected OS traits; Linux logind lifecycle, X11 clipboard ownership, single-instance and persistence reporting; unavailable native input/quick unlock; Android/autofill adapters planned |
 | qv-cli / qv-app | Explicit user actions and views; no unrestricted crypto/file/SQL bridge |
 | qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
 
@@ -118,7 +118,7 @@ authenticated listing, and the `verify` report) and `qv-cli`
 `snapshot ls|restore`, `verify`, `copy` and
 `totp`/`generate --copy`, `attach add|ls|save|rm`; protected
 prompts/notes, signal cancellation and terminal restoration, escaped and JSON
-output, exit codes). Its private Linux X11 clipboard adapter (including usable
+output, exit codes). The shared qv-platform Linux X11 clipboard adapter (including usable
 XWayland) drops keys/metadata before foreground serving, uses protected outgoing
 buffers and bounded incoming/INCR state, and releases only its own window.
 Native Wayland is not implemented; OS/recipient/manager copies remain outside
@@ -275,6 +275,24 @@ recovery preserves conflicting keyslot heads using the authenticated source's
 working slot in the new baseline. Formats stay volatile; no independent security
 or release claim is implied.
 
+Roadmap 2.3 adds qv-platform with injected secure-input, clipboard, lifecycle,
+keystore and protection-status traits. Linux uses pinned zbus 6.2.0 for a
+bounded system-bus logind subscription, a delay inhibitor, initial lock-state
+checks and screen-lock/sleep/monitor-loss events. Core binds subscriptions to
+weak references to session state; lock cancels operations and session clipboard
+ownership, and dropping a session releases its watcher. No event unlocks a
+session. Linux persistence probes cannot establish locked-state storage-key
+custody and report reduced protection; configured core flows require explicit
+acknowledgement before persistent create/unlock. A configured session still
+refuses unavailable lifecycle monitoring after that acknowledgement. An owner-only no-follow flock
+provides app single-instance ownership without unlinking its lock file. Native
+input and keystore wrapping fail unavailable; Linux quick unlock is disabled.
+The CLI retains foreground behavior through core's shared clipboard reexports.
+The app still must cancel pending tasks and destroy externally held views on
+lifecycle events. Real-desktop validation remains unclaimed; procedure and
+private-bus evidence are in plan 0029. Dependency exemptions are recorded audit
+debt, not security approval. No production GUI is introduced; D13 gates 2.4.
+
 Frontends call qv-core. Core injects platform traits and orchestrates model,
 store, crypto and sync. Crypto/model have no dependency on frontends. Server
 uses protocol types and public-key verification libraries; its inability to
@@ -292,8 +310,10 @@ validation, and does not require separate application implementations per OS.
 flowchart TB
     ui["CLI / shared Dioxus UI and input"] --> core["qv-core: policy and sessions"]
     core --> rust["trusted Rust: model, crypto, store, sync"]
-    core --> platform["platform: keystore, clipboard, autofill"]
-    ui --> clip["current CLI: private X11 clipboard adapter; keys already dropped"]
+    core --> platform["qv-platform: lifecycle, clipboard, protection status; future keystore/autofill"]
+    platform -. "lock/cancel notifications" .-> core
+    ui --> clip["CLI clipboard via core reexports; keys already dropped"]
+    clip --> platform
     rust --> db[("private active SQLite vault")]
     db -->|"build from verified objects"| snapshot["immutable authenticated archives"]
     snapshot <-->|"backup / archive exchange"| files["user-selected file storage"]
@@ -401,7 +421,8 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Remote transport | TLS 1.3, X25519MLKEM768, pinned application server identity |
 | Remote account authentication | Pinned RFC 9807 OPAQUE application profile |
 | Direct LAN discovery / enrollment / transport | Specified in 0013 (Accepted): DNS-SD only during explicit windows (`_qvault._tcp`, random instance), QR/manual pairing into pairwise link keys, X-Wing draft-11 + HKDF-SHA-512 + MAC/1 handshake, XChaCha20-Poly1305 counter-nonce records over TCP; crates chosen in roadmap 2.8–2.10 |
-| CLI / license | clap (builder API), rustix termios/poll for bounded no-echo prompts, signal-hook atomic flags for cancellation, own escaping and JSON writer, private X11 adapter over maintained x11rb 0.13.2 with protected transport buffers and framing budgets; `zxcvbn` (in `qv-core`) for typed master passwords / AGPL-3.0-or-later |
+| Linux OS adapters | zbus 6.2.0 over the fixed system-bus Unix socket; existing rustix file locks/configuration probes; shared maintained X11 clipboard; quick unlock unavailable |
+| CLI / license | clap (builder API), rustix termios/poll for bounded no-echo prompts, signal-hook atomic flags for cancellation, own escaping and JSON writer, shared qv-platform X11 adapter over maintained x11rb 0.13.2 with protected transport buffers and framing budgets; `zxcvbn` (in `qv-core`) for typed master passwords / AGPL-3.0-or-later |
 
 OPAQUE and ordinary TLS certificates are explicit classical exceptions.
 TLS-bound opaque sessions replace custom per-request HMAC/counter signing.
@@ -443,8 +464,10 @@ candidates, plan 0026), 2.2b (receipt storage and atomic acceptance, plan 0027),
 2.2c (core/CLI archive exchange and conflict resolution, plan 0028). The owner
 recombined the former c1/c2 split and requested completion on the staged tree.
 Implementation steps stay within the phase plan; step count alone no longer
-creates another phase suffix. The next fresh session reviews the complete C
-implementation. This work does not authorize a release.
+creates another phase suffix. The complete C implementation and its
+publication reporting repair were reviewed under explicit owner continuation. Roadmap 2.3 (plan 0029) supplies Linux platform services;
+D13 owner architecture review still gates production GUI phase 2.4. This work
+does not authorize a release.
 
 The project is pre-1.0 and every format stays volatile (owner decision
 2026-10-30). The 0012 §3 format freeze, golden vectors and supported-device

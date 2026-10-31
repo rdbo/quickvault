@@ -1006,9 +1006,15 @@ mod platform {
     pub struct PublishedSnapshot {
         entry: SnapshotEntry,
         stats: ArchiveStats,
+        completion_error: Option<StoreError>,
     }
 
     impl PublishedSnapshot {
+        /// Failure after rename; when present, crash durability is unconfirmed.
+        pub fn completion_error(&self) -> Option<StoreError> {
+            self.completion_error
+        }
+
         /// The published file.
         pub fn entry(&self) -> &SnapshotEntry {
             &self.entry
@@ -1245,8 +1251,8 @@ mod platform {
     /// only in the file name. Publication follows 0004 §6.5: a temp file in
     /// this directory, written, re-read and verified with the archive reader,
     /// `fsync`ed, then `RENAME_NOREPLACE`d under a new unique name, then the
-    /// directory is `fsync`ed. A failure or a crash leaves at most an
-    /// unpublished temp file.
+    /// directory is `fsync`ed. Failure after rename can leave a complete
+    /// published file whose crash durability is unconfirmed.
     pub struct SnapshotDir {
         path: PathBuf,
     }
@@ -1447,11 +1453,17 @@ mod platform {
             created_at: Timestamp,
             cancelled: &dyn Fn() -> bool,
         ) -> Result<PublishedSnapshot, StoreError> {
-            self.publish_export(vault, kind, created_at, false, cancelled)
+            let published = self.publish_export(vault, kind, created_at, false, cancelled)?;
+            if let Some(error) = published.completion_error() {
+                return Err(error);
+            }
+            Ok(published)
         }
 
         /// Publish a verified explicit export without replacement. A true
         /// `self_contained` requires caller consent to offline password guessing.
+        /// After rename, returns the published identity even if completion fails;
+        /// callers must inspect `completion_error()` before claiming durability.
         pub fn publish_export(
             &self,
             vault: &mut UnlockedVault,
@@ -1459,6 +1471,25 @@ mod platform {
             created_at: Timestamp,
             self_contained: bool,
             cancelled: &dyn Fn() -> bool,
+        ) -> Result<PublishedSnapshot, StoreError> {
+            self.publish_export_with_sync(
+                vault,
+                kind,
+                created_at,
+                self_contained,
+                cancelled,
+                &fs::sync_dir,
+            )
+        }
+
+        pub(super) fn publish_export_with_sync(
+            &self,
+            vault: &mut UnlockedVault,
+            kind: SnapshotKind,
+            created_at: Timestamp,
+            self_contained: bool,
+            cancelled: &dyn Fn() -> bool,
+            sync: &dyn Fn(&Path) -> Result<(), StoreError>,
         ) -> Result<PublishedSnapshot, StoreError> {
             fs::check_private_dir(&self.path)?;
             // The temp name is not a snapshot name, so a crash never leaves a
@@ -1511,8 +1542,9 @@ mod platform {
                 fs::remove_best_effort(&temp);
                 return Err(e);
             }
-            point(CrashPoint::ArchivePublished)?;
-            fs::sync_dir(&self.path)?;
+            let completion_error = point(CrashPoint::ArchivePublished)
+                .and_then(|()| sync(&self.path))
+                .err();
             Ok(PublishedSnapshot {
                 entry: SnapshotEntry {
                     name: OsString::from(name),
@@ -1520,6 +1552,7 @@ mod platform {
                     kind,
                 },
                 stats,
+                completion_error,
             })
         }
     }
@@ -2940,5 +2973,46 @@ mod export_tests {
         ));
         assert!(!crate::crash::test::disarm());
         assert_eq!(dir.entries().unwrap().len(), 2);
+    }
+    // 0012 §1: Anchor crash windows
+    // 0012 §1: Exchange-file password guessing
+    #[test]
+    fn archive_export_sync_failure_keeps_identity_and_verified_file() {
+        let (d, a, exports) = (TestDir::new(), TestDir::new(), TestDir::new());
+        let (path, anchors) = copy_fixture(&d, &a, "v.qvault");
+        let mut u = unlock(&path, &anchors, PASSWORD).unwrap();
+        let dir = SnapshotDir::open(exports.path()).unwrap();
+        let before = u.local_seq();
+        for backup in [false, true] {
+            let published = dir
+                .publish_export_with_sync(
+                    &mut u,
+                    SnapshotKind::Ordinary,
+                    Timestamp(3),
+                    backup,
+                    &|| false,
+                    &|_| Err(StoreError::Io),
+                )
+                .unwrap();
+            assert_eq!(published.completion_error(), Some(StoreError::Io));
+            let path = exports.path().join(published.entry().name());
+            assert_eq!(path.file_stem().unwrap(), published.archive_id());
+            let mut input = std::fs::File::open(path).unwrap();
+            let scope = ArchiveScope::new(u.header().vault_id, u.header().key_generation);
+            let opened =
+                read_archive(&mut input, scope, u.vault_key(), &mut |_| Ok(()), &|| false).unwrap();
+            assert_eq!(opened.manifest(), u.manifest());
+            assert_eq!(opened.header().is_self_contained(), backup);
+        }
+        assert_eq!(dir.entries().unwrap().len(), 2);
+        assert_eq!(u.local_seq(), before);
+        // A subsequent export publishes a new file, leaving both earlier files intact.
+        let later = dir
+            .publish_export(&mut u, SnapshotKind::Ordinary, Timestamp(4), false, &|| {
+                false
+            })
+            .unwrap();
+        assert_eq!(later.completion_error(), None);
+        assert_eq!(dir.entries().unwrap().len(), 3);
     }
 }

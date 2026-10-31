@@ -6,7 +6,8 @@
 //! §1.1): the CLI and the app call this crate only. It owns session policy
 //! (unlock, lock, cancellation, session-scoped handles, mutation
 //! authorization) and orchestrates `qv-store`, `qv-model` and `qv-crypto`.
-//! It has no frontend, server or network dependency: creating, unlocking
+//! It has no frontend or server dependency; optional native OS services do not
+//! initiate network sync. Creating, unlocking
 //! and editing a vault needs no account or server (0005 §0.1).
 //!
 //! | Module | Contents | Spec |
@@ -125,6 +126,7 @@ mod error;
 mod history;
 mod index;
 mod order;
+pub mod platform;
 mod rotation;
 mod session;
 mod settings;

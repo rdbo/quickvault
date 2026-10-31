@@ -61,7 +61,9 @@ and all other packages retain the ordinary rules. Metadata checks are not audits
    - Nothing reaches the server that could link records (0004 §2.2).
 5. **Are the tests real?** Tests exist, exercise rejected inputs and crash paths
    (0012 §2), cover the matrix rows the plan claims, and haven't been weakened.
-6. **Do the gates pass?** Run all gates from `AGENTS.md`, including SPDX and
+6. **Do the gates pass?** Check the actual working tree, including new untracked
+   sources and excluding deleted paths (the matrix checker does this).
+   Run all gates from `AGENTS.md`, including SPDX and
    deny/vet when dependencies changed. Run them once on the final reviewed
    tree, after any fixes; use focused checks while investigating. Keep full
    output in temporary logs with exit status preserved, and record commands,

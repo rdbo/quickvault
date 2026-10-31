@@ -33,7 +33,7 @@ reviewing/updating. Only the following upstream files have local changes:
   existing 4 KiB staging buffer, rather than bypassing header checks with direct
   reads into a large protocol buffer.
 
-The CLI's private Stream separately caps lifetime input at 4 MiB, rejects
+The shared qv-platform clipboard Stream (also used by the CLI) separately caps lifetime input at 4 MiB, rejects
 received FDs, and bounds nonblocking I/O with deadlines/cancellation. This limit
 also bounds the library's eager queue accumulation. These guards do not replace
 upstream decoding or claim complete dependency security. Copied plaintext uses

@@ -9,6 +9,22 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-31: Linux platform services (roadmap 2.3, plan 0029): injectable OS
+  traits, logind lock/sleep monitoring, session-bound clipboard cancellation,
+  hardened single-instance ownership and conservative swap/hibernation status.
+  The CLI shares its existing X11 engine through core; quick unlock stays
+  unavailable. Configured platform flows require explicit reduced-protection
+  acknowledgement; missing lifecycle monitoring still refuses the session.
+  Real-desktop validation remains unclaimed; private-bus and
+  manual procedures are recorded. zbus 6.2.0 replaces the proposed unmaintained
+  5.x graph; 24 exact-version vet exemptions record development audit debt.
+  CI installs the private D-Bus test server, and matrix checks include untracked
+  sources while ignoring deleted paths without changing row/tag requirements.
+
+- 2026-10-31: Archive export retains and reports its published ID when directory
+  sync fails, with an explicit warning that crash durability is unconfirmed.
+  Recovery snapshots still require successful publication completion.
+
 - 2026-10-31: Core and CLI conflict resolution and archive exchange (roadmap
   2.2c, plan 0028): all-kind `conflicts`, complete-version `resolve --version`,
   `merge` and immutable `snapshot export`. Resolution preserves protected/TOTP

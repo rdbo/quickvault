@@ -30,6 +30,8 @@ pub struct ArchiveExportReport {
     pub archive_id: String,
     /// Whether explicit backup consent permitted a password guessing target.
     pub self_contained: bool,
+    /// Failure after publication; the file exists but crash durability is unconfirmed.
+    pub completion_error: Option<CoreError>,
 }
 
 macro_rules! redacted {
@@ -196,6 +198,7 @@ impl Session {
             Ok(ArchiveExportReport {
                 archive_id: published.archive_id().to_owned(),
                 self_contained,
+                completion_error: published.completion_error().map(Into::into),
             })
         })
     }

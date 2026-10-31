@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Nonblocking local transport with lifetime, allocation and cancellation budgets.
+use crate::Cancellation;
 use rustix::event::{PollFd, PollFlags, Timespec};
 use std::{
     cell::Cell,
@@ -26,6 +27,7 @@ pub(super) struct BoundedStream {
     remaining: Cell<usize>,
     deadline: Cell<Instant>,
     cleanup: Cell<bool>,
+    cancel: Cancellation,
 }
 fn failed() -> io::Error {
     io::Error::from(io::ErrorKind::InvalidData)
@@ -39,7 +41,7 @@ impl BoundedStream {
         if Instant::now() >= self.deadline.get() {
             return Err(io::ErrorKind::TimedOut.into());
         }
-        if !self.cleanup.get() && crate::signals::check().is_err() {
+        if !self.cleanup.get() && (self.cancel)() {
             return Err(io::ErrorKind::ConnectionAborted.into());
         }
         Ok(())
@@ -107,7 +109,11 @@ impl Stream for BoundedStream {
     }
 }
 
-fn socket(address: &rustix::net::SocketAddrUnix, deadline: Instant) -> io::Result<UnixStream> {
+fn socket(
+    address: &rustix::net::SocketAddrUnix,
+    deadline: Instant,
+    cancel: &Cancellation,
+) -> io::Result<UnixStream> {
     use rustix::net::{AddressFamily, SocketFlags, SocketType, connect, socket_with};
     let fd = socket_with(
         AddressFamily::UNIX,
@@ -118,7 +124,7 @@ fn socket(address: &rustix::net::SocketAddrUnix, deadline: Instant) -> io::Resul
     match connect(&fd, address) {
         Ok(()) => {}
         Err(rustix::io::Errno::INPROGRESS | rustix::io::Errno::AGAIN) => loop {
-            if crate::signals::check().is_err() {
+            if cancel() {
                 return Err(io::ErrorKind::ConnectionAborted.into());
             }
             poll(&fd, PollFlags::OUT, deadline)?;
@@ -138,7 +144,7 @@ fn socket(address: &rustix::net::SocketAddrUnix, deadline: Instant) -> io::Resul
     Ok(UnixStream::from(fd))
 }
 
-pub(super) fn connect() -> Result<(Connection, usize), ()> {
+pub(super) fn connect(cancel: Cancellation) -> Result<(Connection, usize), ()> {
     let deadline = Instant::now() + Duration::from_secs(5);
     let parsed = parse_display(None).map_err(|_| ())?;
     // Upstream connect_instruction also computes a u16 TCP port, even for :N.
@@ -157,7 +163,7 @@ pub(super) fn connect() -> Result<(Connection, usize), ()> {
                 rustix::net::SocketAddrUnix::new(path.as_str())
             }
             .map_err(|_| ())?;
-            if let Ok(stream) = socket(&address, deadline) {
+            if let Ok(stream) = socket(&address, deadline, &cancel) {
                 connected = Some(stream);
                 break;
             }
@@ -176,6 +182,7 @@ pub(super) fn connect() -> Result<(Connection, usize), ()> {
             remaining: Cell::new(MAX_READ),
             deadline: Cell::new(deadline),
             cleanup: Cell::new(false),
+            cancel: cancel.clone(),
         };
         return Ok((
             RustConnection::connect_to_stream_with_auth_info(
@@ -193,6 +200,8 @@ pub(super) fn connect() -> Result<(Connection, usize), ()> {
 
 #[cfg(test)]
 mod tests {
+    // Test-only OS fixtures fail loudly.
+    #![allow(clippy::unwrap_used)]
     use super::*;
     fn stream() -> (BoundedStream, UnixStream) {
         let (a, b) = UnixStream::pair().unwrap();
@@ -203,6 +212,7 @@ mod tests {
                 remaining: Cell::new(MAX_READ),
                 deadline: Cell::new(Instant::now() + Duration::from_secs(5)),
                 cleanup: Cell::new(false),
+                cancel: std::sync::Arc::new(|| false),
             },
             b,
         )

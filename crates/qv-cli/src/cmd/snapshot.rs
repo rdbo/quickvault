@@ -162,10 +162,68 @@ fn export(ctx: &Ctx, args: &ArgMatches) -> Result<(), CliError> {
     let cancel = crate::signals::token();
     let result = session.export_archive(directory, backup, Some(&cancel));
     session.lock();
-    let report = result?;
+    print_export_report(result?)
+}
+
+fn print_export_report(report: qv_core::ArchiveExportReport) -> Result<(), CliError> {
     let mut out = Out::stdout();
     out.raw(&report.archive_id);
     out.raw("\n");
     out.flush()?;
+    if let Some(error) = report.completion_error {
+        crate::out::eprint(
+            "qvault: archive published; crash durability is unconfirmed because publication completion failed\n",
+        );
+        return Err(error.into());
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 0012 §1: Anchor crash windows
+    #[test]
+    fn export_completion_failure_prints_published_id_and_warns() {
+        const CHILD: &str = "QV_TEST_EXPORT_COMPLETION";
+        const ID: &str = "0123456789abcdef0123456789abcdef";
+        if let Some(mode) = std::env::var_os(CHILD) {
+            let failed = mode == "failed";
+            let result = print_export_report(qv_core::ArchiveExportReport {
+                archive_id: ID.into(),
+                self_contained: true,
+                completion_error: failed
+                    .then_some(qv_core::CoreError::Store(qv_core::StoreError::Io)),
+            });
+            assert_eq!(
+                result.map_err(|e| e.code),
+                if failed {
+                    Err(crate::exit::OTHER)
+                } else {
+                    Ok(())
+                }
+            );
+            return;
+        }
+        for failed in [false, true] {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "cmd::snapshot::tests::export_completion_failure_prints_published_id_and_warns",
+                    "--nocapture",
+                ])
+                .env(CHILD, if failed { "failed" } else { "success" })
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            assert!(stdout.contains(&format!("{ID}\n")), "{stdout}");
+            assert_eq!(
+                stderr.contains("archive published; crash durability is unconfirmed"),
+                failed
+            );
+        }
+    }
 }

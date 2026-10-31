@@ -204,6 +204,11 @@ impl SnapshotEntry {
 }
 
 impl PublishedSnapshot {
+    /// Unreachable: no published snapshot exists on this target.
+    pub fn completion_error(&self) -> Option<StoreError> {
+        match self.0 {}
+    }
+
     /// Unreachable: no `PublishedSnapshot` exists on this target.
     pub fn entry(&self) -> &SnapshotEntry {
         match self.0 {}

@@ -177,14 +177,6 @@ fn offline_cli_dependencies_are_fixed() {
         .collect();
     assert_eq!(
         deps,
-        [
-            "clap",
-            "qv-core",
-            "rustix",
-            "signal-hook",
-            "x11rb",
-            "x11rb-protocol",
-            "zeroize"
-        ]
+        ["clap", "qv-core", "rustix", "signal-hook", "zeroize"]
     );
 }

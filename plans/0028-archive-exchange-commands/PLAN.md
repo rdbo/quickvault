@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-10-31 | 2026-10-31 | 0004 §4–6; 0005 §2, §4–5.4; 0007 §3; 0008 §1–3, §5; 0011 §3–6 |
+| Reviewed | 2026-10-31 | 2026-10-31 | 0004 §4–6; 0005 §2, §4–5.4; 0007 §3; 0008 §1–3, §5; 0011 §3–6 |
 
 ## Intent
 
@@ -247,6 +247,22 @@ does not establish global freshness, erase old slots, or validate security.
 
 ## Revisions
 
+- 2026-10-31: Owner authorized fixing the publication review finding and then
+  completing phase 2.3 on this tree, overriding the intermediate commit/session
+  boundary. Preserve `PublishedSnapshot` and add a redacted
+  `completion_error() -> Option<StoreError>`; `publish_export` returns it after
+  rename even if completion fails. `publish` retains its strict contract by
+  converting any completion error back to Err, so recovery snapshots still
+  require directory sync. Add `ArchiveExportReport::completion_error` in core;
+  CLI prints the ID, flushes output, warns that durability is unconfirmed and
+  returns the mapped completion error. No new error/exit code, dependency,
+  format or crypto change. 0011 §4 already requires actual publication reporting;
+  no normative amendment is needed. Tests inject directory-sync failure through
+  a private store helper, check retained verified files and pre-rename cleanup,
+  and check frontend output/error ordering. Scope includes existing archive,
+  unsupported-platform, exchange and snapshot command modules/tests, changelog
+  and review/plan/index/roadmap records.
+
 - 2026-10-31: Dependency review found the isolated feasibility prototype also
   locks qv-core. Include its lockfile's necessary internal qv-sync edge/package
   so the core dependency change does not stale that consumer's lock. Validate
@@ -256,6 +272,13 @@ does not establish global freshness, erase old slots, or validate security.
 
 
 ## Execution log
+
+- 2026-10-31: Fresh next-phase review requests changes; see REVIEW.md. Export
+  loses the published archive ID when directory sync fails after rename.
+  Revise the publication/completion result contract before implementation;
+  phase 2.3 is held under roadmap Session protocol step 2. Current SPDX,
+  matrix, fmt and Clippy pass; full tests fail because Xvfb is unavailable,
+  and deny/vet are not installed. Status remains Implemented pending fixes.
 
 - 2026-10-31: Planned during the independent 0027 verification run; no product
   changes yet. The prior explicit 0026 delegation covers exact archive/CLI
@@ -506,3 +529,49 @@ primitive, crypto profile, on-disk layout or format version.
   owner's staged c1 index is preserved; all continuation edits are unstaged.
   No commit, push or branch. Final documentation/status edits change no tested
   Rust/dependency inputs; SPDX/matrix/fmt/diff checks rerun for handoff.
+
+## Review-fix continuation — publication outcomes (2026-10-31)
+
+### Step 16 — Preserve post-rename outcomes
+
+- [x] **Do:** Add PublishedSnapshot completion status, propagate it into the
+  core export report, print the archive ID before warning/error, and retain
+  strict recovery-snapshot completion semantics. Inject directory-sync failure
+  through a private store helper; cover both export modes and retry preservation.
+- **Files:** qv-store archive/unsupported; qv-core exchange/tests;
+  qv-cli snapshot command/tests; CHANGELOG.md.
+- **Done when:** a post-rename failure retains a verified file and identity
+  without a durability claim; pre-rename failures remain Err; snapshot policy
+  still refuses failed completion.
+- **Verify:** focused store archive and CLI export-completion tests.
+
+### Step 17 — Verify and close the review finding
+
+- [x] **Do:** Run final required gates, dependency gates for the combined phase,
+  affected fuzz checks and a focused source review; update review/index/roadmap.
+- **Files:** this plan, REVIEW.md, index and roadmap.
+- **Done when:** finding resolved, current checks recorded, phase 2.3's separate
+  dependency/scope approval is handled without assuming it.
+- **Verify:** AGENTS gates, matrix, deny/vet, fuzz formatting and compilation.
+
+- 2026-10-31: Step 16 implemented under the owner's explicit fix-and-continue
+  instruction. Focused store archive suite passes (27 tests, including injected
+  fsync failure for both export modes); the new CLI subprocess test passes.
+  Existing strict snapshot crash tests still pass. No dependencies, storage
+  bytes, crypto or exit-code changes. Full verification is running under
+  /tmp/qv-work/; private Xvfb and CI-pinned deny/vet were installed in /tmp only.
+  The default Cargo home is read-only for advisory locks; deny uses an isolated
+  copy of its public registry cache. Plan 0029 is prepared but awaits the
+  roadmap-required D-Bus dependency/clipboard-reuse scope approval.
+
+- 2026-10-31: Step 17 complete. Final SPDX/matrix/fmt/Clippy and full locked
+  workspace tests pass: 701 passed, 0 failed, 2 pre-existing ignored. CI-pinned
+  deny 0.20.2 passes all four categories using isolated CARGO_HOME; vet 0.10.3
+  passes with unchanged audit policy/exemptions. Affected fuzz formatting and
+  locked archive_read/manifest_decode/vault_open/archive_receipts compilation
+  pass. Logs /tmp/qv-work/fix-*.log. Follow-up source review closes the finding
+  and marks this plan Reviewed; it is not an independent fresh-context review
+  of the repair. The owner explicitly requested fixing and proceeding on this
+  tree, overriding the intermediate commit/session boundary. Phase 2.3's new
+  dependency/CLI reuse scope still requires the separately requested approval.
+  No commit, push, branch or staging changes.

@@ -85,7 +85,8 @@ requests override the named intermediate commit/session boundary.
   old logs are not current evidence. Do not weaken tests to save tokens.
 - Tests that cover a 0012 §1 offline row carry `// 0012 §1: <exact row>`
   above their attributes; `sh scripts/check-matrix.sh` (CI) checks the rows
-  in `tests/matrix-offline.txt`. Pre-1.0, formats stay volatile: no freeze
+  in `tests/matrix-offline.txt`; it includes untracked Rust sources and skips
+  deleted paths so unstaged work is checked. Pre-1.0, formats stay volatile: no freeze
   until the owner says so.
 - Dependency changes: justify in the plan, run `cargo deny check` and
   `cargo vet --locked` (0012 §3), retain `Cargo.lock` changes for owner commit,

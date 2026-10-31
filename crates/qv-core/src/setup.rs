@@ -160,6 +160,7 @@ pub struct Core {
     time: Arc<dyn TimeSource>,
     process: ProcessHardening,
     pub(crate) snapshots: Option<Arc<SnapshotPolicy>>,
+    pub(crate) platform: Option<crate::platform::PlatformPolicy>,
 }
 
 impl core::fmt::Debug for Core {
@@ -185,6 +186,7 @@ impl Core {
             time: config.time,
             process: harden().process,
             snapshots: config.snapshots.map(Arc::new),
+            platform: None,
         }
     }
 
@@ -247,6 +249,7 @@ impl Core {
         password: &MasterPassword,
         name: &str,
     ) -> Result<Created, CoreError> {
+        self.platform_gate()?;
         self.check_anchor_location(path)?;
         let vault = VaultFile::create(path, password, name, &self.anchors)?;
         let recovery_phrase = RecoveryPhrase::from_vault_key(vault.vault_key()).map_err(crypto)?;
@@ -260,6 +263,7 @@ impl Core {
             false,
             None,
         )?;
+        let session = self.bind_platform(session)?;
         Ok(Created {
             session,
             recovery_phrase,
@@ -314,6 +318,7 @@ impl Core {
             false,
             cancel,
         )?;
+        let session = self.bind_platform(session)?;
         if automatic {
             session.run_automatic_snapshot(cancel);
         }
@@ -341,6 +346,7 @@ impl Core {
             read_only,
             cancel,
         )?;
+        let session = self.bind_platform(session)?;
         Ok((session, status))
     }
 
@@ -365,6 +371,7 @@ impl Core {
             read_only,
             cancel,
         )?;
+        let session = self.bind_platform(session)?;
         session.run_automatic_snapshot(cancel);
         Ok((session, status))
     }
@@ -375,6 +382,7 @@ impl Core {
         cancel: Option<&CancelToken>,
         unlock: impl FnOnce(VaultFile) -> Result<(UnlockedVault, AnchorStatus), qv_store::StoreError>,
     ) -> Result<(UnlockedVault, AnchorStatus), CoreError> {
+        self.platform_gate()?;
         cancelled(cancel)?;
         self.check_anchor_location(path)?;
         let file = VaultFile::open(path)?;

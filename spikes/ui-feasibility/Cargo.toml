@@ -42,3 +42,8 @@ unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
 dbg_macro = "deny"
+
+# qv-core now exposes the shared platform clipboard. Keep the same maintained
+# protected X11 transport as the product workspace, even in this isolated spike.
+[patch.crates-io]
+x11rb = { path = "../../third-party/x11rb" }

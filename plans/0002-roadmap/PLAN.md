@@ -629,8 +629,8 @@ release; it is not weakened.
 
 #### Phase 2.2c — Conflict resolution and archive-exchange commands
 
-- [x] **Plan:** [0028](../0028-archive-exchange-commands/PLAN.md) (Implemented;
-  complete combined C phase).
+- [x] **Plan:** [0028](../0028-archive-exchange-commands/PLAN.md) (Reviewed;
+  complete combined C phase, publication reporting repair verified).
 - **Do:** Core/CLI `conflicts`, `resolve`, `merge <archive>` and `snapshot export
   <directory> [--self-contained]`; complete versions, selected-slot proof,
   mandatory recovery snapshots, bounded views, lock races and durable outcomes.
@@ -646,7 +646,10 @@ release; it is not weakened.
 
 #### Phase 2.3 — Platform adapters: traits and Linux
 
-- [ ] **Do:** Create `qv-platform`: traits injected into core (secure input,
+- **Plan:** [0029](../0029-linux-platform/PLAN.md) (Implemented). The 0028 review
+  finding is repaired/verified under explicit owner continuation. Owner delegated
+  dependency/clipboard-reuse choices and instructed continuation on 2026-10-31.
+- [x] **Do:** Create `qv-platform`: traits injected into core (secure input,
   clipboard, lifecycle/lock signals, keystore, protection-status reporting).
   Linux implementations: logind/D-Bus lock and sleep, clipboard ownership,
   single instance, and swap/hibernation configuration detection. Quick unlock
@@ -1593,3 +1596,29 @@ release; it is not weakened.
   0 failed, 2 pre-existing ignored. Owner's staged index preserved; continuation
   remains unstaged/uncommitted. Next fresh session reviews all of 0028 before
   phase 2.3. D13 and release gates remain unchanged.
+
+- 2026-10-31: Fresh 0028 review found post-rename export errors concealed the
+  published archive ID. Owner explicitly requested fixing it and doing the
+  next phase on this tree. Plan 0028 was revised, repaired and follow-up reviewed:
+  701 tests pass, 0 fail, 2 pre-existing ignored; SPDX/matrix/fmt/Clippy/deny/vet
+  and affected fuzz checks pass. Published identity/completion error are now
+  reported separately without a false durability claim; recovery snapshots
+  retain strict completion. No new fresh-context repair review is claimed.
+  Phase 2.3 plan 0029 is Proposed, awaiting the separately requested approval
+  for a new D-Bus dependency and CLI clipboard consolidation file scope.
+  D13 still gates phase 2.4. No commit, push or branch.
+
+- 2026-10-31: Phase 2.3 implemented in plan 0029 under owner delegation. Added
+  qv-platform traits/Linux adapters, weak-state session lock/cancellation,
+  conservative persistence status and explicit consent gates (including
+  interrupted-rotation recovery), owner-only single-instance flock and shared
+  X11 clipboard. Initial lock delivery is synchronous; configured sessions
+  refuse missing monitoring despite persistence consent. Pinned maintained
+  zbus 6.2.0 after advisory review; 24 exact-version vet exemptions are recorded
+  audit debt, not audits. Full workspace 712/0/2 ignored passed; final affected
+  core/CLI rerun 196/0/0 passed after two final local guards. SPDX/matrix/fmt/
+  Clippy/deny/vet, focused vendor and affected fuzz/metadata checks pass. Actual
+  desktop/suspend/device validation and native Wayland/quick unlock are not
+  claimed. Current source/evidence and limitations: plan 0029. Next fresh
+  session reviews 0029, then D13 requires owner architecture review before
+  planning GUI phase 2.4. No commit, push, branch or staging change.

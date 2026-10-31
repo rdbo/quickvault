@@ -10,6 +10,7 @@ use std::sync::{Arc, mpsc};
 
 fn export(s: &Session, dir: &TestDir, backup: bool) -> std::path::PathBuf {
     let r = s.export_archive(dir.path(), backup, None).unwrap();
+    assert_eq!(r.completion_error, None);
     assert_eq!(r.self_contained, backup);
     dir.path().join(format!("{}.qvsnap", r.archive_id))
 }

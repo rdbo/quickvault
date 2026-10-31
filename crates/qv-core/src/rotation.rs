@@ -225,6 +225,7 @@ impl Core {
         new: Option<&MasterPassword>,
         cancel: Option<&CancelToken>,
     ) -> Result<InterruptedRotation, CoreError> {
+        self.platform_gate()?;
         if self.snapshots.is_none() {
             return Err(CoreError::NotAllowed);
         }
@@ -242,6 +243,7 @@ impl Core {
         choice: RotationChoice,
         cancel: Option<&CancelToken>,
     ) -> Result<(), CoreError> {
+        self.platform_gate()?;
         let policy = self.snapshots.as_ref().ok_or(CoreError::NotAllowed)?;
         let cancelled = || cancel.is_some_and(CancelToken::is_cancelled);
         rotation

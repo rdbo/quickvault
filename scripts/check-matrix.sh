@@ -38,7 +38,8 @@ while IFS= read -r row; do
 done < "$tmp/wanted"
 
 # Tags, each checked to sit on a #[test] function: "row<TAB>file:line".
-git ls-files 'crates/*.rs' | while IFS= read -r file; do
+git ls-files --cached --others --exclude-standard 'crates/*.rs' | while IFS= read -r file; do
+  [ -f "$file" ] || continue
   awk -v file="$file" '
     function flush(ok) {
       for (i = 1; i <= n; i++) {
