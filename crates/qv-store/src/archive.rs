@@ -22,9 +22,8 @@
 //! | snapshot files | `<32 lowercase hex>.qvsnap`, `recover-<32 hex>.qvsnap` |
 //!
 //! The header (0004 §6.2) is a canonical CBOR map with integer keys; every
-//! key is required, an unknown key fails closed and a `password_slot` is
-//! recognised only to be refused (no archive carries a slot until phase 2,
-//! 0004 §6.4):
+//! key except 10 is required, an unknown key fails closed and a `password_slot` is
+//! optional only for explicitly self-contained exports (0004 §6.4):
 //!
 //! | Key | Field | CBOR |
 //! |-----|-------|------|
@@ -38,7 +37,7 @@
 //! | 7 | reference_digest | bstr 32 |
 //! | 8 | object_count | uint |
 //! | 9 | total_length | uint |
-//! | 10 | password_slot | refused: self-contained archives are phase 2 |
+//! | 10 | password_slot | optional bstr: complete canonical working Keyslot descriptor |
 //! | 11 | header_mac | bstr 32 |
 //!
 //! The header MAC is MAC/1 under the `header-mac` purpose key (the key the
@@ -101,7 +100,7 @@ pub const ARCHIVE_MAC_PROFILE: MacProfile = MacProfile::V1;
 pub(crate) const ARCHIVE_HASH_PROFILE: ObjectHashProfile = ObjectHashProfile::V1;
 
 /// The header map key of a self-contained archive's password slot (0004
-/// §6.4), recognised only to be refused.
+/// §6.4), included only after explicit backup consent.
 const KEY_PASSWORD_SLOT: i64 = 10;
 
 /// The header map key of the MAC itself.
@@ -184,6 +183,7 @@ pub struct ArchiveHeader {
     reference_digest: [u8; 32],
     object_count: u64,
     total_length: u64,
+    pub(crate) password_slot: Option<Zeroizing<Vec<u8>>>,
     header_mac: MacTag,
 }
 
@@ -221,7 +221,7 @@ impl core::fmt::Debug for ArchiveStats {
 impl ArchiveHeader {
     /// Decodes and checks a header whose length the caller has bounded.
     ///
-    /// Unknown fields are [`StoreError::Unsupported`]; a `password_slot`,
+    /// Unknown fields are [`StoreError::Unsupported`]; a malformed slot,
     /// missing or mistyped field is [`StoreError::Integrity`]; a count over
     /// its budget is [`StoreError::LimitExceeded`]. Nothing is allocated from
     /// a length before the decoder has checked it.
@@ -241,6 +241,7 @@ impl ArchiveHeader {
         let mut object_count = None;
         let mut total_length = None;
         let mut header_mac = None;
+        let mut password_slot = None;
         for _ in 0..d.map().map_err(malformed)? {
             match d.int().map_err(malformed)? {
                 0 => archive_id = Some(id16(&mut d)?),
@@ -260,9 +261,11 @@ impl ArchiveHeader {
                 7 => reference_digest = Some(digest32(&mut d)?),
                 8 => object_count = Some(d.uint().map_err(malformed)?),
                 9 => total_length = Some(d.uint().map_err(malformed)?),
-                // Refused before its value is looked at: a self-contained
-                // archive is an explicit phase 2 choice (0004 §6.4).
-                KEY_PASSWORD_SLOT => return Err(StoreError::Integrity),
+                KEY_PASSWORD_SLOT => {
+                    let body = d.bytes().map_err(malformed)?;
+                    qv_model::Keyslot::decode(body)?;
+                    password_slot = Some(Zeroizing::new(body.to_vec()));
+                }
                 KEY_HEADER_MAC => header_mac = Some(MacTag::from_bytes(digest32(&mut d)?)),
                 _ => return Err(StoreError::Unsupported),
             }
@@ -303,6 +306,7 @@ impl ArchiveHeader {
             reference_digest: reference_digest.ok_or(StoreError::Integrity)?,
             object_count,
             total_length,
+            password_slot,
             header_mac: header_mac.ok_or(StoreError::Integrity)?,
         })
     }
@@ -360,6 +364,12 @@ impl ArchiveHeader {
                 e.uint(self.total_length);
                 Ok(())
             })?;
+            if let Some(slot) = &self.password_slot {
+                m.entry(KEY_PASSWORD_SLOT, |e| {
+                    e.bytes(slot);
+                    Ok(())
+                })?;
+            }
             if let Some(tag) = mac {
                 m.entry(KEY_HEADER_MAC, |e| {
                     e.bytes(tag.as_bytes());
@@ -370,6 +380,11 @@ impl ArchiveHeader {
         })
         .map_err(|_| StoreError::Internal)?;
         e.finish().map_err(|_| StoreError::Internal)
+    }
+
+    /// Whether this is an explicitly self-contained, offline-guessable backup.
+    pub fn is_self_contained(&self) -> bool {
+        self.password_slot.is_some()
     }
 
     /// The archive's random 128-bit identifier.
@@ -1073,13 +1088,25 @@ mod platform {
         /// copied (0004 §5.3, §6).
         pub fn write_archive<W: Write>(
             &mut self,
+            out: W,
+            created_at: Timestamp,
+            cancelled: &dyn Fn() -> bool,
+        ) -> Result<ArchiveStats, StoreError> {
+            self.write_export_archive(out, created_at, false, cancelled)
+        }
+
+        /// Stream an explicit export; callers must obtain warned consent before
+        /// setting `self_contained`. Ordinary snapshots use `write_archive`.
+        pub fn write_export_archive<W: Write>(
+            &mut self,
             mut out: W,
             created_at: Timestamp,
+            self_contained: bool,
             cancelled: &dyn Fn() -> bool,
         ) -> Result<ArchiveStats, StoreError> {
             self.verify_all(cancelled)?;
             self.begin_read()?;
-            match self.archive_stream(&mut out, created_at, cancelled) {
+            match self.archive_stream(&mut out, created_at, self_contained, cancelled) {
                 Ok(stats) => {
                     self.end_read()?;
                     Ok(stats)
@@ -1096,6 +1123,7 @@ mod platform {
             &mut self,
             out: &mut W,
             created_at: Timestamp,
+            self_contained: bool,
             cancelled: &dyn Fn() -> bool,
         ) -> Result<ArchiveStats, StoreError> {
             let header = self.file.header;
@@ -1151,6 +1179,13 @@ mod platform {
                 reference_digest,
                 object_count,
                 total_length,
+                password_slot: if self_contained {
+                    Some(Zeroizing::new(
+                        crate::slot::password_slot(&self.file.slots)?.body.clone(),
+                    ))
+                } else {
+                    None
+                },
                 header_mac: MacTag::from_bytes([0; 32]),
             };
             archive_header.seal_mac(&self.vk)?;
@@ -1327,7 +1362,7 @@ mod platform {
             let file = self.open_entry(entry)?;
             let mut input = std::io::BufReader::new(file);
             let header = read_header(&mut input, expect, vk)?;
-            if header.archive_id_hex() != entry.archive_id() {
+            if header.is_self_contained() || header.archive_id_hex() != entry.archive_id() {
                 return Err(StoreError::Integrity);
             }
             Ok(header)
@@ -1352,13 +1387,14 @@ mod platform {
             let header = self.read_header(entry, scope, source.vault_key())?;
             let scope = scope.with_archive_id(header.archive_id());
             let mut input = std::io::BufReader::new(self.open_entry(entry)?);
-            crate::VaultFile::create_from_archive(
+            crate::VaultFile::create_from_archive_with_slot(
                 path,
                 &mut input,
                 scope,
                 source.vault_key(),
                 &source.anchors,
                 cancelled,
+                Some(crate::slot::password_slot(&source.file.slots)?),
             )
         }
 
@@ -1411,6 +1447,19 @@ mod platform {
             created_at: Timestamp,
             cancelled: &dyn Fn() -> bool,
         ) -> Result<PublishedSnapshot, StoreError> {
+            self.publish_export(vault, kind, created_at, false, cancelled)
+        }
+
+        /// Publish a verified explicit export without replacement. A true
+        /// `self_contained` requires caller consent to offline password guessing.
+        pub fn publish_export(
+            &self,
+            vault: &mut UnlockedVault,
+            kind: SnapshotKind,
+            created_at: Timestamp,
+            self_contained: bool,
+            cancelled: &dyn Fn() -> bool,
+        ) -> Result<PublishedSnapshot, StoreError> {
             fs::check_private_dir(&self.path)?;
             // The temp name is not a snapshot name, so a crash never leaves a
             // file that `entries` would list (0004 §6.5).
@@ -1419,7 +1468,8 @@ mod platform {
             let built = (|| -> Result<(ArchiveStats, u64), StoreError> {
                 let file = locked.into_file();
                 let mut file = file;
-                let stats = vault.write_archive(&mut file, created_at, cancelled)?;
+                let stats =
+                    vault.write_export_archive(&mut file, created_at, self_contained, cancelled)?;
                 let size = file.metadata().map_err(|_| StoreError::Io)?.len();
 
                 // Re-open what is on disk under the temp's name and verify it
@@ -1433,6 +1483,7 @@ mod platform {
                     let opened =
                         read_archive(&mut input, scope, vault.vault_key(), &mut sink, cancelled)?;
                     if opened.header().archive_id_hex() != stats.archive_id
+                        || opened.header().is_self_contained() != self_contained
                         || opened.manifest() != vault.manifest()
                     {
                         return Err(StoreError::Integrity);
@@ -1452,6 +1503,10 @@ mod platform {
             };
             let name = format!("{}{}{}", kind.prefix(), stats.archive_id, SNAPSHOT_SUFFIX);
             let target = self.path.join(&name);
+            if cancelled() {
+                fs::remove_best_effort(&temp);
+                return Err(StoreError::Io);
+            }
             if let Err(e) = fs::rename_noreplace(&temp, &target) {
                 fs::remove_best_effort(&temp);
                 return Err(e);
@@ -1495,6 +1550,7 @@ mod tests {
             reference_digest: [0x44; 32],
             object_count: 5,
             total_length: 6 * 1024,
+            password_slot: None,
             header_mac: MacTag::from_bytes([0; 32]),
         }
     }
@@ -1674,7 +1730,7 @@ mod tests {
             decode_err(&reencode(|e| e.push((12, vec![0x00])))),
             Some(StoreError::Unsupported)
         );
-        // A present password_slot is refused before its value is read.
+        // A malformed non-bstr password_slot is refused before descriptor parsing.
         assert_eq!(
             decode_err(&reencode(|e| e.push((KEY_PASSWORD_SLOT, vec![0xa0])))),
             Some(StoreError::Integrity)
@@ -2283,7 +2339,7 @@ mod tests {
     #[test]
     fn exchange_file_password_guessing_archives_carry_no_slot() {
         // 0012 §1 row "Exchange-file password guessing": nothing this crate
-        // writes carries a password slot, and a slot-bearing header is
+        // writes carries a password slot, and a malformed slot header is
         // refused explicitly (0004 §6.4).
         let d = crate::fs::test_dir::TestDir::new();
         let (mut u, _a) = vault_with(&d);
@@ -2292,7 +2348,7 @@ mod tests {
         // The header has exactly the eleven documented fields and no slot:
         // its canonical map head is 0xab.
         assert_eq!(s.head[12], 0xab, "the header lost or gained a field");
-        // A slot-bearing header is refused before anything is read.
+        // A malformed non-bstr slot descriptor is rejected.
         let mut entries = super::tests::entries(&s.head[12..]);
         entries.push((super::KEY_PASSWORD_SLOT, vec![0xa0]));
         let mut e = Encoder::new();
@@ -2740,5 +2796,149 @@ mod tests {
             StoreError::Integrity
         );
         assert_eq!(delivered, 0);
+    }
+}
+
+#[cfg(test)]
+mod export_tests {
+    use super::*;
+    use crate::fs::test_dir::TestDir;
+    use crate::vault::tests::{PASSWORD, copy_fixture, unlock};
+
+    // 0012 §1: Exchange-file password guessing
+    #[test]
+    fn archive_explicit_backup_slot_round_trips_and_is_mac_bound() {
+        let (d, a) = (TestDir::new(), TestDir::new());
+        let (path, anchors) = copy_fixture(&d, &a, "v.qvault");
+        let mut u = unlock(&path, &anchors, PASSWORD).unwrap();
+        let scope = ArchiveScope::new(u.header().vault_id, u.header().key_generation);
+        for backup in [false, true] {
+            let mut bytes = Vec::new();
+            u.write_export_archive(&mut bytes, Timestamp(1), backup, &|| false)
+                .unwrap();
+            let opened = read_archive(
+                &mut std::io::Cursor::new(&bytes),
+                scope,
+                u.vault_key(),
+                &mut |_| Ok(()),
+                &|| false,
+            )
+            .unwrap();
+            let mut header = opened.header;
+            assert_eq!(header.is_self_contained(), backup);
+            let encoded = header.encode().unwrap();
+            let decoded = ArchiveHeader::decode(&encoded).unwrap();
+            decoded.verify_mac(u.vault_key()).unwrap();
+            if backup {
+                assert_eq!(
+                    header.password_slot.as_deref().unwrap().as_slice(),
+                    u.file.slots[0].body
+                );
+                // Exact independent CBOR field: key 10 is a bstr of the original
+                // complete descriptor, rather than a slot-ID or a chosen head.
+                let mut decoder = Decoder::new(&encoded).unwrap();
+                let mut found = false;
+                for _ in 0..decoder.map().unwrap() {
+                    let key = decoder.int().unwrap();
+                    if key == 10 {
+                        assert_eq!(decoder.bytes().unwrap(), u.file.slots[0].body);
+                        found = true;
+                    } else {
+                        decoder.skip().unwrap();
+                    }
+                }
+                assert!(found);
+                let original = header.password_slot.take().unwrap();
+                assert_eq!(header.verify_mac(u.vault_key()), Err(StoreError::Integrity));
+                // The bounded unauthenticated header may describe a slot, but
+                // cannot choose an arbitrary KDF profile or malformed payload.
+                let mut input = Decoder::new(&original).unwrap();
+                let count = input.map().unwrap();
+                let mut invalid = Encoder::new();
+                invalid
+                    .map(|map| {
+                        for _ in 0..count {
+                            let key = input.int().unwrap();
+                            let value = input.raw_value().unwrap();
+                            if key == 1 {
+                                map.entry(key, |e| {
+                                    e.uint(65535);
+                                    Ok(())
+                                })?;
+                            } else {
+                                map.raw_entry(key, &value)?;
+                            }
+                        }
+                        Ok(())
+                    })
+                    .unwrap();
+                header.password_slot = Some(invalid.finish().unwrap());
+                assert!(matches!(
+                    ArchiveHeader::decode(&header.encode().unwrap()),
+                    Err(StoreError::Unsupported)
+                ));
+                header.password_slot = Some(Zeroizing::new(vec![0xa0]));
+                assert!(matches!(
+                    ArchiveHeader::decode(&header.encode().unwrap()),
+                    Err(StoreError::Integrity)
+                ));
+                header.password_slot = Some(Zeroizing::new(vec![0; MAX_ARCHIVE_HEADER_BYTES]));
+                assert!(matches!(
+                    ArchiveHeader::decode(&header.encode().unwrap()),
+                    Err(StoreError::LimitExceeded)
+                ));
+            }
+        }
+    }
+
+    // 0012 §1: Exchange-file password guessing
+    // 0012 §1: Anchor crash windows
+    #[test]
+    fn archive_export_publication_uses_unique_names_and_keeps_policy_slotless() {
+        let (d, a, exports) = (TestDir::new(), TestDir::new(), TestDir::new());
+        let (path, anchors) = copy_fixture(&d, &a, "v.qvault");
+        let mut u = unlock(&path, &anchors, PASSWORD).unwrap();
+        let dir = SnapshotDir::open(exports.path()).unwrap();
+        let scope = ArchiveScope::new(u.header().vault_id, u.header().key_generation);
+        let first = dir
+            .publish_export(&mut u, SnapshotKind::Ordinary, Timestamp(1), true, &|| {
+                false
+            })
+            .unwrap();
+        let second = dir
+            .publish(&mut u, SnapshotKind::Ordinary, Timestamp(1), &|| false)
+            .unwrap();
+        assert_ne!(first.archive_id(), second.archive_id());
+        assert_eq!(dir.entries().unwrap().len(), 2);
+        assert!(matches!(
+            dir.read_header(first.entry(), scope, u.vault_key()),
+            Err(StoreError::Integrity)
+        ));
+        assert!(
+            !dir.read_header(second.entry(), scope, u.vault_key())
+                .unwrap()
+                .is_self_contained()
+        );
+        assert!(
+            dir.publish_export(&mut u, SnapshotKind::Ordinary, Timestamp(2), true, &|| true)
+                .is_err()
+        );
+        assert_eq!(dir.entries().unwrap().len(), 2);
+        // Reaching ArchiveVerified proves the explicit mode used the same
+        // persisted-byte re-verification and cleanup boundary as snapshots.
+        let snapshot = TestDir::new();
+        crate::crash::test::arm_dir(
+            crate::crash::CrashPoint::ArchiveVerified,
+            exports.path(),
+            snapshot.path(),
+        );
+        assert!(matches!(
+            dir.publish_export(&mut u, SnapshotKind::Ordinary, Timestamp(2), true, &|| {
+                false
+            }),
+            Err(StoreError::Internal)
+        ));
+        assert!(!crate::crash::test::disarm());
+        assert_eq!(dir.entries().unwrap().len(), 2);
     }
 }

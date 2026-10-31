@@ -27,7 +27,7 @@
 //! | `slot` | local password slots (the `qv_model::Keyslot` descriptor) | 0002 §3.2 |
 //! | `object` | [`ObjectEnvelope`], record AAD, record encryption | 0004 §2.2, §3.2 |
 //! | `manifest` | [`Manifest`]: codec, validation, budgets, digests, encryption, envelope hash | 0004 §3.4–3.5, §4.1–4.2 |
-//! | `receipts` / `receipt_store` | Bounded protected receipt metadata, sealed singleton and head/replica binding; no incoming acceptance yet | 0004 §2.3 |
+//! | `receipts` / `receipt_store` | Bounded protected receipt metadata, sealed singleton and head/replica binding for atomic acceptance | 0004 §2.3 |
 //! | `head` | the local head, its MAC and digest, the head-versus-anchor table ([`AnchorStatus`]) | 0005 §5.4 |
 //! | `anchor` | [`AnchorDir`]: anchor files, atomic replacement | 0005 §5.4 |
 //! | `archive_verify` / `validation` | Bounded role-aware archive authentication and shared record checks | 0004 §3.6, §6 |

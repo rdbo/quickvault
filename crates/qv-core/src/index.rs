@@ -271,20 +271,33 @@ impl Index {
         cancelled: &dyn Fn() -> bool,
         budget: usize,
     ) -> Result<Index, CoreError> {
-        let m = vault.manifest();
-        let mut index = Index::new(m.root_group_id(), m.vault_meta_id(), budget)?;
-        for rec in m.records() {
+        Self::from_manifest(
+            vault.manifest(),
+            &mut |r, v| vault.read_version(r, v).map_err(Into::into),
+            cancelled,
+            budget,
+        )
+    }
+
+    /// Preflight a complete candidate through authenticated, source-bound reads.
+    pub(crate) fn from_manifest(
+        manifest: &qv_store::Manifest,
+        read: &mut impl FnMut(RecordId, VersionId) -> Result<RecordVersion, CoreError>,
+        cancelled: &dyn Fn() -> bool,
+        budget: usize,
+    ) -> Result<Index, CoreError> {
+        let mut index = Index::new(manifest.root_group_id(), manifest.vault_meta_id(), budget)?;
+        for rec in manifest.records() {
             if cancelled() {
                 return Err(CoreError::Cancelled);
             }
-            let id = rec.record_id();
-            let kind = vault.record_kind(id).ok_or(CoreError::Internal)?;
             let heads = rec
                 .heads()
                 .iter()
-                .map(|h| vault.read_version(id, h.version_id()))
+                .map(|h| read(rec.record_id(), h.version_id()))
                 .collect::<Result<Vec<_>, _>>()?;
-            index.insert(id, RecordInfo::from_heads(kind, heads)?)?;
+            let kind = heads.first().ok_or(CoreError::Internal)?.kind();
+            index.insert(rec.record_id(), RecordInfo::from_heads(kind, heads)?)?;
         }
         index.retree()?;
         Ok(index)

@@ -2895,6 +2895,7 @@ dependencies = [
  "qv-crypto",
  "qv-model",
  "qv-store",
+ "qv-sync",
  "zeroize",
  "zxcvbn",
 ]
@@ -2944,6 +2945,15 @@ dependencies = [
  "rusqlite",
  "rustix",
  "zeroize",
+]
+
+[[package]]
+name = "qv-sync"
+version = "0.0.0"
+dependencies = [
+ "qv-crypto",
+ "qv-model",
+ "qv-store",
 ]
 
 [[package]]

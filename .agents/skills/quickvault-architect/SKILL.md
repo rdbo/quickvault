@@ -87,6 +87,11 @@ earlier where cross-crate or security risks warrant them. Put spec amendments
 first and documentation last. If a step needs judgment, give the developer the
 decision and the reason, not just "figure out".
 
+For roadmap work, steps are implementation detail inside the phase plan.
+Do not add phase suffixes merely because there are many steps or context needs
+compaction. Use a durable execution log to continue the phase. A split needs a
+concrete delivery boundary/blocker and a reason, consistent with the roadmap.
+
 ### 6. Write the plan
 
 - Next number: the highest in `ls plans/` plus one, as four digits. Slug: short kebab-case.

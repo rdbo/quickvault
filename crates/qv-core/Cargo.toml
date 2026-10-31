@@ -12,6 +12,7 @@ publish.workspace = true
 qv-crypto.workspace = true
 qv-model.workspace = true
 qv-store.workspace = true
+qv-sync.workspace = true
 zeroize.workspace = true
 zxcvbn.workspace = true
 

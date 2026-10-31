@@ -640,6 +640,58 @@ struct Taken {
     entry: Option<SnapshotEntry>,
 }
 
+/// The caller already holds the session for the entire protected operation.
+pub(crate) fn begin_recovery(
+    open: &mut Open,
+    now: Timestamp,
+    allow_over_budget: bool,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<RecoverySnapshot, CoreError> {
+    if cancelled() {
+        return Err(CoreError::Cancelled);
+    }
+    if open.pinned().is_some() {
+        return Err(CoreError::NotAllowed);
+    }
+    let policy = open.snapshots.clone().ok_or(CoreError::Internal)?;
+    let taken = snapshot_pass(
+        &policy,
+        &mut open.vault,
+        SnapshotKind::Recovery,
+        now,
+        allow_over_budget,
+        None,
+        cancelled,
+    )?;
+    let summary = taken.report.published.clone().ok_or(CoreError::Internal)?;
+    let entry = taken.entry.ok_or(CoreError::Internal)?;
+    *open.pin.lock().unwrap_or_else(PoisonError::into_inner) = Some(summary.archive_id.clone());
+    Ok(RecoverySnapshot {
+        pin: Arc::clone(&open.pin),
+        summary,
+        entry,
+    })
+}
+
+pub(crate) fn finish_recovery(
+    open: &mut Open,
+    snapshot: RecoverySnapshot,
+) -> Result<(), CoreError> {
+    if !Arc::ptr_eq(&open.pin, &snapshot.pin) {
+        return Err(CoreError::StaleHandle);
+    }
+    {
+        let mut pin = open.pin.lock().unwrap_or_else(PoisonError::into_inner);
+        if pin.as_deref() != Some(snapshot.summary.archive_id.as_str()) {
+            return Err(CoreError::StaleHandle);
+        }
+        *pin = None;
+    }
+    let policy = open.snapshots.clone().ok_or(CoreError::Internal)?;
+    policy.dir.reclassify_as_ordinary(&snapshot.entry)?;
+    Ok(())
+}
+
 impl Session {
     /// The authenticated local snapshots of this vault (0011 `snapshot ls`).
     ///
@@ -804,61 +856,17 @@ impl Session {
     ) -> Result<RecoverySnapshot, CoreError> {
         self.read(|ctx| {
             let c = ctx.canceller();
-            if cancel.is_some_and(CancelToken::is_cancelled) || c.is_cancelled() {
-                return Err(CoreError::Cancelled);
-            }
             let now = ctx.now();
-            let open = &mut *ctx.open;
-            // Only one serialized recovery operation may pin a snapshot
-            // (0007 §3.2).
-            if open.pinned().is_some() {
-                return Err(CoreError::NotAllowed);
-            }
-            let policy = open.snapshots.clone().ok_or(CoreError::Internal)?;
-            let taken = snapshot_pass(
-                &policy,
-                &mut open.vault,
-                SnapshotKind::Recovery,
-                now,
-                allow_over_budget,
-                None,
-                &move || c.is_cancelled() || cancel.is_some_and(CancelToken::is_cancelled),
-            )?;
-            let summary = taken.report.published.clone().ok_or(CoreError::Internal)?;
-            let entry = taken.entry.ok_or(CoreError::Internal)?;
-            *open.pin.lock().unwrap_or_else(PoisonError::into_inner) =
-                Some(summary.archive_id.clone());
-            Ok(RecoverySnapshot {
-                pin: Arc::clone(&open.pin),
-                summary,
-                entry,
+            begin_recovery(ctx.open, now, allow_over_budget, &|| {
+                c.is_cancelled() || cancel.is_some_and(CancelToken::is_cancelled)
             })
         })
     }
 
-    /// Ends a destructive operation: the pinned copy becomes an ordinary
-    /// snapshot subject to pruning (0007 §3.2). A failure here leaves the
-    /// copy as a `recover-` file that the next policy pass reclassifies.
+    /// Ends a destructive operation: release its pin and make its copy ordinary.
+    /// Reclassification failure leaves a recovery file for the next policy pass.
     pub fn finish_destructive(&self, snapshot: RecoverySnapshot) -> Result<(), CoreError> {
-        self.read(|ctx| {
-            if !Arc::ptr_eq(&ctx.open.pin, &snapshot.pin) {
-                return Err(CoreError::StaleHandle);
-            }
-            {
-                let mut pin = ctx.open.pin.lock().unwrap_or_else(PoisonError::into_inner);
-                if pin.as_deref() != Some(snapshot.summary.archive_id.as_str()) {
-                    return Err(CoreError::StaleHandle);
-                }
-                *pin = None;
-            }
-            match ctx.open.snapshots.clone() {
-                Some(policy) => {
-                    policy.dir.reclassify_as_ordinary(&snapshot.entry)?;
-                    Ok(())
-                }
-                None => Err(CoreError::Internal),
-            }
-        })
+        self.read(|ctx| finish_recovery(ctx.open, snapshot))
     }
 
     /// One full integrity pass over the committed state (0011 `verify`;

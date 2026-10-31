@@ -71,6 +71,15 @@ pub(crate) fn command() -> Command {
             .subcommand_required(true)
             .subcommand(Command::new("show").about("Reauthenticate and show the phrase on the terminal alternate screen"))
             .subcommand(Command::new("rotate").about("Create a new key generation, phrase and password (resumable); always asks you to type `rotate`")))
+        .subcommand(Command::new("merge")
+            .about("Authenticate and merge an archive; preserves unresolved conflicts")
+            .arg(Arg::new("archive").required(true).value_parser(value_parser!(PathBuf)))
+            .arg(flag("allow-over-budget", "Allow the mandatory recovery copy to exceed ordinary snapshot budgets")))
+        .subcommand(Command::new("conflicts").about("Inspect complete conflict versions of every record kind")
+            .arg(Arg::new("target")).arg(flag("reveal", REVEAL_HELP)))
+        .subcommand(Command::new("resolve").about("Resolve from one complete active version; unseen edits may remain concurrent")
+            .arg(Arg::new("target").required(true))
+            .arg(Arg::new("version").long("version").required(true).value_name("VERSION")))
         .subcommand(attach_command())
         .subcommand(history_command())
         .subcommand(Command::new("restore").about("Restore a retained entry version as a new causal edit")
@@ -203,6 +212,10 @@ pub(crate) fn command() -> Command {
                     Command::new("ls")
                         .about("List local snapshots (authenticates every header)"),
                 )
+                .subcommand(Command::new("export")
+                    .about("Publish a new immutable archive; slotless unless explicitly self-contained")
+                    .arg(Arg::new("directory").required(true).value_parser(value_parser!(PathBuf)))
+                    .arg(flag("self-contained", "Include the local password slot: anyone holding the file can guess the master password offline")))
                 .subcommand(Command::new("restore")
                     .about("Restore into a new vault path and explicit recovery baseline; may be old")
                     .arg(Arg::new("id").required(true))
@@ -546,6 +559,9 @@ fn dispatch(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
         Some(("history", s)) => crate::cmd::history::run(ctx, s, false),
         Some(("restore", s)) => crate::cmd::history::run(ctx, s, true),
         Some(("trash", s)) => crate::cmd::trash::run(ctx, s),
+        Some(("conflicts", s)) => crate::cmd::conflicts::inspect(ctx, s),
+        Some(("resolve", s)) => crate::cmd::conflicts::resolve(ctx, s),
+        Some(("merge", s)) => crate::cmd::merge::run(ctx, s),
         Some(("snapshot", s)) => crate::cmd::snapshot::run(ctx, s),
         Some(("verify", s)) => crate::cmd::verify::run(ctx, s),
         _ => Err(CliError::new(OTHER, "unknown command")),

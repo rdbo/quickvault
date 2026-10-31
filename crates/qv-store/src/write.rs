@@ -2072,3 +2072,428 @@ mod attachment_crash_tests {
 
 #[path = "acceptance.rs"]
 mod acceptance;
+
+impl Write<'_> {
+    /// Reauthenticate a selected active keyslot before adopting its exact
+    /// descriptor. The matching new causal record is required by commit.
+    pub fn stage_selected_password(
+        &mut self,
+        version: qv_model::VersionId,
+        password: &qv_crypto::MasterPassword,
+    ) -> Result<(), StoreError> {
+        if self.poisoned || self.password.is_some() {
+            self.poisoned = true;
+            return Err(StoreError::InvalidEdit);
+        }
+        self.poisoned = true;
+        let id = self.manifest.keyslot_id();
+        let record = self.manifest.record(id).ok_or(StoreError::Integrity)?;
+        if !record.heads().iter().any(|h| h.version_id() == version) {
+            return Err(StoreError::InvalidEdit);
+        }
+        let v = self.vault.read_version(id, version)?;
+        let RecordBody::Live(Payload::PasswordKeyslot(slot)) = v.body else {
+            return Err(StoreError::Integrity);
+        };
+        let h = self.vault.header();
+        let confirmed = slot.slot.unlock(password, h.vault_id, h.key_generation)?;
+        // Header MAC verification is existing constant-time key confirmation;
+        // no raw VK exposure or new cryptographic comparison is introduced.
+        self.vault.file.verify_header(&confirmed)?;
+        self.password = Some(crate::slot::LocalSlot::from_stored(schema::StoredSlot {
+            slot_id: slot.slot.slot_id.0,
+            kind: crate::slot::PASSWORD_SLOT,
+            body: slot.encode()?.to_vec(),
+        })?);
+        self.poisoned = false;
+        Ok(())
+    }
+
+    /// Restage a selected attachment head for an intentional new causal edit.
+    /// Every chunk gets a fresh object ID/nonce; history keeps its own objects.
+    /// At most one protected plaintext chunk is held at a time.
+    pub fn restage_attachment(
+        &mut self,
+        record: RecordId,
+        version: qv_model::VersionId,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<crate::StagedAttachment, StoreError> {
+        if self.poisoned || self.staged.contains_key(&record) {
+            self.poisoned = true;
+            return Err(StoreError::InvalidEdit);
+        }
+        self.poisoned = true;
+        let result = self.restage_attachment_inner(record, version, cancelled);
+        if result.is_ok() {
+            self.poisoned = false;
+        }
+        result
+    }
+
+    fn restage_attachment_inner(
+        &mut self,
+        record: RecordId,
+        version: qv_model::VersionId,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<crate::StagedAttachment, StoreError> {
+        use qv_crypto::{ContentHasher, ObjectHashProfile, SecretArray, object_hash, purpose};
+        let r = self
+            .manifest
+            .record(record)
+            .ok_or(StoreError::InvalidEdit)?;
+        if !r.heads().iter().any(|h| h.version_id() == version) {
+            return Err(StoreError::InvalidEdit);
+        }
+        let v = self.vault.read_version(record, version)?;
+        let RecordBody::Live(Payload::AttachmentMeta(meta)) = v.body else {
+            return Err(StoreError::InvalidEdit);
+        };
+        self.vault.verify_attachment(record, version, cancelled)?;
+        let header = self.vault.file.header;
+        let root = self.vault.vk.purpose_key::<purpose::Attachment>(
+            header.vault_id,
+            header.key_generation,
+            header.derivation_profile,
+        )?;
+        let key = root.attachment_key(header.vault_id, qv_crypto::AttachmentId(record.0))?;
+        let mut hash = ContentHasher::new();
+        let mut size = 0u64;
+        let mut chunks = Vec::new();
+        for (index, old_id) in meta.chunk_object_ids.iter().enumerate() {
+            if cancelled() {
+                return Err(StoreError::Io);
+            }
+            self.vault.file.budget.reset();
+            let reference = self
+                .vault
+                .manifest()
+                .reference(*old_id)
+                .ok_or(StoreError::Integrity)?;
+            let (profile, nonce, ciphertext) = schema::ObjectReader::new(&self.vault.file.conn)?
+                .read(
+                    header.key_generation,
+                    &old_id.to_bytes(),
+                    reference.length(),
+                )?;
+            if profile != reference.data_profile().id()
+                || object_hash(ObjectHashProfile::V1, &ciphertext).0 != *reference.sha256()
+            {
+                return Err(StoreError::Integrity);
+            }
+            let bytes = qv_crypto::open_chunk(
+                &key,
+                reference.data_profile(),
+                &crate::attachment::aad(
+                    scope(&header),
+                    record,
+                    *old_id,
+                    index,
+                    reference.data_profile(),
+                )?,
+                &nonce,
+                &ciphertext,
+            )?;
+            let expected = meta
+                .size
+                .checked_sub(size)
+                .ok_or(StoreError::Integrity)?
+                .min(qv_model::CHUNK_SIZE);
+            if expected == 0 || bytes.len() as u64 != expected {
+                return Err(StoreError::Integrity);
+            }
+            size = size
+                .checked_add(expected)
+                .ok_or(StoreError::LimitExceeded)?;
+            hash.update(bytes.expose_secret());
+            if self.manifest.references().len() >= crate::MAX_OBJECTS {
+                return Err(StoreError::LimitExceeded);
+            }
+            let id = ObjectId::generate()?;
+            let sealed = qv_crypto::seal_chunk(
+                &key,
+                header.data_profile,
+                &crate::attachment::aad(scope(&header), record, id, index, header.data_profile)?,
+                bytes.expose_secret(),
+            )?;
+            let reference = ObjectRef::new(id, header.data_profile, &sealed.ciphertext)?;
+            let total = self
+                .manifest
+                .references()
+                .iter()
+                .try_fold(reference.length(), |n, r| {
+                    n.checked_add(r.length()).ok_or(StoreError::LimitExceeded)
+                })?;
+            if total > crate::MAX_TOTAL_CIPHERTEXT {
+                return Err(StoreError::LimitExceeded);
+            }
+            let object = crate::object::SealedObject {
+                object_id: id,
+                data_profile: header.data_profile,
+                nonce: sealed.nonce,
+                ciphertext: sealed.ciphertext,
+            };
+            insert_object(&self.vault.file.conn, header.key_generation, &object)?;
+            self.growth = self.growth.saturating_add(len64(object.ciphertext.len()));
+            self.manifest.insert_reference(reference)?;
+            chunks.push(id);
+            point(CrashPoint::ObjectsWritten)?;
+        }
+        let hash = hash.finalize();
+        if size != meta.size || !hash.ct_eq(&meta.content_hash) {
+            return Err(StoreError::Integrity);
+        }
+        let mut copy = SecretArray::zeroed();
+        copy.expose_secret_mut()
+            .copy_from_slice(hash.expose_secret());
+        self.staged.insert(
+            record,
+            crate::StagedAttachment {
+                chunks: chunks.clone(),
+                size,
+                hash: copy,
+            },
+        );
+        Ok(crate::StagedAttachment { chunks, size, hash })
+    }
+}
+
+#[cfg(test)]
+mod selected_slot_tests {
+    // These fixtures deliberately model authenticated incoming slot records;
+    // private-field access bypasses operational adoption only in these tests.
+    #![allow(clippy::unwrap_used, clippy::panic)]
+    use super::*;
+    use crate::fs::test_dir::TestDir;
+    use crate::vault::tests::{PASSWORD, copy_fixture, kdf, pw, unlock};
+    use qv_model::{Clock, RandomId, Timestamp, VersionId};
+    const NEW: &str = "selected incoming slot password";
+
+    fn received(u: &mut UnlockedVault, foreign: bool) -> VersionId {
+        let id = u.manifest().keyslot_id();
+        let slot = {
+            let _k = kdf();
+            if foreign {
+                qv_model::Keyslot {
+                    slot: qv_crypto::PasswordSlot::create(
+                        &pw(NEW),
+                        &qv_crypto::VaultKey::generate().unwrap(),
+                        u.header().vault_id,
+                        u.header().key_generation,
+                        qv_crypto::SlotId::generate().unwrap(),
+                        qv_crypto::PasswordKdfProfile::V1,
+                        qv_crypto::PasswordWrapProfile::V1,
+                    )
+                    .unwrap(),
+                    ext: qv_model::Extensions::new(),
+                }
+            } else {
+                let mut w = u.write().unwrap();
+                // Dropping this write leaves only the complete descriptor for
+                // the following simulated incoming-version fixture.
+                w.stage_password(
+                    &pw(NEW),
+                    qv_crypto::PasswordKdfProfile::V1,
+                    qv_crypto::PasswordWrapProfile::V1,
+                )
+                .unwrap()
+            }
+        };
+        let mut w = u.write().unwrap();
+        let c = w.reserve_counter().unwrap();
+        let version = VersionId::generate().unwrap();
+        let v = RecordVersion {
+            version_id: version,
+            clock: Clock::for_edit(w.head_clocks(id).iter(), w.writer_id(), c).unwrap(),
+            modified_at: Timestamp(1),
+            body: RecordBody::Live(Payload::PasswordKeyslot(slot)),
+            ext: qv_model::Extensions::new(),
+        };
+        w.put_local(id, v).unwrap();
+        w.touched.remove(&id); // Test-only incoming metadata, working slot unchanged.
+        w.commit().unwrap();
+        version
+    }
+    fn adopt(u: &mut UnlockedVault, version: VersionId, password: &str) -> Result<(), StoreError> {
+        let _k = kdf();
+        let id = u.manifest().keyslot_id();
+        let mut v = u.read_version(id, version)?;
+        let mut w = u.write()?;
+        w.stage_selected_password(version, &pw(password))?;
+        let c = w.reserve_counter()?;
+        v.clock = Clock::for_edit(w.head_clocks(id).iter(), w.writer_id(), c)?;
+        v.version_id = VersionId::generate()?;
+        v.modified_at = Timestamp(2);
+        w.put_local(id, v)?;
+        w.commit()
+    }
+    // 0012 §1: Mixed credentials
+    #[test]
+    fn selected_slot_wrong_password_foreign_vk_and_incomplete_binding_reject_atomically() {
+        for foreign in [false, true] {
+            let (d, a) = (TestDir::new(), TestDir::new());
+            let (path, anchors) = copy_fixture(&d, &a, "v.qvault");
+            let mut u = unlock(&path, &anchors, PASSWORD).unwrap();
+            let version = received(&mut u, foreign);
+            let seq = u.local_seq();
+            assert_eq!(
+                adopt(&mut u, version, "wrong"),
+                Err(StoreError::WrongPassword)
+            );
+            assert_eq!(u.local_seq(), seq);
+            if foreign {
+                assert_eq!(adopt(&mut u, version, NEW), Err(StoreError::Integrity));
+            } else {
+                {
+                    let _k = kdf();
+                    let mut w = u.write().unwrap();
+                    w.stage_selected_password(version, &pw(NEW)).unwrap();
+                    assert_eq!(w.commit(), Err(StoreError::InvalidEdit));
+                }
+                assert_eq!(u.local_seq(), seq);
+            }
+            drop(u);
+            unlock(&path, &anchors, PASSWORD).unwrap();
+        }
+    }
+    // 0012 §1: Anchor crash windows
+    #[test]
+    fn selected_slot_adoption_crash_matrix_preserves_operational_and_causal_binding() {
+        use crate::crash::{
+            CrashPoint::*,
+            test::{arm, disarm},
+        };
+        for point in [
+            Begun,
+            ObjectsWritten,
+            PasswordSlotWritten,
+            ManifestWritten,
+            HeadWritten,
+            Pruned,
+            Committed,
+            AnchorTempWritten,
+            AnchorReplaced,
+        ] {
+            let (d, a, snap) = (TestDir::new(), TestDir::new(), TestDir::new());
+            let (path, anchors) = copy_fixture(&d, &a, "v.qvault");
+            let mut u = unlock(&path, &anchors, PASSWORD).unwrap();
+            let version = received(&mut u, false);
+            let seq = u.local_seq();
+            arm(point, &path, anchors.path(), snap.path());
+            assert_eq!(
+                adopt(&mut u, version, NEW),
+                Err(StoreError::Internal),
+                "{point:?}"
+            );
+            assert!(!disarm());
+            drop(u);
+            let durable = matches!(point, Committed | AnchorTempWritten | AnchorReplaced);
+            let anchors = crate::AnchorDir::open(&snap.join("anchors")).unwrap();
+            let u = unlock(
+                &snap.join("v.qvault"),
+                &anchors,
+                if durable { NEW } else { PASSWORD },
+            )
+            .unwrap();
+            assert_eq!(u.local_seq(), seq + u64::from(durable));
+            u.verify_all(&|| false).unwrap();
+            let id = u.manifest().keyslot_id();
+            let role = &u.manifest().record(id).unwrap().heads()[0];
+            let RecordBody::Live(Payload::PasswordKeyslot(slot)) =
+                u.read_version(id, role.version_id()).unwrap().body
+            else {
+                panic!()
+            };
+            if durable {
+                assert_eq!(slot.encode().unwrap().as_slice(), u.file.slots[0].body);
+                assert_ne!(role.version_id(), version);
+            } else {
+                assert_eq!(role.version_id(), version);
+                assert_ne!(slot.encode().unwrap().as_slice(), u.file.slots[0].body);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod resolution_attachment_tests {
+    // Tests use private transactional fields only to inject hostile rows and
+    // observe that a failed restage poisons/rolls back the complete write.
+    #![allow(clippy::unwrap_used, clippy::panic)]
+    use super::*;
+    use crate::fs::test_dir::TestDir;
+    use crate::vault::tests::{PASSWORD, copy_fixture, edit, unlock};
+    use qv_model::{Clock, RandomId, Timestamp, VersionId};
+
+    // 0012 §1: Hostile SQLite/CBOR
+    // 0012 §1: Anchor crash windows
+    #[test]
+    fn resolution_attachment_corruption_and_partial_cancellation_poison_the_write() {
+        let (d, a) = (TestDir::new(), TestDir::new());
+        let (path, anchors) = copy_fixture(&d, &a, "v.qvault");
+        let mut u = unlock(&path, &anchors, PASSWORD).unwrap();
+        let owner = RecordId::generate().unwrap();
+        edit(&mut u, owner, "owner");
+        let id = RecordId::generate().unwrap();
+        let version = VersionId::generate().unwrap();
+        {
+            let mut w = u.write().unwrap();
+            let data = vec![7; 70000];
+            let staged = w
+                .stage_attachment(id, &mut data.as_slice(), &|| false)
+                .unwrap();
+            let c = w.reserve_counter().unwrap();
+            let v = RecordVersion {
+                version_id: version,
+                clock: Clock::for_edit([].iter(), w.writer_id(), c).unwrap(),
+                modified_at: Timestamp(1),
+                body: RecordBody::Live(Payload::AttachmentMeta(staged.into_meta(
+                    owner,
+                    qv_model::Text::new("file").unwrap(),
+                    qv_model::Text::new("test/data").unwrap(),
+                ))),
+                ext: qv_model::Extensions::new(),
+            };
+            w.put_local(id, v).unwrap();
+            w.commit().unwrap();
+        }
+        let seq = u.local_seq();
+        let references = u.manifest().references().len();
+        {
+            let mut w = u.write().unwrap();
+            let calls = std::cell::Cell::new(0);
+            assert!(matches!(
+                w.restage_attachment(id, version, &|| {
+                    calls.set(calls.get() + 1);
+                    calls.get() > 6
+                }),
+                Err(StoreError::Io)
+            ));
+            assert!(
+                w.manifest.references().len() > references,
+                "fixture must cancel after some staging"
+            );
+            assert_eq!(w.commit(), Err(StoreError::Internal));
+        }
+        assert_eq!(u.local_seq(), seq);
+        u.verify_all(&|| false).unwrap();
+        {
+            let mut w = u.write().unwrap();
+            let chunk = w.manifest.record(id).unwrap().heads()[0].chunks().unwrap()[1];
+            w.vault
+                .file
+                .conn
+                .execute(
+                    "UPDATE object SET ciphertext=zeroblob(length(ciphertext)) WHERE object_id=?1",
+                    [chunk.to_bytes().as_slice()],
+                )
+                .unwrap();
+            assert!(matches!(
+                w.restage_attachment(id, version, &|| false),
+                Err(StoreError::Integrity)
+            ));
+            assert_eq!(w.commit(), Err(StoreError::Internal));
+        }
+        assert_eq!(u.local_seq(), seq);
+        u.verify_all(&|| false).unwrap();
+    }
+}

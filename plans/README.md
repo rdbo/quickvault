@@ -65,4 +65,5 @@ plan, or a new plan that names the one it supersedes.
 | [0024](0024-offline-release-evidence/PLAN.md) | Offline hardening evidence (roadmap 1.16) | Reviewed |
 | [0025](0025-lan-protocol-spec/PLAN.md) | LAN sync protocol spec 0013 (roadmap 2.1) | Reviewed (0013 Accepted) |
 | [0026](0026-conflicts-archive-exchange/PLAN.md) | Verified archive input and merge candidates (roadmap 2.2a) | Reviewed |
-| [0027](0027-archive-receipt-state/PLAN.md) | Archive receipts and atomic incoming acceptance (roadmap 2.2b) | Implemented |
+| [0027](0027-archive-receipt-state/PLAN.md) | Archive receipts and atomic incoming acceptance (roadmap 2.2b) | Reviewed |
+| [0028](0028-archive-exchange-commands/PLAN.md) | Conflict resolution and archive exchange (roadmap 2.2c) | Implemented |

@@ -40,6 +40,20 @@ impl VaultFile {
         anchors: &AnchorDir,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), StoreError> {
+        Self::create_from_archive_with_slot(path, input, expect, vk, anchors, cancelled, None)
+    }
+
+    /// Local recovery may retain its authenticated source's working slot when
+    /// snapshot keyslot heads conflict. This never chooses an incoming head.
+    pub(crate) fn create_from_archive_with_slot<R: Read + Seek>(
+        path: &Path,
+        input: &mut R,
+        expect: ArchiveScope,
+        vk: &VaultKey,
+        anchors: &AnchorDir,
+        cancelled: &dyn Fn() -> bool,
+        working: Option<&LocalSlot>,
+    ) -> Result<(), StoreError> {
         crate::rotation_guard::check(path)?;
         check_cancel(cancelled)?;
         if path.extension().and_then(|e| e.to_str()) != Some(vault::VAULT_EXTENSION) {
@@ -70,26 +84,35 @@ impl VaultFile {
             min_derivation_profile: min_derivation,
         };
         let keys = Keys::derive(vk, &header)?;
-        let entry = opened
-            .manifest()
-            .record(opened.manifest().keyslot_id())
-            .ok_or(StoreError::Integrity)?;
-        let [role] = entry.heads() else {
-            return Err(StoreError::Integrity);
+        let body = if let Some(slot) = &h.password_slot {
+            slot.clone()
+        } else {
+            let entry = opened
+                .manifest()
+                .record(opened.manifest().keyslot_id())
+                .ok_or(StoreError::Integrity)?;
+            if entry.heads().len() > 1 {
+                zeroize::Zeroizing::new(working.ok_or(StoreError::Integrity)?.body.clone())
+            } else {
+                let [role] = entry.heads() else {
+                    return Err(StoreError::Integrity);
+                };
+                let version = crate::archive_verify::read_version(
+                    input,
+                    h,
+                    opened.manifest(),
+                    &opened.frames,
+                    &keys.record,
+                    entry.record_id(),
+                    role,
+                )?;
+                let RecordBody::Live(Payload::PasswordKeyslot(slot)) = version.body else {
+                    return Err(StoreError::Integrity);
+                };
+                slot.encode()?
+            }
         };
-        let version = crate::archive_verify::read_version(
-            input,
-            h,
-            opened.manifest(),
-            &opened.frames,
-            &keys.record,
-            entry.record_id(),
-            role,
-        )?;
-        let RecordBody::Live(Payload::PasswordKeyslot(slot)) = version.body else {
-            return Err(StoreError::Integrity);
-        };
-        let body = slot.encode()?;
+        let slot = qv_model::Keyslot::decode(&body)?;
         let local = LocalSlot::from_stored(StoredSlot {
             slot_id: slot.slot.slot_id.0,
             kind: crate::slot::PASSWORD_SLOT,

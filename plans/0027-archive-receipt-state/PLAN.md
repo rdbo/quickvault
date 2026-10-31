@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-10-30 | 2026-10-30 | 0004 §2–5; 0005 §4, §5.4; 0008 §1–3, §5; 0012 §1 |
+| Reviewed | 2026-10-30 | 2026-10-30 | 0004 §2–5; 0005 §4, §5.4; 0008 §1–3, §5; 0012 §1 |
 
 ## Intent
 
@@ -470,3 +470,5 @@ No unresolved owner decisions, dependency or unsafe are needed.
   the owner's existing staged index was preserved, with continuation edits
   left unstaged. No commit, push or branch. Documentation-only final status
   edits do not change tested Rust inputs; SPDX/diff checks rerun after them.
+
+- 2026-10-31: Fresh-context review Approved (REVIEW.md). Independent SPDX, matrix, fmt, Clippy and locked full suite pass: 679 passed, 0 failed, 2 ignored; affected fuzz format/compilation passes. No code fixes or escalations. Logs /tmp/qv-next-review/.

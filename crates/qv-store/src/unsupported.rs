@@ -559,6 +559,24 @@ impl UnlockedVault {
 }
 
 impl Write<'_> {
+    /// Unreachable: no Write exists on this target.
+    pub fn stage_selected_password(
+        &mut self,
+        _version: VersionId,
+        _password: &MasterPassword,
+    ) -> Result<(), StoreError> {
+        match self.0 {}
+    }
+    /// Unreachable: no Write exists on this target.
+    pub fn restage_attachment(
+        &mut self,
+        _record: RecordId,
+        _version: VersionId,
+        _cancelled: &impl Fn() -> bool,
+    ) -> Result<crate::StagedAttachment, StoreError> {
+        match self.0 {}
+    }
+
     /// Unreachable on unsupported targets.
     pub fn stage_password(
         &mut self,

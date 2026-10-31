@@ -280,6 +280,22 @@ password_slot?, header_mac }`. `archive_id` is a random 128-bit ID.
 `password_slot` is present only in an explicitly **self-contained** archive
 (§6.4).
 
+The optional password slot is archive-header CBOR key 10, a bstr containing the
+complete canonical local `Keyslot` descriptor (the same bytes as the local
+password-slot body, including unknown optional fields), within the total 64 KiB
+header budget. Strictly validate its encoding and known profiles without running
+a KDF while decoding the bounded header; include these exact bytes in the
+existing header MAC. An explicitly self-contained export copies the working
+local operational slot, never selects a received/conflicted record version.
+Ordinary snapshots remain slotless and their policy reader rejects slot-bearing
+files. New-path restore may use the authenticated self-contained slot while
+preserving all manifest conflicts; this does not resolve any keyslot record.
+A local snapshot restore from an authenticated source vault may use that source's
+working local password descriptor when a slotless snapshot has multiple keyslot
+heads. It must preserve those heads, require the same vault/generation and never
+choose an incoming descriptor implicitly. Generic archive restore without such
+an authenticated source still refuses an ambiguous slotless keyslot set.
+
 6.3. Readers MUST: check magic/version; reject any length beyond the
 budgets before reading it; decode only the bounded header before
 authentication; obtain VK (from the local vault with the same vault ID and
@@ -320,6 +336,10 @@ is unsupported ([SQLite warning](https://www.sqlite.org/howtocorrupt.html)).
    format. Changes require documented policy/version updates.
 
 ## Changelog
+
+- 2026-10-31: Define working-source-slot fallback for ambiguous slotless local snapshot recovery without resolving incoming keyslot heads (0028 continuation).
+
+- 2026-10-31: Specify optional self-contained header slot key 10, exact descriptor/MAC coverage and snapshot exclusion (0028; prior owner delegation in 0026).
 
 - 2026-10-30: Combined 2.2b (owner direction): explicit permanent-tombstone
   role markers allow indefinite retention below floors; authenticate and

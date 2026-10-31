@@ -38,7 +38,9 @@ Product code still uses workspace rules; no other vendor exception is implied.
    - `Implemented`, `Reviewed` or `Abandoned`: ask what the user wants.
 4. **Check Decisions needed.** Don't start any step that depends on an
    unresolved item. Ask about it first.
-5. **Check `git status`.** Don't overwrite or reformat the user's uncommitted
+5. **Check `git status`.** An explicit owner request to continue on the current
+   tree authorizes the named work without another commit/session question;
+   preserve staging and unrelated changes. Don't overwrite or reformat the user's uncommitted
    work. If the tree is dirty in files the plan touches, ask.
 6. Set the status to `In progress`.
 

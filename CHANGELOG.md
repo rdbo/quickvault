@@ -9,6 +9,17 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-10-31: Core and CLI conflict resolution and archive exchange (roadmap
+  2.2c, plan 0028): all-kind `conflicts`, complete-version `resolve --version`,
+  `merge` and immutable `snapshot export`. Resolution preserves protected/TOTP
+  and unknown values, rejects stale choices and requires selected-slot password
+  proof before adoption. Attachment copying and owned deletion share the atomic
+  write path. Imports require serialized recovery copies and view preflight;
+  exports are slotless unless warned self-contained consent is explicit. Local
+  snapshot recovery preserves keyslot conflicts with the working source slot.
+  Agent guidance now keeps steps inside the phase instead of automatically
+  splitting phases by step count. Fresh-context review of 0027 is Approved.
+
 - 2026-10-30: Completed both parts of roadmap 2.2b under plan 0027, combined
   at the owner's direction: atomic archive-candidate acceptance and durable
   filename receipts through the existing commit/anchor path, descriptor-pinned

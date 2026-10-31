@@ -89,8 +89,20 @@
 //! anchor. Initial phrase key confirmation cannot distinguish a wrong valid
 //! phrase from header damage; later authenticated failures are integrity errors.
 //!
-//! **Not yet implemented:** general conflict resolution and merges (2.2),
-//! production inactivity/OS lifecycle hooks (2.3).
+//! **Archive exchange:** [`Session::merge_archive`] takes a mandatory recovery
+//! copy under the session mutex, preflights the candidate index and preserves
+//! conflicts/working slots. Durable acceptance is reported separately from
+//! anchor completion. [`Session::export_archive`] publishes immutable slotless
+//! exchange archives or explicitly authorized self-contained backups.
+//!
+//! **Conflicts:** [`Session::conflict_records`] reaches every record kind.
+//! Version capabilities bind a selected head to the complete inspected head set;
+//! [`Session::resolve_version`] preserves the complete selected payload in a new
+//! causal edit. Selected password slots require separate password proof and
+//! existing header-MAC key confirmation. Attachment resolution streams fresh
+//! encrypted chunks; permanent deletion refuses other unresolved conflicts.
+//!
+//! **Not yet implemented:** production inactivity/OS lifecycle hooks (2.3).
 //!
 //! **Rotation** (0002 §3.5, offline path; plan 0023):
 //! - [`Session::begin_rotation`] pins a recovery snapshot, consumes the
@@ -159,3 +171,13 @@ pub use qv_store::{
 
 pub use attachment::{AttachmentHandle, AttachmentSummary};
 pub use history::{HistoryHandle, HistorySummary};
+
+mod exchange;
+pub use exchange::{ArchiveExportReport, ArchiveMergeReport};
+
+mod conflict;
+pub use conflict::{
+    ConflictDetails, ConflictRecord, ConflictRecordHandle, ConflictVersion, ConflictVersionHandle,
+    ResolutionReport,
+};
+pub use qv_model::{Deletion, RecordKind};

@@ -69,8 +69,11 @@ The session then works without further prompting:
    an *Execution log* entry. End with a short summary for the owner: what was
    built, gate results and anything deferred. Leave all changes uncommitted.
 
-If a phase is too large for one session, the architect splits it into
-N.Ma/N.Mb (as a dated *Revisions* entry here) instead of cramming it in. A
+Keep implementation steps inside the phase plan. Do not split a phase solely
+because of step count or context size; continue the phase across context
+handoffs. A phase split needs a concrete delivery boundary or blocking decision
+and must be justified in a dated Revisions entry, not added as another routine
+level of task numbering (owner direction 2026-10-31). A
 phase with a blocking decision does not start until the owner resolves it.
 Phases inside a milestone run in the listed order unless an entry says
 otherwise. *Depends on* names the hard prerequisites.
@@ -612,7 +615,7 @@ release; it is not weakened.
 
 #### Phase 2.2b — Atomic incoming acceptance and filename receipts
 
-- [x] **Plan:** [0027](../0027-archive-receipt-state/PLAN.md) (Implemented).
+- [x] **Plan:** [0027](../0027-archive-receipt-state/PLAN.md) (Reviewed).
 - **Do:** Sealed receipt state and lifecycle, safe source paths and verified
   candidate/object staging through the existing write/anchor path. Preserve
   all permanent tombstones, including dominated floor-covered ones.
@@ -626,17 +629,20 @@ release; it is not weakened.
 
 #### Phase 2.2c — Conflict resolution and archive-exchange commands
 
-- [ ] **Do:** Core capabilities and CLI `conflicts`, `resolve`, `merge
-  <archive>`, `snapshot export <directory> [--self-contained]`. Specify exact
-  CLI contracts first under owner delegation (0026); preserve complete versions,
-  keyslot reauthentication, mandatory pre-import recovery snapshots and lock races.
-- **Specs:** 0005 §2.3–2.6, §4; 0004 §6; 0007 §3; 0011 §3–6.
-- **Depends on:** 2.2b, its fresh-context review and owner commit.
-- **Files:** `crates/qv-store/`, `crates/qv-core/`, `crates/qv-cli/`, specs.
-- **Done when:** original 2.2 end-to-end requirements pass: an old archive
-  revives no tombstone/suppressed history, concurrent delete/edit stays a
-  conflict, reused filenames reject, self-contained exports need explicit consent.
-- **Verify:** affected crate tests and required gates.
+- [x] **Plan:** [0028](../0028-archive-exchange-commands/PLAN.md) (Implemented;
+  complete combined C phase).
+- **Do:** Core/CLI `conflicts`, `resolve`, `merge <archive>` and `snapshot export
+  <directory> [--self-contained]`; complete versions, selected-slot proof,
+  mandatory recovery snapshots, bounded views, lock races and durable outcomes.
+- **Specs:** 0005 §2.3–2.6, §4–5.4; 0004 §5–6; 0007 §3; 0011 §3–6.
+- **Depends on:** 2.2b (Reviewed and committed). Owner explicitly authorized
+  completing both former C parts on the current staged tree without a boundary.
+- **Files:** qv-store, qv-core, qv-cli, specs, workspace metadata.
+- **Done when:** original 2.2 requirements pass: old archives revive no suppressed
+  history/tombstones, concurrent deletion/edit remains explicit, reused filenames
+  reject, complete selected versions resolve causally, slots require proof and
+  self-contained exports require warned consent.
+- **Verify:** affected crate tests, required gates and affected fuzz compilation.
 
 #### Phase 2.3 — Platform adapters: traits and Linux
 
@@ -922,8 +928,8 @@ release; it is not weakened.
 - **Format churn:** until 1.0, no data compatibility is promised (owner
   decision 2026-10-30; the freeze is a pre-1.0 release step, not 1.16). A
   phase that wants to preserve old dev vaults must ask first.
-- **Session size:** if a phase plan grows past roughly 8–10 steps, split it
-  rather than leave half-done steps at a session boundary.
+- **Session size:** step count alone is not a reason to split phases. Preserve
+  a durable execution log and continue the approved phase to completion.
 
 ## Documentation
 
@@ -935,6 +941,20 @@ release; it is not weakened.
 - [ ] `plans/README.md` — index row (done)
 
 ## Revisions
+
+- 2026-10-31: Owner rejected the excessive c1/c2 split and requested both now.
+  Recombine as 2.2c in 0028; continue on staged c1 without intermediate commit
+  or fresh review. Remove the automatic 8–10-step splitting rule. Future plans
+  keep implementation detail inside the phase and use a split only for a real
+  delivery boundary/blocker. The next fresh session reviews the complete C work.
+
+- 2026-10-31: Architect sized combined 2.2c at roughly sixteen steps (archive
+  codec/publication, serialized recovery policy, candidate-index preflight,
+  core and CLI commands, plus per-kind conflict handles/views, selected-slot
+  proof, resolution and adversarial evidence). Split under the session-size
+  rule into 2.2c1 archive exchange/export (0028, eight steps) and 2.2c2 conflict
+  inspection/resolution. Original scope retained; 2.3 waits for c2. Prior 0026
+  delegation covers exact amendments; keep owner-commit/fresh-review boundaries.
 
 - 2026-10-30: Owner: “Do both Bs already.” Recombine b1/b2 as 2.2b,
   continuing 0027 on the staged tree in this session. This explicitly overrides
@@ -1552,3 +1572,24 @@ release; it is not weakened.
   ordering; named evidence for the four 0012 rows. All gates pass with 560
   passed / 0 failed / 2 ignored; no dependency, `unsafe`, schema or MSRV
   change and no second write path. `snapshot restore` is deferred to 1.13b.
+
+- 2026-10-31: Clean next-phase tree at 4eeb787. Fresh-context 0027 review Approved: independent required gates and affected fuzz compilation pass, 679 tests passed / 0 failed / 2 ignored. Plan 0028 starts archive commands under prior explicit 0026 delegation; c2 retains conflict/slot resolution.
+
+- 2026-10-31: Phase 2.2c1 Implemented (0028). Core/CLI merge and immutable
+  export now enforce mandatory serialized recovery copies, view preflight,
+  preserved conflicts/working slots and explicit self-contained consent. Exact
+  optional header-slot/CLI contracts amended under the prior 0026 delegation.
+  All final root gates, deny/vet and affected fuzz compilation pass: 689 passed,
+  0 failed, 2 ignored. Only internal dependency edges changed in root/prototype
+  locks; prototype GUI was not built. Next fresh session reviews 0028, then
+  plans 2.2c2 conflict/slot resolution after the owner's commit. Uncommitted;
+  no release/security claim or D13 change.
+
+- 2026-10-31: Owner-directed combined phase 2.2c Implemented (0028). Complete
+  archive exchange/export, all-kind masked conflict inspection and complete
+  version resolution, selected-slot proof/atomic adoption, bounded attachment
+  restaging and working-source-slot snapshot recovery. No C subphase remains.
+  All final gates, deny/vet and affected fuzz compilation pass: 699 tests passed,
+  0 failed, 2 pre-existing ignored. Owner's staged index preserved; continuation
+  remains unstaged/uncommitted. Next fresh session reviews all of 0028 before
+  phase 2.3. D13 and release gates remain unchanged.

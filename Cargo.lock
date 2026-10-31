@@ -584,6 +584,7 @@ dependencies = [
  "qv-encoding",
  "qv-model",
  "qv-store",
+ "qv-sync",
  "zeroize",
  "zxcvbn",
 ]

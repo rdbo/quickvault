@@ -21,3 +21,7 @@ pub(crate) mod snapshot;
 pub(crate) mod verify;
 
 pub(crate) mod credentials;
+
+pub(crate) mod merge;
+
+pub(crate) mod conflicts;

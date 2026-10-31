@@ -255,8 +255,25 @@ Identical redelivery creates no new commit; pending anchors finish first.
 Working local password slots, writer counters and remote checkpoints remain
 unchanged by receipt. Creation/restore/rotation initialize fresh empty receipts.
 The volatile schema/header is 0x7FFF0003 and manifest 0x7FFF0002, with no migration.
-Core/CLI exchange commands, recovery-snapshot policy at that operation boundary,
-explicit conflict/slot resolution and export remain 2.2c. Formats stay volatile.
+Roadmap 2.2c (0028) adds core/CLI archive merge, immutable export and explicit
+complete-version conflict resolution. Core
+serializes stable-source authentication, a mandatory recovery copy, bounded
+candidate-index preflight and acceptance under its session mutex. A durable
+merge installs its matching index even if anchor completion fails, and reports
+that acceptance separately. Exports are slotless by default; explicitly warned
+self-contained backups include the working local slot, authenticated in the
+archive header. Ordinary snapshot policy continues to reject slot-bearing files.
+All-kind conflict capabilities expose one bounded masked version at a time and
+reject a changed inspected head set. Resolution preserves protected/unknown
+payload fields in a deliberate causal edit; a later unseen edit can still
+conflict. Selected operational slots require their own password and existing
+header-MAC key confirmation before the shared atomic slot/record/head commit.
+Attachment resolutions stream new encrypted chunk objects without shared roles;
+final entry resolution refuses affected attachment conflicts and atomically
+finalizes non-conflicted owned attachment metadata. Local slotless snapshot
+recovery preserves conflicting keyslot heads using the authenticated source's
+working slot in the new baseline. Formats stay volatile; no independent security
+or release claim is implied.
 
 Frontends call qv-core. Core injects platform traits and orchestrates model,
 store, crypto and sync. Crypto/model have no dependency on frontends. Server
@@ -423,9 +440,11 @@ It is implemented and reviewed.
 
 Roadmap 2.2 is split into 2.2a (verified private archive input and shared merge
 candidates, plan 0026), 2.2b (receipt storage and atomic acceptance, plan 0027), and
-2.2c (core/CLI conflict resolution and archive export). Preserve the owner
-commit and fresh-context review between these parts. Candidate construction
-alone does not complete archive exchange or authorize a release.
+2.2c (core/CLI archive exchange and conflict resolution, plan 0028). The owner
+recombined the former c1/c2 split and requested completion on the staged tree.
+Implementation steps stay within the phase plan; step count alone no longer
+creates another phase suffix. The next fresh session reviews the complete C
+implementation. This work does not authorize a release.
 
 The project is pre-1.0 and every format stays volatile (owner decision
 2026-10-30). The 0012 §3 format freeze, golden vectors and supported-device

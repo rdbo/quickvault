@@ -21,6 +21,9 @@ what they say, and behaviour changes start with a spec change.
 | [0012](0012-security-validation.md) | Security Validation and Release Gates | Accepted |
 | [0013](0013-lan-sync-protocol.md) | Direct LAN Sync Protocol | Accepted |
 
+0004 §6.2 and 0011 §4 specify the delegated archive merge/export contracts and
+explicit self-contained backup slots (2026-10-31, plan 0028).
+
 0004 §3.4.1 and 0007 also specify permanent tombstone role markers and
 indefinite covered-history retention (combined 2.2b, owner-directed plan 0027).
 
@@ -118,3 +121,5 @@ scenarios are acceptance criteria, not evidence of completed validation.
 ## Open Questions
 ## Changelog
 ```
+
+0028 completion specifies all-kind conflict inspection/resolution, mandatory selected-slot proof, and working-source-slot fallback for local snapshot recovery (0004 §6.2, 0011 §4; 2026-10-31).

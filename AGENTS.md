@@ -54,6 +54,11 @@ apply standing approval only when no listed stop condition applies, implement,
 then update the roadmap. If the previous phase is uncommitted, ask the owner
 to commit it first. Preserve the fresh-context review requirement for
 implementation; spec-only or plan-only work needs no separate review session.
+Keep implementation steps inside the phase plan. Do not create more phase
+suffixes solely for step count or context size; use the execution log to
+continue the approved phase. Split only at a concrete delivery boundary or
+blocking owner decision, with a stated reason. Explicit owner continuation
+requests override the named intermediate commit/session boundary.
 
 ## Documentation duties
 

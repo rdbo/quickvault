@@ -23,6 +23,7 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
     match cmd {
         "ls" => list(ctx),
         "restore" => restore(ctx, args),
+        "export" => export(ctx, args),
         _ => Err(CliError::usage("unknown snapshot command")),
     }
 }
@@ -73,7 +74,7 @@ fn restore(ctx: &Ctx, args: &ArgMatches) -> Result<(), CliError> {
     crate::cli::warn_snapshots(&session);
     session.lock();
     crate::out::eprint(
-        "qvault: restored a new recovery baseline; the snapshot may be old and does not establish the latest global state. Unlock it with the password current when the snapshot was created.\n",
+        "qvault: restored a new recovery baseline; the snapshot may be old and does not establish the latest global state. For a single-slot snapshot use its original password; if its keyslot heads conflict, use this source vault's current working password. All conflicts are preserved.\n",
     );
     Ok(())
 }
@@ -137,4 +138,34 @@ fn human(o: &mut Out, s: &SnapshotSummary) {
         "  {} bytes on disk  {} objects  {} bytes referenced\n",
         s.size, s.objects, s.total_bytes
     ));
+}
+
+fn export(ctx: &Ctx, args: &ArgMatches) -> Result<(), CliError> {
+    if ctx.json {
+        return Err(CliError::usage("snapshot export does not support --json"));
+    }
+    let directory = args
+        .get_one::<std::path::PathBuf>("directory")
+        .ok_or_else(|| CliError::usage("missing export directory"))?;
+    let backup = args.get_flag("self-contained");
+    if backup {
+        crate::out::eprint(
+            "qvault: warning: anyone holding this self-contained backup can try offline master-password guessing. Old copies are not revoked by a password change.\n",
+        );
+        if !ctx.yes
+            && !crate::term::stdio_tty()?.confirm("Include the password slot in this backup?")?
+        {
+            return Err(CliError::new(crate::exit::OTHER, "export cancelled"));
+        }
+    }
+    let session = ctx.unlock()?;
+    let cancel = crate::signals::token();
+    let result = session.export_archive(directory, backup, Some(&cancel));
+    session.lock();
+    let report = result?;
+    let mut out = Out::stdout();
+    out.raw(&report.archive_id);
+    out.raw("\n");
+    out.flush()?;
+    Ok(())
 }
