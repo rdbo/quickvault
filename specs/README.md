@@ -5,6 +5,12 @@ what they say, and behaviour changes start with a spec change.
 
 ## Index
 
+Owner-approved 2026-11-01 amendment to Draft 0008 §1.4 and 0009 §5: Linux
+OS lock/sleep monitoring is optional and disclosed when unavailable; manual
+and inactivity locking remain active. Reduced-protection acknowledgement still
+applies. Android lifecycle requirements remain unchanged. Approved for current
+phase 2.4 implementation; neither spec's overall status is promoted.
+
 | # | Title | Status |
 |---|-------|--------|
 | [0001](0001-threat-model.md) | Threat Model | Accepted |

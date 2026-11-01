@@ -52,8 +52,21 @@ in security settings. Do not infer that a screen lock necessarily seals all
 disk-encryption keys. This limitation is part of 0001, not an unlocked-malware
 exception.
 
-1.4. Lock on inactivity, OS screen lock/sleep, and mobile background expiry.
-Cancel in-flight operations, invalidate session-scoped handles and network
+1.4. Manual locking and the application inactivity timeout MUST work without
+OS lifecycle services. Lock on OS screen lock/sleep when the platform provides
+usable notifications, and on mobile background expiry. On Linux, automatic
+OS lock/sleep notification support is an optional detected capability, not a
+prerequisite for local vault use. If unavailable, show that limitation clearly
+before persistent use and while unlocked; retain §1.3's explicit reduced-
+protection acknowledgement. Do not advertise OS-triggered locking as active.
+Absence of logind, a portal interface or a compositor integration MUST NOT by
+itself prevent Linux creation, unlock or recovery. Android's required lifecycle
+and secure-window checks remain in force.
+
+Loss of an installed watcher locks existing sessions and clears pending work;
+a subsequent explicit Linux open may proceed with the unavailable capability
+disclosed. Successful notifications always lock; foreground/resume never unlocks.
+On every lock, cancel in-flight operations, invalidate session-scoped handles and network
 credentials, close authenticated TLS connections, clear clipboard if still
 owned, zeroize keys/metadata/buffers and
 destroy revealed UI state. Late responses must not repopulate a locked session.
@@ -143,6 +156,11 @@ out of scope. Remotely supplied parser/rendering inputs remain in scope.
    evidence that they pass.
 
 ## Changelog
+
+- 2026-11-01: Owner directs optional Linux OS lock/sleep monitoring. Preserve
+  manual/idle locking, clear unavailable-capability reporting and reduced-
+  protection acknowledgement; watcher loss locks current sessions but does not
+  permanently bar subsequent Linux opens. Android requirements unchanged.
 
 - 2026-10-26: Owner selected stock Dioxus/webview input. Replace mandatory native
   secret dialogs with bounded input and best-effort cleanup; distinguish controlled

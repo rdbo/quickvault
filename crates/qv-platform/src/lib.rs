@@ -4,6 +4,9 @@
 //! No backend here stores keys or implements Linux quick unlock. Framework input
 //! and its best-effort cleanup remain the application's responsibility (0008).
 
+/// Android lifecycle/protection adapter, also testable without a device.
+pub mod android;
+
 use qv_crypto::SecretBytes;
 use std::sync::Arc;
 use std::time::Duration;

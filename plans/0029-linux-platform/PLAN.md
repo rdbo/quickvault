@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-10-31 | 2026-10-31 | 0009 §1.6, §5; 0008 §1.3–1.4, §3; 0002 §5.2 |
+| Reviewed | 2026-10-31 | 2026-10-31 | 0009 §1.6, §5; 0008 §1.3–1.4, §3; 0002 §5.2 |
 
 ## Intent
 
@@ -205,6 +205,15 @@ need for production GUI. D13 remains pending and gates phase 2.4.
 
 ## Execution log
 
+- 2026-10-31: Fresh-context review of committed `7e5c118`: Approved, no
+  product fixes or unresolved findings; see REVIEW.md. Independent final
+  SPDX/matrix/fmt/Clippy/full locked suite pass (712 passed, 0 failed, 2
+  pre-existing ignored), plus deny/vet, private D-Bus/Xvfb, core lifecycle,
+  vendor provenance/12 focused tests and isolated spike locked metadata.
+  Logs `/tmp/qv29-review/`. Only review/status documentation changed. D13
+  remains pending; stop before planning production GUI phase 2.4 and present
+  the current architecture to the owner. No commit, push or branch.
+
 - 2026-10-31: Owner requested fixing 0028 and completing the next phase on the
   current tree. Plan prepared while that fix is verified; no phase 2.3 product
   code yet. Dependency/file-scope approval above is required by roadmap 0002.
@@ -337,3 +346,10 @@ need for production GUI. D13 remains pending and gates phase 2.4.
   independent phase-0029 review or security/release claim. Next fresh context
   reviews this phase; D13 still gates planning phase 2.4. All changes are left
   uncommitted and the index is unchanged; no commit, push or branch.
+
+- 2026-11-01: Historical clarification: plan 0030's later owner-approved
+  amendment to 0008 §1.4/0009 §5 makes Linux OS lifecycle monitoring optional.
+  This plan's completed generic strict-binding implementation remains available;
+  the Linux app now selects explicit optional-monitor core policy, with reduced
+  consent and manual/idle locking. Do not apply the earlier mandatory Linux
+  watcher assumption over the newer normative owner decision.

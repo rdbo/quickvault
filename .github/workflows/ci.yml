@@ -45,6 +45,53 @@ jobs:
           QV_REQUIRE_NETNS: "1"
         run: cargo test --locked
 
+  app-boundary:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_BUILD_JOBS: "2"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: rustup toolchain install
+      - name: Native webview and test dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev xvfb dbus
+      - name: Production UI compilation and Clippy
+        run: cargo clippy --locked -p qv-app --all-targets --features validation -- -D warnings
+      - name: Shared flows and actual engine boundary
+        run: cargo test --locked -p qv-app --features validation
+      - name: Maintained dependency regressions
+        run: |
+          cargo test --manifest-path third-party/Cargo.toml --locked -p glib --lib variant_iter
+          cargo test --manifest-path third-party/Cargo.toml --locked -p glib-macros --tests
+          cargo test --manifest-path third-party/Cargo.toml --locked -p gtk3-macros --lib
+          cargo test --manifest-path third-party/Cargo.toml --locked -p selectors --lib
+          cargo test --manifest-path third-party/Cargo.toml --locked -p dioxus-desktop --no-default-features --features tokio_runtime --lib hardened
+
+  android-app-build:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_BUILD_JOBS: "2"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain and Android target
+        run: rustup toolchain install && rustup target add aarch64-linux-android
+      - name: JDK and CLI prerequisites
+        run: sudo apt-get update && sudo apt-get install -y openjdk-21-jdk pkg-config libssl-dev
+      - name: SDK, NDK and pinned packaging tool
+        run: |
+          export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+          sh scripts/setup-android.sh --accept-licenses
+          cargo install --locked dioxus-cli --version 0.7.10
+      - name: Build and inspect app and instrumentation APKs
+        run: |
+          export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+          eval "$(sh scripts/setup-android.sh --print-env)"
+          sh crates/qv-app/scripts/build-android.sh
+
   supply-chain:
     runs-on: ubuntu-latest
     steps:

@@ -216,3 +216,50 @@ fn platform_reduced_acknowledgement_does_not_bypass_required_lock_monitoring() {
     assert!(!core.platform_status().unwrap().lifecycle);
     assert_eq!(services.active.load(Ordering::SeqCst), 0);
 }
+
+// 0012 §1: Ambiguous trust boundary
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_optional_monitor_requires_consent_and_preserves_manual_lock() {
+    let env = Env::new();
+    let services = Arc::new(Fake::default());
+    services.unavailable.store(true, Ordering::SeqCst);
+    let refused = env.core().with_linux_platform(services.clone(), false);
+    let path = env.dir.path().join("no-consent.qvault");
+    assert_eq!(
+        err(refused.create(&path, &pw(PASSWORD), "test")),
+        CoreError::NotAllowed
+    );
+    assert!(!path.exists());
+    assert_eq!(
+        err(refused.unlock(&env.path, &pw(PASSWORD), None)),
+        CoreError::NotAllowed
+    );
+    let core = env.core().with_linux_platform(services.clone(), true);
+    assert!(!core.platform_status().unwrap().lifecycle);
+    let _k = kdf();
+    let session = core.unlock(&env.path, &pw(PASSWORD), None).unwrap();
+    let root = session.root().unwrap();
+    assert_eq!(services.active.load(Ordering::SeqCst), 0);
+    session.lock();
+    assert_eq!(err(session.list(root)), CoreError::SessionLocked);
+}
+
+// 0012 §1: Ambiguous trust boundary
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_optional_monitor_still_refuses_observed_lock_and_handles_sleep() {
+    let env = Env::new();
+    let services = Arc::new(Fake::default());
+    let core = env.core().with_linux_platform(services.clone(), true);
+    let _k = kdf();
+    services.initially_locked.store(true, Ordering::SeqCst);
+    assert_eq!(
+        err(core.unlock(&env.path, &pw(PASSWORD), None)),
+        CoreError::Cancelled
+    );
+    services.initially_locked.store(false, Ordering::SeqCst);
+    let session = core.unlock(&env.path, &pw(PASSWORD), None).unwrap();
+    services.event(LockEvent::PreparingForSleep);
+    assert!(session.is_locked());
+}

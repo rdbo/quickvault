@@ -13,3 +13,7 @@
 
 # Maintained upstream transport test output (plan 0015)
 /third-party/x11rb/target/
+
+# Shared app packaging and isolated vendor-test outputs (plan 0030)
+/crates/qv-app/dist/
+/third-party/target/

@@ -283,15 +283,40 @@ weak references to session state; lock cancels operations and session clipboard
 ownership, and dropping a session releases its watcher. No event unlocks a
 session. Linux persistence probes cannot establish locked-state storage-key
 custody and report reduced protection; configured core flows require explicit
-acknowledgement before persistent create/unlock. A configured session still
-refuses unavailable lifecycle monitoring after that acknowledgement. An owner-only no-follow flock
+acknowledgement before persistent create/unlock. The generic platform builder
+retains required lifecycle attachment. The Linux app uses
+`Core::with_linux_platform`: OS monitoring is an optional capability,
+with explicit reduced-protection acknowledgement when missing. Observed lock/
+sleep and watcher-loss events still invalidate sessions; manual and inactivity
+locking work independently. An owner-only no-follow flock
 provides app single-instance ownership without unlinking its lock file. Native
 input and keystore wrapping fail unavailable; Linux quick unlock is disabled.
 The CLI retains foreground behavior through core's shared clipboard reexports.
-The app still must cancel pending tasks and destroy externally held views on
-lifecycle events. Real-desktop validation remains unclaimed; procedure and
-private-bus evidence are in plan 0029. Dependency exemptions are recorded audit
-debt, not security approval. No production GUI is introduced; D13 gates 2.4.
+Roadmap 2.4 (plan 0030) adds qv-app's shared create, password unlock, phrase
+recovery, explicit snapshot-backed anchor recovery and lock screens. Its
+protected forms use epochs and one bounded worker; lifecycle events invalidate
+pending work, clear views and prevent late results from reopening a session.
+Linux startup acquires instance ownership and attempts lifecycle monitoring.
+Missing OS notifications are prominently disclosed and do not prevent local
+use after reduced-protection acknowledgement. Manual/idle locking remains
+active; loss of an installed watcher locks existing state and permits an
+explicit reduced-protection retry. Android's metadata-only adapter locks on
+background,
+screen-off, destroyed activity or loss of required hardening; resume never
+unlocks. Private anchors and snapshots live outside the active vault; Android
+uses OS no-backup storage. Keystore, quick unlock and autofill remain unavailable.
+
+Dioxus 0.7.10 uses a maintained desktop integration: compiled local assets,
+strict CSP, exact native origin/navigation checks, bounded typed IPC and bounded
+authenticated loopback rendering. Native file-dialog/filesystem and document-eval
+routes are unavailable in this configuration. Five provenance-tracked upstream
+snapshots support the integration; see third-party/README.md. Application Rust
+secrets use protected containers; framework/DOM/OS copies have best-effort cleanup,
+not deterministic erasure. Linux real-WebKit boundary and rendered-flow tests
+pass under private Xvfb. Android APKs compile and synthetic instrumentation passes on a POCO X7 Pro
+(Android 15); manual device and real-desktop lifecycle evidence remain incomplete. Dependency
+exemptions are development audit debt. Full vault browsing/editing belongs to
+roadmap 2.5; phase 2.4 foundation is implemented, with fresh-context review pending.
 
 Frontends call qv-core. Core injects platform traits and orchestrates model,
 store, crypto and sync. Crypto/model have no dependency on frontends. Server
@@ -410,7 +435,8 @@ A vault master password alone cannot bootstrap a new device from the server.
 |---------|--------|
 | Language | Stable Rust; toolchain pinned to 1.98.1 (`rust-toolchain.toml`), which is the MSRV |
 | Build / CI | Cargo virtual workspace (`crates/<name>/`); GitHub Actions with SHA-pinned actions running the gates, `cargo deny` and `cargo vet` |
-| UI | Owner-selected Dioxus app/UI and standard webview input for Android and Linux; best-effort cleanup with documented framework limits; OS adapters; iOS later |
+| UI | Dioxus 0.7.10, maintained hardened dioxus-desktop integration, standard webview input; shared Android/Linux screens, best-effort framework cleanup; iOS later |
+| Android foundation | arm64/API 29+, pinned SDK/NDK recipe, FLAG_SECURE, metadata-only lifecycle adapter, private no-backup storage; device validation pending |
 | Optional remote server | Axum/Tokio; SQLite first, Postgres deferred |
 | Local storage | rusqlite with bundled SQLite 3.53.2 and trimmed compile options (`.cargo/config.toml`), encrypted immutable objects and manifests; external anchors as per-replica files in the private state directory (`$XDG_STATE_HOME/quickvault/anchors` on Linux; keystore-backed where available later) |
 | Serialization | Bounded RFC 8949 deterministic CBOR |
@@ -421,7 +447,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Remote transport | TLS 1.3, X25519MLKEM768, pinned application server identity |
 | Remote account authentication | Pinned RFC 9807 OPAQUE application profile |
 | Direct LAN discovery / enrollment / transport | Specified in 0013 (Accepted): DNS-SD only during explicit windows (`_qvault._tcp`, random instance), QR/manual pairing into pairwise link keys, X-Wing draft-11 + HKDF-SHA-512 + MAC/1 handshake, XChaCha20-Poly1305 counter-nonce records over TCP; crates chosen in roadmap 2.8–2.10 |
-| Linux OS adapters | zbus 6.2.0 over the fixed system-bus Unix socket; existing rustix file locks/configuration probes; shared maintained X11 clipboard; quick unlock unavailable |
+| Linux OS adapters | Optional logind lifecycle monitoring via zbus 6.2.0 over the fixed system-bus Unix socket; existing rustix file locks/configuration probes; shared maintained X11 clipboard; quick unlock unavailable |
 | CLI / license | clap (builder API), rustix termios/poll for bounded no-echo prompts, signal-hook atomic flags for cancellation, own escaping and JSON writer, shared qv-platform X11 adapter over maintained x11rb 0.13.2 with protected transport buffers and framing budgets; `zxcvbn` (in `qv-core`) for typed master passwords / AGPL-3.0-or-later |
 
 OPAQUE and ordinary TLS certificates are explicit classical exceptions.
@@ -465,9 +491,14 @@ candidates, plan 0026), 2.2b (receipt storage and atomic acceptance, plan 0027),
 recombined the former c1/c2 split and requested completion on the staged tree.
 Implementation steps stay within the phase plan; step count alone no longer
 creates another phase suffix. The complete C implementation and its
-publication reporting repair were reviewed under explicit owner continuation. Roadmap 2.3 (plan 0029) supplies Linux platform services;
-D13 owner architecture review still gates production GUI phase 2.4. This work
-does not authorize a release.
+publication reporting repair were reviewed under explicit owner continuation.
+Roadmap 2.3 (plan 0029) supplies Linux platform services. The owner approved GUI
+phase 2.4 under D13 and delegated dependency/integration choices. Plan 0030's
+shared UI foundation builds on Linux and Android; Linux engine tests pass,
+and Android synthetic instrumentation passes on a POCO X7 Pro. Manual
+supported-device release evidence remains incomplete. The foundation is
+Implemented and requires a fresh-context implementation review. This work does not
+authorize a release.
 
 The project is pre-1.0 and every format stays volatile (owner decision
 2026-10-30). The 0012 §3 format freeze, golden vectors and supported-device

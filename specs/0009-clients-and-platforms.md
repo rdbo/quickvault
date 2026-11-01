@@ -119,8 +119,13 @@ custom scheme. Require choosing an unresolved credential version before filling.
 
 ### 5. Desktop specifics
 
-- Single-instance; lock on screen lock/sleep via OS signals (logind/D-Bus on
-  Linux, WTS session notifications on Windows).
+- Single-instance; support manual and inactivity locking independently of OS
+  notification services. Lock on screen lock/sleep via available OS signals
+  (for example logind/D-Bus on Linux, WTS session notifications on Windows).
+  On Linux this automatic OS integration is optional: detect and prominently
+  disclose its absence, with 0008 §1.3–1.4's reduced-protection acknowledgement,
+  while allowing local create/unlock/recovery. Never claim unavailable signals
+  are monitored. Failure/loss must not disable manual or inactivity locking.
 - Quick unlock: only a validated backend with the authentication and backup
   behavior specified in 0002 §5; unavailable backends remain disabled.
 
@@ -166,6 +171,10 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
    not reconsider native input or a custom engine just for memory-copy concerns.
 
 ## Changelog
+
+- 2026-11-01: Owner makes Linux automatic OS lock/sleep integration optional.
+  Detect/report capability and permit local use when unavailable, retaining
+  manual/idle locking and explicit reduced-protection policy (0008 §1.3–1.4).
 
 - 2026-10-26: Owner chose Dioxus and standard webview secret input; resolve the
   renderer choice and update feasibility/autofill handoff wording. Retain

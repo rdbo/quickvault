@@ -196,7 +196,11 @@ at the phase that needs them.
     session that reaches phase 2.4 stops before planning it. It reminds the
     owner, summarizes the current architecture and what has changed since D8,
     and waits for the owner's explicit go-ahead. Blocks: 2.4 (and so 2.5–2.7).
-    Resolution: pending.
+    Resolution: owner approved proceeding with phase 2.4 on the presented
+    shared Dioxus → qv-core → Rust/platform architecture on 2026-10-31
+    ("Yes"). This also authorizes the phase's named Draft requirements in
+    0008 §4 and 0009 §1.6. Preserve the current review documentation while
+    continuing; no additional commit/session boundary is required here.
 
 ## Design
 
@@ -646,7 +650,7 @@ release; it is not weakened.
 
 #### Phase 2.3 — Platform adapters: traits and Linux
 
-- **Plan:** [0029](../0029-linux-platform/PLAN.md) (Implemented). The 0028 review
+- **Plan:** [0029](../0029-linux-platform/PLAN.md) (Reviewed). The 0028 review
   finding is repaired/verified under explicit owner continuation. Owner delegated
   dependency/clipboard-reuse choices and instructed continuation on 2026-10-31.
 - [x] **Do:** Create `qv-platform`: traits injected into core (secure input,
@@ -663,7 +667,9 @@ release; it is not weakened.
 
 #### Phase 2.4 — App foundation and security boundary
 
-- [ ] **Do:** Build the production `qv-app` skeleton on the framework chosen in
+- **Plan:** [0030](../0030-app-foundation/PLAN.md) (Implemented; fresh-context
+  review pending. Linux OS notifications are optional under owner amendment).
+- [x] **Do:** Build the production `qv-app` skeleton on the framework chosen in
   D8. If it is a webview: local assets, CSP, navigation/frame/popup blocking,
   and a typed allowlisted bridge checked in Rust. Use standard Dioxus input for
   master password, phrase and protected values with 0008's bounded cleanup. Flows:
@@ -1077,6 +1083,39 @@ release; it is not weakened.
 - 2026-10-26 (phase 1.10, plan 0011): the owner approved splitting 1.10 into 1.10a/1.10b and decisions D-1–D-6 of plan 0011 as recommended: `zxcvbn 3.1.1` in `qv-core` (0010 §3.2); `clap 4.6.7` builder API only; for 1.10b, `signal-hook 0.4.5` and `arboard 3.6.1` (X11 only, no image support) with per-crate `BSL-1.0` exceptions for `clipboard-win` and `error-code`; the recovery-phrase skip (0002 §4.2) recorded as vault settings key 3 `recovery_skipped_at` (development value for the 1.16 freeze). These dependencies are now approved for 1.10b's standing approval. Raised, not decided: 0011 has no command to adopt a vault with a missing or mismatched anchor (suggested for 1.13/1.14).
 
 ## Execution log
+
+- 2026-10-31: Owner answered "Yes" to proceeding with phase 2.4 on the
+  architecture presented at D13. Recorded the approval and preserved the
+  uncommitted phase-0029 review records. Architect inspection reconfirmed the
+  spike's Dioxus desktop integration gaps in both 0.7.3 and 0.7.10: inline
+  bootstrap injection, IPC deserialization before app bounds, framework
+  file-dialog/filesystem routes and implicit external URL opening. Wrote
+  Proposed plan 0030 with one combined dependency/vendor-policy decision.
+  Standing approval withheld under Session protocol step 4; only x11rb is
+  currently authorized for vendoring. No production GUI, dependency, spec
+  amendment or unsafe change was made. D13 itself is resolved and does not
+  need approval again.
+
+- 2026-10-31: Clean-tree next-phase session reviewed committed phase 2.3
+  (`7e5c118`, plan 0029): **Approved**, no product fixes or unresolved
+  findings. Independent gates pass: SPDX/matrix/fmt/Clippy, full locked suite
+  (712 passed, 0 failed, 2 pre-existing ignored), deny/vet and focused
+  platform/core/clipboard/vendor checks; see 0029 REVIEW.md.
+  **D13 hold reached before planning phase 2.4.** Architecture handoff:
+  one shared Dioxus Android/Linux UI calls qv-core for vault/session policy;
+  core orchestrates store/model/crypto/sync and injects qv-platform OS services.
+  Since D8, the offline CLI/core and archive/conflict workflows are implemented,
+  LAN protocol 0013 is Accepted (implementation/release review still pending),
+  and Linux lifecycle/clipboard/instance/protection adapters now exist.
+  The GUI remains unimplemented. Standard bounded Dioxus input and documented
+  framework-copy limits remain the owner-selected design. Plan 0013's
+  REPORT.md identifies production CSP/bootstrap, IPC bounds, bridge endpoint
+  and navigation issues still needing validation against 0008 §4; Android
+  production adapters and real-desktop logind/suspend evidence are also due.
+  Phase 2.4 will establish the shared app/security boundary and create/unlock/
+  lock/recover flows; phase 2.5 adds the full offline vault workflows.
+  D13 remains unresolved until explicit owner go-ahead. No new phase plan,
+  GUI code, commit, push or branch; review documentation is uncommitted.
 
 - 2026-10-30: Owner explicitly requested both Bs without the intermediate
   split. Continued 0027 on the staged tree and recombined **2.2b, Implemented**:
@@ -1622,3 +1661,48 @@ release; it is not weakened.
   claimed. Current source/evidence and limitations: plan 0029. Next fresh
   session reviews 0029, then D13 requires owner architecture review before
   planning GUI phase 2.4. No commit, push, branch or staging change.
+
+- 2026-10-31: Owner delegated plan 0030 D1 and continuation ("Whatever you
+  say man."). D1 is approved. The isolated production dependency probe then
+  failed with the actual GTK/glib and Android parser chain, even after
+  eliminating unused image-codec dependencies. Plan 0030 is Blocked on D2,
+  which proposes broader source remediation and exact license/audit-baseline
+  disposition without advisory ignores. See its DEPENDENCIES.md for current
+  command evidence and recommended package scope. No production dependency,
+  app source, root lockfile or policy changed; owner staging is preserved.
+
+- 2026-11-01: Continue approved 2.4 on the current tree under owner delegation.
+  Shared foundation UI, protected controller, hardened renderer and Android
+  adapter/packaging implemented. Linux actual-engine boundary and rendered-flow
+  tests pass; app/instrumentation APKs build. Plan 0030 records dependency
+  remediation and exact development audit debt. Physical-device evidence is
+  still pending; keep 2.4 unticked and In progress. No commit/push/branch.
+
+- 2026-11-01: Phase 2.4 synthetic instrumentation passed on the owner's POCO
+  X7 Pro, Android 15/API35, WebView 156.0.8078.47, after correcting a checkbox
+  assertion in the test fixture. Production app unchanged. Working invocation
+  and initial failed/ANR runs are recorded in plan 0030 VALIDATION.md. Manual
+  device/desktop scenarios and fresh review remain pending; keep 2.4 unticked.
+
+- 2026-11-01: Expanded 2.4 phone instrumentation passes (15.287s): create,
+  phrase confirmation, wrong-password refusal, password/phrase recovery,
+  cancellation/no late reopen and recorded skip. Owner also observed ordinary
+  screen-lock/background locking and screenshot blocking. Remaining desktop
+  lifecycle evidence is unavailable through this environment's system bus
+  (no logind service); fresh implementation review remains outstanding. Phase
+  remains In progress; current evidence and artifact identities in plan 0030.
+
+- 2026-11-01: Owner directs that Linux OS screen-lock/sleep integration is
+  optional rather than a startup prerequisite. Specs 0008 §1.4/0009 §5 and
+  plan 0030 amended under explicit approval. Keep manual/inactivity locks,
+  prominent unavailable-capability reporting and reduced-protection consent;
+  Android's native lifecycle remains required. Existing logind monitoring is
+  used when available, with no new backend/dependency. Prior non-logind desktop
+  blocker is superseded by this policy and positive reduced-mode validation.
+
+- 2026-11-01: Phase 2.4 foundation implementation complete under the owner's
+  optional Linux OS-lock-monitoring policy. Full gates pass (724 tests), with
+  real Linux services used in shared-screen WebKit flows without login1.
+  Android packages rebuilt/inspected, strict Android policy retained. Plan 0030
+  is Implemented, not Reviewed; fresh-context implementation review remains
+  next. No spec-wide implementation or release/security claim.

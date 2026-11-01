@@ -9,6 +9,41 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-11-01: Owner policy amendment makes automatic OS screen-lock/sleep
+  monitoring optional on Linux. Missing logind no longer prevents app startup
+  or local create/unlock/recovery after reduced-protection acknowledgement.
+  A persistent warning states which automatic locking is unavailable; manual
+  and 60-second inactivity locking remain active. Received OS events and loss
+  of an installed watcher still lock existing state. Android requirements remain
+  unchanged. Specs 0008/0009 and the active phase plan record this decision.
+  Foundation implementation passes all gates (724 tests) and awaits a fresh-
+  context review; no release/security validation claim.
+
+- 2026-11-01: App startup identifies missing lock monitoring, unavailable
+  private storage and another running instance instead of collapsing them into
+  "Protection unavailable". A failed monitor rearm locks the controller and
+  clears protected forms before reporting the failure. No monitoring bypass.
+
+- 2026-11-01: Repeatable Android instrumentation runner installs the local test
+  packages without clearing app data and exercises separate synthetic vaults.
+  Expanded recovery/error/cancellation/skip suite passes on the physical phone. Owner confirms screenshot blocking alongside
+  screen-lock/background locking. Test-only keep-awake does not alter product
+  lock behavior. Phase 2.4 remains In progress.
+
+- 2026-11-01: Shared Android/Linux app foundation (roadmap 2.4, plan 0030):
+  create with phrase confirmation/recorded skip, password and phrase unlock,
+  snapshot-backed anchor recovery, protected bounded forms, lifecycle locking,
+  visible protection status and responsive screens. A maintained Dioxus 0.7.10
+  integration restricts assets, CSP, native IPC/navigation and loopback transport.
+  Android arm64/API29+ app and instrumentation APKs build; Linux real-WebKit
+  boundary and full rendered-flow checks pass. Synthetic Android instrumentation also passes on a POCO X7 Pro
+  (Android 15); manual device and real-desktop lifecycle validation remain
+  pending, so the phase stays In progress. Full
+  vault browsing/editing follows in 2.5. Framework cleanup is best effort.
+  Five provenance-tracked vendor additions remediate the dependency graph;
+  deny passes without advisory ignores. Exact vet exemptions record development
+  audit debt rather than audits or release approval.
+
 - 2026-10-31: Linux platform services (roadmap 2.3, plan 0029): injectable OS
   traits, logind lock/sleep monitoring, session-bound clipboard cancellation,
   hardened single-instance ownership and conservative swap/hibernation status.
@@ -20,6 +55,10 @@ Dates are ISO 8601. Newest first within each section.
   5.x graph; 24 exact-version vet exemptions record development audit debt.
   CI installs the private D-Bus test server, and matrix checks include untracked
   sources while ignoring deleted paths without changing row/tag requirements.
+  Fresh-context phase review is Approved. The owner subsequently approved
+  the architecture under D13; plan 0030 describes the app foundation and the
+  approved desktop integration. Subsequent implementation and dependency
+  remediation are recorded in the 2026-11-01 entry.
 
 - 2026-10-31: Archive export retains and reports its published ID when directory
   sync fails, with an explicit warning that crash durability is unconfirmed.

@@ -168,7 +168,7 @@ pub use qv_model::{
 };
 pub use qv_store::{
     AnchorDir, AnchorStatus, InterruptedRotation, Leftovers, LocationWarnings, NeededPasswords,
-    RotationChoice, RotationState, SnapshotKind, StoreError, VAULT_EXTENSION,
+    RotationChoice, RotationState, SnapshotDir, SnapshotKind, StoreError, VAULT_EXTENSION,
 };
 
 pub use attachment::{AttachmentHandle, AttachmentSummary};

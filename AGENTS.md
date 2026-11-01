@@ -94,9 +94,10 @@ requests override the named intermediate commit/session boundary.
   by SHA, with gates plus deny/vet (D2).
 - Every source starts with `// SPDX-License-Identifier: AGPL-3.0-or-later`
   (shell scripts use `#`, after the shebang); CI checks headers (D3).
-  The sole approved vendored exception is `third-party/x11rb` 0.13.2 (plan
-  0015): retain upstream licenses/headers/lints, exclude it from the product
-  workspace and validate package identity/provenance in the header checker.
+  Approved vendored exceptions: x11rb 0.13.2 (0015); dioxus-desktop
+  0.7.10, glib/glib-macros 0.18.5, gtk3-macros 0.18.2 and selectors 0.24.0
+  (0030, owner delegation 2026-11-01). See `third-party/README.md`: retain
+  upstream licenses/headers/lints, exclude them from the product workspace and validate package identity/provenance in the header checker.
   QuickVault adapter code still follows all product header/lint rules. Review
   the local vendor patch as maintained application code; run its focused tests.
 - Crates opt into workspace lints (`[lints] workspace = true`): `unsafe_code`

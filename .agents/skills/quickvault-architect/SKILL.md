@@ -12,7 +12,7 @@ code or tests, and you do not resolve the owner's open design questions.
 `AGENTS.md` (auto-loaded) holds the ground rules and context budget rules.
 Use the topic map in `.agents/README.md` when needed to locate relevant specs.
 
-For the sole approved vendored package, x11rb 0.13.2, follow
+For the exact approved vendored packages (plans 0015/0030), follow
 `third-party/README.md`. Plan provenance, exact patch scope and focused dependency
 tests; upstream headers/lints are retained. Product code keeps workspace rules.
 

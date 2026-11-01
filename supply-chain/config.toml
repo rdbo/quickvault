@@ -22,6 +22,21 @@ url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 [imports.zcash]
 url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/audits.toml"
 
+[policy.dioxus-desktop]
+audit-as-crates-io = false
+
+[policy.glib]
+audit-as-crates-io = false
+
+[policy.glib-macros]
+audit-as-crates-io = false
+
+[policy.gtk3-macros]
+audit-as-crates-io = false
+
+[policy.selectors]
+audit-as-crates-io = false
+
 [policy.x11rb]
 audit-as-crates-io = false
 
@@ -41,6 +56,11 @@ criteria = "safe-to-deploy"
 version = "1.0.14"
 criteria = "safe-to-deploy"
 
+[[exemptions.anyhow]]
+version = "1.0.104"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.argon2]]
 version = "0.6.0"
 criteria = "safe-to-deploy"
@@ -54,6 +74,16 @@ notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt,
 version = "0.1.92"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
+
+[[exemptions.atk]]
+version = "0.18.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.atk-sys]]
+version = "0.18.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.autocfg]]
 version = "1.5.1"
@@ -71,13 +101,53 @@ criteria = "safe-to-deploy"
 version = "0.11.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.block]]
+version = "0.1.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.block-buffer]]
 version = "0.12.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.bytemuck]]
+version = "1.25.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.byteorder-lite]]
+version = "0.1.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.bytes]]
+version = "1.12.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.cairo-rs]]
+version = "0.18.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.cairo-sys-rs]]
+version = "0.18.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.cc]]
 version = "1.8.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.cesu8]]
+version = "1.1.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.cfb]]
+version = "0.7.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.cfg-if]]
 version = "1.0.5"
@@ -111,15 +181,80 @@ criteria = "safe-to-deploy"
 version = "0.5.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.cocoa]]
+version = "0.26.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.cocoa-foundation]]
+version = "0.2.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.combine]]
+version = "4.6.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.concurrent-queue]]
 version = "2.5.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.const_format]]
+version = "0.2.37"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.const_format_proc_macros]]
+version = "0.2.37"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.convert_case]]
+version = "0.8.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.cookie]]
+version = "0.18.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.core-foundation]]
+version = "0.10.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.core-graphics]]
+version = "0.25.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.cpufeatures]]
+version = "0.2.17"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.crc32fast]]
+version = "1.5.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.crossbeam-channel]]
+version = "0.5.17"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.crossbeam-utils]]
 version = "0.8.23"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
+
+[[exemptions.crypto-common]]
+version = "0.1.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.crypto-common]]
 version = "0.2.2"
@@ -129,9 +264,174 @@ criteria = "safe-to-deploy"
 version = "0.4.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.darling]]
+version = "0.21.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.darling_core]]
+version = "0.21.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.darling_macro]]
+version = "0.21.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.data-encoding]]
+version = "2.11.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.derive_more]]
+version = "0.99.20"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.digest]]
+version = "0.10.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.digest]]
 version = "0.11.3"
 criteria = "safe-to-deploy"
+
+[[exemptions.dioxus]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-asset-resolver]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-cli-config]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-config-macro]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-config-macros]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-core]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-core-macro]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-core-types]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-document]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-history]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-hooks]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-html]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-html-internal-macro]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-interpreter-js]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-rsx]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-signals]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-stores]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dioxus-stores-macro]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dirs]]
+version = "6.0.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dirs-sys]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dispatch2]]
+version = "0.3.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.displaydoc]]
+version = "0.2.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dlopen2]]
+version = "0.8.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dlopen2_derive]]
+version = "0.4.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dpi]]
+version = "0.1.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dtoa]]
+version = "1.0.11"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.dtoa-short]]
+version = "0.3.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.either]]
 version = "1.19.0"
@@ -142,6 +442,21 @@ version = "1.1.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.enumset]]
+version = "1.1.15"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.enumset_derive]]
+version = "0.15.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.equivalent]]
+version = "1.0.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.fancy-regex]]
 version = "0.18.0"
 criteria = "safe-to-deploy"
@@ -151,9 +466,39 @@ version = "2.5.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.field-offset]]
+version = "0.3.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.find-msvc-tools]]
 version = "0.1.14"
 criteria = "safe-to-deploy"
+
+[[exemptions.flate2]]
+version = "1.1.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.foreign-types-macros]]
+version = "0.2.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.futf]]
+version = "0.1.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.futures-channel]]
+version = "0.3.34"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.futures-executor]]
+version = "0.3.34"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.futures-io]]
 version = "0.3.34"
@@ -165,6 +510,11 @@ version = "2.6.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.futures-macro]]
+version = "0.3.34"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.futures-task]]
 version = "0.3.21"
 criteria = "safe-to-deploy"
@@ -173,13 +523,99 @@ criteria = "safe-to-deploy"
 version = "0.3.21"
 criteria = "safe-to-deploy"
 
+[[exemptions.gdk]]
+version = "0.18.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.gdk-pixbuf]]
+version = "0.18.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.gdk-pixbuf-sys]]
+version = "0.18.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.gdk-sys]]
+version = "0.18.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.gdkwayland-sys]]
+version = "0.18.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.gdkx11-sys]]
+version = "0.18.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.generational-box]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.generic-array]]
+version = "0.14.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.gethostname]]
 version = "1.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.getrandom]]
-version = "0.4.3"
+version = "0.2.17"
 criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.getrandom]]
+version = "0.3.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.gio]]
+version = "0.18.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.gio-sys]]
+version = "0.18.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.glib-sys]]
+version = "0.18.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.global-hotkey]]
+version = "0.7.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.gobject-sys]]
+version = "0.18.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.gtk]]
+version = "0.18.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.gtk-sys]]
+version = "0.18.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.hashbrown]]
+version = "0.17.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.hermit-abi]]
 version = "0.5.3"
@@ -194,6 +630,21 @@ criteria = "safe-to-deploy"
 version = "0.13.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.html5ever]]
+version = "0.29.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.http]]
+version = "1.5.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.httparse]]
+version = "1.10.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.hybrid-array]]
 version = "0.4.15"
 criteria = "safe-to-deploy"
@@ -201,6 +652,61 @@ criteria = "safe-to-deploy"
 [[exemptions.iana-time-zone]]
 version = "0.1.65"
 criteria = "safe-to-deploy"
+
+[[exemptions.icu_collections]]
+version = "2.4.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.icu_locale_core]]
+version = "2.4.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.icu_normalizer]]
+version = "2.4.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.icu_normalizer_data]]
+version = "2.4.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.icu_properties]]
+version = "2.4.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.icu_properties_data]]
+version = "2.4.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.icu_provider]]
+version = "2.4.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.idna_adapter]]
+version = "1.2.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.image]]
+version = "0.25.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.indexmap]]
+version = "2.14.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.infer]]
+version = "0.19.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.inout]]
 version = "0.2.5"
@@ -210,84 +716,459 @@ criteria = "safe-to-deploy"
 version = "0.10.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.itoa]]
+version = "1.0.18"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.javascriptcore-rs]]
+version = "1.1.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.javascriptcore-rs-sys]]
+version = "1.1.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.jni]]
+version = "0.22.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.jni-macros]]
+version = "0.22.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.jni-sys]]
+version = "0.3.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.jni-sys]]
+version = "0.4.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.jni-sys-macros]]
+version = "0.4.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.js-sys]]
 version = "0.3.106"
 criteria = "safe-to-deploy"
+
+[[exemptions.keyboard-types]]
+version = "0.7.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.konst]]
+version = "0.2.20"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.konst_macro_rules]]
+version = "0.2.19"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.kuchikiki]]
+version = "0.8.8-speedreader"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.lazy-js-bundle]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.lazy_static]]
 version = "1.5.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.libappindicator]]
+version = "0.9.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.libappindicator-sys]]
+version = "0.9.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.libc]]
 version = "0.2.191"
 criteria = "safe-to-deploy"
+
+[[exemptions.libloading]]
+version = "0.7.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.libloading]]
+version = "0.8.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.libredox]]
+version = "0.1.25"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.libsqlite3-sys]]
 version = "0.38.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.libxdo]]
+version = "0.6.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.libxdo-sys]]
+version = "0.11.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.linux-raw-sys]]
 version = "0.12.1"
 criteria = "safe-to-deploy"
+
+[[exemptions.litemap]]
+version = "0.8.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.lock_api]]
+version = "0.4.14"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.log]]
 version = "0.4.34"
 criteria = "safe-to-deploy"
 
+[[exemptions.longest-increasing-subsequence]]
+version = "0.1.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.mac]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.mach2]]
 version = "0.7.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.markup5ever]]
+version = "0.14.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.match_token]]
+version = "0.1.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.memchr]]
 version = "2.8.3"
 criteria = "safe-to-deploy"
+
+[[exemptions.memfd]]
+version = "0.6.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.memmap2]]
+version = "0.9.12"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.memoffset]]
 version = "0.9.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.miniz_oxide]]
+version = "0.9.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.moxcms]]
+version = "0.8.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.muda]]
+version = "0.17.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.native-tls]]
+version = "0.2.18"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.ndk]]
+version = "0.9.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.ndk-sys]]
+version = "0.6.0+11769913"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.new_debug_unreachable]]
+version = "1.0.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.nodrop]]
+version = "0.1.14"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.num_enum]]
+version = "0.7.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.num_enum_derive]]
+version = "0.7.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.objc]]
+version = "0.2.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.objc2-app-kit]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.objc2-exception-helper]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.objc2-ui-kit]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.objc2-web-kit]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.objc_id]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.once_cell]]
 version = "1.12.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.openssl]]
+version = "0.10.81"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.openssl-probe]]
+version = "0.2.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.openssl-sys]]
+version = "0.9.117"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.ordered-stream]]
 version = "0.2.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.pango]]
+version = "0.18.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.pango-sys]]
+version = "0.18.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.parking_lot]]
+version = "0.12.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.parking_lot_core]]
+version = "0.9.12"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.phf]]
+version = "0.10.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.phf_codegen]]
+version = "0.11.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.phf_generator]]
+version = "0.10.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.phf_macros]]
+version = "0.10.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.phf_shared]]
+version = "0.10.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.pin-project]]
+version = "1.1.13"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.pin-project-internal]]
+version = "1.1.13"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.pin-project-lite]]
 version = "0.2.17"
 criteria = "safe-to-deploy"
+
+[[exemptions.png]]
+version = "0.18.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.polling]]
 version = "3.11.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.pollster]]
+version = "0.4.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.poly1305]]
 version = "0.9.1"
 criteria = "safe-to-deploy"
+
+[[exemptions.potential_utf]]
+version = "0.1.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.powerfmt]]
 version = "0.2.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.ppv-lite86]]
+version = "0.2.21"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.proc-macro-crate]]
+version = "1.3.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.proc-macro-crate]]
+version = "2.0.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.proc-macro-crate]]
+version = "3.5.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.proc-macro-error-attr3]]
+version = "3.1.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.proc-macro-error3]]
+version = "3.1.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.proc-macro-hack]]
+version = "0.5.20+deprecated"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.proc-macro2]]
 version = "1.0.107"
 criteria = "safe-to-deploy"
+
+[[exemptions.proc-macro2-diagnostics]]
+version = "0.10.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.proptest]]
 version = "1.12.0"
 criteria = "safe-to-run"
 
+[[exemptions.pxfm]]
+version = "0.1.30"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.r-efi]]
+version = "5.3.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.r-efi]]
 version = "6.0.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.rand]]
+version = "0.8.8"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.rand]]
+version = "0.9.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.rand_xorshift]]
 version = "0.5.0"
 criteria = "safe-to-run"
+
+[[exemptions.redox_syscall]]
+version = "0.5.18"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.redox_users]]
+version = "0.5.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.regex]]
 version = "1.13.1"
@@ -305,6 +1186,16 @@ criteria = "safe-to-deploy"
 version = "4.0.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.rfd]]
+version = "0.17.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.ring]]
+version = "0.17.14"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.rusqlite]]
 version = "0.40.2"
 criteria = "safe-to-deploy"
@@ -313,9 +1204,49 @@ criteria = "safe-to-deploy"
 version = "1.1.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.rustls]]
+version = "0.23.46"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.rustls-pki-types]]
+version = "1.15.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.rustls-webpki]]
+version = "0.103.16"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.rustversion]]
 version = "1.0.23"
 criteria = "safe-to-deploy"
+
+[[exemptions.same-file]]
+version = "1.0.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.schannel]]
+version = "0.1.30"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.scopeguard]]
+version = "1.2.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.security-framework]]
+version = "3.7.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.security-framework-sys]]
+version = "2.17.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.serde]]
 version = "1.0.229"
@@ -330,10 +1261,30 @@ criteria = "safe-to-deploy"
 version = "1.0.229"
 criteria = "safe-to-deploy"
 
+[[exemptions.serde_json]]
+version = "1.0.154"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.serde_repr]]
 version = "0.1.21"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
+
+[[exemptions.serde_spanned]]
+version = "0.6.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.servo_arc]]
+version = "0.2.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.sha1]]
+version = "0.10.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.sha1]]
 version = "0.11.0"
@@ -344,6 +1295,11 @@ version = "0.11.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.signal-hook]]
+version = "0.3.18"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.signal-hook]]
 version = "0.4.5"
 criteria = "safe-to-deploy"
 
@@ -351,9 +1307,49 @@ criteria = "safe-to-deploy"
 version = "1.4.8"
 criteria = "safe-to-deploy"
 
+[[exemptions.simd-adler32]]
+version = "0.3.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.simd_cesu8]]
+version = "1.2.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.siphasher]]
+version = "0.3.11"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.siphasher]]
+version = "1.0.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.slab]]
 version = "0.4.12"
 criteria = "safe-to-deploy"
+
+[[exemptions.sledgehammer_bindgen]]
+version = "0.6.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.sledgehammer_bindgen_macro]]
+version = "0.6.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.sledgehammer_utils]]
+version = "0.3.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.slotmap]]
+version = "1.1.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.smallvec]]
 version = "1.16.3"
@@ -364,6 +1360,46 @@ version = "0.6.5"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.soup3]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.soup3-sys]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.stable_deref_trait]]
+version = "1.2.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.string_cache]]
+version = "0.8.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.string_cache_codegen]]
+version = "0.5.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.subsecond]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.subsecond-types]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.syn]]
+version = "1.0.109"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.syn]]
 version = "2.0.119"
 criteria = "safe-to-deploy"
@@ -372,14 +1408,119 @@ criteria = "safe-to-deploy"
 version = "3.0.9"
 criteria = "safe-to-deploy"
 
+[[exemptions.synstructure]]
+version = "0.14.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.system-deps]]
+version = "6.2.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.tao]]
+version = "0.34.8"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.tao-macros]]
+version = "0.1.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.target-lexicon]]
+version = "0.12.16"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.tempfile]]
 version = "3.27.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.tendril]]
+version = "0.4.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.thiserror]]
+version = "2.0.21"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.thiserror-impl]]
+version = "2.0.21"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.time]]
 version = "0.3.55"
 criteria = "safe-to-deploy"
+
+[[exemptions.time-macros]]
+version = "0.2.32"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.tinystr]]
+version = "0.8.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.tokio]]
+version = "1.54.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.tokio-macros]]
+version = "2.7.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.toml]]
+version = "0.8.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.toml_datetime]]
+version = "1.1.2+spec-1.1.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.toml_edit]]
+version = "0.19.15"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.toml_edit]]
+version = "0.25.17+spec-1.1.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.toml_parser]]
+version = "1.1.5+spec-1.1.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.tracing]]
+version = "0.1.44"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.tracing-attributes]]
+version = "0.1.31"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.tray-icon]]
+version = "0.21.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.tungstenite]]
+version = "0.28.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.typenum]]
 version = "1.20.1"
@@ -398,14 +1539,64 @@ criteria = "safe-to-deploy"
 version = "0.6.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.url]]
+version = "2.5.8"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.utf8_iter]]
+version = "1.1.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.utf_types]]
+version = "1.0.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.uuid]]
 version = "1.29.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.version-compare]]
+version = "0.2.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.version_check]]
+version = "0.9.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.walkdir]]
+version = "2.5.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.warnings]]
+version = "0.2.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.warnings-macro]]
+version = "0.2.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.wasi]]
+version = "0.11.1+wasi-snapshot-preview1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.wasm-bindgen]]
 version = "0.2.129"
 criteria = "safe-to-deploy"
+
+[[exemptions.wasm-bindgen-futures]]
+version = "0.4.79"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.wasm-bindgen-macro]]
 version = "0.2.99"
@@ -423,9 +1614,79 @@ criteria = "safe-to-deploy"
 version = "0.3.106"
 criteria = "safe-to-deploy"
 
+[[exemptions.webbrowser]]
+version = "1.2.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.webkit2gtk]]
+version = "2.0.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.webkit2gtk-sys]]
+version = "2.0.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.webview2-com]]
+version = "0.38.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.webview2-com-macros]]
+version = "0.8.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.webview2-com-sys]]
+version = "0.38.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.winapi]]
+version = "0.3.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.winapi-i686-pc-windows-gnu]]
+version = "0.4.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.winapi-util]]
+version = "0.1.11"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.winapi-x86_64-pc-windows-gnu]]
+version = "0.4.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows]]
+version = "0.61.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows-collections]]
+version = "0.2.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows-core]]
+version = "0.61.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.windows-core]]
 version = "0.62.2"
 criteria = "safe-to-deploy"
+
+[[exemptions.windows-future]]
+version = "0.2.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.windows-implement]]
 version = "0.60.2"
@@ -435,26 +1696,241 @@ criteria = "safe-to-deploy"
 version = "0.59.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.windows-numerics]]
+version = "0.2.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows-result]]
+version = "0.3.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.windows-result]]
 version = "0.4.1"
 criteria = "safe-to-deploy"
+
+[[exemptions.windows-strings]]
+version = "0.4.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.windows-strings]]
 version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-sys]]
+version = "0.45.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows-sys]]
+version = "0.52.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows-sys]]
+version = "0.59.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows-sys]]
+version = "0.60.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows-sys]]
 version = "0.61.2"
 criteria = "safe-to-deploy"
+
+[[exemptions.windows-targets]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows-targets]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows-targets]]
+version = "0.53.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows-threading]]
+version = "0.1.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows-version]]
+version = "0.1.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_aarch64_gnullvm]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_aarch64_gnullvm]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_aarch64_gnullvm]]
+version = "0.53.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_aarch64_msvc]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_aarch64_msvc]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_aarch64_msvc]]
+version = "0.53.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_i686_gnu]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_i686_gnu]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_i686_gnu]]
+version = "0.53.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_i686_gnullvm]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_i686_gnullvm]]
+version = "0.53.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_i686_msvc]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_i686_msvc]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_i686_msvc]]
+version = "0.53.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_x86_64_gnu]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_x86_64_gnu]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_x86_64_gnu]]
+version = "0.53.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_x86_64_gnullvm]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_x86_64_gnullvm]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_x86_64_gnullvm]]
+version = "0.53.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_x86_64_msvc]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_x86_64_msvc]]
+version = "0.52.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.windows_x86_64_msvc]]
+version = "0.53.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.winnow]]
+version = "0.5.40"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.winnow]]
 version = "1.0.4"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.writeable]]
+version = "0.6.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.wry]]
+version = "0.53.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.x11]]
+version = "2.21.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.x11-dl]]
+version = "2.21.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
 [[exemptions.x11rb-protocol]]
 version = "0.13.2"
 criteria = "safe-to-deploy"
+
+[[exemptions.xkeysym]]
+version = "0.2.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.yoke]]
+version = "0.8.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.yoke-derive]]
+version = "0.8.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.zbus]]
 version = "6.2.0"
@@ -475,6 +1951,51 @@ notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt,
 version = "1.2.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
+
+[[exemptions.zerocopy]]
+version = "0.8.63"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.zerocopy-derive]]
+version = "0.8.63"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.zerofrom]]
+version = "0.1.8"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.zerofrom-derive]]
+version = "0.1.8"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.zerotrie]]
+version = "0.2.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.zerovec]]
+version = "0.11.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.zerovec-derive]]
+version = "0.11.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.zlib-rs]]
+version = "0.6.8"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.zmij]]
+version = "1.0.23"
+criteria = "safe-to-deploy"
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.zruntime]]
 version = "0.2.2"

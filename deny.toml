@@ -33,3 +33,93 @@ unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = []
+
+# Plan 0030: exact compatible UI dependency license, owner delegated.
+[[licenses.exceptions]]
+name = "const_format"
+version = "=0.2.37"
+allow = ["Zlib"]
+
+# Plan 0030: exact compatible UI dependency license, owner delegated.
+[[licenses.exceptions]]
+name = "const_format_proc_macros"
+version = "=0.2.37"
+allow = ["Zlib"]
+
+# Plan 0030: exact compatible UI dependency license, owner delegated.
+[[licenses.exceptions]]
+name = "cssparser"
+version = "=0.29.6"
+allow = ["MPL-2.0"]
+
+# Plan 0030: exact compatible UI dependency license, owner delegated.
+[[licenses.exceptions]]
+name = "cssparser-macros"
+version = "=0.6.1"
+allow = ["MPL-2.0"]
+
+# Plan 0030: exact compatible UI dependency license, owner delegated.
+[[licenses.exceptions]]
+name = "dtoa-short"
+version = "=0.3.5"
+allow = ["MPL-2.0"]
+
+# Plan 0030: exact compatible UI dependency license, owner delegated.
+[[licenses.exceptions]]
+name = "konst"
+version = "=0.2.20"
+allow = ["Zlib"]
+
+# Plan 0030: exact compatible UI dependency license, owner delegated.
+[[licenses.exceptions]]
+name = "konst_macro_rules"
+version = "=0.2.19"
+allow = ["Zlib"]
+
+# Plan 0030: exact compatible UI dependency license, owner delegated.
+[[licenses.exceptions]]
+name = "libloading"
+version = "=0.7.4"
+allow = ["ISC"]
+
+# Plan 0030: exact compatible UI dependency license, owner delegated.
+[[licenses.exceptions]]
+name = "libloading"
+version = "=0.8.9"
+allow = ["ISC"]
+
+# Plan 0030: exact compatible UI dependency license, owner delegated.
+[[licenses.exceptions]]
+name = "option-ext"
+version = "=0.2.0"
+allow = ["MPL-2.0"]
+
+# Plan 0030: exact compatible UI dependency license, owner delegated.
+[[licenses.exceptions]]
+name = "rustls-webpki"
+version = "=0.103.16"
+allow = ["ISC"]
+
+# Plan 0030: exact compatible UI dependency license, owner delegated.
+[[licenses.exceptions]]
+name = "slotmap"
+version = "=1.1.1"
+allow = ["Zlib"]
+
+# Plan 0030: exact compatible UI dependency license, owner delegated.
+[[licenses.exceptions]]
+name = "subtle"
+version = "=2.6.1"
+allow = ["BSD-3-Clause"]
+
+# Plan 0030: exact compatible UI dependency license, owner delegated.
+[[licenses.exceptions]]
+name = "target-lexicon"
+version = "=0.12.16"
+allow = ["Apache-2.0 WITH LLVM-exception"]
+
+# Plan 0030: exact compatible UI dependency license, owner delegated.
+[[licenses.exceptions]]
+name = "untrusted"
+version = "=0.9.0"
+allow = ["ISC"]

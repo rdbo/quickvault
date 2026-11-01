@@ -1,0 +1,15 @@
+[application]
+name = "quickvault"
+default_platform = "desktop"
+out_dir = "dist"
+android_manifest = "android/AndroidManifest.xml"
+android_main_activity = "android/MainActivity.kt"
+android_min_sdk_version = 29
+[bundle]
+identifier = "org.quickvault.app"
+publisher = "QuickVault"
+
+[android]
+min_sdk = 29
+compile_sdk = 35
+target_sdk = 35

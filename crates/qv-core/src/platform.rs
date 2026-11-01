@@ -3,6 +3,7 @@
 //! OS service injection and explicit reduced-protection policy (0008 §1.3).
 //! Frontends continue through core; no vault key reaches an OS event callback.
 use crate::{Core, CoreError, Session};
+pub use qv_platform::android::{AndroidPlatform, AndroidState};
 pub use qv_platform::{
     Cancellation, Clipboard, Evidence, InputPurpose, Keystore, Lifecycle, LockCallback, LockEvent,
     PlatformError, PlatformServices, ProtectionStatus, SecureInput, Unavailable, Watch,
@@ -17,6 +18,7 @@ use std::sync::Arc;
 pub(crate) struct PlatformPolicy {
     services: Arc<dyn PlatformServices>,
     acknowledged: bool,
+    lifecycle_required: bool,
 }
 pub(crate) fn error(error: PlatformError) -> CoreError {
     match error {
@@ -39,8 +41,25 @@ impl Core {
         self.platform = Some(PlatformPolicy {
             services,
             acknowledged: acknowledge_reduced,
+            lifecycle_required: true,
         });
         self
+    }
+    /// Configure Linux OS services with optional lock/sleep notifications.
+    /// Manual and application inactivity locking remain the frontend's duty.
+    /// Missing monitoring requires explicit reduced-protection acknowledgement;
+    /// observed lock/loss events still invalidate the bound session.
+    #[cfg(target_os = "linux")]
+    pub fn with_linux_platform(
+        self,
+        services: Arc<dyn PlatformServices>,
+        acknowledge_reduced: bool,
+    ) -> Self {
+        let mut core = self.with_platform(services, acknowledge_reduced);
+        if let Some(policy) = &mut core.platform {
+            policy.lifecycle_required = false;
+        }
+        core
     }
     /// Current OS protection status for frontend security settings.
     pub fn platform_status(&self) -> Option<ProtectionStatus> {
@@ -58,11 +77,15 @@ impl Core {
     }
     pub(crate) fn bind_platform(&self, mut session: Session) -> Result<Session, CoreError> {
         if let Some(policy) = &self.platform {
-            // Consent covers uncertain OS persistence, not disabling required
-            // lock/sleep handling for a configured platform session.
-            session
-                .attach_platform(policy.services.as_ref())
-                .map_err(error)?;
+            if let Err(failure) = session.attach_platform(policy.services.as_ref()) {
+                if policy.lifecycle_required {
+                    return Err(error(failure));
+                }
+                // Monitoring may become unavailable after the initial gate.
+                if !policy.acknowledged {
+                    return Err(CoreError::NotAllowed);
+                }
+            }
             if session.is_locked() {
                 return Err(CoreError::Cancelled);
             }

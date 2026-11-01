@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Isolated focused tests for maintained upstream packages; not shipped code.
+[workspace]
+resolver = "3"
+members = ["dioxus-desktop", "glib", "glib-macros", "gtk3-macros", "selectors"]
+exclude = ["x11rb"]
+[patch.crates-io]
+glib = { path = "glib" }
+glib-macros = { path = "glib-macros" }
+gtk3-macros = { path = "gtk3-macros" }
+selectors = { path = "selectors" }
+dioxus-desktop = { path = "dioxus-desktop" }
+
+# The GLib output-pointer defect was optimizer-sensitive. Exercise its tests
+# with optimization without changing upstream source or product profiles.
+[profile.test.package.glib]
+opt-level = 2
