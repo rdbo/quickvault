@@ -318,6 +318,16 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-02: Removed the vendored x11rb, glib, glib-macros, gtk3-macros and
+  selectors forks (plan 0032, owner direction). The same versions now come from
+  crates.io; only the hardened dioxus-desktop snapshot remains in
+  `third-party/`. The X11 framing check (packets over 1 MiB refused before
+  x11rb allocates) moved into QuickVault's own clipboard transport. x11rb's
+  ordinary send buffer now briefly holds a copied value (documented
+  best-effort intermediate). `deny.toml` gains four justified advisory ignores
+  (glib's uncalled unsound iterator, two unmaintained crates, build-time-only
+  rand 0.7) and an MPL-2.0 exception for selectors.
+
 - 2026-10-28: Owner-approved 0011 snapshot/`verify` contract (plan 0018, owner
   decision D1): `verify` reports counts, anchor status and fixed-label notes and
   never repairs; `snapshot ls` lists only authenticated same-vault,

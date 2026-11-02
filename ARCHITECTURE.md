@@ -119,11 +119,14 @@ authenticated listing, and the `verify` report) and `qv-cli`
 `totp`/`generate --copy`, `attach add|ls|save|rm`; protected
 prompts/notes, signal cancellation and terminal restoration, escaped and JSON
 output, exit codes). The shared qv-platform Linux X11 clipboard adapter (including usable
-XWayland) drops keys/metadata before foreground serving, uses protected outgoing
-buffers and bounded incoming/INCR state, and releases only its own window.
-Native Wayland is not implemented; OS/recipient/manager copies remain outside
-application erasure control. The transport patch is maintained under
-`third-party/x11rb` (provenance and checks in `third-party/README.md`).
+XWayland) drops keys/metadata before foreground serving, uses the published
+x11rb 0.13.2 over QuickVault's own bounded transport (lifetime read budget,
+X11 framing check refusing packets over 1 MiB before x11rb allocates, received
+descriptors refused, deadlines/cancellation) and bounded incoming/INCR state,
+and releases only its own window. x11rb's ordinary send buffer briefly holds a
+copied value (documented best-effort library intermediate, 0008 §4.4; plan
+0032). Native Wayland is not implemented; OS/recipient/manager copies remain
+outside application erasure control.
 Attachment content uses existing per-attachment keys, fixed full-chunk framing
 and canonical chunk AAD, with ciphertext reference/hash checks, per-chunk AEAD
 and whole-content SHA-256/length verification. Imports stage encrypted objects
@@ -455,7 +458,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Remote account authentication | Pinned RFC 9807 OPAQUE application profile |
 | Direct LAN discovery / enrollment / transport | Specified in 0013 (Accepted): DNS-SD only during explicit windows (`_qvault._tcp`, random instance), QR/manual pairing into pairwise link keys, X-Wing draft-11 + HKDF-SHA-512 + MAC/1 handshake, XChaCha20-Poly1305 counter-nonce records over TCP; crates chosen in roadmap 2.8–2.10 |
 | Linux OS adapters | Optional logind lifecycle monitoring via zbus 6.2.0 over the fixed system-bus Unix socket; existing rustix file locks/configuration probes; shared maintained X11 clipboard; quick unlock unavailable |
-| CLI / license | clap (builder API), rustix termios/poll for bounded no-echo prompts, signal-hook atomic flags for cancellation, own escaping and JSON writer, shared qv-platform X11 adapter over maintained x11rb 0.13.2 with protected transport buffers and framing budgets; `zxcvbn` (in `qv-core`) for typed master passwords / AGPL-3.0-or-later |
+| CLI / license | clap (builder API), rustix termios/poll for bounded no-echo prompts, signal-hook atomic flags for cancellation, own escaping and JSON writer, shared qv-platform X11 adapter over published x11rb 0.13.2 with QuickVault's bounded transport and framing budgets; `zxcvbn` (in `qv-core`) for typed master passwords / AGPL-3.0-or-later |
 
 OPAQUE and ordinary TLS certificates are explicit classical exceptions.
 TLS-bound opaque sessions replace custom per-request HMAC/counter signing.

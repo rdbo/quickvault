@@ -15,7 +15,7 @@ Review the **diff** and the code it touches, not the whole codebase.
 Follow affected callers, tests and spec cross-references as needed to establish
 correctness. Use `.agents/README.md` for navigation, not as review evidence.
 
-For the exact approved vendor packages (plans 0015/0030), follow
+For the exact approved vendor package (dioxus-desktop, plans 0030/0032), follow
 `third-party/README.md`: verify identity/provenance and the exact diff from the
 hashed upstream archive, then review local patches as maintained application
 code and run their focused tests. Upstream headers/lints remain; product code

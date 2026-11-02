@@ -19,7 +19,7 @@
 //! | `address` | paths and `@id` prefixes | 0011 §2 |
 //! | `exit` | exit codes and messages | 0011 §6 |
 //! | `cmd` | the commands | 0011 §4 |
-//! | `clipboard` | private X11 owner, protected transport and deadlines | 0011 §3.6, 0008 §1–3 |
+//! | `clipboard` | private X11 owner, bounded transport and deadlines | 0011 §3.6, 0008 §1–3 |
 //!
 //! Editing/group/trash commands use core drafts and durable transactions;
 //! notes and protected values are prompted. SIGINT/TERM/HUP cancel prompts
@@ -29,8 +29,9 @@
 //! and the whole committed state without repairing anything.
 //!
 //! Clipboard commands close the vault before serving a copied value in the
-//! foreground. The private X11 adapter uses a maintained protected-buffer x11rb
-//! patch, sensitive hints, bounded INCR transfers and ownership-safe release.
+//! foreground. The private X11 adapter uses published x11rb over a bounded,
+//! framing-checked transport, sensitive hints, bounded INCR transfers and
+//! ownership-safe release.
 //! OS/recipient copies may persist; native Wayland requires usable XWayland.
 //!
 //! `snapshot restore` writes a new vault and explicit recovery baseline,

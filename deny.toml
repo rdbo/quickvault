@@ -7,7 +7,15 @@ all-features = true
 yanked = "deny"
 unmaintained = "all"
 unsound = "all"
-ignore = []
+# Plan 0032 (owner, 2026-11-02): published crates replace maintained forks.
+# The Linux webview stack (tao/wry on GTK3) pins glib 0.18 and selectors 0.24.
+# Revisit when tao/wry leave GTK3 or these crates publish fixes.
+ignore = [
+    { id = "RUSTSEC-2024-0429", reason = "glib 0.18 VariantStrIter (Variant::array_iter_str) is unsound; neither QuickVault nor any GTK/WebKit/tao/wry/muda crate in the build calls it; no 0.18 fix exists" },
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained (no vulnerability); compile-time helper of glib-macros/gtk3-macros 0.18" },
+    { id = "RUSTSEC-2025-0057", reason = "fxhash unmaintained (no vulnerability); non-cryptographic hasher inside selectors 0.24" },
+    { id = "RUSTSEC-2026-0097", reason = "rand 0.7 is only a build dependency of selectors' phf code generator, without the log feature the advisory requires; it does not ship" },
+]
 
 [licenses]
 # Only what the current dependency tree needs; extend deliberately.
@@ -45,6 +53,13 @@ allow = ["Zlib"]
 name = "const_format_proc_macros"
 version = "=0.2.37"
 allow = ["Zlib"]
+
+# Plan 0032: published selectors replaces the private fork (same version and
+# MPL-2.0 licence, previously skipped as a private crate).
+[[licenses.exceptions]]
+name = "selectors"
+version = "=0.24.0"
+allow = ["MPL-2.0"]
 
 # Plan 0030: exact compatible UI dependency license, owner delegated.
 [[licenses.exceptions]]

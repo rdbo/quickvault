@@ -12,7 +12,7 @@ code or tests, and you do not resolve the owner's open design questions.
 `AGENTS.md` (auto-loaded) holds the ground rules and context budget rules.
 Use the topic map in `.agents/README.md` when needed to locate relevant specs.
 
-For the exact approved vendored packages (plans 0015/0030), follow
+For the exact approved vendored package (dioxus-desktop, plans 0030/0032), follow
 `third-party/README.md`. Plan provenance, exact patch scope and focused dependency
 tests; upstream headers/lints are retained. Product code keeps workspace rules.
 
