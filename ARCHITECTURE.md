@@ -476,7 +476,7 @@ release requirements remain. Framework selection is not validation evidence.
 | Phase | Deliverable |
 |-------|-------------|
 | 1 | Shared offline Rust core and early Linux CLI: encrypted vault, manifests, anchors, bounded history/recovery; early Android/Linux shared-UI and platform-adapter feasibility work |
-| 2 | Usable offline Android and Linux apps from the shared UI; validated input cleanup/lifecycle, Android quick unlock/autofill as their gates pass, manually initiated direct LAN sync, conflicts and archive exchange; LAN protocol decisions/review required first |
+| 2 | Usable offline Android and Linux apps from the shared UI; validated input cleanup/lifecycle, Android quick unlock/autofill as their gates pass, manually initiated direct LAN sync, conflicts and archive exchange, then an owner-approved app-like UI design (2.10a); LAN protocol decisions/review required first |
 | 3 | Optional closed self-hosted remote server, manually initiated remote sync, accounts, device grants/sessions, server pairing/recovery and remote generation transitions |
 | 4 | Windows |
 | Later | Automatic sync (separate design), third-party import/export, hosted admission, iOS/macOS, extensions and BSD |

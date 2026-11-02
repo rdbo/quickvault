@@ -768,13 +768,34 @@ release; it is not weakened.
 - **Verify:** `cargo test --locked -p qv-sync lan`; two-device test with networking to the Internet blocked.
 - **0012 rows:** Account-dependent LAN sync, LAN partial acceptance, Unrequested synchronization (LAN).
 
+#### Phase 2.10a — App design
+
+- [ ] **Do:** Make the shared app look and feel like an application on desktop
+  and phone, not a website in a browser (owner direction, 2026-11-02). First a
+  design brief and mockups covering app-style navigation and window chrome,
+  native-feeling controls, typography, spacing, motion, and light/dark themes;
+  the owner approves the direction before any code (a stop for owner
+  decision). Then restructure and restyle the shared Dioxus screens to match,
+  one codebase for both platforms.
+- **Specs:** 0009 §1; 0008 §4 (no change to input cleanup, reveal, clipboard
+  or lock behaviour).
+- **Depends on:** 2.10 (every Milestone 2 screen exists, so the redesign
+  covers the whole app once).
+- **Files:** `crates/qv-app/` (UI components, assets).
+- **Done when:** the owner accepts the result on Linux and the phone. No
+  security behaviour or functionality changes; existing app, real-engine and
+  device tests still pass.
+- **Verify:** app test suite; real-engine flows; Android instrumentation;
+  screenshots at desktop and phone widths in the log; owner review.
+- **0012 rows:** none new (existing GUI rows keep their evidence).
+
 #### Phase 2.11 — Milestone 2 release evidence
 
 - [ ] **Do:** Run the LAN gate and the per-platform GUI/mobile gates (0012 §3)
   on Linux and Android. Extended LAN fuzzing. Packaging, signed artifacts,
   checksums, and the reproducible-build status. Fold in the D12 review findings.
 - **Specs:** 0012 §1 (milestone-2 rows), §3.
-- **Depends on:** 2.10, 2.6/2.7 (or those features disabled), D12 review result.
+- **Depends on:** 2.10a, 2.6/2.7 (or those features disabled), D12 review result.
 - **Files:** release docs, `CHANGELOG.md`, spec statuses.
 - **Done when:** every applicable 0012 row has evidence, and unvalidated features are disabled.
 - **Verify:** gate checklist in the phase plan's log.
@@ -1092,7 +1113,7 @@ release; it is not weakened.
 - 2026-10-26 (phase 1.8, plan 0010): development values for the 1.16 freeze: the generator-defaults layout at vault settings key 2 (`qv-model`), the 64 MiB metadata-view budget and the 10-minute clock-anomaly tolerance (`qv-core`). Trash expiry is never automatic: `expired_trash` lists what the retention period offers and frontends confirm `purge` (1.10 `trash empty`). Mutations of conflicted records are refused until conflict resolution (2.2). Notes for later phases are in plan 0010's log.
 - 2026-10-26 (phase 1.10, plan 0011): the owner approved splitting 1.10 into 1.10a/1.10b and decisions D-1–D-6 of plan 0011 as recommended: `zxcvbn 3.1.1` in `qv-core` (0010 §3.2); `clap 4.6.7` builder API only; for 1.10b, `signal-hook 0.4.5` and `arboard 3.6.1` (X11 only, no image support) with per-crate `BSL-1.0` exceptions for `clipboard-win` and `error-code`; the recovery-phrase skip (0002 §4.2) recorded as vault settings key 3 `recovery_skipped_at` (development value for the 1.16 freeze). These dependencies are now approved for 1.10b's standing approval. Raised, not decided: 0011 has no command to adopt a vault with a missing or mismatched anchor (suggested for 1.13/1.14).
 - 2026-11-02: Owner direction: remove all vendored third-party source except the hardened dioxus-desktop, as a priority (plan 0032, outside the phase sequence, same working tree as 2.4/2.5).
-- 2026-11-02: Owner direction after phase 2.5: the current app UI looks and feels like a website in a browser rather than an application, on desktop as well as mobile, and the owner wants an app-like design eventually. Working functionality takes priority over that redesign for now. No phase or timing is decided; raise it at the UI review or when the owner asks.
+- 2026-11-02: Owner direction after phase 2.5: the current app UI looks and feels like a website in a browser rather than an application, on desktop as well as mobile, and the owner wants an app-like design eventually. Working functionality takes priority over that redesign for now. The owner placed it as phase 2.10a (App design), after LAN exchange in the app and before the Milestone 2 release evidence, so the redesign covers every Milestone 2 screen once and release evidence uses the final design.
 
 ## Execution log
 
