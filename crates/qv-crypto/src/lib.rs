@@ -69,6 +69,7 @@ mod ids;
 #[cfg(test)]
 mod kat;
 mod keys;
+pub mod lan;
 mod memory;
 mod otp;
 mod password;
@@ -80,6 +81,7 @@ mod rng;
 mod slot;
 mod stored_data;
 mod wordlist;
+mod xwing;
 
 pub use error::CryptoError;
 pub use generator::{
@@ -103,3 +105,7 @@ pub use profile::{
 pub use rng::{RngError, fill_random, random_array};
 pub use slot::PasswordSlot;
 pub use stored_data::{CHUNK_BYTES, Sealed, open, open_chunk, seal, seal_chunk, sealed_len};
+pub use xwing::{
+    XWING_CIPHERTEXT_LEN, XWING_ENCAPS_KEY_LEN, XWingCiphertext, XWingDecapsKey, XWingEncapsKey,
+    XWingSharedSecret,
+};

@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Approved | 2026-11-02 | 2026-11-02 | 0009 §4 (amended here); 0008 §3, §4; 0002 §5; 0003 §5; 0012 §3 |
+| Reviewed | 2026-11-02 | 2026-11-02 | 0009 §4 (amended here); 0008 §3, §4; 0002 §5; 0003 §5; 0012 §3 |
 
 ## Intent
 
@@ -631,3 +631,15 @@ the glue. Rust compares digests only.
 - 2026-11-02: The `ndk-context` re-creation finding is fixed by plan 0035 and
   verified on the device (Back/reopen and dark-mode toggle). The VALIDATION.md
   "known failure" row is resolved.
+
+- 2026-11-02 (fresh-context review, REVIEW.md): **Approved with minor fixes**.
+  The reviewer fixed four issues:
+  - cold-start handoffs were cancelled by the first poll, before the
+    controller existed (high, fails closed);
+  - empty login fields failed the whole fill;
+  - the 0009 §4.4 lifetime wording;
+  - a pre-existing Android-only Clippy cast in qv-store.
+
+  New device test `AutofillTest#testColdStartRequestWaitsForControllerAndUnlock`
+  passes on the POCO X7 Pro and fails with the old poll order (VALIDATION.md).
+  Autofill stays gated.

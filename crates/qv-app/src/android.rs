@@ -451,7 +451,6 @@ pub(crate) fn initialize() {
                 generation = Some(next);
                 os.update(observed);
                 poll_pick(observed.foreground, &mut seen_pick);
-                poll_autofill();
                 if !ready && observed.secure_window {
                     #[cfg(not(feature = "validation"))]
                     let controller = Controller::new(root.clone(), os.clone());
@@ -461,6 +460,11 @@ pub(crate) fn initialize() {
                     });
                     let _ = crate::ui::ACTIVE.set(controller);
                     ready = true;
+                }
+                // A cold-start handoff claims its request before this runtime
+                // exists; fetch it only once the controller can take it.
+                if ready {
+                    poll_autofill();
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }

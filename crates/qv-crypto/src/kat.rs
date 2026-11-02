@@ -360,3 +360,25 @@ mod dev {
         print!("{out}");
     }
 }
+
+// 0012 §1: Unpinned crypto
+#[test]
+fn kat_xwing_draft_11() {
+    use crate::xwing::{XWingCiphertext, XWingDecapsKey};
+    let records = vectors!("xwing-draft-11.txt");
+    assert_eq!(records.len(), 3);
+    for r in &records {
+        // The draft's private key is its seed.
+        assert_eq!(r.get("sk"), r.get("seed"));
+        let (dk, ek) = XWingDecapsKey::from_test_seed(&r.array("seed")).unwrap();
+        assert_eq!(&ek.as_bytes()[..], r.get("pk"));
+        let (ss, ct) = ek.encapsulate_derand(&r.array("eseed")).unwrap();
+        assert_eq!(&ct.as_bytes()[..], r.get("ct"));
+        assert_eq!(&ss.expose_secret()[..], r.get("ss"));
+        let ct = XWingCiphertext::from_bytes(r.get("ct")).unwrap();
+        assert_eq!(
+            &dk.decapsulate(&ct).unwrap().expose_secret()[..],
+            r.get("ss")
+        );
+    }
+}

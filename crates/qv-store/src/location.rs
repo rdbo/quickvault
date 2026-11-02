@@ -148,7 +148,9 @@ pub(crate) fn warnings_for(path: &Path, file: &crate::fs::LockedFile) -> Locatio
         w.sync_folder |= has_sync_marker(d);
         w
     });
-    // `f_type` is a signed C long; the magic is its low 32 bits.
+    // `f_type` is a signed C long; the magic is its low 32 bits. Its Rust
+    // type differs by target (already `u64` on Android), hence the allow.
+    #[allow(clippy::unnecessary_cast)]
     let by_fs = rustix::fs::fstatfs(file.fd()).map_or_else(
         |_| LocationWarnings::default(),
         |s| fs_type_warnings(s.f_type as u64),

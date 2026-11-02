@@ -142,7 +142,9 @@ on titles, labels, activity names or URL substrings.
 - *Handoff:* the autofill service returns only an authentication entry with a
   generic label. Its immutable explicit intent targets a non-exported activity
   and carries a one-shot random token (at least 128 bits) for a single
-  in-process pending request, valid at most 120 seconds. Request identity and
+  in-process request. The token can be claimed at most 120 seconds after the
+  request; a claimed request expires at most 10 minutes after the request,
+  after which its result is never delivered and is zeroed. Request identity and
   results never travel in intent extras. The shared app shows the requester,
   requires unlock and an explicit choice (including a version of a conflicted
   entry), and returns only the chosen username/password for the requested
@@ -207,6 +209,10 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
    not reconsider native input or a custom engine just for memory-copy concerns.
 
 ## Changelog
+
+- 2026-11-02: §4.4 states the handoff lifetimes as implemented: the token can
+  be claimed for up to 120 seconds, and a claimed request lives for up to
+  10 minutes (plan 0034 review; owner standing delegation). Still Draft.
 
 - 2026-11-02: Add §4.4 Android autofill profile: exact verified app
   signer/package and allowlisted-browser origin matching, explicit app linking,

@@ -17,6 +17,7 @@ libfuzzer-sys = "=0.4.13"
 qv-crypto = { path = "../crates/qv-crypto", version = "=0.0.0" }
 qv-encoding = { path = "../crates/qv-encoding", version = "=0.0.0" }
 qv-model = { path = "../crates/qv-model", version = "=0.0.0" }
+qv-protocol = { path = "../crates/qv-protocol", version = "=0.0.0" }
 qv-store = { path = "../crates/qv-store", version = "=0.0.0" }
 
 [workspace]
@@ -77,6 +78,13 @@ bench = false
 [[bin]]
 name = "archive_receipts"
 path = "fuzz_targets/archive_receipts.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lan_message"
+path = "fuzz_targets/lan_message.rs"
 test = false
 doc = false
 bench = false

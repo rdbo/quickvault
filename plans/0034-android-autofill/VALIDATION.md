@@ -103,6 +103,7 @@ the hashes above only in the test assertion and launch changes described below.
 | Label spoof: an app labelled like the service with no link gets no candidate | attended run with a sideloaded test app | UI/matcher pass in `AutofillTest`; framework path pending |
 | WebView origin claims from an untrusted app never match web entries | attended WebView page with `loadDataWithBaseURL("https://bank.example/", …)` | pending (host covered) |
 | Trusted-browser exact origin | requires recording a browser's signer digests from the device and adding an allowlist entry | not started; allowlist empty by design |
+| Cold-start handoff: request claimed before MainActivity/Rust start waits for the controller and unlock (review finding 1) | `AutofillTest#testColdStartRequestWaitsForControllerAndUnlock` (validation build) | **pass** (POCO X7 Pro, 2026-11-02, 6.1 s); the same test **fails** on a build with the pre-review poll order ("Request survives controller startup") |
 | Reopening QuickVault in a still-cached process (e.g. a second handoff after backing out) | plan 0035 fix; attended Back/reopen and dark-mode toggle | **pass** after plan 0035 (fresh process on reopen, no abort) |
 
 Run after connecting the phone:
@@ -115,9 +116,36 @@ adb install -r crates/qv-app/dist/quickvault-validation-tests.apk
 #   adb shell am start -n org.quickvault.app/dev.dioxus.main.MainActivity
 # whenever another activity is resumed.
 adb shell am instrument -w -e class org.quickvault.app.AutofillTest#testAutofillHandoffNeedsVerifiedLinkExplicitChoiceAndLockCancels org.quickvault.app.test/android.test.InstrumentationTestRunner
+adb shell am instrument -w -e class org.quickvault.app.AutofillTest#testColdStartRequestWaitsForControllerAndUnlock org.quickvault.app.test/android.test.InstrumentationTestRunner
 ```
 
 Restore the normal build afterwards (`quickvault-debug.apk`). Only after the
 rows above pass on a named device may its exact fingerprint be added to
 `AutofillGate`. Browser allowlist entries need digests read on that device and
 recorded here.
+
+## Device evidence after the 0034 review (2026-11-02)
+
+Same POCO X7 Pro (build fingerprint above), with plan 0036 included (libcrux
+linked). The process was force-stopped before each method, and each method
+ran in its own `am instrument` invocation, with the shell starting
+MainActivity because of MIUI.
+
+| Run | Build (APK SHA-256) | Result |
+|-----|---------------------|--------|
+| `AutofillTest#testColdStartRequestWaitsForControllerAndUnlock` | validation `e94b39035451cf674f0edd69db82097939a2458801e71fa70be2e92fcc88d2c1` | OK (1 test), 6.125 s; the request survived controller startup, was bound after unlock, and cancel abandoned it with no result |
+| same method, pre-review poll order (diagnostic build, not kept) | validation, `android.rs` temporarily reverted | **FAILURES**: `Request survives controller startup`. The test catches the defect |
+| `AutofillTest#testAutofillHandoffNeedsVerifiedLinkExplicitChoiceAndLockCancels` | validation `e94b3903…` | OK (1 test), 9.868 s, all stages |
+| `PlatformTest` (`test-android.sh`) | normal `99ae40a0b4eae906636aacc4be72967f21bd9df0816fecd3fa64d695ce8acba5`, tests `3e4c0d5f…` | OK (1 test), 62.607 s |
+
+The crash buffer and the `am_crash`/`ndk-context`/`FATAL` greps were empty
+for the autofill runs. Rebuilding from the restored tree reproduced both APK
+hashes byte for byte. The normal build is reinstalled, and the device's
+autofill service setting was not changed
+(`com.google.android.gms/.autofill.service.AutofillService`).
+
+Still pending (attended, would change the owner's autofill-service setting):
+- the framework round trip from a foreign app;
+- the WebView origin-claim rows.
+
+The trusted-browser row is not started. No device or browser is enabled.

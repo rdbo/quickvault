@@ -90,6 +90,39 @@ public final class AutofillTest extends PlatformTest {
         return AutofillRegistry.INSTANCE.claimed(r.getId())!=null;
     }
 
+    /**
+     * Cold start: the handoff activity claims the request before MainActivity
+     * and its Rust runtime exist. The request must wait for the controller and
+     * then for unlock, not be cancelled by the first poll.
+     */
+    public void testColdStartRequestWaitsForControllerAndUnlock() throws Exception {
+        os=getInstrumentation();
+        android.content.Context target=os.getTargetContext();
+        byte[] signers=AutofillIdentity.INSTANCE.signers(target,REQUESTER);
+        assertNotNull("Requester signer set readable",signers);
+        AutofillId[] ids=new AutofillId[2];
+        os.runOnMainSync(()->{ids[0]=new android.view.View(target).getAutofillId();ids[1]=new android.view.View(target).getAutofillId();});
+        AutofillRegistry.Request r=AutofillRegistry.INSTANCE.register(REQUESTER,signers,null,null,ids[0],ids[1]);
+        assertTrue("Token claims once",AutofillRegistry.INSTANCE.claim(r.getToken()));
+        launch();
+        try {
+            create();
+            assertTrue("Request survives controller startup",claimed(r));
+            stage("request survived controller startup");
+            lockFixture(os,view);
+            awaitJs(os,view,"(document.querySelector('[data-qv-autofill=banner]')?.textContent||'').includes("+org.json.JSONObject.quote(REQUESTER)+")","locked request banner");
+            input("password",PASSWORD);submitFixture(os,view);
+            awaitHeading(os,view,"Fill a login");
+            stage("cold-start request bound after unlock");
+            js(os,view,"document.querySelector('[data-qv-autofill=cancel]').click();true");
+            long deadline=android.os.SystemClock.elapsedRealtime()+30000;
+            while(claimed(r) && android.os.SystemClock.elapsedRealtime()<deadline)Thread.sleep(100);
+            assertFalse("Cancel abandons the request",claimed(r));
+            assertNull("Cancelled request yields no result",AutofillRegistry.INSTANCE.take(r.getToken()));
+            stage("cancel abandoned the request");
+        } finally { if(fixture!=null && fixture.exists())removeFixture(fixture,fixture); }
+    }
+
     public void testAutofillHandoffNeedsVerifiedLinkExplicitChoiceAndLockCancels() throws Exception {
         launch();
         try {

@@ -15,6 +15,7 @@ ctutils.workspace = true
 getrandom.workspace = true
 hkdf.workspace = true
 hmac.workspace = true
+libcrux-kem.workspace = true
 qv-encoding.workspace = true
 region.workspace = true
 sha1.workspace = true

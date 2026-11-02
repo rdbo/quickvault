@@ -86,10 +86,10 @@ rather than creating unused workspace scaffolding.
 | Component | Responsibility |
 |-----------|----------------|
 | qv-encoding | Bounded deterministic CBOR (0004 §3.1): validates hostile input before typed reads, encodes only canonical items, builds AAD/info/transcript arrays; depends on no other qv crate |
-| qv-crypto | Profiles, key hierarchy, encryption, signature verification, protected memory |
+| qv-crypto | Profiles, key hierarchy, encryption, protected memory, X-Wing draft-11 (libcrux-kem) and the LAN record layer (0013 §6); hybrid signature verification from roadmap 3.3 |
 | qv-model | Canonical payloads, atomic records, deterministic tree projection |
 | qv-store | Hardened SQLite, immutable objects, manifests, transactions, authenticated archives (header, writer, role-verifying reader), new-path restore and the full `verify` pass |
-| qv-protocol | Bounded canonical LAN/server wire types, contexts and version registry |
+| qv-protocol | Key-free hostile-input wire layer: bounded LAN frames, wire labels with exact arity, exact-shape message reader/writer, `lan / 1` profile, feature and error-code registry (implemented, roadmap 2.8); server wire types later; depends only on qv-encoding |
 | qv-sync | Shared causal merge candidates (implemented); direct LAN exchange, remote candidate state and publication orchestration (planned) |
 | qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets and the `verify` report |
 | qv-platform | Injected OS traits; Linux logind lifecycle, X11 clipboard ownership, single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; gated Android keystore quick unlock with process-local policy; gated exact-identity autofill matching; native input unavailable |
@@ -127,6 +127,14 @@ and releases only its own window. x11rb's ordinary send buffer briefly holds a
 copied value (documented best-effort library intermediate, 0008 §4.4; plan
 0032). Native Wayland is not implemented; OS/recipient/manager copies remain
 outside application erasure control.
+Roadmap 2.8 adds:
+- `qv-protocol`: the key-free LAN wire layer (bounded frames, the wire-label
+  and arity registry, exact-shape messages, profile, feature and error-code
+  registry);
+- in `qv-crypto`: the X-Wing KEM and the 0013 §6 record layer.
+
+The LAN key schedule, state machines, windows and sockets are not
+implemented yet (2.9–2.10).
 Attachment content uses existing per-attachment keys, fixed full-chunk framing
 and canonical chunk AAD, with ciphertext reference/hash checks, per-chunk AEAD
 and whole-content SHA-256/length verification. Imports stage encrypted objects
@@ -481,7 +489,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Application signatures | Ed25519 + ML-DSA-65, both required |
 | Remote transport | TLS 1.3, X25519MLKEM768, pinned application server identity |
 | Remote account authentication | Pinned RFC 9807 OPAQUE application profile |
-| Direct LAN discovery / enrollment / transport | Specified in 0013 (Accepted): DNS-SD only during explicit windows (`_qvault._tcp`, random instance), QR/manual pairing into pairwise link keys, X-Wing draft-11 + HKDF-SHA-512 + MAC/1 handshake, XChaCha20-Poly1305 counter-nonce records over TCP; crates chosen in roadmap 2.8–2.10 |
+| Direct LAN discovery / enrollment / transport | Specified in 0013 (Accepted): DNS-SD only during explicit windows (`_qvault._tcp`, random instance), QR/manual pairing into pairwise link keys, X-Wing draft-11 + HKDF-SHA-512 + MAC/1 handshake, XChaCha20-Poly1305 counter-nonce records over TCP. X-Wing is `libcrux-kem` 0.0.10 (Cryspen; its draft-06 API matches the draft-11 vectors byte for byte); framing and records in qv-protocol/qv-crypto (roadmap 2.8); discovery and sockets chosen in 2.9–2.10 |
 | Linux OS adapters | Optional logind lifecycle monitoring via zbus 6.2.0 over the fixed system-bus Unix socket; existing rustix file locks/configuration probes; shared maintained X11 clipboard; quick unlock unavailable |
 | CLI / license | clap (builder API), rustix termios/poll for bounded no-echo prompts, signal-hook atomic flags for cancellation, own escaping and JSON writer, shared qv-platform X11 adapter over published x11rb 0.13.2 with QuickVault's bounded transport and framing budgets; `zxcvbn` (in `qv-core`) for typed master passwords / AGPL-3.0-or-later |
 

@@ -72,5 +72,6 @@ plan, or a new plan that names the one it supersedes.
 | [0031](0031-app-vault-workflows/PLAN.md) | App vault workflows (roadmap 2.5) | Reviewed — 2026-11-02 repairs confirmed in the 0033 fresh review |
 | [0032](0032-remove-vendored-forks/PLAN.md) | Remove vendored forks except dioxus-desktop | Reviewed |
 | [0033](0033-android-quick-unlock/PLAN.md) | Android quick unlock (roadmap 2.6) | Reviewed — unvalidated devices disabled; device matrix incomplete |
-| [0034](0034-android-autofill/PLAN.md) | Android autofill (roadmap 2.7) | Implemented — in-process handoff passes on device; framework round trip pending; gate closed |
-| [0035](0035-android-single-runtime/PLAN.md) | Android: one Rust runtime per process; single build project dir | Implemented — device-verified; review due |
+| [0034](0034-android-autofill/PLAN.md) | Android autofill (roadmap 2.7) | Reviewed — reviewer fixed cold-start handoff and empty-field fills; device round trip pending; gate closed |
+| [0035](0035-android-single-runtime/PLAN.md) | Android: one Rust runtime per process; single build project dir | Reviewed |
+| [0036](0036-protocol-foundation/PLAN.md) | Protocol foundation and X-Wing, `qv-protocol` (roadmap 2.8) | Implemented — fresh-context review due |

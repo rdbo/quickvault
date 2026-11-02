@@ -78,6 +78,11 @@ criteria = "safe-to-deploy"
 version = "1.8.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.bindgen]]
+version = "0.72.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
 [[exemptions.bitflags]]
 version = "2.13.2"
 criteria = "safe-to-deploy"
@@ -129,6 +134,11 @@ version = "1.1.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
+[[exemptions.cexpr]]
+version = "0.6.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
 [[exemptions.cfb]]
 version = "0.7.3"
 criteria = "safe-to-deploy"
@@ -149,6 +159,11 @@ criteria = "safe-to-deploy"
 [[exemptions.cipher]]
 version = "0.5.2"
 criteria = "safe-to-deploy"
+
+[[exemptions.clang-sys]]
+version = "1.9.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
 
 [[exemptions.clap]]
 version = "4.6.7"
@@ -216,10 +231,20 @@ version = "0.25.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
+[[exemptions.core-models]]
+version = "0.0.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
 [[exemptions.cpufeatures]]
 version = "0.2.17"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.crabgrind]]
+version = "0.3.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
 
 [[exemptions.crc32fast]]
 version = "1.5.3"
@@ -597,6 +622,11 @@ version = "0.18.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
+[[exemptions.glob]]
+version = "0.3.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
 [[exemptions.global-hotkey]]
 version = "0.7.0"
 criteria = "safe-to-deploy"
@@ -626,6 +656,36 @@ notes = "Plan 0032: published crate replaces a removed vendored fork or its rest
 version = "0.17.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.hax-lib]]
+version = "0.3.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
+[[exemptions.hax-lib]]
+version = "0.4.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
+[[exemptions.hax-lib-macros]]
+version = "0.3.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
+[[exemptions.hax-lib-macros]]
+version = "0.4.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
+[[exemptions.hax-lib-macros-types]]
+version = "0.3.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
+[[exemptions.hax-lib-macros-types]]
+version = "0.4.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
 
 [[exemptions.hermit-abi]]
 version = "0.5.3"
@@ -726,6 +786,11 @@ criteria = "safe-to-deploy"
 version = "0.10.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.itertools]]
+version = "0.13.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
 [[exemptions.itoa]]
 version = "1.0.18"
 criteria = "safe-to-deploy"
@@ -812,6 +877,71 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 [[exemptions.libc]]
 version = "0.2.191"
 criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-curve25519]]
+version = "0.0.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
+
+[[exemptions.libcrux-ecdh]]
+version = "0.0.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
+
+[[exemptions.libcrux-hacl-rs]]
+version = "0.0.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
+
+[[exemptions.libcrux-intrinsics]]
+version = "0.0.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
+
+[[exemptions.libcrux-kem]]
+version = "0.0.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
+
+[[exemptions.libcrux-macros]]
+version = "0.0.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
+
+[[exemptions.libcrux-ml-kem]]
+version = "0.0.11"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
+
+[[exemptions.libcrux-p256]]
+version = "0.0.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
+
+[[exemptions.libcrux-platform]]
+version = "0.0.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
+
+[[exemptions.libcrux-secrets]]
+version = "0.0.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
+
+[[exemptions.libcrux-sha2]]
+version = "0.0.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
+
+[[exemptions.libcrux-sha3]]
+version = "0.0.11"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
+
+[[exemptions.libcrux-traits]]
+version = "0.0.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
 
 [[exemptions.libloading]]
 version = "0.7.4"
@@ -903,6 +1033,11 @@ version = "0.9.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.minimal-lexical]]
+version = "0.2.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
 [[exemptions.miniz_oxide]]
 version = "0.9.1"
 criteria = "safe-to-deploy"
@@ -942,6 +1077,21 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "0.1.14"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.nom]]
+version = "7.1.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
+[[exemptions.num-bigint]]
+version = "0.4.8"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
+[[exemptions.num-integer]]
+version = "0.1.47"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
 
 [[exemptions.num_enum]]
 version = "0.7.6"
@@ -1026,6 +1176,11 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "0.9.12"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.pastey]]
+version = "0.2.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
 
 [[exemptions.phf]]
 version = "0.8.0"
@@ -1119,6 +1274,11 @@ version = "0.2.21"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
+[[exemptions.prettyplease]]
+version = "0.2.37"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
 [[exemptions.proc-macro-crate]]
 version = "1.3.1"
 criteria = "safe-to-deploy"
@@ -1143,6 +1303,16 @@ notes = "Plan 0032: published crate replaces a removed vendored fork or its rest
 version = "1.0.4"
 criteria = "safe-to-deploy"
 notes = "Plan 0032: published crate replaces a removed vendored fork or its restored dependency chain (owner, 2026-11-02); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.proc-macro-error-attr2]]
+version = "2.0.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
+[[exemptions.proc-macro-error2]]
+version = "2.0.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
 
 [[exemptions.proc-macro-hack]]
 version = "0.5.20+deprecated"
@@ -1526,6 +1696,16 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "0.8.5"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.tls_codec]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
+
+[[exemptions.tls_codec_derive]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
 
 [[exemptions.tokio]]
 version = "1.54.1"

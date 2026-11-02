@@ -110,15 +110,20 @@ fn password_field(e: &Entry) -> Option<&Field> {
         .or_else(|| e.fields.iter().find(|f| f.kind == FieldKind::Secret))
 }
 
-fn copy_value(v: &FieldValue) -> Result<SecretBytes, CoreError> {
+/// An empty value fills nothing for its role; an oversized one fails the fill.
+fn copy_value(v: &FieldValue) -> Result<Option<SecretBytes>, CoreError> {
     let bytes = v.expose_secret();
-    if bytes.is_empty() || bytes.len() > MAX_FILL_VALUE {
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    if bytes.len() > MAX_FILL_VALUE {
         return Err(CoreError::InvalidInput);
     }
     SecretBytes::try_init(bytes.len(), |out| {
         out.copy_from_slice(bytes);
         Ok::<(), CoreError>(())
     })
+    .map(Some)
 }
 
 impl Session {
@@ -188,11 +193,11 @@ impl Session {
                 return Err(CoreError::NotAllowed);
             }
             let username = match (roles.username, username_field(&e)) {
-                (true, Some(f)) => Some(copy_value(&f.value)?),
+                (true, Some(f)) => copy_value(&f.value)?,
                 _ => None,
             };
             let password = match (roles.password, password_field(&e)) {
-                (true, Some(f)) => Some(copy_value(&f.value)?),
+                (true, Some(f)) => copy_value(&f.value)?,
                 _ => None,
             };
             if username.is_none() && password.is_none() {
@@ -300,6 +305,27 @@ mod tests {
             )
             .unwrap();
         assert!(only.username.is_none() && only.password.is_some());
+        // An empty username (the app's new-login default) fills only the
+        // password instead of failing the whole fill.
+        let mut d = s.edit_entry(bank).unwrap();
+        for f in &mut d.entry_mut().fields {
+            if f.name.expose() == "Username" {
+                f.value = FieldValue::text("").unwrap();
+            }
+        }
+        let bank = s.save_entry(d).unwrap();
+        let found = s.autofill_candidates(&web_request("bank.example")).unwrap();
+        assert!(
+            found[0]
+                .username
+                .as_ref()
+                .is_none_or(|u| u.expose().is_empty())
+        );
+        let partial = s
+            .autofill_values(&web_request("bank.example"), found[0].key(), roles())
+            .unwrap();
+        assert!(partial.username.is_none());
+        assert_eq!(partial.password.unwrap().expose_secret(), b"hunter2");
         // A different requester cannot redeem the candidate.
         assert!(matches!(
             s.autofill_values(&web_request("evil.test"), found[0].key(), roles()),

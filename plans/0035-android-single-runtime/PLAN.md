@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-11-02 | 2026-11-02 | 0008 §1.4 (lifecycle locking); 0009 §4.4; 0002 §5.4 |
+| Reviewed | 2026-11-02 | 2026-11-02 | 0008 §1.4 (lifecycle locking); 0009 §4.4; 0002 §5.4 |
 
 ## Intent
 
@@ -159,3 +159,6 @@ None.
     all state and fails closed.
 
   Night mode restored to the owner's setting (yes).
+
+- 2026-11-02: Fresh-context review **Approved** (REVIEW.md). The cold-start
+  ordering defect it exposed in 0034 is fixed under the 0034 review.

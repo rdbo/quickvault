@@ -9,6 +9,31 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-11-02: LAN protocol foundation (roadmap 2.8, plan 0036).
+  - New `qv-protocol` crate: bounded `u32` frames (4096 bytes before the
+    session keys, 1,052,672 after), checked before allocation and read without
+    read-ahead. It also has the fail-closed `lan / 1` profile, feature and
+    error-code registry, and an exact-shape canonical-CBOR message
+    reader/writer for the 0013 wire labels.
+  - `qv-crypto`: X-Wing draft-11 through `libcrux-kem` 0.0.10, checked against
+    all draft-11 test vectors and with tests for missing halves, the ML-KEM
+    key check and low-order X25519. It also has the 0013 §6 record layer:
+    counter nonces, sequence AAD, poisoning on any failure and the 2³²
+    limit.
+  - New `lan_message` fuzz target in CI.
+  - Supply chain:
+    - two narrow `deny.toml` entries for libcrux verification-tooling crates
+      that are never compiled (`bindgen` licence, `proc-macro-error2`
+      advisory);
+    - vet exemptions for the libcrux tree. No audit is claimed.
+  - The hybrid signature moves to roadmap 3.3, its first consumer.
+  - Review of phase 2.7 (plans 0034 and 0035) fixed four issues:
+    - cold-start autofill handoffs were cancelled before the app's
+      controller existed;
+    - an empty login field failed the whole fill;
+    - spec 0009 §4.4 now states the handoff lifetimes;
+    - an Android-only Clippy cast lint in qv-store.
+
 - 2026-11-02: Fixed an Android abort when QuickVault's activity was created a
   second time in a live process: after Back and reopen while the process was
   cached (likely with autofill), or on an in-place configuration change such

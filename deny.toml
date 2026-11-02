@@ -15,6 +15,7 @@ ignore = [
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained (no vulnerability); compile-time helper of glib-macros/gtk3-macros 0.18" },
     { id = "RUSTSEC-2025-0057", reason = "fxhash unmaintained (no vulnerability); non-cryptographic hasher inside selectors 0.24" },
     { id = "RUSTSEC-2026-0097", reason = "rand 0.7 is only a build dependency of selectors' phf code generator, without the log feature the advisory requires; it does not ship" },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 unmaintained (no vulnerability); reached only through hax-lib-macros 0.3, a cfg(hax) dependency of libcrux used by its formal-verification tooling and never compiled in QuickVault builds (plan 0036)" },
 ]
 
 [licenses]
@@ -138,3 +139,11 @@ allow = ["Apache-2.0 WITH LLVM-exception"]
 name = "untrusted"
 version = "=0.9.0"
 allow = ["ISC"]
+
+# Plan 0036: build dependency of `crabgrind`, which libcrux-secrets uses only
+# under `cfg(valgrind_ct_test)` (its own constant-time test tooling). That cfg
+# is never set in QuickVault builds, so bindgen is never compiled or shipped.
+[[licenses.exceptions]]
+name = "bindgen"
+version = "=0.72.1"
+allow = ["BSD-3-Clause"]

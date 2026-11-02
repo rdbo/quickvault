@@ -723,10 +723,13 @@ release; it is not weakened.
 
 #### Phase 2.7 — Android autofill (gated)
 
-- **Plan:** [0034](../0034-android-autofill/PLAN.md) (Implemented on host;
-  device run pending; fresh-context review due).
+- **Plan:** [0034](../0034-android-autofill/PLAN.md) and
+  [0035](../0035-android-single-runtime/PLAN.md) (both Reviewed 2026-11-02).
+  Implementation closed under the owner's standing delegation, following the
+  2.6 precedent. The remaining attended device rows in 0034 VALIDATION.md are
+  follow-up for device enablement. Autofill stays disabled on every device.
 
-- [ ] **Do:** Write the thin Kotlin/JNI `AutofillService` entry point with the
+- [x] **Do:** Write the thin Kotlin/JNI `AutofillService` entry point with the
   logic in Rust: verified app signature and web origin (Digital Asset Links),
   conflicted credentials require a choice, handoff to the main app for unlock,
   and an authenticated, scoped IPC channel.
@@ -738,7 +741,11 @@ release; it is not weakened.
 
 #### Phase 2.8 — Protocol foundation and hybrid primitives
 
-- [ ] **Do:** Create `qv-protocol`: a bounded canonical message framework with
+- **Plan:** [0036](../0036-protocol-foundation/PLAN.md) (Implemented;
+  fresh-context review due). The hybrid signature moves to phase 3.3; see
+  Revisions 2026-11-02 (phase 2.8).
+
+- [x] **Do:** Create `qv-protocol`: a bounded canonical message framework with
   a version/feature registry that fails closed. Add the hybrid signature
   (strict Ed25519 + ML-DSA-65) and, if the 2.1 spec requires it, X-Wing
   draft-11, all with upstream KATs and negative tests.
@@ -839,7 +846,11 @@ release; it is not weakened.
 
 #### Phase 3.3 — Server foundation
 
-- [ ] **Do:** Create `qv-server` (Axum/Tokio, SQLite): TLS 1.3 with mandatory
+- [ ] **Do:** First add the hybrid signature deferred from 2.8 (strict
+  Ed25519 + ML-DSA-65, 0002 §6.2) to `qv-crypto`, with upstream KATs and
+  strict-verification edge vectors. A missing half, wrong label or wrong
+  profile must fail (0012 "Unpinned crypto", asymmetric part).
+  Then create `qv-server` (Axum/Tokio, SQLite): TLS 1.3 with mandatory
   X25519MLKEM768 and no 0-RTT, the pinned application server identity, closed
   admission, request bounds and the opaque object store schema.
 - **Specs:** 0006 (scope, admission, server identity); 0002 §6.3.
@@ -1133,7 +1144,72 @@ release; it is not weakened.
   satisfied by verified signer identity instead; DAL needs its own later spec
   decision. Plan 0034 also carries the 0033 review's mutex finding.
 
+- 2026-11-02 (phase 2.8, plan 0036): under the owner's standing delegation,
+  the hybrid signature (strict Ed25519 + ML-DSA-65, 0002 §6.2) moves out of
+  2.8:
+  - 0013 authenticates LAN sessions with symmetric link keys and uses no
+    signature;
+  - the consumers are the milestone-3 device/server identities, whose shape
+    depends on D11 (settled in 3.1);
+  - `ed25519-dalek`/`curve25519-dalek` would need new BSD-3-Clause licence
+    exceptions.
+
+  Phase 3.3 implements it first (the pinned server application identity is
+  hybrid), with upstream KATs and strict-verification edge vectors, after 3.1
+  settles D11. Phase 2.8 delivers qv-protocol, the 0013 record layer and
+  X-Wing. X-Wing comes from `libcrux-kem =0.0.10` (Apache-2.0; not in the
+  candidate table). Its draft-06 API is byte-identical to draft-11: the
+  change log is editorial and the vectors match.
+
 ## Execution log
+
+- 2026-11-02: Clean-tree next-phase session at `87f1267`.
+  - **Fresh-context review of phase 2.7** (plans 0034 and 0035). 0034 is
+    **Approved with minor fixes** and 0035 is **Approved**; see their
+    REVIEW.md files. The reviewer fixed:
+    - cold-start autofill handoffs, which the first poll cancelled before
+      the controller existed (fails closed; a new instrumentation method
+      covers it);
+    - empty login fields, which failed the whole fill;
+    - the 0009 §4.4 handoff lifetimes;
+    - an Android-only qv-store Clippy cast.
+
+    The phone disconnected before the new device test could run, so that row
+    is pending.
+  - **Phase 2.7 closed** under the owner's standing delegation, following
+    the 2.6 precedent. The attended device rows are enablement follow-up, and
+    autofill stays disabled everywhere.
+  - **Phase 2.8 planned and implemented as plan 0036** (standing approval plus
+    delegation):
+    - `qv-protocol`: frames, the label/arity registry, exact-shape messages,
+      the profile/feature/error registry;
+    - `qv-crypto`: X-Wing draft-11 via `libcrux-kem` 0.0.10, passing all
+      draft-11 vectors with negative tests;
+    - the 0013 §6 record layer;
+    - the `lan_message` fuzz target.
+
+    The hybrid signature moves to 3.3 (Revisions). There are two narrow
+    deny entries for libcrux verification-tooling crates that are never
+    compiled, plus 36 vet exemptions. No audit is claimed.
+  - **Gates on the final tree:**
+    - SPDX, matrix, fmt and workspace Clippy pass;
+    - `cargo test --locked`: 781 passed, 0 failed, 2 pre-existing ignored
+      (private Xvfb);
+    - app validation Clippy and 31 tests pass;
+    - `cargo deny check`, fuzz-crate deny and `cargo vet --locked` pass;
+    - Android arm64 Clippy passes for both feature sets;
+    - fuzz smoke: 28.4M runs, no crash.
+  - Phone reconnected (same session), POCO X7 Pro:
+    - the new cold-start autofill method passes, and fails with the old poll
+      order;
+    - the handoff method passes;
+    - `PlatformTest` passes on the normal build with libcrux linked.
+
+    Evidence is in 0034 VALIDATION.md. The normal build is reinstalled and no
+    device setting changed. The framework round trip and WebView rows remain
+    attended follow-up.
+  - Next: owner commits, then a fresh-context review of 0036 before phase
+    2.9. No commit, push or branch.
 
 - 2026-11-02: Owner explicitly corrected the earlier stop handoff: carry out
   "next phase" without approval checkpoints, fixing prerequisites and continuing
