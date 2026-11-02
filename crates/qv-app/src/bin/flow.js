@@ -37,13 +37,24 @@ try{
  stage=54;click("Hide");await until(()=>!document.querySelector(".field-value.revealed"));
  stage=6;click("Copy");
  if(clipboard)await until(()=>!!document.querySelector(".toast"));else await until(()=>!!document.querySelector(".error"));
+ stage=61;click("Edit");await until(()=>heading("Edit entry"));input("ws-title","Edited engine entry");click("Save");await until(()=>heading("Edited engine entry"));await unlocked();
+ click("History");await until(()=>heading("History"));await until(()=>!!document.querySelector(".row-button"));document.querySelector(".row-button").click();await until(()=>!!button("Restore this version"));click("Restore this version");await until(()=>(document.querySelector(".notice")?.textContent||"")==="Restored as a new version.");await until(()=>headingStarts("Synthetic <img"));await unlocked();
+ stage=62;const root=document.getElementById("validation-result").getAttribute("data-fixture-root");
+ click("Attachments");await until(()=>heading("Attachments"));input("ws-path",root+"/source.bin");input("ws-attach-name","engine-canary.bin");click("Add attachment");await until(()=>!!document.querySelector(".notice")||!!document.querySelector(".error"));
+ const filesSafe=!document.querySelector(".error");
+ if(filesSafe){await until(()=>!!button("Save…"));input("ws-path",root+"/output.bin");click("Save…");await until(()=>!!button("Continue"));click("Continue");await until(()=>(document.querySelector(".notice")?.textContent||"")==="Attachment saved.")}
+ stage=63;nav("Archives");await until(()=>heading("Archive exchange"));input("ws-path",root+"/exports");click("Export archive");await until(()=>(document.querySelector(".report")?.textContent||"").includes("Archive published:"));
+ const archive=document.querySelector(".report").textContent.match(/Archive published: ([a-f0-9]+)/)?.[1];if(!archive)throw new Error("synthetic archive id");
+ input("ws-path",root+"/exports/"+archive+".qvsnap");click("Merge archive");await until(()=>/Archive merged|already accepted/.test(document.querySelector(".report")?.textContent||""));
+ nav("Vault");await until(()=>!!document.querySelector(".row-button"));Array.from(document.querySelectorAll(".row-button")).find(b=>b.textContent.includes("Synthetic <img")).click();await until(()=>headingStarts("Synthetic <img"));
  stage=7;click("Delete");await until(()=>(document.querySelector(".notice")?.textContent||"").startsWith("Moved to the trash"));
  nav("Trash");await until(()=>heading("Trash"));await until(()=>!!button("Restore"));click("Restore");
  await until(()=>!!Array.from(document.querySelectorAll(".muted")).find(m=>m.textContent==="The trash is empty."));
  stage=8;nav("Generator");await until(()=>heading("Password generator"));
  Array.from(document.querySelectorAll(".primary-small")).find(b=>b.textContent==="Generate").click();
  await until(()=>(document.querySelector(".phrase.revealed")?.textContent||"").length>=8);
- stage=9;await lockVault();
+ stage=81;nav("Vault");await until(()=>!!document.querySelector(".row-button"));Array.from(document.querySelectorAll(".row-button")).find(b=>b.textContent.includes("Synthetic <img")).click();await until(()=>headingStarts("Synthetic <img"));click("Edit");await until(()=>heading("Edit entry"));input("ws-notes","synthetic save-lock race");click("Save");click("Lock");
+ stage=9;await until(()=>heading("Welcome back"));
  if(document.querySelector(".phrase")||document.querySelector(".revealed"))throw new Error("synthetic reveal remained");
  input("password","incorrect");document.querySelector(".check input").click();await until(()=>!document.querySelector(".primary").disabled);document.querySelector(".primary").click();
  await until(()=>!!document.querySelector(".error"));

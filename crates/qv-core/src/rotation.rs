@@ -105,6 +105,7 @@ impl Session {
         allow_snapshot_over_budget: bool,
         cancel: Option<&CancelToken>,
     ) -> Result<Rotation, CoreError> {
+        self.invalidate_quick()?;
         self.read(|ctx| {
             if ctx.open.read_only || ctx.open.snapshots.is_none() {
                 return Err(CoreError::NotAllowed);

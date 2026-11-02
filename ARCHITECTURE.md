@@ -92,7 +92,7 @@ rather than creating unused workspace scaffolding.
 | qv-protocol | Bounded canonical LAN/server wire types, contexts and version registry |
 | qv-sync | Shared causal merge candidates (implemented); direct LAN exchange, remote candidate state and publication orchestration (planned) |
 | qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets and the `verify` report |
-| qv-platform | Injected OS traits; Linux logind lifecycle, X11 clipboard ownership, single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; unavailable native input/quick unlock; autofill planned |
+| qv-platform | Injected OS traits; Linux logind lifecycle, X11 clipboard ownership, single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; gated Android keystore quick unlock with process-local policy; native input unavailable; autofill planned |
 | qv-cli / qv-app | Explicit user actions and views; no unrestricted crypto/file/SQL bridge |
 | qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
 
@@ -307,7 +307,19 @@ explicit reduced-protection retry. Android's metadata-only adapter locks on
 background,
 screen-off, destroyed activity or loss of required hardening; resume never
 unlocks. Private anchors and snapshots live outside the active vault; Android
-uses OS no-backup storage. Keystore, quick unlock and autofill remain unavailable.
+uses OS no-backup storage. Autofill remains unavailable.
+Roadmap 2.6 (plan 0033) adds a gated Android AES-256-GCM keystore backend:
+Class 3 per-operation biometrics, separate reduced-protection device credentials,
+StrongBox preferred over an equally authenticated TEE key, explicit key-policy
+inspection and no software/authenticator fallback. Core reauthenticates enrollment
+and uses the existing phrase/header/manifest/anchor open path, then checks the
+current password-slot binding. Credential changes and rotation invalidate handles.
+Envelopes and attempt/age policy stay in process memory: process restart/reboot,
+seven-day maximum age, three failures or lost policy state require the master
+password. Native elapsedRealtime also counts deep sleep. No token/handle is
+exported, synced or backed up. Shared screens expose enrollment/disable and explicit
+quick unlock; all devices remain disabled until the physical validation matrix
+is recorded (the current fingerprint allowlist is empty).
 Roadmap 2.5 (plan 0031) adds the unlocked workspace: typed epoch-checked
 actions over core for browsing, editing, trash, history, conflicts, snapshots,
 archives, attachments, generator, settings and credential flows; one bounded
@@ -345,7 +357,7 @@ validation, and does not require separate application implementations per OS.
 flowchart TB
     ui["CLI / shared Dioxus UI and input"] --> core["qv-core: policy and sessions"]
     core --> rust["trusted Rust: model, crypto, store, sync"]
-    core --> platform["qv-platform: lifecycle, clipboard, protection status; future keystore/autofill"]
+    core --> platform["qv-platform: lifecycle, clipboard, protection status; gated Android keystore; future autofill"]
     platform -. "lock/cancel notifications" .-> core
     ui --> clip["CLI clipboard via core reexports; keys already dropped"]
     clip --> platform

@@ -179,6 +179,7 @@ pub fn Shell(
     };
     rsx! {
         main { class: "ws", "data-qv-epoch": "{epoch.0}",
+            if fixture && cfg!(target_os="android") {p {class:"warning","Synthetic validation build · isolated test vault only"}}
             header { class: "ws-top",
                 div { class: "brand", span { class: "brand-mark", "Q" } span { class: "ws-name", "{name.as_str()}" } }
                 button { class: "lock-button", "data-qv-clear": "true", onclick: lock, "Lock" }
@@ -207,7 +208,7 @@ pub fn Shell(
                         div { class: "busy", role: "status", "Working… The vault stays locked to other actions until this finishes." }
                     } else {
                         if let Some(kind) = pending {
-                            Confirm { controller: controller.clone(), epoch, kind }
+                            Confirm { controller: controller.clone(), epoch, kind, seconds: live.weak_seconds }
                         }
                         if let Some(n) = notice { p { class: "notice", role: "status", "{n}" } }
                         if let Some(e) = error { p { class: "error", role: "alert", "{e.message()}" } }
@@ -223,12 +224,12 @@ pub fn Shell(
             if live.clipboard > 0 {
                 div { class: "toast", role: "status", "Copied · clears in {live.clipboard} s if unchanged" }
             }
-            if fixture { input { id: "validation-result", oninput: move |e| on_fixture.call(e) } }
+            if fixture { input { id: "validation-result", "data-fixture-root": controller.0.base.to_string_lossy().as_ref(), oninput: move |e| on_fixture.call(e) } }
         }
     }
 }
 #[component]
-fn Confirm(controller: Controller, epoch: FormEpoch, kind: ConfirmKind) -> Element {
+fn Confirm(controller: Controller, epoch: FormEpoch, kind: ConfirmKind, seconds: u64) -> Element {
     let message = match kind {
         ConfirmKind::DeleteRecursive => "Move this group and everything in it to the trash?".to_owned(),
         ConfirmKind::EmptyTrash => "Permanently delete every non-conflicted item in the trash? A recovery snapshot is taken first. Independent copies may remain.".to_owned(),
@@ -243,14 +244,15 @@ fn Confirm(controller: Controller, epoch: FormEpoch, kind: ConfirmKind) -> Eleme
         ConfirmKind::RestoreConflicts => "Restore this version and resolve the entry's current conflict with it?".to_owned(),
         ConfirmKind::OverBudget(n) => format!("The mandatory recovery snapshot needs {n} bytes and exceeds the snapshot budget. Allow it to exceed the budget? Nothing changes otherwise."),
         ConfirmKind::OldSnapshots(n) => format!("{n} local snapshots were taken before this password change and still open with the old password. Delete them? Copies elsewhere remain; deletion is not cryptographic erasure."),
+        ConfirmKind::ReducedQuick => "Reduced protection: this makes your device PIN, pattern or password a vault credential. Enable this separate policy? Biometrics never fall back to it automatically.".to_owned(),
         ConfirmKind::WeakPassword => "This password is weak and could be guessed by an attacker who obtains your vault file. Use it anyway?".to_owned(),
     };
     rsx! {
         div { class: "dialog", role: "alertdialog", "aria-label": "Confirmation",
             p { "{message}" }
             div { class: "row",
-                button { class: "secondary", onclick: act(&controller, epoch, WsAction::Answer(false)), "Cancel" }
-                button { class: "danger", onclick: act(&controller, epoch, WsAction::Answer(true)), "Continue" }
+                button { class: "secondary", autofocus: true, onclick: act(&controller, epoch, WsAction::Answer(false)), if kind == ConfirmKind::WeakPassword { "Choose a stronger password" } else { "Cancel" } }
+                button { class: "danger", "data-qv-clear": "true", disabled: kind == ConfirmKind::WeakPassword && seconds > 0, onclick: act(&controller, epoch, WsAction::Answer(true)), if kind == ConfirmKind::WeakPassword { "Use anyway · {seconds}s" } else { "Continue" } }
             }
         }
     }
@@ -966,6 +968,7 @@ fn Generator(controller: Controller, epoch: FormEpoch, revision: u64) -> Element
             (GenFlag::Digits, "0–9", 2),
             (GenFlag::Symbols, "Symbols", 3),
             (GenFlag::Ambiguous, "Avoid look-alikes", 4),
+            (GenFlag::Each, "Require every enabled class", 7),
         ],
         GenMode::Words => &[
             (GenFlag::Capitalize, "Capitalize", 5),
@@ -1002,6 +1005,10 @@ fn Generator(controller: Controller, epoch: FormEpoch, revision: u64) -> Element
             }
         }
         p { class: "hint", "Strength of these settings: {bits}" }
+        if let Some(b) = form.bits {
+            p { class: "hint", "{strength_label(b)}" }
+            if b < 64.0 { p { class: "warning", role: "status", "Low strength: these settings give less than 64 bits. Consider a longer password or passphrase." } }
+        }
         if let Some(v) = value {
             div { class: "phrase revealed", "{v}" }
             p { class: "hint", "Visible for 30 seconds." }
@@ -1086,6 +1093,8 @@ fn Settings(controller: Controller, epoch: FormEpoch, revision: u64, pane: Pane)
         match pane {
             Pane::General => rsx! { General { controller: controller.clone(), epoch, revision } },
             Pane::Password => rsx! {
+                QuickSettings { controller: controller.clone(), epoch, revision }
+                PasswordGuidance { controller: controller.clone(), epoch, revision }
                 p { class: "muted", "Old copies of the vault and its password slot still open this key generation. After a suspected compromise, rotate keys instead." }
                 Input { controller: controller.clone(), epoch, field: WsField::NewPassword, label: "New master password", kind: Kind::Secret, value: None, disabled: false }
                 Input { controller: controller.clone(), epoch, field: WsField::Repeat, label: "Confirm new master password", kind: Kind::Secret, value: None, disabled: false }
@@ -1093,6 +1102,7 @@ fn Settings(controller: Controller, epoch: FormEpoch, revision: u64, pane: Pane)
             },
             Pane::Phrase => rsx! { PhrasePane { controller: controller.clone(), epoch, revision } },
             Pane::Rotation => rsx! {
+                PasswordGuidance { controller: controller.clone(), epoch, revision }
                 p { class: "muted", "Key rotation creates a new key generation with a new master password and a new recovery phrase. It can take a while, is resumable, and locks the vault when it finishes. Type rotate to continue." }
                 Input { controller: controller.clone(), epoch, field: WsField::Confirmation, label: "Type rotate", kind: Kind::Line, value: None, disabled: false }
                 Input { controller: controller.clone(), epoch, field: WsField::NewPassword, label: "New master password", kind: Kind::Secret, value: None, disabled: false }
@@ -1105,6 +1115,47 @@ fn Settings(controller: Controller, epoch: FormEpoch, revision: u64, pane: Pane)
             },
             Pane::About => rsx! { About { controller: controller.clone(), epoch, revision } },
         }
+    }
+}
+#[component]
+fn QuickSettings(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
+    let _ = revision;
+    let available = controller.protection().quick_unlock;
+    rsx! {
+        h3 { "Quick unlock" }
+        p { class: "hint", "Opt-in hardware authentication for this app process. Restart, reboot, seven days, three failed attempts or a password/key change require the master password." }
+        if !available {
+            p { class: "hint", "Unavailable: this device has no validated quick-unlock backend. Master-password unlock remains available." }
+        } else {
+            Input { controller: controller.clone(), epoch, field: WsField::Password, label: "Master password to enroll quick unlock", kind: Kind::Secret, value: None, disabled: false }
+            button { class: "secondary-small", "data-qv-clear": "true", onclick: act(&controller, epoch, WsAction::EnrollQuick(qv_core::platform::QuickPolicy::Class3)), "Enable Class 3 biometric quick unlock" }
+            button { class: "text-button", "data-qv-clear": "true", onclick: act(&controller, epoch, WsAction::EnrollQuick(qv_core::platform::QuickPolicy::DeviceCredential)), "Enable device credential · reduced protection…" }
+            button { class: "text-button", onclick: act(&controller, epoch, WsAction::DisableQuick), "Disable quick unlock" }
+        }
+    }
+}
+fn strength_label(bits: f64) -> &'static str {
+    if bits < 50.0 {
+        "Weak"
+    } else if bits < 70.0 {
+        "Fair"
+    } else if bits < 90.0 {
+        "Strong"
+    } else {
+        "Very strong"
+    }
+}
+#[component]
+fn PasswordGuidance(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
+    let _ = revision;
+    let fair = controller
+        .peek(epoch, |ws| ws.fair_warning)
+        .unwrap_or(false);
+    let suggestion = text(controller.generated(epoch).map(|(v, _)| v));
+    rsx! {
+        if fair { p { class: "warning", "This password is fair. Consider a longer, less predictable passphrase." } }
+        button { class: "text-button", onclick: act(&controller, epoch, WsAction::SuggestPassword), "Suggest a six-word passphrase" }
+        if !suggestion.is_empty() { div { class: "phrase revealed", "{suggestion}" } p { class: "hint", "Suggestion visible for 30 seconds." } }
     }
 }
 #[component]

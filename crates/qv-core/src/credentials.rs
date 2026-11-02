@@ -18,6 +18,7 @@ impl Session {
         password: &MasterPassword,
         cancel: Option<&CancelToken>,
     ) -> Result<(), CoreError> {
+        self.invalidate_quick()?;
         self.mutate(|ctx| {
             ctx.check_cancel()?;
             if cancel.is_some_and(CancelToken::is_cancelled) {

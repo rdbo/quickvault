@@ -17,8 +17,15 @@ case "$("$qv_dx" --version)" in
 esac
 : "${ANDROID_HOME:?Source scripts/setup-android.sh --print-env first}"
 : "${JAVA_HOME:?Select a supported JDK (validated with JDK 21)}"
+qv_features=mobile
+qv_artifact=quickvault
+if [ "${QV_APP_DEVICE_VALIDATION:-0}" = 1 ]; then
+    qv_features=mobile,validation
+    qv_artifact=quickvault-validation
+fi
+export QV_APP_BUILT_APK="dist/$qv_artifact-debug.apk"
 "$qv_dx" build --platform android --target aarch64-linux-android --release \
-    --features mobile --package qv-app --bin quickvault --cargo-args=--locked
+    --features "$qv_features" --package qv-app --bin quickvault --cargo-args=--locked
 # Dioxus 0.7.10 uses android_min_sdk_version for native linking but hardcodes
 # minSdk=24 in Gradle. Copy its generated package and enforce the baseline in
 # the APK as well, without patching the framework or its registry source.
@@ -40,6 +47,8 @@ p.write_text(s)
 tests=destination/'app/src/androidTest/java/org/quickvault/app'
 tests.mkdir(parents=True)
 shutil.copyfile(root/'android/tests/PlatformTest.java',tests/'PlatformTest.java')
+shutil.copyfile(root/'android/tests/QuickUnlockTest.java',tests/'QuickUnlockTest.java')
+shutil.copyfile(root/'android/tests/QuickUnlockUiTest.java',tests/'QuickUnlockUiTest.java')
 fixture_assets=destination/'app/src/androidTest/assets'
 fixture_assets.mkdir(parents=True)
 shutil.copyfile(root/'android/tests/flows.js',fixture_assets/'flows.js')
@@ -52,14 +61,14 @@ print(destination)
 PY
 )
 sh "$qv_project/gradlew" -p "$qv_project" :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
-cp "$qv_project/app/build/outputs/apk/debug/app-debug.apk" dist/quickvault-debug.apk
-cp "$qv_project/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk" dist/quickvault-tests.apk
-"$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging dist/quickvault-debug.apk > dist/apk-badging.txt
-"$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions dist/quickvault-debug.apk > dist/apk-permissions.txt
+cp "$qv_project/app/build/outputs/apk/debug/app-debug.apk" "dist/$qv_artifact-debug.apk"
+cp "$qv_project/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk" "dist/$qv_artifact-tests.apk"
+"$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "dist/$qv_artifact-debug.apk" > dist/apk-badging.txt
+"$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "dist/$qv_artifact-debug.apk" > dist/apk-permissions.txt
 python3 - <<'PY'
 from pathlib import Path
 import xml.etree.ElementTree as ET
-import hashlib
+import hashlib,os
 badging=Path('dist/apk-badging.txt').read_text()
 permissions=Path('dist/apk-permissions.txt').read_text()
 if "package: name='org.quickvault.app'" not in badging or "sdkVersion:'29'" not in badging:
@@ -67,6 +76,7 @@ if "package: name='org.quickvault.app'" not in badging or "sdkVersion:'29'" not 
 for line in permissions.splitlines():
     if line.startswith('uses-permission:') and not any(allowed in line for allowed in (
         "name='org.quickvault.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'",
+        "name='android.permission.USE_BIOMETRIC'",
         "name='android.permission.INTERNET'",  # Dioxus loopback UI transport
     )):
         raise SystemExit('Unexpected requested permission; inspect before installing')
@@ -75,7 +85,7 @@ ns='{http://schemas.android.com/apk/res/android}'
 app=manifest.find('application')
 if app is None or app.get(ns+'allowBackup')!='false':
     raise SystemExit('Backup policy is not disabled')
-p=Path('dist/quickvault-debug.apk')
+p=Path(os.environ['QV_APP_BUILT_APK'])
 print('APK SHA-256:',hashlib.sha256(p.read_bytes()).hexdigest())
 print('Built only. Inspect the final manifest/signature before any device install.')
 PY

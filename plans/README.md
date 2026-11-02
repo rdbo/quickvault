@@ -69,5 +69,6 @@ plan, or a new plan that names the one it supersedes.
 | [0028](0028-archive-exchange-commands/PLAN.md) | Conflict resolution and archive exchange (roadmap 2.2c) | Reviewed — publication reporting repaired and verified |
 | [0029](0029-linux-platform/PLAN.md) | Platform traits and Linux adapters (roadmap 2.3) | Reviewed |
 | [0030](0030-app-foundation/PLAN.md) | Shared app foundation and webview security boundary (roadmap 2.4) | Reviewed — startup error category repaired; 2.5 follow-ups recorded |
-| [0031](0031-app-vault-workflows/PLAN.md) | App vault workflows (roadmap 2.5) | Implemented |
-| [0032](0032-remove-vendored-forks/PLAN.md) | Remove vendored forks except dioxus-desktop | Implemented |
+| [0031](0031-app-vault-workflows/PLAN.md) | App vault workflows (roadmap 2.5) | Implemented — changes requested; see REVIEW.md |
+| [0032](0032-remove-vendored-forks/PLAN.md) | Remove vendored forks except dioxus-desktop | Reviewed |
+| [0033](0033-android-quick-unlock/PLAN.md) | Android quick unlock (roadmap 2.6) | Implemented — owner closed phase; review due, unvalidated devices disabled |

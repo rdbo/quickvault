@@ -9,6 +9,39 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-11-02: Phase 2.6 implementation completed under the owner's closure
+  decision (plan 0033). Remaining physical-device checks are recorded separately
+  as prerequisites for device enablement; unvalidated hardware stays disabled.
+  Fresh-context implementation review remains due.
+
+- 2026-11-02: Physical Android testing found and repaired a CSP/bootstrap
+  metadata read that could borrow the renderer's active edit RefCell and abort
+  the app. Protocol connection metadata now uses its independent shared server
+  location; a focused regression covers reads during rendering, and updated
+  host engine tests pass. The earlier extended Android regression passed;
+  authenticated Class 3 and device-credential adapter round trips and wrong-AAD
+  rejection now pass on the connected phone. An explicit isolated validation
+  build adds shared-app quick-unlock workflow tests. Enrollment-change
+  invalidation and the remaining device matrix are still unverified.
+
+- 2026-11-02: Android quick-unlock implementation (roadmap 2.6, plan 0033):
+  bounded hardware keystore/prompt adapter, Class 3 policy and separate labelled
+  device-credential opt-in, core reauthentication/binding and credential-change
+  invalidation, process-local age/attempt policy, app enrollment/unlock/disable,
+  host regressions and interactive hardware instrumentation. Unvalidated devices
+  remain disabled; physical-device evidence is still required. No dependency,
+  vault format, server or primitive change.
+- 2026-11-02: Repaired phase-2.5 review findings: candidate-bound five-second
+  weak-password consent, Fair warning and generated master-password suggestions,
+  generator class-constraint preservation/strength warnings, Android Back and
+  action-transition document cleanup and stale native picker-result rejection.
+  Extended engine/device edit/history/file/lock-race checks; see the review log.
+
+- 2026-11-02: Fresh phase-2.5 review records changes requested for credential
+  strength safeguards, Android Back document-choice cleanup, generator
+  option/warning parity and incomplete GUI validation. Phase 2.6 remains
+  pending the prerequisite review fixes; see plan 0031 REVIEW.md.
+
 - 2026-11-01: App vault workflows (roadmap 2.5, plan 0031). The shared
   Android/Linux app now reaches the CLI's offline feature set:
   - browsing, search, entry view and edit, groups and trash;

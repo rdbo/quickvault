@@ -157,7 +157,7 @@ impl core::fmt::Debug for Created {
 /// The single entry point for frontends.
 pub struct Core {
     pub(crate) anchors: AnchorDir,
-    time: Arc<dyn TimeSource>,
+    pub(crate) time: Arc<dyn TimeSource>,
     process: ProcessHardening,
     pub(crate) snapshots: Option<Arc<SnapshotPolicy>>,
     pub(crate) platform: Option<crate::platform::PlatformPolicy>,
@@ -376,7 +376,7 @@ impl Core {
         Ok((session, status))
     }
 
-    fn open(
+    pub(crate) fn open(
         &self,
         path: &Path,
         cancel: Option<&CancelToken>,

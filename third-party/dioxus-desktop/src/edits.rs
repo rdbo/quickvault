@@ -73,6 +73,9 @@ impl Drop for ConnectionPermit {
 /// This handles communication between the requests that the webview makes and the interpreter.
 #[derive(Clone)]
 pub(crate) struct WryQueue {
+    // Protocol callbacks on Android may run while the renderer borrows inner.
+    // Connection metadata is independently shared and never borrows edit state.
+    location: WebviewWebsocketLocation,
     inner: Rc<RefCell<WryQueueInner>>,
 }
 
@@ -133,7 +136,7 @@ impl WryQueue {
     pub(crate) fn edits_path(&self) -> String {
         let WebviewWebsocketLocation {
             webview_id, server, ..
-        } = &self.inner.borrow().location;
+        } = &self.location;
         let server = server.lock().unwrap();
         let port = server.port;
         let key = &server.client_key;
@@ -143,7 +146,7 @@ impl WryQueue {
 
     /// Get the key the client should expect from the server when connecting to the websocket.
     pub(crate) fn required_server_key(&self) -> String {
-        let server = &self.inner.borrow().location.server;
+        let server = &self.location.server;
         let server = server.lock().unwrap();
         encode_key_string(&server.server_key)
     }
@@ -496,6 +499,10 @@ impl EditWebsocket {
         let server = self.current_location.clone();
         let server_location = self.server_location.clone();
         WryQueue {
+            location: WebviewWebsocketLocation {
+                webview_id,
+                server: server.clone(),
+            },
             inner: Rc::new(RefCell::new(WryQueueInner {
                 server_location_changed: server_location.clone(),
                 server_location_changed_future: owned_notify_future(server_location),
@@ -623,6 +630,26 @@ fn owned_notify_future(notify: Arc<Notify>) -> Pin<Box<dyn Future<Output = ()>>>
 mod hardened_transport_tests {
     use super::*;
     use std::io::Write;
+    #[test]
+    fn hardened_protocol_metadata_does_not_borrow_the_active_render_queue() {
+        let queue = EditWebsocket::start(true).create_queue();
+        let _rendering = queue.inner.borrow_mut();
+        let first = queue.edits_path();
+        assert!(first.starts_with("ws://127.0.0.1:"));
+        assert!(!queue.required_server_key().is_empty());
+        // Keep the shared location live: a server restart must update CSP too.
+        let old_port = queue.location.server.lock().unwrap().port;
+        let next_port = if old_port == u16::MAX {
+            1
+        } else {
+            old_port + 1
+        };
+        queue.location.server.lock().unwrap().port = next_port;
+        assert!(queue
+            .edits_path()
+            .starts_with(&format!("ws://127.0.0.1:{next_port}/")));
+        assert_ne!(first, queue.edits_path());
+    }
     // A batch the bounded queue cannot hold must not look flushed: its
     // receiver resolves as cancelled, which hardened rendering treats as fatal.
     #[test]
@@ -633,9 +660,7 @@ mod hardened_transport_tests {
         assert!(matches!(dropped.try_recv(), Err(oneshot::Canceled)));
         let mut huge = state.add_message(vec![0; 8 * 1024 * 1024 + 1]);
         assert!(matches!(huge.try_recv(), Err(oneshot::Canceled)));
-        assert!(kept
-            .iter_mut()
-            .all(|r| matches!(r.try_recv(), Ok(None))));
+        assert!(kept.iter_mut().all(|r| matches!(r.try_recv(), Ok(None))));
         let (tx, rx) = std::sync::mpsc::sync_channel(0);
         let mut full = WebviewConnectionState::Connected { edits_outgoing: tx };
         let mut lost = full.add_message(vec![3]);
@@ -653,12 +678,18 @@ mod hardened_transport_tests {
         applied.send(()).unwrap();
         // Later wake-ups without a new batch must not look like a dropped one.
         for _ in 0..3 {
-            assert_eq!(queue.poll_edits_flushed(&mut cx), std::task::Poll::Ready(true));
+            assert_eq!(
+                queue.poll_edits_flushed(&mut cx),
+                std::task::Poll::Ready(true)
+            );
         }
         let (dropped, rx) = oneshot::channel::<()>();
         queue.inner.borrow_mut().edits_in_progress = Some(rx);
         drop(dropped);
-        assert_eq!(queue.poll_edits_flushed(&mut cx), std::task::Poll::Ready(false));
+        assert_eq!(
+            queue.poll_edits_flushed(&mut cx),
+            std::task::Poll::Ready(false)
+        );
     }
     #[test]
     fn hardened_handshake_reader_and_actual_stalled_peer_are_bounded() {

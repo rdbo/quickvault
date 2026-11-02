@@ -4,6 +4,7 @@
     <!-- Dioxus renderer IPC binds a loopback TCP socket; Android requires this
          permission even for localhost. No remote-network feature is implemented. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <application android:hasCode="true" android:supportsRtl="true"
         android:extractNativeLibs="true" android:allowNativeHeapPointerTagging="false"
         android:allowBackup="false" android:fullBackupContent="false"

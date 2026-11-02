@@ -553,6 +553,21 @@ dated revision under roadmap step 4.
 
 ## Revisions
 
+- 2026-11-02 (owner explicitly requests repairs and continuation to 2.6 on
+  the current tree, without approval/commit checkpoints): resolve REVIEW.md
+  findings before continuing. Add candidate-bound five-second weak-password
+  consent to workspace pending state; input changes cancel it. Show countdown,
+  stronger-password default, Fair warning and six-word suggestion for password
+  change/post-recovery/rotation. Reuse protected generated-value expiry and
+  compare generated suggestions without zxcvbn. Preserve/expose character
+  `require_each_class`, strength labels and <64-bit warnings. Clear Android
+  picks on Back and action-driven screen changes; reject stale native picker
+  completions by request code. Extend engine/device flow checks for the missing
+  edit/history/file/lock-race cases. Files remain those already named by this
+  plan, plus its tests. No spec/dependency change. Verify focused controller
+  and engine tests, Android build/device evidence if available, then final
+  AGENTS gates. Owner continuation overrides the earlier stop handoff.
+
 - 2026-11-02 (device evidence, owner delegation 2026-11-01): decision 1's
   rule extended to the system document picker, which always backgrounds the
   activity, so every pick locked the vault and lost the pick. A pick started in
@@ -569,6 +584,17 @@ dated revision under roadmap step 4.
   fresh-context review; the owner may veto the picker choice at the UI review.
 
 ## Execution log
+
+- 2026-11-02: Fresh-context prerequisite review on clean committed HEAD
+  `1a40186`: **Changes requested**, see REVIEW.md. Outstanding: the Accepted
+  0010 password-change strength contract (including Rust-enforced weak-password
+  cooldown), screen-scoped Android document cleanup on Back, generator option
+  preservation/weak-output warnings, and gaps against the promised GUI flow
+  checklist. Status remains Implemented under the review lifecycle; it is not
+  Reviewed. No product fix or new phase implementation was made. The owner
+  delegated choices/approval in this session ("do whatever you think is best
+  and ill review afterwards"); no approval question is pending. Roadmap
+  Session protocol step 2 stops phase progression on escalated findings.
 
 - 2026-11-01: Planned after the 0030 fresh-context review (Approved with minor
   fixes). Decisions 1–5 chosen under the owner's 2026-11-01 delegation. No
@@ -751,3 +777,13 @@ dated revision under roadmap step 4.
   vendored dioxus-desktop 5 passed. No dependency changed, so deny/vet were not
   rerun. Steps 8 and 11 ticked; owner phone observations stay separate (UI
   review). Status Implemented.
+
+- 2026-11-02 (owner-authorized continuation): implemented the dated review
+  repair revision. Candidate-bound weak consent and generator persistence tests
+  pass; expanded WebKit engine flows pass (3), including edit/history restore,
+  archive round trip, explicit file-rule success/refusal and lock during save.
+  Back/action transitions clear picks, native stale picker callbacks reject;
+  device regressions compile in the test APK. Device rerun remains pending
+  hardware, and the repaired code still needs its ordinary later fresh review.
+  Explicit owner continuation authorizes phase 2.6 while that evidence is kept
+  open. No staging, commit, push or branch changes.

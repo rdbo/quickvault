@@ -14,8 +14,8 @@ import java.util.concurrent.TimeUnit;
 
 /** Synthetic device checks. Never selects or opens an existing vault. */
 @SuppressWarnings("deprecation")
-public final class PlatformTest extends InstrumentationTestCase {
-    private WebView find(View view) {
+public class PlatformTest extends InstrumentationTestCase {
+    protected WebView find(View view) {
         if (view instanceof WebView) return (WebView)view;
         if (view instanceof ViewGroup) {
             ViewGroup group=(ViewGroup)view;
@@ -23,13 +23,13 @@ public final class PlatformTest extends InstrumentationTestCase {
         }
         return null;
     }
-    private String js(Instrumentation instrumentation,WebView view,String script) throws Exception {
+    protected String js(Instrumentation instrumentation,WebView view,String script) throws Exception {
         ArrayBlockingQueue<String> result=new ArrayBlockingQueue<>(1);
         instrumentation.runOnMainSync(()->view.evaluateJavascript(script,value->result.offer(value)));
         String value=result.poll(10,TimeUnit.SECONDS);
         assertNotNull("Engine response deadline",value);return value;
     }
-    private void removeFixture(java.io.File root, java.io.File file) throws Exception {
+    protected void removeFixture(java.io.File root, java.io.File file) throws Exception {
         // Only the newly created private test directory may be removed.
         assertTrue("Fixture remains inside its private root", file.getCanonicalPath().equals(root.getCanonicalPath()) || file.getCanonicalPath().startsWith(root.getCanonicalPath()+java.io.File.separator));
         if(file.isDirectory()) {
@@ -38,7 +38,7 @@ public final class PlatformTest extends InstrumentationTestCase {
         }
         assertTrue("Fixture cleanup",file.delete());
     }
-    private void awaitJs(Instrumentation instrumentation,WebView view,String condition,String stage) throws Exception {
+    protected void awaitJs(Instrumentation instrumentation,WebView view,String condition,String stage) throws Exception {
         long deadline=System.currentTimeMillis()+30000;
         while(System.currentTimeMillis()<deadline) {
             if("true".equals(js(instrumentation,view,condition)))return;
@@ -47,22 +47,22 @@ public final class PlatformTest extends InstrumentationTestCase {
         // AppError messages are fixed, data-free categories, never input text.
         fail("Synthetic device stage: "+stage+"; "+js(instrumentation,view,"document.querySelector('.error')?.textContent || 'no app error'")+"; "+js(instrumentation,view,"window.qvDeviceFixture?.summary?.() || ''"));
     }
-    private void submitFixture(Instrumentation instrumentation,WebView view) throws Exception {
+    protected void submitFixture(Instrumentation instrumentation,WebView view) throws Exception {
         js(instrumentation,view,"window.qvDeviceFixture.consent()");
         awaitJs(instrumentation,view,"!document.querySelector('.primary').disabled","consent enabled submission");
         js(instrumentation,view,"window.qvDeviceFixture.submit()");
     }
-    private void awaitHeading(Instrumentation instrumentation,WebView view,String heading) throws Exception {
+    protected void awaitHeading(Instrumentation instrumentation,WebView view,String heading) throws Exception {
         awaitJs(instrumentation,view,"document.querySelector('h2')?.textContent === "+org.json.JSONObject.quote(heading),heading);
     }
-    private void lockFixture(Instrumentation instrumentation,WebView view) throws Exception {
+    protected void lockFixture(Instrumentation instrumentation,WebView view) throws Exception {
         js(instrumentation,view,"window.qvDeviceFixture.lock()");
         awaitHeading(instrumentation,view,"Welcome back");
     }
-    private void awaitUnlocked(Instrumentation instrumentation,WebView view) throws Exception {
+    protected void awaitUnlocked(Instrumentation instrumentation,WebView view) throws Exception {
         awaitJs(instrumentation,view,"!!document.querySelector('.ws') && !document.querySelector('.busy')","unlocked workspace");
     }
-    private void click(Instrumentation instrumentation,WebView view,String text) throws Exception {
+    protected void click(Instrumentation instrumentation,WebView view,String text) throws Exception {
         awaitJs(instrumentation,view,"window.qvDeviceFixture.button("+org.json.JSONObject.quote(text)+")","button "+text);
     }
     private android.content.ClipData clip(Instrumentation instrumentation) throws Exception {
@@ -117,6 +117,17 @@ public final class PlatformTest extends InstrumentationTestCase {
         js(instrumentation,view,"window.qvDeviceFixture.unlock(false)");
         submitFixture(instrumentation,view);
         awaitUnlocked(instrumentation,view);
+        // Edit, then restore the older complete version through the shared UI.
+        click(instrumentation,view,"Synthetic phone entry");click(instrumentation,view,"Edit");
+        awaitHeading(instrumentation,view,"Edit entry");
+        js(instrumentation,view,"document.getElementById('ws-title').value='Edited phone entry';document.getElementById('ws-title').dispatchEvent(new Event('input',{bubbles:true}))");
+        click(instrumentation,view,"Save");awaitHeading(instrumentation,view,"Edited phone entry");
+        click(instrumentation,view,"History");awaitHeading(instrumentation,view,"History");
+        awaitJs(instrumentation,view,"!!document.querySelector('.row-button')","history retained");
+        js(instrumentation,view,"document.querySelector('.row-button').click()");
+        click(instrumentation,view,"Restore this version");
+        awaitJs(instrumentation,view,"(document.querySelector('.notice')?.textContent||'')==='Restored as a new version.'","history restored");
+        awaitJs(instrumentation,view,"window.qvDeviceFixture.nav('Vault')","vault after restore");
         // Attachment round trip through the picker path, no plaintext temp file.
         java.io.File input=new java.io.File(root,"input.bin");
         try(java.io.FileOutputStream out=new java.io.FileOutputStream(input)){out.write("phone-attachment-canary".getBytes(java.nio.charset.StandardCharsets.UTF_8));}
@@ -128,6 +139,12 @@ public final class PlatformTest extends InstrumentationTestCase {
         awaitJs(instrumentation,view,"Array.from(document.querySelectorAll('.row-title')).some(t=>t.textContent==='phone-canary.bin')","attachment added");
         java.io.File output=new java.io.File(root,"output.bin");
         pick(instrumentation,view,"Choose where to save",output,"picked output");
+        // Back and a late native result must not carry a destination to a new screen.
+        click(instrumentation,view,"Back");awaitHeading(instrumentation,view,"Synthetic phone entry");
+        assertNull("Back forgets the native document",main.qvPickedName());
+        click(instrumentation,view,"Attachments");
+        awaitJs(instrumentation,view,"!Array.from(document.querySelectorAll('.hint')).some(h=>h.textContent.startsWith('Chosen:'))","Back cleared chosen hint");
+        pick(instrumentation,view,"Choose where to save",output,"picked replacement output");
         click(instrumentation,view,"Save…");
         click(instrumentation,view,"Continue");
         awaitJs(instrumentation,view,"(document.querySelector('.notice')?.textContent||'')==='Attachment saved.'","attachment saved");
@@ -224,6 +241,7 @@ public final class PlatformTest extends InstrumentationTestCase {
             // or the production app's ordinary screen-lock behavior.
             instrumentation.runOnMainSync(()->activity.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
             MainActivity main=(MainActivity)activity;
+            assertFalse("No unvalidated hardware backend is enabled",main.qvQuickAvailable());
             long unlockedDeadline=System.currentTimeMillis()+30000;
             while((main.qvStatus()&2)==0 && System.currentTimeMillis()<unlockedDeadline)Thread.sleep(100);
             assertEquals("Unlock the test phone before running instrumentation",2,main.qvStatus()&2);

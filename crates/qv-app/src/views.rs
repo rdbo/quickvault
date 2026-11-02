@@ -653,8 +653,8 @@ pub struct GeneratorView {
     pub words: u32,
     /// PIN digits.
     pub pin: u32,
-    /// Toggles: lower, upper, digits, symbols, ambiguous, capitalize, digit.
-    pub flags: [bool; 7],
+    /// Toggles: lower, upper, digits, symbols, ambiguous, capitalize, digit, require each.
+    pub flags: [bool; 8],
     /// Separator.
     pub separator: String,
     /// Excluded characters.

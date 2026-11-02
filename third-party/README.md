@@ -45,6 +45,12 @@ Upstream license files are unchanged.
 
 Unmodified upstream unsafe is retained; product code adds none.
 
+- Plan 0033 device follow-up: edits.rs stores protocol connection metadata
+  independently of the renderer's RefCell. CSP/bootstrap metadata reads no
+  longer borrow the mutable render queue on Android request threads; the same
+  Arc/Mutex server location still supplies refreshed ports/keys. Regression
+  holds a live render borrow while reading/updating protocol metadata.
+
 ## Verification and maintenance
 
 - `sh scripts/test-check-spdx.sh` and `sh scripts/check-spdx.sh`.

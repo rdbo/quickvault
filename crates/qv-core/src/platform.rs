@@ -6,9 +6,11 @@ use crate::{Core, CoreError, Session};
 pub use qv_platform::android::{
     AndroidClipboardBackend, AndroidPlatform, AndroidState, BackgroundDeferral, ClipToken,
 };
+pub use qv_platform::quick_unlock::{AndroidKeystore, AndroidKeystoreBackend};
 pub use qv_platform::{
     Cancellation, Clipboard, Evidence, InputPurpose, Keystore, Lifecycle, LockCallback, LockEvent,
-    PlatformError, PlatformServices, ProtectionStatus, SecureInput, Unavailable, Watch,
+    PlatformError, PlatformServices, ProtectionStatus, QuickBinding, QuickPolicy, SecureInput,
+    Unavailable, Watch,
 };
 #[cfg(target_os = "linux")]
 pub use qv_platform::{
@@ -19,7 +21,7 @@ pub use qv_platform::{
 use std::sync::Arc;
 
 pub(crate) struct PlatformPolicy {
-    services: Arc<dyn PlatformServices>,
+    pub(crate) services: Arc<dyn PlatformServices>,
     acknowledged: bool,
     lifecycle_required: bool,
 }
@@ -68,6 +70,17 @@ impl Core {
     pub fn platform_status(&self) -> Option<ProtectionStatus> {
         self.platform.as_ref().map(|p| p.services.status())
     }
+    pub(crate) fn quick_services(&self) -> Result<&Arc<dyn PlatformServices>, CoreError> {
+        let services = &self
+            .platform
+            .as_ref()
+            .ok_or(CoreError::NotAllowed)?
+            .services;
+        if !services.keystore().available() {
+            return Err(CoreError::NotAllowed);
+        }
+        Ok(services)
+    }
     pub(crate) fn platform_gate(&self) -> Result<(), CoreError> {
         if self
             .platform
@@ -80,6 +93,7 @@ impl Core {
     }
     pub(crate) fn bind_platform(&self, mut session: Session) -> Result<Session, CoreError> {
         if let Some(policy) = &self.platform {
+            session.services = Some(policy.services.clone());
             if let Err(failure) = session.attach_platform(policy.services.as_ref()) {
                 if policy.lifecycle_required {
                     return Err(error(failure));

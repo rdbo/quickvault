@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-11-02 | 2026-11-02 | 0008 §3, §4.4; 0012 §3 |
+| Reviewed | 2026-11-02 | 2026-11-02 | 0008 §3, §4.4; 0012 §3 |
 
 ## Intent
 
@@ -106,3 +106,5 @@ None.
     ARCHITECTURE (§3 CLI paragraph, technology table), qv-cli docs, CHANGELOG,
     plans index and roadmap revision. Historical plans 0015/0030 left as
     records. Needs a fresh-context review (touches the clipboard transport).
+
+- 2026-11-02: Independent scoped review Approved; see REVIEW.md. No product fix. Original committed transport/dependency change verified before phase-0033 work.

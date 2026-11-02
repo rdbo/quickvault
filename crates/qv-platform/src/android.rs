@@ -53,6 +53,7 @@ struct State {
 pub struct AndroidPlatform {
     state: Arc<Mutex<State>>,
     backend: Option<Arc<dyn AndroidClipboardBackend>>,
+    keystore: Option<Arc<dyn Keystore>>,
 }
 struct Guard {
     state: Weak<Mutex<State>>,
@@ -82,6 +83,11 @@ fn lock_event(observed: AndroidState) -> Option<LockEvent> {
     }
 }
 impl AndroidPlatform {
+    /// Inject a validated hardware wrapping adapter; no default backend exists.
+    pub fn with_keystore(mut self, backend: Arc<dyn Keystore>) -> Self {
+        self.keystore = Some(backend);
+        self
+    }
     /// Enable copying through a native clipboard backend.
     pub fn with_clipboard(mut self, backend: Arc<dyn AndroidClipboardBackend>) -> Self {
         self.backend = Some(backend);
@@ -245,7 +251,7 @@ impl PlatformServices for AndroidPlatform {
             hibernation: Evidence::Unknown,
             lifecycle: state.observed.monitoring && state.observed.secure_window,
             clipboard: self.backend.is_some(),
-            quick_unlock: false,
+            quick_unlock: self.keystore.as_ref().is_some_and(|k| k.available()),
         }
     }
     fn lifecycle(&self) -> &dyn Lifecycle {
@@ -262,7 +268,7 @@ impl PlatformServices for AndroidPlatform {
         &Unavailable
     }
     fn keystore(&self) -> &dyn Keystore {
-        &Unavailable
+        self.keystore.as_deref().unwrap_or(&Unavailable)
     }
 }
 #[cfg(test)]

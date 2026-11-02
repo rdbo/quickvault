@@ -145,7 +145,7 @@ pub(crate) fn settings_from(g: &crate::workspace::GenForm) -> qv_core::Generator
             symbols: g.flags[3],
             exclude_ambiguous: g.flags[4],
             exclude_chars: g.exclude.as_str().to_owned(),
-            ..Default::default()
+            require_each_class: g.flags[7],
         }),
         GenMode::Words => qv_core::GeneratorSettings::Passphrase(qv_core::PassphraseSettings {
             words: g.words,
@@ -175,6 +175,7 @@ pub(crate) fn load_generator(
             g.flags[2] = c.digits;
             g.flags[3] = c.symbols;
             g.flags[4] = c.exclude_ambiguous;
+            g.flags[7] = c.require_each_class;
             g.exclude = zeroize::Zeroizing::new(c.exclude_chars.clone());
         }
         qv_core::GeneratorSettings::Passphrase(p) => {
@@ -641,6 +642,7 @@ pub(crate) fn run(
                     GenFlag::Digits => 2,
                     GenFlag::Symbols => 3,
                     GenFlag::Ambiguous => 4,
+                    GenFlag::Each => 7,
                     GenFlag::Capitalize => 5,
                     GenFlag::AppendDigit => 6,
                 };
@@ -655,6 +657,11 @@ pub(crate) fn run(
                 Ok(())
             })
             .ok_or(AppError::InvalidInput)?,
+        WsAction::SuggestPassword => c.with_ws(epoch, |ws, _| -> Result<(), AppError> {
+            ws.generated = Some((qv_core::generate(&qv_core::GeneratorSettings::Passphrase(
+                qv_core::PassphraseSettings::default()))?, std::time::Instant::now()));
+            Ok(())
+        }).ok_or(AppError::InvalidInput)?,
         WsAction::SaveGeneratorDefaults => {
             let settings = c
                 .peek(epoch, |ws| settings_from(&ws.generator))
@@ -684,7 +691,18 @@ pub(crate) fn run(
                 }))
             })
         }
-        WsAction::ChangePassword => change_password(c, epoch, over_budget),
+        WsAction::ChangePassword => change_password(c, epoch),
+        WsAction::EnrollQuick(policy) => {
+            let pw = c.peek(epoch, |ws| password(ws, WsField::Password)).ok_or(AppError::InvalidInput)??;
+            c.run_op(epoch, None, move |s, token, _| {
+                s.enroll_quick(&pw, policy, Some(token))?;
+                Ok(on_ws(|ws| { ws.inputs.clear(); ws.notice = Some("Quick unlock enabled for this app process. Restart, reboot, expiry, three failures or credential changes require the master password."); }))
+            })
+        }
+        WsAction::DisableQuick => c.run_op(epoch, None, move |s, _, _| {
+            s.disable_quick()?;
+            Ok(on_ws(|ws| ws.notice = Some("Quick unlock disabled; the hardware key was removed.")))
+        }),
         WsAction::DeleteOldSnapshots => {
             let ids = c
                 .with_ws(epoch, |ws, _| std::mem::take(&mut ws.old_snapshots))
@@ -776,10 +794,46 @@ fn reveal_value(
     };
     Ok(bytes)
 }
+/// Candidate inputs clear this consent on every change; the dispatch layer
+/// enforces the deadline as well as the disabled UI button.
+fn strength_consent(
+    c: &Controller,
+    epoch: FormEpoch,
+    candidate: &MasterPassword,
+    action: WsAction,
+) -> Result<bool, AppError> {
+    c.with_ws(epoch, |ws, _| {
+        let generated = ws.generated.as_ref().is_some_and(|(g, _)| {
+            g.expose_secret()
+                .as_bytes()
+                .ct_eq(candidate.expose_secret().as_bytes())
+                .to_bool()
+        });
+        let verdict = if generated {
+            PasswordVerdict::Accept
+        } else {
+            qv_core::password_strength(candidate).verdict
+        };
+        ws.fair_warning = verdict == PasswordVerdict::Warn;
+        if verdict == PasswordVerdict::ConfirmWeak
+            && (!ws.weak_accepted
+                || ws
+                    .weak_until
+                    .is_none_or(|until| std::time::Instant::now() < until))
+        {
+            ws.weak_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
+            ws.set_pending(crate::workspace::ConfirmKind::WeakPassword, action, false);
+            return false;
+        }
+        ws.weak_until = None;
+        true
+    })
+    .ok_or(AppError::InvalidInput)
+}
 /// New password twice (constant-time comparison) with the creation strength
 /// rules; a weak one needs an explicit confirmation, which re-dispatches with
 /// `weak_ok` set.
-fn change_password(c: &Controller, epoch: FormEpoch, weak_ok: bool) -> Result<(), AppError> {
+fn change_password(c: &Controller, epoch: FormEpoch) -> Result<(), AppError> {
     let new = c
         .peek(epoch, |ws| -> Result<MasterPassword, AppError> {
             let a = password(ws, WsField::NewPassword)?;
@@ -796,13 +850,8 @@ fn change_password(c: &Controller, epoch: FormEpoch, weak_ok: bool) -> Result<()
             Ok(a)
         })
         .ok_or(AppError::InvalidInput)??;
-    match qv_core::password_strength(&new).verdict {
-        PasswordVerdict::ConfirmWeak if !weak_ok => {
-            return c
-                .with_ws(epoch, |ws, _| ws.set_pending_weak())
-                .ok_or(AppError::InvalidInput);
-        }
-        _ => {}
+    if !strength_consent(c, epoch, &new, WsAction::ChangePassword)? {
+        return Ok(());
     }
     c.run_op(epoch, None, move |s, token, _| {
         let ids: Vec<String> = s
@@ -875,12 +924,12 @@ fn begin_rotation(
             {
                 return Err(AppError::InvalidInput);
             }
-            if qv_core::password_strength(&a).verdict == PasswordVerdict::ConfirmWeak {
-                return Err(AppError::WeakPassword);
-            }
             Ok(a)
         })
         .ok_or(AppError::InvalidInput)??;
+    if !strength_consent(c, epoch, &new, WsAction::BeginRotation)? {
+        return Ok(());
+    }
     // The rotation consumes and locks the session once its recovery snapshot
     // exists; that expected lock must not discard the prepared rotation.
     c.state().rotating = true;
@@ -914,13 +963,6 @@ fn begin_rotation(
     started
 }
 impl Workspace {
-    fn set_pending_weak(&mut self) {
-        self.set_pending(
-            crate::workspace::ConfirmKind::WeakPassword,
-            WsAction::ChangePassword,
-            true,
-        );
-    }
     fn offer_old_snapshots(&mut self, ids: Vec<String>) {
         let n = ids.len();
         self.old_snapshots = ids;

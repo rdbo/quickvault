@@ -73,7 +73,7 @@ impl AndroidClipboardBackend for NativeClipboard {
 }
 /// Ask the user to choose a document; the result is polled by later actions.
 pub(crate) fn request_pick(c: &Controller, epoch: FormEpoch, kind: PickKind, create: bool) {
-    if c.screen(epoch).is_none() {
+    if c.screen(epoch).is_none() || c.snapshot().busy {
         return;
     }
     let archive = kind == PickKind::Archive;
@@ -86,7 +86,8 @@ pub(crate) fn request_pick(c: &Controller, epoch: FormEpoch, kind: PickKind, cre
             &[JValue::Bool(create.into()), JValue::Bool(archive.into())],
         )?
         .j()
-    }) && let Ok(mut pick) = PICK.lock()
+    }) && id > 0
+        && let Ok(mut pick) = PICK.lock()
     {
         *pick = Some((id, create));
         drop(pick);
@@ -343,7 +344,17 @@ pub(crate) fn initialize() {
         };
         let _ = BRIDGE.set((vm, activity));
         std::thread::spawn(move || {
-            let os = Arc::new(AndroidPlatform::default().with_clipboard(Arc::new(NativeClipboard)));
+            #[cfg(feature = "validation")]
+            let quick: Arc<dyn qv_core::platform::AndroidKeystoreBackend> =
+                Arc::new(FixtureKeystore);
+            #[cfg(not(feature = "validation"))]
+            let quick: Arc<dyn qv_core::platform::AndroidKeystoreBackend> =
+                Arc::new(NativeKeystore);
+            let os = Arc::new(
+                AndroidPlatform::default()
+                    .with_clipboard(Arc::new(NativeClipboard))
+                    .with_keystore(Arc::new(qv_core::platform::AndroidKeystore::new(quick))),
+            );
             let _ = OS.set(os.clone());
             let Ok(mut env) = poll_vm.attach_current_thread() else {
                 let _ = crate::ui::ACTIVE.set(Err(AppError::Unavailable));
@@ -369,6 +380,8 @@ pub(crate) fn initialize() {
                 let path = std::fs::canonicalize(path)
                     .map_err(|_| ())?
                     .join("quickvault");
+                #[cfg(feature = "validation")]
+                let path = path.join("validation-current");
                 private_dir(&path).map_err(|_| ())?;
                 Ok::<_, ()>(path)
             })();
@@ -434,11 +447,194 @@ pub(crate) fn initialize() {
                 os.update(observed);
                 poll_pick(observed.foreground, &mut seen_pick);
                 if !ready && observed.secure_window {
-                    let _ = crate::ui::ACTIVE.set(Controller::new(root.clone(), os.clone()));
+                    #[cfg(not(feature = "validation"))]
+                    let controller = Controller::new(root.clone(), os.clone());
+                    #[cfg(feature = "validation")]
+                    let controller = Controller::new(root.clone(), os.clone()).inspect(|c| {
+                        c.0.fixture.store(true, std::sync::atomic::Ordering::SeqCst);
+                    });
+                    let _ = crate::ui::ACTIVE.set(controller);
                     ready = true;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
         });
     });
+}
+
+/// Bounded native keystore channel. No vault or plaintext enters UI events.
+struct NativeKeystore;
+impl qv_core::platform::AndroidKeystoreBackend for NativeKeystore {
+    fn validated(&self) -> bool {
+        call(|env, a| env.call_method(a, "qvQuickAvailable", "()Z", &[])?.z()).unwrap_or(false)
+    }
+    fn seal(
+        &self,
+        binding: qv_core::platform::QuickBinding,
+        policy: qv_core::platform::QuickPolicy,
+        secret: &qv_core::SecretBytes,
+        cancel: qv_core::platform::Cancellation,
+    ) -> Result<qv_core::SecretBytes, PlatformError> {
+        quick_operation(true, binding, policy, secret, cancel)
+    }
+    fn open(
+        &self,
+        binding: qv_core::platform::QuickBinding,
+        policy: qv_core::platform::QuickPolicy,
+        envelope: &qv_core::SecretBytes,
+        cancel: qv_core::platform::Cancellation,
+    ) -> Result<qv_core::SecretBytes, PlatformError> {
+        quick_operation(false, binding, policy, envelope, cancel)
+    }
+    fn delete(&self, envelope: &qv_core::SecretBytes) -> Result<(), PlatformError> {
+        if envelope.len() > 1536 {
+            return Err(PlatformError::InvalidInput);
+        }
+        let ok = call(|env, a| {
+            let array = env.byte_array_from_slice(envelope.expose_secret())?;
+            env.call_method(a, "qvQuickDelete", "([B)Z", &[JValue::Object(&array)])?
+                .z()
+        })
+        .map_err(|_| PlatformError::Io)?;
+        if ok { Ok(()) } else { Err(PlatformError::Io) }
+    }
+}
+fn quick_operation(
+    encrypt: bool,
+    binding: qv_core::platform::QuickBinding,
+    policy: qv_core::platform::QuickPolicy,
+    payload: &qv_core::SecretBytes,
+    cancel: qv_core::platform::Cancellation,
+) -> Result<qv_core::SecretBytes, PlatformError> {
+    let limit = if encrypt { 1024 } else { 1536 };
+    if payload.is_empty() || payload.len() > limit {
+        return Err(PlatformError::InvalidInput);
+    }
+    if cancel() {
+        return Err(PlatformError::Cancelled);
+    }
+    let _foreground = OS
+        .get()
+        .and_then(|os| os.defer_background())
+        .ok_or(PlatformError::Unavailable)?;
+    let id = call(|env, a| {
+        let context = env.byte_array_from_slice(&binding.encode())?;
+        let bytes = env.byte_array_from_slice(payload.expose_secret())?;
+        env.call_method(
+            a,
+            "qvQuickStart",
+            "(Z[BI[B)J",
+            &[
+                JValue::Bool(encrypt.into()),
+                JValue::Object(&context),
+                JValue::Int(policy as i32),
+                JValue::Object(&bytes),
+            ],
+        )?
+        .j()
+    })
+    .map_err(|_| PlatformError::Io)?;
+    if id <= 0 {
+        return Err(PlatformError::Unavailable);
+    }
+    let began = std::time::Instant::now();
+    let result = (|| {
+        loop {
+            if cancel() || began.elapsed() >= std::time::Duration::from_secs(60) {
+                return Err(PlatformError::Cancelled);
+            }
+            let status = call(|env, a| {
+                env.call_method(a, "qvQuickState", "(J)I", &[JValue::Long(id)])?
+                    .i()
+            })
+            .map_err(|_| PlatformError::Io)?;
+            // Success and cancellation can both arrive before credential UI
+            // dismissal is observed. Retain the guard through that observation.
+            let _resumed = if status != 0 {
+                let resumed = OS.get().and_then(|os| os.defer_background());
+                if resumed.is_none() {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                    continue;
+                }
+                resumed
+            } else {
+                None
+            };
+            if status == 1 {
+                let maximum = if encrypt { 1536 } else { 1024 };
+                let bytes = call(|env, a| {
+                    let array: jni::objects::JByteArray = env
+                        .call_method(a, "qvQuickResult", "(J)[B", &[JValue::Long(id)])?
+                        .l()?
+                        .into();
+                    let length = env.get_array_length(&array)?;
+                    if length <= 0 || length > maximum {
+                        return Err(jni::errors::Error::NullPtr("quick result bounds"));
+                    }
+                    env.convert_byte_array(array)
+                })
+                .map_err(|_| PlatformError::Io)?;
+                let bytes = Zeroizing::new(bytes);
+                return qv_core::SecretBytes::try_init(bytes.len(), |out| {
+                    out.copy_from_slice(&bytes);
+                    Ok(())
+                });
+            }
+            if status != 0 {
+                let transient = call(|env, a| {
+                    env.call_method(a, "qvQuickFailureKind", "(J)I", &[JValue::Long(id)])?
+                        .i()
+                })
+                .unwrap_or(2);
+                return Err(if transient == 1 {
+                    PlatformError::Cancelled
+                } else {
+                    PlatformError::Unavailable
+                });
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    })();
+    let _ = call(|env, a| {
+        env.call_method(
+            a,
+            "qvQuickFinish",
+            "(JZ)V",
+            &[JValue::Long(id), JValue::Bool(result.is_ok().into())],
+        )
+        .map(|_| ())
+    });
+    result
+}
+
+/// Availability-only test adapter. Built solely into the explicitly marked,
+/// path-restricted synthetic fixture; hardware operations remain the real ones.
+#[cfg(feature = "validation")]
+struct FixtureKeystore;
+#[cfg(feature = "validation")]
+impl qv_core::platform::AndroidKeystoreBackend for FixtureKeystore {
+    fn validated(&self) -> bool {
+        true
+    }
+    fn seal(
+        &self,
+        b: qv_core::platform::QuickBinding,
+        p: qv_core::platform::QuickPolicy,
+        s: &qv_core::SecretBytes,
+        c: qv_core::platform::Cancellation,
+    ) -> Result<qv_core::SecretBytes, PlatformError> {
+        qv_core::platform::AndroidKeystoreBackend::seal(&NativeKeystore, b, p, s, c)
+    }
+    fn open(
+        &self,
+        b: qv_core::platform::QuickBinding,
+        p: qv_core::platform::QuickPolicy,
+        s: &qv_core::SecretBytes,
+        c: qv_core::platform::Cancellation,
+    ) -> Result<qv_core::SecretBytes, PlatformError> {
+        qv_core::platform::AndroidKeystoreBackend::open(&NativeKeystore, b, p, s, c)
+    }
+    fn delete(&self, s: &qv_core::SecretBytes) -> Result<(), PlatformError> {
+        qv_core::platform::AndroidKeystoreBackend::delete(&NativeKeystore, s)
+    }
 }

@@ -1015,3 +1015,91 @@ pub(crate) fn ancestors_safe(path: &std::path::Path) -> bool {
             .is_ok_and(|s| s.mode() & 0o022 == 0 && (s.uid() == 0 || s.uid() == euid))
     })
 }
+
+#[test]
+fn password_change_consent_has_a_rust_deadline_and_tracks_candidate_and_epoch() {
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::unlocked();
+    env.c
+        .navigate(env.epoch(), Screen::Settings(Pane::Password));
+    env.put(WsField::NewPassword, "password");
+    env.put(WsField::Repeat, "password");
+    env.act(WsAction::ChangePassword);
+    assert_eq!(env.c.snapshot().live.weak_seconds, 5);
+    env.act(WsAction::Answer(true));
+    assert_eq!(env.c.pending(env.epoch()), Some(ConfirmKind::WeakPassword));
+    assert!(env.notice().is_none());
+    env.put(WsField::Repeat, "different");
+    assert!(env.c.pending(env.epoch()).is_none());
+    env.put(WsField::Repeat, "password");
+    env.act(WsAction::ChangePassword);
+    env.c.with_ws(env.epoch(), |ws, _| {
+        ws.weak_until = Some(Instant::now() - Duration::from_secs(1))
+    });
+    env.act(WsAction::Answer(true));
+    assert!(
+        env.notice()
+            .is_some_and(|n| n.starts_with("Master password changed"))
+    );
+    let stale = env.epoch();
+    env.c.back(stale);
+    env.c.act(stale, WsAction::Answer(true));
+    env.c.lock();
+    env.unlock("password");
+    assert_eq!(env.c.snapshot().phase, Phase::Unlocked);
+    env.c
+        .navigate(env.epoch(), Screen::Settings(Pane::Password));
+    env.act(WsAction::SuggestPassword);
+    let (value, bits) = env.c.generated(env.epoch()).unwrap();
+    assert_eq!(
+        std::str::from_utf8(value.expose_secret())
+            .unwrap()
+            .split('.')
+            .count(),
+        6
+    );
+    assert!(bits >= 70.0);
+    env.c.navigate(env.epoch(), Screen::Browse(None));
+    assert!(env.c.generated(env.epoch()).is_none());
+}
+#[test]
+fn generator_preserves_require_each_class_through_ui_and_saved_defaults() {
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::unlocked();
+    env.c.navigate(env.epoch(), Screen::Generator);
+    env.act(WsAction::GenToggle(crate::workspace::GenFlag::Each));
+    env.act(WsAction::SaveGeneratorDefaults);
+    let qv_core::GeneratorSettings::Characters(c) = env.read(|s| s.generator_defaults()) else {
+        panic!("character defaults");
+    };
+    assert!(!c.require_each_class);
+    env.c.navigate(env.epoch(), Screen::Browse(None));
+    env.c.navigate(env.epoch(), Screen::Generator);
+    assert!(!env.c.generator_form(env.epoch()).unwrap().flags[7]);
+}
+
+#[test]
+fn quick_unlock_unavailable_never_falls_back_or_opens_a_session() {
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::unlocked();
+    env.c
+        .navigate(env.epoch(), Screen::Settings(Pane::Password));
+    env.put(WsField::Password, PASSWORD);
+    env.act(WsAction::EnrollQuick(
+        qv_core::platform::QuickPolicy::Class3,
+    ));
+    assert!(env.error().is_some());
+    assert!(!env.c.protection().quick_unlock);
+    env.act(WsAction::EnrollQuick(
+        qv_core::platform::QuickPolicy::DeviceCredential,
+    ));
+    assert_eq!(env.c.pending(env.epoch()), Some(ConfirmKind::ReducedQuick));
+    env.act(WsAction::Answer(false));
+    env.c.lock();
+    env.c
+        .submit(env.epoch(), Action::QuickUnlock, true)
+        .unwrap();
+    env.wait();
+    assert_eq!(env.c.snapshot().phase, Phase::Locked);
+    assert!(env.c.snapshot().error.is_some());
+}

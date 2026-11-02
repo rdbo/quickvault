@@ -150,6 +150,7 @@ fn Screen(controller: Controller, revision: u64) -> Element {
     let rotation_confirmed = view.rotation_confirmed;
     rsx! {
         main {class:"shell", "data-qv-epoch":"{epoch.0}", Header{}
+            if fixture && cfg!(target_os="android") {p {class:"warning","Synthetic validation build · isolated test vault only"}}
             if preview {p {class:"hint","Read-only preview · vault actions are disabled. Do not enter real credentials."}}
             div {class:"layout",
                 aside {class:"intro",
@@ -225,7 +226,8 @@ fn Screen(controller: Controller, revision: u64) -> Element {
                             p {"Process and memory protection reduced: {protection.is_reduced()}"}
                             p {"Storage: {os.storage:?} · Swap: {os.swap:?} · Hibernation: {os.hibernation:?}"}
                             p {"Lock monitoring: {os.lifecycle} · Clipboard: {os.clipboard}"}
-                            p {"Quick unlock is unavailable. Clearing an input cannot guarantee erasure of framework or OS copies."}
+                            p {if os.quick_unlock {"Hardware quick unlock requires explicit enrollment in Settings."} else {"Quick unlock is unavailable on this device."}}
+                            p {"Clearing an input cannot guarantee erasure of framework or OS copies."}
                         }
                         label {class:"check",input {r#type:"checkbox",checked:acknowledged,disabled:view.busy,onchange:move|event|consent.set((epoch,event.checked()))} span {"I understand these protection limits and acknowledge reduced protection where shown."}}
                         if phase==Phase::WeakPassword{
@@ -238,6 +240,9 @@ fn Screen(controller: Controller, revision: u64) -> Element {
                                 if view.busy{"Opening…"}else if mode==Mode::Create{"Create vault"}else if mode==Mode::Recover{"Open with recovery phrase"}else{"Unlock vault"}
                                 span {"→"}
                             }
+                        }
+                        if mode==Mode::Unlock && controller.0.services.keystore().binding().is_some() {
+                            button { class: "secondary", "data-qv-clear": "true", disabled: view.busy || !acknowledged || preview, onclick: invoke(Action::QuickUnlock), "Quick unlock with the enrolled hardware policy" }
                         }
                         if mode==Mode::Recover{
                             details {summary{"Recover using a password and inspect the local anchor"}

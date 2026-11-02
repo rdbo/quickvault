@@ -12,6 +12,24 @@ The shared Android/Linux Dioxus UI provides the CLI's offline feature set:
 Validation: [2.4](../../plans/0030-app-foundation/VALIDATION.md),
 [2.5](../../plans/0031-app-vault-workflows/VALIDATION.md).
 
+Android quick unlock (plan 0033) is implemented behind a device-validation gate.
+No device is enabled yet. Unsupported/unvalidated devices keep password unlock.
+On a validated API 30+ device, Settings → Password offers password-reauthenticated
+Class 3 enrollment and a separate **device credential · reduced protection**
+action. The latter makes the device PIN/pattern/password a vault credential;
+biometric unlock never silently falls back to it. Each operation needs native
+OS authentication. Hardware policy is checked before use (StrongBox preferred,
+TEE permitted; software keys refused).
+
+Quick unlock lasts only for the current app process. Restart/reboot, lost state,
+seven days (including deep sleep), three failed/cancelled attempts, password
+change or rotation require the master password again. Its encrypted envelope and
+trusted counter are held in memory; aliases are deleted on invalidation and stale
+QuickVault aliases cleaned on startup. Nothing enters vault exports, sync or backup.
+JNI/provider/JVM intermediates have bounded best-effort cleanup, like the other
+Android adapters. Physical validation and interactive commands are recorded in
+[plan 0033](../../plans/0033-android-quick-unlock/VALIDATION.md).
+
 App limits (plan 0031):
 - Single-line inputs accept 1 KiB and multi-line notes or protected values
   8 KiB, below the 64 KiB native IPC bound. Larger existing values can be
@@ -118,8 +136,19 @@ ADB client/server; the runner never replaces that server. Only the test window
 stays awake during the run. Test fixtures use a newly created private directory
 and never open the existing app vault. Logs and failure status are retained in
 a temporary directory printed by the runner. Android uses canonical noBackupFilesDir,
-backup disabled and FLAG_SECURE; clipboard, keystore, quick unlock and autofill
-remain unavailable.
+backup disabled and FLAG_SECURE. Hardware quick unlock remains disabled on
+unvalidated devices; autofill remains unavailable.
+
+`QV_APP_DEVICE_VALIDATION=1` selects an explicit synthetic app build and writes
+`quickvault-validation-debug.apk` and `quickvault-validation-tests.apk`.
+It displays a validation banner, uses a separate `validation-current` private
+root, and restricts foundation opens to its fixed synthetic vault. Only this
+build injects hardware-backend availability for device testing; real native
+key-policy checks and authentication remain required. The explicit
+`QuickUnlockUiTest` methods exercise enrollment, lock/unlock, password-change
+invalidation and three cancelled prompts through the shared app UI and core.
+Install the normal build again after device testing. Record results in plan
+0033's validation record; this build does not validate or enable a device.
 
 Rust forms use protected containers, bounded input and epoch cancellation.
 Compiled local scripts explicitly clear DOM inputs on submit, cancel, lock and

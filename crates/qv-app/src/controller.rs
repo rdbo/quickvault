@@ -211,6 +211,8 @@ pub enum Action {
     ConfirmWeak,
     /// Unlock with a password.
     Unlock,
+    /// Explicit hardware-authenticated quick unlock; never a fallback.
+    QuickUnlock,
     /// Open with the recovery phrase.
     Recover,
     /// Inspect a missing or mismatched anchor using a password.
@@ -349,7 +351,7 @@ pub(crate) struct Inner {
     #[cfg(feature = "validation")]
     preview: AtomicBool,
     #[cfg(feature = "validation")]
-    fixture: AtomicBool,
+    pub(crate) fixture: AtomicBool,
 }
 /// Shared application controller; event callbacks contain only a weak reference.
 #[derive(Clone)]
@@ -518,7 +520,9 @@ impl Controller {
                 &Unavailable
             }
         }
-        let base = std::env::temp_dir().join(format!("qv-ui-flow-{}", std::process::id()));
+        let base = std::env::current_dir()
+            .map_err(|_| AppError::Unavailable)?
+            .join(format!(".qv-ui-flow-{}", std::process::id()));
         let mut builder = std::fs::DirBuilder::new();
         #[cfg(unix)]
         {
@@ -535,6 +539,12 @@ impl Controller {
                 services
             };
         let controller = Self::new(base, services)?;
+        std::fs::write(
+            controller.0.base.join("source.bin"),
+            b"synthetic-attachment-canary",
+        )
+        .map_err(|_| AppError::Unavailable)?;
+        private_dir(&controller.0.base.join("exports"))?;
         controller.0.fixture.store(true, Ordering::SeqCst);
         Ok(controller)
     }
@@ -548,6 +558,19 @@ impl Controller {
             std::process::exit(2)
         }
         self.lock();
+        #[cfg(target_os = "linux")]
+        let files_safe = qv_core::platform::files::Input::open(
+            &self.0.base.join("source.bin"),
+            1024,
+            Arc::new(|| false),
+        )
+        .is_ok();
+        #[cfg(not(target_os = "linux"))]
+        let files_safe = false;
+        let attachment_ok = !files_safe
+            || std::fs::read(self.0.base.join("output.bin"))
+                .is_ok_and(|b| b == b"synthetic-attachment-canary");
+        let passed = passed && attachment_ok;
         let cleaned = std::fs::remove_dir_all(&self.0.base).is_ok();
         if passed && cleaned {
             println!("full UI flow passed");
@@ -729,6 +752,7 @@ impl Controller {
             Action::Create
                 | Action::ConfirmWeak
                 | Action::Unlock
+                | Action::QuickUnlock
                 | Action::Recover
                 | Action::RecoverPassword
         ) {
@@ -1014,6 +1038,10 @@ impl Controller {
         if !path.is_absolute() {
             return Err(AppError::InvalidInput);
         }
+        #[cfg(all(feature = "validation", target_os = "android"))]
+        if self.is_fixture() && path != self.0.base.join("vaults/main.qvault") {
+            return Err(AppError::InvalidInput);
+        }
         let core = self.core()?;
         if !matches!(action, Action::Create | Action::ConfirmWeak)
             && core.rotation_pending(&path).unwrap_or(false)
@@ -1046,6 +1074,12 @@ impl Controller {
                     path,
                 ))
             }
+            Action::QuickUnlock => Ok(Opened::Session(
+                core.unlock_quick(&path, Some(token))?,
+                path,
+                false,
+                about,
+            )),
             Action::Unlock | Action::RecoverPassword => {
                 let password =
                     MasterPassword::from_utf8(values[InputField::Password.index()].expose_secret())

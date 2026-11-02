@@ -686,8 +686,9 @@ release; it is not weakened.
 
 #### Phase 2.5 — App vault workflows
 
-- **Plan:** [0031](../0031-app-vault-workflows/PLAN.md) (Implemented; standing
-  approval with owner-delegated decisions 1–5).
+- **Plan:** [0031](../0031-app-vault-workflows/PLAN.md) (Implemented; fresh review
+  requests changes to credential safeguards, Android document-choice lifetime,
+  generator controls and GUI validation; see REVIEW.md).
 - [x] **Do:** Shared screens for browsing/search, entry view and edit (reveal
   that expires after 30 s, copy straight from Rust to the OS), generator,
   trash, history, conflicts, snapshots, archive import/export and settings.
@@ -701,17 +702,23 @@ release; it is not weakened.
 
 #### Phase 2.6 — Android quick unlock (gated)
 
-- [ ] **Do:** Implement the Android keystore backend: a nonexportable AES-GCM
+- **Plan:** [0033](../0033-android-quick-unlock/PLAN.md) (Implemented;
+  owner closes phase on 2026-11-02; fresh-context review due).
+
+- [x] **Do:** Implement the Android keystore backend: a nonexportable AES-GCM
   key with per-operation auth, Class 3 biometrics only, invalidation on new
   biometric enrollment, StrongBox preferred, AAD binding, the policy state of
   0002 §5.4, and the device-credential variant labelled reduced protection.
   Disabled unless the device validates.
 - **Specs:** 0002 §5.
 - **Depends on:** 2.4.
-- **Files:** `crates/qv-platform/` (android), `crates/qv-core/`.
+- **Files:** `crates/qv-platform/` (android), `crates/qv-core/`, shared app controls and Android packaging/instrumentation.
 - **Done when:** enrolling a new fingerprint invalidates quick unlock. Reboot,
   expiry and three failures require the password. No silent fallback.
-- **Verify:** real-device test log.
+- **Verify:** real-device test log. Owner accepts implementation delivery on
+  2026-11-02; outstanding physical checks remain unverified follow-up for device
+  enablement in [VALIDATION.md](../0033-android-quick-unlock/VALIDATION.md).
+  Unvalidated devices remain disabled; no behavior or security gate is waived.
 - **0012 rows:** Biometric enrollment bypass, Hardware assumptions.
 
 #### Phase 2.7 — Android autofill (gated)
@@ -1116,6 +1123,30 @@ release; it is not weakened.
 - 2026-11-02: Owner direction after phase 2.5: the current app UI looks and feels like a website in a browser rather than an application, on desktop as well as mobile, and the owner wants an app-like design eventually. Working functionality takes priority over that redesign for now. The owner placed it as phase 2.10a (App design), after LAN exchange in the app and before the Milestone 2 release evidence, so the redesign covers every Milestone 2 screen once and release evidence uses the final design.
 
 ## Execution log
+
+- 2026-11-02: Owner explicitly corrected the earlier stop handoff: carry out
+  "next phase" without approval checkpoints, fixing prerequisites and continuing
+  on the staged tree. This overrides the intermediate commit/session boundary.
+  Repaired 0031 under its dated revision; expanded WebKit flows pass. Reviewed
+  0032 separately; record in its REVIEW.md. Planned/implemented phase 2.6 as
+  0033 under owner delegation: hardware adapter, core authorization/invalidation,
+  process-local policy, app actions and bounded native instrumentation. APKs
+  build and host focused checks pass. Physical-device evidence remains pending,
+  so the phase stays unticked and all device fingerprints remain disabled.
+  Final host evidence: 746 workspace tests (2 existing ignored), 28 app
+  validation tests, five vendor tests, all required static/supply-chain gates,
+  Android arm64 Clippy and both APK builds/signature pass. The phone remains
+  absent; no physical-validation pass is claimed. See 0033 VALIDATION.md.
+  No commit, push or branch; original staging preserved.
+
+- 2026-11-02: Clean-tree next-phase session at `1a40186`. Reviewed phase 2.5
+  (0031): **Changes requested**; see its REVIEW.md for findings and independent
+  gate evidence. Credential strength safeguards, Android Back document cleanup,
+  generator option/warning parity and promised GUI evidence need follow-up.
+  Session protocol step 2 stops progression before phase 2.6; no next-phase
+  plan or implementation. Plan 0032's separate review remains due. Owner
+  delegated implementation choices and approvals for this session; no approval
+  request is pending. Changes are review documentation only, uncommitted.
 
 - 2026-10-31: Owner answered "Yes" to proceeding with phase 2.4 on the
   architecture presented at D13. Recorded the approval and preserved the
@@ -1765,3 +1796,11 @@ release; it is not weakened.
   tree. Delegated extension of decision 1 to the document picker recorded in
   0031 Revisions for veto. The UI is ready for the owner's major review. Next
   session: owner commits 2.4 + 2.5, then the fresh-context review of 0031.
+
+- 2026-11-02: Owner closes phase 2.6 implementation (plan 0033). Host gates
+  pass (747 workspace tests, 28 app validation checks); actual-device evidence
+  includes both native policies and app Class3 workflow/cancellation checks.
+  Remaining physical matrix rows are explicit follow-up for device enablement,
+  not implementation-phase blockers. Unvalidated devices remain disabled and no
+  missing result is promoted to passed. Next fresh session reviews 0033, then
+  plans phase 2.7. No commit, push, branch or staging change.

@@ -6,6 +6,9 @@
 
 /// Android lifecycle/protection adapter, also testable without a device.
 pub mod android;
+/// Bound, device-local Android quick-unlock policy.
+pub mod quick_unlock;
+pub use quick_unlock::{QuickBinding, QuickPolicy};
 
 use qv_crypto::SecretBytes;
 use std::sync::Arc;
@@ -121,6 +124,28 @@ pub trait Keystore: Send + Sync {
     fn wrap(&self, secret: &SecretBytes) -> Result<SecretBytes, PlatformError>;
     /// Require OS authentication and return protected bytes.
     fn unwrap(&self, envelope: &SecretBytes) -> Result<SecretBytes, PlatformError>;
+    /// The live trusted policy binding, or None after state loss/expiry.
+    fn binding(&self) -> Option<QuickBinding> {
+        None
+    }
+    /// Enroll only following master-password reauthentication in core.
+    fn enroll(
+        &self,
+        _: QuickBinding,
+        _: QuickPolicy,
+        _: &SecretBytes,
+        _: Cancellation,
+    ) -> Result<(), PlatformError> {
+        Err(PlatformError::Unavailable)
+    }
+    /// Authenticate one operation for the exact vault/generation/password slot.
+    fn unlock_bound(&self, _: QuickBinding, _: Cancellation) -> Result<SecretBytes, PlatformError> {
+        Err(PlatformError::Unavailable)
+    }
+    /// Drop device-local state and destroy associated keystore handles.
+    fn invalidate(&self) -> Result<(), PlatformError> {
+        Ok(())
+    }
 }
 /// Foreground clipboard ownership; no readback or clipboard-manager handover.
 pub trait Clipboard: Send + Sync {

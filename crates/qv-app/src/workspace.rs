@@ -229,6 +229,8 @@ pub enum GenFlag {
     Symbols,
     /// Remove ambiguous characters.
     Ambiguous,
+    /// Require every enabled character class.
+    Each,
     /// Capitalize words.
     Capitalize,
     /// Append one digit.
@@ -299,12 +301,18 @@ pub enum WsAction {
     GenToggle(GenFlag),
     /// Generate with the current generator settings.
     Generate,
+    /// Suggest a six-word master password without exposing it to clipboard IPC.
+    SuggestPassword,
     /// Store the generator settings as the vault defaults.
     SaveGeneratorDefaults,
     /// Save general settings.
     SaveSettings,
     /// Change the master password.
     ChangePassword,
+    /// Enroll a validated device-local hardware wrapping policy.
+    EnrollQuick(qv_core::platform::QuickPolicy),
+    /// Destroy the quick-unlock handle and process policy.
+    DisableQuick,
     /// Delete snapshots taken before a password change.
     DeleteOldSnapshots,
     /// Show the recovery phrase after reauthentication.
@@ -350,6 +358,8 @@ pub enum ConfirmKind {
     OldSnapshots(usize),
     /// Accept a weak new master password.
     WeakPassword,
+    /// Device PIN/pattern becomes a vault credential.
+    ReducedQuick,
 }
 struct Pending {
     kind: ConfirmKind,
@@ -378,7 +388,7 @@ pub(crate) struct GenForm {
     pub(crate) length: u32,
     pub(crate) words: u32,
     pub(crate) pin: u32,
-    pub(crate) flags: [bool; 7],
+    pub(crate) flags: [bool; 8],
     pub(crate) separator: char,
     pub(crate) exclude: zeroize::Zeroizing<String>,
 }
@@ -464,6 +474,9 @@ pub struct Workspace {
     pub(crate) phrase: Option<PhraseView>,
     pub(crate) old_snapshots: Vec<String>,
     pub(crate) searched: bool,
+    pub(crate) weak_until: Option<Instant>,
+    pub(crate) weak_accepted: bool,
+    pub(crate) fair_warning: bool,
     clip: Option<Clip>,
 }
 impl Drop for Workspace {
@@ -482,6 +495,8 @@ pub struct Live {
     pub clipboard: u64,
     /// The generated value is still displayed.
     pub generated: bool,
+    /// Rust-enforced delay before weak-master-password consent.
+    pub weak_seconds: u64,
 }
 /// Expire time-limited values and report the visible state.
 pub(crate) fn live(s: &mut State) -> (u64, Live) {
@@ -512,6 +527,10 @@ pub(crate) fn live(s: &mut State) -> (u64, Live) {
                 reveal: ws.reveal.is_some(),
                 clipboard,
                 generated: ws.generated.is_some(),
+                weak_seconds: ws.weak_until.map_or(0, |until| {
+                    let left = until.saturating_duration_since(Instant::now());
+                    left.as_secs() + u64::from(left.subsec_nanos() > 0)
+                }),
             }
         }
         None => Live::default(),
@@ -535,7 +554,7 @@ impl Workspace {
                 length: 24,
                 words: 6,
                 pin: 6,
-                flags: [true, true, true, true, false, false, false],
+                flags: [true, true, true, true, false, false, false, true],
                 separator: '.',
                 exclude: zeroize::Zeroizing::new(String::new()),
             },
@@ -548,6 +567,9 @@ impl Workspace {
             phrase: None,
             old_snapshots: Vec::new(),
             searched: false,
+            weak_until: None,
+            weak_accepted: false,
+            fair_warning: false,
             clip: None,
         };
         if recovered_with_phrase {
@@ -564,6 +586,10 @@ impl Workspace {
     }
     fn clear_transient(&mut self) {
         self.inputs.clear();
+        self.generated = None;
+        self.weak_until = None;
+        self.weak_accepted = false;
+        self.fair_warning = false;
         self.entry_form = None;
         self.group_form = None;
         self.settings = None;
@@ -619,7 +645,13 @@ pub(crate) type Apply = Box<dyn FnOnce(&mut State) + Send>;
 pub(crate) fn on_ws(f: impl FnOnce(&mut Workspace) + Send + 'static) -> Apply {
     Box::new(move |s: &mut State| {
         if let Some(ws) = s.workspace.as_mut() {
-            f(ws)
+            #[cfg(target_os = "android")]
+            let previous = ws.screen.clone();
+            f(ws);
+            #[cfg(target_os = "android")]
+            if previous != ws.screen {
+                crate::android::forget_pick();
+            }
         }
     })
 }
@@ -650,7 +682,13 @@ impl Controller {
         }
         let session = s.session.clone()?;
         s.active = Instant::now();
+        #[cfg(target_os = "android")]
+        let previous = s.workspace.as_ref()?.screen.clone();
         let out = f(s.workspace.as_mut()?, &session);
+        #[cfg(target_os = "android")]
+        if s.workspace.as_ref()?.screen != previous {
+            crate::android::forget_pick();
+        }
         s.revision = s.revision.wrapping_add(1);
         Some(out)
     }
@@ -724,6 +762,8 @@ impl Controller {
         let Some(ws) = s.workspace.as_mut() else {
             return;
         };
+        #[cfg(target_os = "android")]
+        crate::android::forget_pick();
         let to = ws.back.pop().unwrap_or(Screen::Browse(None));
         ws.screen = to;
         ws.clear_transient();
@@ -744,6 +784,17 @@ impl Controller {
         let mut s = self.state();
         let current = s.epoch == epoch.0 && s.phase == Phase::Unlocked && !busy;
         if current && let Some(ws) = s.workspace.as_mut() {
+            if matches!(
+                field,
+                WsField::NewPassword | WsField::Repeat | WsField::Confirmation
+            ) {
+                ws.weak_until = None;
+                ws.weak_accepted = false;
+                ws.fair_warning = false;
+                if ws.pending() == Some(ConfirmKind::WeakPassword) {
+                    ws.pending = None;
+                }
+            }
             let multiline = match field {
                 WsField::FieldValue(i) => ws.entry_form.as_ref().is_some_and(|f| {
                     f.draft
@@ -759,6 +810,12 @@ impl Controller {
             } else {
                 apply_input(ws, field, value)
             };
+            if matches!(field, WsField::NewPassword) {
+                ws.fair_warning =
+                    qv_core::MasterPassword::from_utf8(ws.input(field)).is_ok_and(|p| {
+                        qv_core::password_strength(&p).verdict == qv_core::PasswordVerdict::Warn
+                    });
+            }
             match result {
                 Ok(()) => ws.error = None,
                 Err(e) => {
@@ -814,7 +871,21 @@ impl Controller {
         }
         if let WsAction::Answer(yes) = action {
             let pending = self
-                .with_ws(epoch, |ws, _| ws.pending.take())
+                .with_ws(epoch, |ws, _| {
+                    if yes
+                        && ws.pending() == Some(ConfirmKind::WeakPassword)
+                        && ws.weak_until.is_none_or(|until| Instant::now() < until)
+                    {
+                        return None;
+                    }
+                    if !yes {
+                        ws.weak_until = None;
+                    }
+                    if yes && ws.pending() == Some(ConfirmKind::WeakPassword) {
+                        ws.weak_accepted = true;
+                    }
+                    ws.pending.take()
+                })
                 .ok_or(AppError::InvalidInput)?;
             let Some(p) = pending else {
                 return Err(AppError::InvalidInput);
@@ -853,6 +924,9 @@ impl Controller {
                     })
                     .ok_or(AppError::InvalidInput)??;
                 nonempty.then_some(ConfirmKind::DeleteRecursive)
+            }
+            WsAction::EnrollQuick(qv_core::platform::QuickPolicy::DeviceCredential) => {
+                Some(ConfirmKind::ReducedQuick)
             }
             WsAction::EmptyTrash => Some(ConfirmKind::EmptyTrash),
             WsAction::PurgeExpired => {

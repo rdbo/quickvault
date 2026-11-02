@@ -261,9 +261,10 @@ impl<'a> Ctx<'a> {
 /// takes `&self` and calls are serialized.
 pub struct Session {
     tag: SessionTag,
-    locking: Arc<AtomicBool>,
+    pub(crate) locking: Arc<AtomicBool>,
     state: Arc<Mutex<Option<Open>>>,
     platform_watch: Option<Box<dyn qv_platform::Watch>>,
+    pub(crate) services: Option<Arc<dyn qv_platform::PlatformServices>>,
     time: Arc<dyn TimeSource>,
 }
 
@@ -296,6 +297,7 @@ impl Session {
             tag,
             locking: Arc::new(AtomicBool::new(false)),
             platform_watch: None,
+            services: None,
             state: Arc::new(Mutex::new(Some(Open {
                 vault,
                 index,
