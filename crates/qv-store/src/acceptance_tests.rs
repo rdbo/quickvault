@@ -339,6 +339,23 @@ fn acceptance_paths_normalize_without_symlink_traversal_or_filename_spoofing() {
         )
         .is_err()
     );
+    // A search-only ancestor (Android's /data is `--x` for apps) is traversed.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let sealed = d.join("sealed");
+        std::fs::create_dir(&sealed).unwrap();
+        std::fs::copy(&source, sealed.join("in.qvsnap")).unwrap();
+        std::fs::set_permissions(&sealed, std::fs::Permissions::from_mode(0o100)).unwrap();
+        let opened = VerifiedIncoming::open(
+            &sealed.join("in.qvsnap"),
+            private.path(),
+            ArchiveScope::new(u.header().vault_id, u.header().key_generation),
+            u.vault_key(),
+            &|| false,
+        );
+        std::fs::set_permissions(&sealed, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(opened.is_ok());
+    }
     let bytes =
         crate::incoming_path::normalize(std::path::Path::new("./a/../receipt-test")).unwrap();
     assert!(bytes.expose_secret().ends_with(b"/receipt-test"));

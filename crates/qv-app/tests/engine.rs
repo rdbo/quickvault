@@ -78,7 +78,7 @@ fn run_with_platform(binary: &str, real_linux: bool) {
             .spawn()
             .expect("synthetic engine harness"),
     );
-    let end = Instant::now() + Duration::from_secs(65);
+    let end = Instant::now() + Duration::from_secs(160);
     loop {
         if let Some(status) = harness.0.try_wait().expect("harness wait") {
             assert!(status.success(), "synthetic engine checks failed");

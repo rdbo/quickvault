@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-10-31 | 2026-10-31 | 0008 §1, §3–5; 0009 §1.1–1.6, §2, §5; 0002 §4.2; 0010 §4.2 |
+| Reviewed | 2026-10-31 | 2026-10-31 | 0008 §1, §3–5; 0009 §1.1–1.6, §2, §5; 0002 §4.2; 0010 §4.2 |
 
 ## Intent
 
@@ -653,3 +653,10 @@ release requirement is proven from their presence.
   inconclusive private-Xvfb captures. No new owner vault-flow test inferred.
   Documentation only; product/test inputs unchanged from the passing 724-test
   gate set. Implemented status retained; fresh-context review remains next.
+
+- 2026-11-01: Fresh-context review: Approved with minor fixes (REVIEW.md).
+  Reviewer repaired the Linux startup refusal category (storage/instance errors
+  were collapsed into Unavailable) and added a regression test. Phrase-screen
+  idle expiry without durable pending confirmation, over-budget baseline
+  consent, fail-closed edit drops and engine-level IPC assertions are carried
+  forward as findings. Status Reviewed.

@@ -167,8 +167,9 @@ pub use qv_model::{
     SecretText, Settings, Text, Timestamp, TotpError, VaultMeta, VersionId, WriterId,
 };
 pub use qv_store::{
-    AnchorDir, AnchorStatus, InterruptedRotation, Leftovers, LocationWarnings, NeededPasswords,
-    RotationChoice, RotationState, SnapshotDir, SnapshotKind, StoreError, VAULT_EXTENSION,
+    AnchorDir, AnchorStatus, InterruptedRotation, Leftovers, LocationWarnings,
+    MAX_ARCHIVE_TOTAL_LENGTH, NeededPasswords, RotationChoice, RotationState, SnapshotDir,
+    SnapshotKind, StoreError, VAULT_EXTENSION,
 };
 
 pub use attachment::{AttachmentHandle, AttachmentSummary};

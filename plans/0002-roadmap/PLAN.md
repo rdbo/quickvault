@@ -667,8 +667,8 @@ release; it is not weakened.
 
 #### Phase 2.4 — App foundation and security boundary
 
-- **Plan:** [0030](../0030-app-foundation/PLAN.md) (Implemented; fresh-context
-  review pending. Linux OS notifications are optional under owner amendment).
+- **Plan:** [0030](../0030-app-foundation/PLAN.md) (Reviewed with one minor fix; phrase-idle and
+  over-budget follow-ups go to 2.5. Linux OS notifications are optional).
 - [x] **Do:** Build the production `qv-app` skeleton on the framework chosen in
   D8. If it is a webview: local assets, CSP, navigation/frame/popup blocking,
   and a typed allowlisted bridge checked in Rust. Use standard Dioxus input for
@@ -686,7 +686,9 @@ release; it is not weakened.
 
 #### Phase 2.5 — App vault workflows
 
-- [ ] **Do:** Shared screens for browsing/search, entry view and edit (reveal
+- **Plan:** [0031](../0031-app-vault-workflows/PLAN.md) (Implemented; standing
+  approval with owner-delegated decisions 1–5).
+- [x] **Do:** Shared screens for browsing/search, entry view and edit (reveal
   that expires after 30 s, copy straight from Rust to the OS), generator,
   trash, history, conflicts, snapshots, archive import/export and settings.
   Responsive layouts for touch and desktop. Lock-time race handling.
@@ -950,6 +952,14 @@ release; it is not weakened.
 - [ ] `plans/README.md` — index row (done)
 
 ## Revisions
+
+- 2026-11-01: Phase 2.5 (plan 0031) also touches `crates/qv-platform` (shared
+  no-follow file helpers moved from qv-cli, Android clipboard hold over an
+  injected backend), `crates/qv-cli` (uses the moved helpers, unchanged
+  behaviour), the approved dioxus-desktop patch areas (0030 review findings) and
+  Android packaging. These are needed for the phase's Rust→OS copy and file
+  features; no new crate, dependency, trust boundary or format. Kept as one
+  phase; no split.
 
 - 2026-10-31: Owner rejected the excessive c1/c2 split and requested both now.
   Recombine as 2.2c in 0028; continue on staged c1 without intermediate commit
@@ -1706,3 +1716,29 @@ release; it is not weakened.
   Android packages rebuilt/inspected, strict Android policy retained. Plan 0030
   is Implemented, not Reviewed; fresh-context implementation review remains
   next. No spec-wide implementation or release/security claim.
+
+- 2026-11-01: Next-phase session. Committed phase 2.4 (`a6b2252`, plan 0030)
+  reviewed in fresh context: Approved with minor fixes. The Linux startup
+  refusal category is repaired with a test; phrase-idle, over-budget,
+  dropped-edit and engine-IPC findings were carried into 2.5. Owner asked for
+  third-party footprint alternatives; a recommendation is recorded in the 0030
+  REVIEW (scoped advisory ignores for the four advisory-only forks; keep and
+  shrink the dioxus-desktop patch), not decided.
+
+  Plan 0031 written under standing approval. Decisions 1–5 were chosen under
+  the owner's 2026-11-01 delegation: Android copy defers background expiry
+  during a hold; clear only owned clips; Linux path input; 1 KiB/8 KiB edit
+  bounds; 5-minute phrase-screen limit. No spec amendment, dependency or
+  unsafe.
+
+  Shared and Linux workflows plus Android code are implemented; gates pass
+  (738 workspace tests; app validation and real-WebKit flows; Android check).
+  The APK build and device run are pending, so the phase stays In progress.
+- 2026-11-02: Phase 2.5 implemented (plan 0031). The physical-phone run found
+  and fixed seven app/platform defects (startup close on a re-read edit batch,
+  pause bypassing the copy deferral, a stale busy render, picker-induced locks,
+  pick re-render and scoping, and Android archive import through a search-only
+  `/data`); the device suite then passed twice. All gates pass on the final
+  tree. Delegated extension of decision 1 to the document picker recorded in
+  0031 Revisions for veto. The UI is ready for the owner's major review. Next
+  session: owner commits 2.4 + 2.5, then the fresh-context review of 0031.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Shared responsive screens. Vault text is rendered as escaped text only.
+mod workspace;
 use crate::controller::{Action, AppError, Controller, FormEpoch, InputField, Mode, Phase};
 use dioxus::prelude::*;
 use std::sync::OnceLock;
@@ -50,6 +51,25 @@ pub(crate) fn app() -> Element {
             rsx! {main {class:"shell", Header{} section {class:"card", h1{"{title}"} p{"{message}"} p{class:"muted","No vault has been opened by this window."}}}}
         }
     }
+}
+/// Synthetic flow result handler; a no-op outside validation builds.
+#[cfg(feature = "validation")]
+fn fixture_report(controller: &Controller) -> impl FnMut(FormEvent) + 'static {
+    let c = controller.clone();
+    move |event: FormEvent| {
+        let value = event.value();
+        if let Some(stage) = value
+            .strip_prefix("FAIL:")
+            .and_then(|n| n.parse::<u8>().ok())
+        {
+            eprintln!("synthetic flow stage {stage} failed");
+        }
+        c.finish_fixture(value == "PASS")
+    }
+}
+#[cfg(not(feature = "validation"))]
+fn fixture_report(_: &Controller) -> impl FnMut(FormEvent) + 'static {
+    |_| {}
 }
 #[component]
 fn Header() -> Element {
@@ -107,26 +127,27 @@ fn Screen(controller: Controller, revision: u64) -> Element {
         .as_ref()
         .and_then(|v| std::str::from_utf8(v.expose_secret()).ok())
         .unwrap_or("");
-    #[cfg(feature = "validation")]
-    let fixture_report = {
-        let c = controller.clone();
-        move |event: FormEvent| -> () {
-            let value = event.value();
-            if let Some(stage) = value
-                .strip_prefix("FAIL:")
-                .and_then(|n| n.parse::<u8>().ok())
-            {
-                eprintln!("synthetic flow stage {stage} failed");
-            }
-            c.finish_fixture(value == "PASS")
-        }
-    };
-    #[cfg(not(feature = "validation"))]
-    let fixture_report = move |_: FormEvent| {};
     let invoke = |action| {
         let controller = controller.clone();
         move |_| controller.perform(epoch, action, acknowledged)
     };
+    if phase == Phase::Unlocked {
+        return rsx! {
+            workspace::Shell {
+                controller: controller.clone(),
+                epoch,
+                revision: view.revision,
+                live: view.live,
+                busy: view.busy,
+                reduced_lifecycle: view.reduced_lifecycle,
+                fixture,
+                on_fixture: fixture_report(&controller),
+            }
+        };
+    }
+    let resume = view.resume;
+    let over_budget = view.over_budget;
+    let rotation_confirmed = view.rotation_confirmed;
     rsx! {
         main {class:"shell", "data-qv-epoch":"{epoch.0}", Header{}
             if preview {p {class:"hint","Read-only preview · vault actions are disabled. Do not enter real credentials."}}
@@ -147,7 +168,35 @@ fn Screen(controller: Controller, revision: u64) -> Element {
                     if view.reduced_lifecycle {
                         p {class:"warning",role:"status","Automatic locking on screen lock or sleep is unavailable. Manual lock and the 60-second inactivity lock remain active."}
                     }
-                    if matches!(phase,Phase::Locked|Phase::Opening|Phase::WeakPassword){
+                    if phase == Phase::Locked && let Some(need) = resume {
+                        h2 {"Finish the interrupted key rotation"}
+                        p {class:"muted","A key rotation for this vault was interrupted. Complete it to use the new master password and phrase, or roll it back to keep the previous ones. Nothing else can open the vault until it is finished."}
+                        if need.new {
+                            SecretInput{controller:controller.clone(),epoch,field:InputField::Password,label:"New master password (chosen for the rotation)",id:"resume-new",secret:true,disabled:view.busy}
+                        }
+                        if need.old {
+                            SecretInput{controller:controller.clone(),epoch,field:InputField::Repeat,label:"Previous master password",id:"resume-old",secret:true,disabled:view.busy}
+                        }
+                        button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::ResumeComplete),"Complete the rotation" span{"→"}}
+                        button {class:"secondary","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::ResumeRollback),"Roll back to the previous generation"}
+                        button {class:"text-button","data-qv-clear":"true",onclick:{let c=controller.clone();move |_|c.lock()},"Cancel"}
+                    }else if phase==Phase::Rotation{
+                        h2 {"Your new recovery phrase"}
+                        p {class:"muted","Write these 24 words down in order. They replace the old phrase once the rotation is installed. Nothing has changed yet."}
+                        div {class:"phrase", "{phrase_text}"}
+                        if rotation_confirmed {
+                            p {class:"notice","The new recovery words are confirmed."}
+                            button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::InstallRotation),if view.busy{"Installing…"}else{"Install the key rotation"} span{"→"}}
+                        }else{
+                            p {"Confirm the requested words to continue."}
+                            for (field,id,label) in [(InputField::Word0,"rot-word-0","First requested word"),(InputField::Word1,"rot-word-1","Second requested word"),(InputField::Word2,"rot-word-2","Third requested word")] {
+                                SecretInput{controller:controller.clone(),epoch,field,label,id,secret:true,disabled:view.busy}
+                            }
+                            p {class:"hint","Word positions: {view.positions[0]}, {view.positions[1]}, {view.positions[2]}"}
+                            button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::ConfirmRotation),"Confirm recovery words"}
+                        }
+                        button {class:"text-button","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::CancelRotation),"Cancel the rotation (nothing changes)"}
+                    }else if matches!(phase,Phase::Locked|Phase::Opening|Phase::WeakPassword){
                         h2 {if mode==Mode::Unlock{"Welcome back"}else if mode==Mode::Create{"Make yourself a vault"}else{"Recover local access"}}
                         p {class:"muted",if mode==Mode::Unlock{"Unlock a vault already on this device."}else if mode==Mode::Create{"Choose a password, then keep your recovery phrase somewhere safe."}else{"Use your recovery phrase, or explicitly inspect a missing or mismatched local anchor."}}
                         nav {class:"tabs","aria-label":"Vault action",
@@ -216,7 +265,12 @@ fn Screen(controller: Controller, revision: u64) -> Element {
                         h2 {"Check this recovery baseline"}
                         p {"The external anchor is missing or mismatched. This verified file may be an older copy. Opening it does not prove it is the latest state."}
                         p {"Accepting it first creates a verified recovery snapshot, then establishes a new local baseline. Nothing is adopted without your action."}
-                        button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:{let c=controller.clone();move |_|c.perform(epoch,Action::AdoptBaseline,true)},"Accept this file as the recovery baseline"}
+                        if let Some(needed) = over_budget {
+                            p {class:"warning","The mandatory recovery snapshot needs {needed} bytes and exceeds the snapshot budget."}
+                            button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:{let c=controller.clone();move |_|c.perform(epoch,Action::AdoptBaselineOverBudget,true)},"Allow the snapshot to exceed the budget and accept"}
+                        } else {
+                            button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:{let c=controller.clone();move |_|c.perform(epoch,Action::AdoptBaseline,true)},"Accept this file as the recovery baseline"}
+                        }
                         button {class:"secondary",onclick:{let c=controller.clone();move |_|c.lock()},"Decline and lock"}
                     }else{
                         div {class:"ready-mark","✓"}
@@ -228,7 +282,7 @@ fn Screen(controller: Controller, revision: u64) -> Element {
                     if let Some(error)=error{p {class:"error",role:"alert","{error.message()}"}}
                 }
             }
-            if fixture {input {id:"validation-result",oninput:fixture_report}}
+            if fixture {input {id:"validation-result",oninput:fixture_report(&controller)}}
             footer {"QuickVault · encrypted locally · no account required"}
         }
     }

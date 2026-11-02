@@ -73,21 +73,18 @@ pub(crate) fn normalize(path: &Path) -> Result<SecretBytes, StoreError> {
 }
 
 pub(crate) fn open_source(path: &SecretBytes) -> Result<OwnedFd, StoreError> {
-    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-    let mut directory =
-        open("/", flags | OFlags::DIRECTORY, Mode::empty()).map_err(crate::error::errno_err)?;
+    // Ancestors are pinned with O_PATH: it needs only search permission, as on
+    // Android's `--x` /data, and O_DIRECTORY|O_NOFOLLOW still refuses symlinks.
+    let walk = OFlags::PATH | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let leaf_flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
+    let mut directory = open("/", walk, Mode::empty()).map_err(crate::error::errno_err)?;
     let mut parts = path.expose_secret()[1..].split(|&b| b == b'/').peekable();
     while let Some(part) = parts.next() {
         let leaf = parts.peek().is_none();
         let fd = openat(
             &directory,
             std::ffi::OsStr::from_bytes(part),
-            flags
-                | if leaf {
-                    OFlags::NONBLOCK
-                } else {
-                    OFlags::DIRECTORY
-                },
+            if leaf { leaf_flags } else { walk },
             Mode::empty(),
         )
         .map_err(crate::error::errno_err)?;

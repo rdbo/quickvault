@@ -6,7 +6,11 @@ fn app() -> Element {
         div { id:"escaped", "<img src=x onerror=window.escapedBad=true>" }
         input { id:"report", oninput:move |event:FormEvent| -> () {
             let value=event.value();
-            if value=="PASS" {println!("boundary harness passed");std::process::exit(0)}
+            // Exactly the three forbidden native messages posted by the page
+            // were refused at ingress; none reached the application.
+            let refused = dioxus_desktop::hardened::refused_ipc();
+            if value=="PASS" && refused == 3 {println!("boundary harness passed");std::process::exit(0)}
+            eprintln!("boundary harness refused native messages: {refused}");
             eprintln!("boundary harness failed: synthetic checks");std::process::exit(1)
         }}
     }

@@ -45,7 +45,7 @@ public final class PlatformTest extends InstrumentationTestCase {
             Thread.sleep(50);
         }
         // AppError messages are fixed, data-free categories, never input text.
-        fail("Synthetic device stage: "+stage+"; "+js(instrumentation,view,"document.querySelector('.error')?.textContent || 'no app error'"));
+        fail("Synthetic device stage: "+stage+"; "+js(instrumentation,view,"document.querySelector('.error')?.textContent || 'no app error'")+"; "+js(instrumentation,view,"window.qvDeviceFixture?.summary?.() || ''"));
     }
     private void submitFixture(Instrumentation instrumentation,WebView view) throws Exception {
         js(instrumentation,view,"window.qvDeviceFixture.consent()");
@@ -56,8 +56,97 @@ public final class PlatformTest extends InstrumentationTestCase {
         awaitJs(instrumentation,view,"document.querySelector('h2')?.textContent === "+org.json.JSONObject.quote(heading),heading);
     }
     private void lockFixture(Instrumentation instrumentation,WebView view) throws Exception {
-        js(instrumentation,view,"window.qvDeviceFixture.submit()");
+        js(instrumentation,view,"window.qvDeviceFixture.lock()");
         awaitHeading(instrumentation,view,"Welcome back");
+    }
+    private void awaitUnlocked(Instrumentation instrumentation,WebView view) throws Exception {
+        awaitJs(instrumentation,view,"!!document.querySelector('.ws') && !document.querySelector('.busy')","unlocked workspace");
+    }
+    private void click(Instrumentation instrumentation,WebView view,String text) throws Exception {
+        awaitJs(instrumentation,view,"window.qvDeviceFixture.button("+org.json.JSONObject.quote(text)+")","button "+text);
+    }
+    private android.content.ClipData clip(Instrumentation instrumentation) throws Exception {
+        android.content.ClipData[] out=new android.content.ClipData[1];
+        instrumentation.runOnMainSync(()->out[0]=instrumentation.getTargetContext().getSystemService(android.content.ClipboardManager.class).getPrimaryClip());
+        return out[0];
+    }
+    private boolean clipEmpty(Instrumentation instrumentation) throws Exception {
+        android.content.ClipData c=clip(instrumentation);
+        return c==null || c.getItemCount()==0 || c.getItemAt(0).getText()==null || c.getItemAt(0).getText().length()==0;
+    }
+    private void pick(Instrumentation instrumentation,WebView view,String button,java.io.File file,String stage) throws Exception {
+        // Answer the picker intent with a private test file; no system UI.
+        Intent result=new Intent().setData(android.net.Uri.fromFile(file));
+        Instrumentation.ActivityMonitor monitor=instrumentation.addMonitor((android.content.IntentFilter)null,new Instrumentation.ActivityResult(Activity.RESULT_OK,result),true);
+        try {
+            click(instrumentation,view,button);
+            awaitJs(instrumentation,view,"Array.from(document.querySelectorAll('.hint')).some(h=>h.textContent==="+org.json.JSONObject.quote("Chosen: "+file.getName())+")",stage);
+        } finally { instrumentation.removeMonitor(monitor); }
+    }
+    private void workspaceFlows(Instrumentation instrumentation,MainActivity main,WebView view,java.io.File root) throws Exception {
+        click(instrumentation,view,"New entry");
+        awaitJs(instrumentation,view,"!!document.getElementById('ws-title')","entry form");
+        js(instrumentation,view,"window.qvDeviceFixture.entryForm()");
+        click(instrumentation,view,"Generate");
+        click(instrumentation,view,"Save");
+        awaitJs(instrumentation,view,"document.querySelector('h2')?.textContent==='Synthetic phone entry' && !document.querySelector('.busy')","saved entry");
+        assertEquals("Protected value masked","true",js(instrumentation,view,"Array.from(document.querySelectorAll('.field-value')).some(v=>v.textContent==='••••••••')"));
+        click(instrumentation,view,"Reveal 30 s");
+        awaitJs(instrumentation,view,"(document.querySelector('.field-value.revealed')?.textContent||'').length>=8","reveal");
+        click(instrumentation,view,"Hide");
+        awaitJs(instrumentation,view,"!document.querySelector('.field-value.revealed')","hide");
+        // Copy goes Rust → OS clipboard, marked sensitive, and expires when owned.
+        js(instrumentation,view,"Array.from(document.querySelectorAll('.field-line')).find(l=>l.textContent.includes('password')).querySelector('.field-actions button:last-child').click()");
+        awaitJs(instrumentation,view,"!!document.querySelector('.toast')","clipboard hold");
+        android.content.ClipData copied=clip(instrumentation);
+        assertNotNull("Copied clip",copied);
+        assertEquals("QuickVault",copied.getDescription().getLabel().toString());
+        assertTrue("Sensitive clip",copied.getDescription().getExtras()!=null && copied.getDescription().getExtras().getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE));
+        assertTrue("Copied value present",copied.getItemAt(0).getText().length()>=8);
+        long end=System.currentTimeMillis()+30000;
+        while(System.currentTimeMillis()<end && !clipEmpty(instrumentation)) Thread.sleep(250);
+        assertTrue("Owned clip cleared at expiry",clipEmpty(instrumentation));
+        // Background during a foreground hold defers only background expiry.
+        js(instrumentation,view,"Array.from(document.querySelectorAll('.field-line')).find(l=>l.textContent.includes('password')).querySelector('.field-actions button:last-child').click()");
+        awaitJs(instrumentation,view,"!!document.querySelector('.toast')","second clipboard hold");
+        instrumentation.runOnMainSync(()->instrumentation.callActivityOnPause(main));
+        Thread.sleep(1500);
+        assertEquals("Deferred while copying","true",js(instrumentation,view,"!!document.querySelector('.ws')"));
+        awaitHeading(instrumentation,view,"Welcome back");
+        instrumentation.runOnMainSync(()->instrumentation.callActivityOnResume(main));
+        js(instrumentation,view,"window.qvDeviceFixture.unlock(false)");
+        submitFixture(instrumentation,view);
+        awaitUnlocked(instrumentation,view);
+        // Attachment round trip through the picker path, no plaintext temp file.
+        java.io.File input=new java.io.File(root,"input.bin");
+        try(java.io.FileOutputStream out=new java.io.FileOutputStream(input)){out.write("phone-attachment-canary".getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+        click(instrumentation,view,"Synthetic phone entry");
+        click(instrumentation,view,"Attachments");
+        pick(instrumentation,view,"Choose a file",input,"picked input");
+        js(instrumentation,view,"window.qvDeviceFixture.attachmentFields()");
+        click(instrumentation,view,"Add attachment");
+        awaitJs(instrumentation,view,"Array.from(document.querySelectorAll('.row-title')).some(t=>t.textContent==='phone-canary.bin')","attachment added");
+        java.io.File output=new java.io.File(root,"output.bin");
+        pick(instrumentation,view,"Choose where to save",output,"picked output");
+        click(instrumentation,view,"Save…");
+        click(instrumentation,view,"Continue");
+        awaitJs(instrumentation,view,"(document.querySelector('.notice')?.textContent||'')==='Attachment saved.'","attachment saved");
+        assertEquals("phone-attachment-canary",new String(java.nio.file.Files.readAllBytes(output.toPath()),java.nio.charset.StandardCharsets.UTF_8));
+        // Archive export then merge back through staged ciphertext.
+        awaitJs(instrumentation,view,"window.qvDeviceFixture.nav('Archives')","archives");
+        awaitHeading(instrumentation,view,"Archive exchange");
+        java.io.File archive=new java.io.File(root,"export.qvsnap");
+        pick(instrumentation,view,"Choose where to save",archive,"picked archive output");
+        click(instrumentation,view,"Export archive");
+        awaitJs(instrumentation,view,"(document.querySelector('.report')?.textContent||'').includes('Archive published')","archive exported");
+        assertTrue("Exported archive bytes: exists="+archive.exists()+" files="+java.util.Arrays.toString(root.list())+" report="+js(instrumentation,view,"(document.querySelector('.report')?.textContent||'').slice(0,120)"),archive.length()>0);
+        pick(instrumentation,view,"Choose a file",archive,"picked archive input");
+        click(instrumentation,view,"Merge archive");
+        // Own fresh export: core may record a new acceptance or report it as known.
+        awaitJs(instrumentation,view,"!document.querySelector('.error') && /Archive merged|already accepted/.test(document.querySelector('.report')?.textContent||'')","archive merged");
+        java.io.File staging=new java.io.File(new java.io.File(main.getNoBackupFilesDir(),"quickvault"),"staging");
+        String[] left=staging.list();
+        assertTrue("Staged ciphertext removed",left==null || left.length==0);
     }
     private void runSyntheticFlows(Instrumentation instrumentation, MainActivity main, WebView view) throws Exception {
         java.io.File root=new java.io.File(main.getNoBackupFilesDir(),"qv-device-test-"+System.nanoTime());
@@ -78,7 +167,8 @@ public final class PlatformTest extends InstrumentationTestCase {
             awaitHeading(instrumentation,view,"Your recovery phrase");
             assertEquals("24 synthetic recovery words","true",js(instrumentation,view,"window.qvDeviceFixture.capture()"));
             js(instrumentation,view,"window.qvDeviceFixture.confirm();window.qvDeviceFixture.submit()");
-            awaitHeading(instrumentation,view,"Your vault is open");
+            awaitUnlocked(instrumentation,view);
+            workspaceFlows(instrumentation,main,view,root);
             lockFixture(instrumentation,view);
             assertEquals("Phrase display removed","true",js(instrumentation,view,"!document.querySelector('.phrase')"));
             js(instrumentation,view,"window.qvDeviceFixture.unlock(true)");
@@ -87,13 +177,13 @@ public final class PlatformTest extends InstrumentationTestCase {
             assertEquals("Wrong-password control cleared","true",js(instrumentation,view,"!document.querySelector('#password').value"));
             js(instrumentation,view,"window.qvDeviceFixture.unlock(false)");
             submitFixture(instrumentation,view);
-            awaitHeading(instrumentation,view,"Your vault is open");
+            awaitUnlocked(instrumentation,view);
             lockFixture(instrumentation,view);
             js(instrumentation,view,"window.qvDeviceFixture.tab(2)");
             awaitJs(instrumentation,view,"!!document.querySelector('#phrase')","recovery form");
             js(instrumentation,view,"window.qvDeviceFixture.recover()");
             submitFixture(instrumentation,view);
-            awaitHeading(instrumentation,view,"Your vault is open");
+            awaitUnlocked(instrumentation,view);
             lockFixture(instrumentation,view);
             js(instrumentation,view,"window.qvDeviceFixture.unlock(false)");
             submitFixture(instrumentation,view);
@@ -114,7 +204,7 @@ public final class PlatformTest extends InstrumentationTestCase {
             js(instrumentation,view,"window.qvDeviceFixture.chooseSkip()");
             awaitJs(instrumentation,view,"!document.querySelector('details button').disabled","explicit skip consent");
             js(instrumentation,view,"window.qvDeviceFixture.skip()");
-            awaitHeading(instrumentation,view,"Your vault is open");
+            awaitUnlocked(instrumentation,view);
             lockFixture(instrumentation,view);
             js(instrumentation,view,"window.qvDeviceFixture.clear();delete window.qvDeviceFixture");
         } finally {

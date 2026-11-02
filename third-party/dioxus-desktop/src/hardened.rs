@@ -132,8 +132,25 @@ impl Drop for Permit {
         self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
+static REFUSED: AtomicUsize = AtomicUsize::new(0);
+/// Count of native IPC messages refused at ingress (metadata only).
+pub fn refused_ipc() -> usize {
+    REFUSED.load(Ordering::SeqCst)
+}
 /// Native ingress before the event loop queue. Failed input is never logged.
 pub(crate) fn ipc(
+    origin: &str,
+    body: &str,
+    initialized: &AtomicBool,
+    queued: &Arc<AtomicUsize>,
+) -> Option<IpcMessage> {
+    let message = admit(origin, body, initialized, queued);
+    if message.is_none() {
+        REFUSED.fetch_add(1, Ordering::SeqCst);
+    }
+    message
+}
+fn admit(
     origin: &str,
     body: &str,
     initialized: &AtomicBool,
@@ -191,6 +208,7 @@ mod tests {
         let init = AtomicBool::new(false);
         let pending = Arc::new(AtomicUsize::new(0));
         let origin = "dioxus://index.html/";
+        let before = refused_ipc();
         for body in [
             r#"{"method":"query","params":{}}"#,
             r#"{"method":"initialize","method":"initialize","params":{}}"#,
@@ -198,6 +216,7 @@ mod tests {
         ] {
             assert!(ipc(origin, body, &init, &pending).is_none());
         }
+        assert!(refused_ipc() >= before + 3);
         assert!(json(&vec![b' '; MAX_INPUT + 1]).is_none());
         assert!(json(format!("{}0{}", "[".repeat(256), "]".repeat(256)).as_bytes()).is_none());
         assert!(ipc(

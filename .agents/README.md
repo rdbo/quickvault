@@ -50,7 +50,7 @@ provided; the roadmap itself is not an implementation plan.
 | `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `clippy.toml` | Virtual workspace, lockfile, pinned toolchain, clippy test exemptions |
 | `.cargo/config.toml` | Build environment: compile options of the bundled SQLite (checked by a `qv-store` test) |
 | `crates/<name>/` | Workspace crates (`ARCHITECTURE.md` §3) |
-| `crates/qv-app/` | Shared UI/controller, local assets, Android packaging/tests; build and validation commands in its README |
+| `crates/qv-app/` | Shared UI/controller (lock screens in `controller.rs`; unlocked workspace in `workspace.rs`, `ops.rs`, `views.rs`, `documents.rs`, `ui/`), local assets, Android packaging/tests; build and validation commands in its README |
 | `deny.toml`, `supply-chain/` | `cargo deny` policy and `cargo vet` audits/exemptions |
 | `fuzz/` | cargo-fuzz targets; own workspace and lockfile, outside the shipped workspace; pinned nightly in CI |
 | `scripts/` | Repository checks (`check-spdx.sh`, `check-matrix.sh` for 0012 row tags); Android SDK/NDK and Rust Android targets setup (`setup-android.sh`, versions pinned inside) |

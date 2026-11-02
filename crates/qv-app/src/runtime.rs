@@ -12,26 +12,16 @@ use std::sync::Arc;
 pub fn run() -> ! {
     qv_core::harden();
     #[cfg(target_os = "linux")]
-    let guard = {
-        let setup = (|| {
-            let base = state_root().map_err(|_| AppError::PrivateStorage)?;
-            private_dir(&base).map_err(|_| AppError::PrivateStorage)?;
-            let guard = qv_core::platform::InstanceLock::acquire(&base).map_err(|error| {
-                if error == qv_core::platform::PlatformError::Busy {
-                    AppError::AlreadyRunning
-                } else {
-                    AppError::PrivateStorage
-                }
-            })?;
-            let controller =
-                Controller::new(base, Arc::new(qv_core::platform::LinuxPlatform::default()));
+    let guard = match linux_setup(state_root().map_err(|_| AppError::PrivateStorage)) {
+        Ok((guard, controller)) => {
             let _ = crate::ui::ACTIVE.set(controller);
-            Ok::<_, AppError>(guard)
-        })();
-        if setup.is_err() {
-            let _ = crate::ui::ACTIVE.set(Err(AppError::Unavailable));
+            Some(guard)
         }
-        setup.ok()
+        Err(error) => {
+            // Keep the fixed category so the refusal screen names the cause.
+            let _ = crate::ui::ACTIVE.set(Err(error));
+            None
+        }
     };
     #[cfg(target_os = "android")]
     crate::android::initialize();
@@ -59,7 +49,7 @@ pub fn run_flow_fixture() -> ! {
         include_str!("bin/flow.js")
     );
     std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_secs(60));
+        std::thread::sleep(std::time::Duration::from_secs(150));
         eprintln!("full UI fixture timeout");
         std::process::exit(2)
     });
@@ -81,15 +71,21 @@ fn launch(title: &'static str, script: &'static [u8]) -> ! {
         .with_hardened_webview(policy)
         .with_custom_event_handler(|event, _| {
             use dioxus_desktop::tao::event::{Event, WindowEvent};
-            if matches!(
-                event,
-                Event::Suspended
-                    | Event::LoopDestroyed
-                    | Event::WindowEvent {
-                        event: WindowEvent::CloseRequested,
-                        ..
-                    }
-            ) && let Some(Ok(c)) = crate::ui::ACTIVE.get()
+            // On Android, tao's Suspended is the activity pause. The native
+            // lifecycle poller reports every pause (generation counter) as a
+            // background transition that a foreground clipboard hold may defer;
+            // locking here as well would defeat that deferral.
+            let suspended = cfg!(not(target_os = "android")) && matches!(event, Event::Suspended);
+            if (suspended
+                || matches!(
+                    event,
+                    Event::LoopDestroyed
+                        | Event::WindowEvent {
+                            event: WindowEvent::CloseRequested,
+                            ..
+                        }
+                ))
+                && let Some(Ok(c)) = crate::ui::ACTIVE.get()
             {
                 c.lock();
             }
@@ -98,6 +94,29 @@ fn launch(title: &'static str, script: &'static [u8]) -> ! {
         dioxus::prelude::VirtualDom::new(crate::ui::app),
         config,
     )
+}
+/// Private state, single-instance ownership and the controller, in that order.
+#[cfg(target_os = "linux")]
+fn linux_setup(
+    base: Result<std::path::PathBuf, AppError>,
+) -> Result<
+    (
+        qv_core::platform::InstanceLock,
+        Result<Controller, AppError>,
+    ),
+    AppError,
+> {
+    let base = base?;
+    private_dir(&base).map_err(|_| AppError::PrivateStorage)?;
+    let guard = qv_core::platform::InstanceLock::acquire(&base).map_err(|error| {
+        if error == qv_core::platform::PlatformError::Busy {
+            AppError::AlreadyRunning
+        } else {
+            AppError::PrivateStorage
+        }
+    })?;
+    let controller = Controller::new(base, Arc::new(qv_core::platform::LinuxPlatform::default()));
+    Ok((guard, controller))
 }
 #[cfg(target_os = "linux")]
 fn state_root() -> Result<std::path::PathBuf, AppError> {
@@ -111,4 +130,33 @@ fn state_root() -> Result<std::path::PathBuf, AppError> {
         return Err(AppError::Unavailable);
     }
     Ok(path)
+}
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    #[test]
+    fn linux_startup_reports_the_specific_storage_or_instance_refusal() {
+        let dir = std::env::temp_dir().join(format!("qv-app-startup-{}", std::process::id()));
+        private_dir(&dir).unwrap();
+        let (guard, controller) = linux_setup(Ok(dir.clone())).unwrap();
+        assert!(controller.is_ok());
+        assert!(matches!(
+            linux_setup(Ok(dir.clone())),
+            Err(AppError::AlreadyRunning)
+        ));
+        drop(guard);
+        let file = dir.join("not-a-directory");
+        std::fs::write(&file, b"").unwrap();
+        assert!(matches!(
+            linux_setup(Ok(file)),
+            Err(AppError::PrivateStorage)
+        ));
+        assert!(matches!(
+            linux_setup(Err(AppError::PrivateStorage)),
+            Err(AppError::PrivateStorage)
+        ));
+        drop(controller);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

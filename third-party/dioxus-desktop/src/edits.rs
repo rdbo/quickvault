@@ -94,17 +94,21 @@ impl WryQueue {
         myself.edits_in_progress = Some(receiver);
     }
 
-    /// Wait until all pending edits have been rendered in the webview
+    /// Wait until all pending edits have been rendered in the webview.
+    /// `Ready(false)` means the batch was dropped before the webview applied it.
     pub(crate) fn poll_edits_flushed(
         &self,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<()> {
+    ) -> std::task::Poll<bool> {
         let mut self_mut = self.inner.borrow_mut();
-        if let Some(receiver) = self_mut.edits_in_progress.as_mut() {
-            receiver.poll_unpin(cx).map(|_| ())
-        } else {
-            std::task::Poll::Ready(())
-        }
+        let Some(receiver) = self_mut.edits_in_progress.as_mut() else {
+            return std::task::Poll::Ready(true);
+        };
+        // A resolved oneshot reports `Canceled` when polled again, so forget it
+        // once it resolves instead of reading a later poll as a dropped batch.
+        let applied = std::task::ready!(receiver.poll_unpin(cx)).is_ok();
+        self_mut.edits_in_progress = None;
+        std::task::Poll::Ready(applied)
     }
 
     /// Check if there is a new location for the websocket edits server.
@@ -619,6 +623,43 @@ fn owned_notify_future(notify: Arc<Notify>) -> Pin<Box<dyn Future<Output = ()>>>
 mod hardened_transport_tests {
     use super::*;
     use std::io::Write;
+    // A batch the bounded queue cannot hold must not look flushed: its
+    // receiver resolves as cancelled, which hardened rendering treats as fatal.
+    #[test]
+    fn hardened_dropped_batches_resolve_as_not_applied() {
+        let mut state = WebviewConnectionState::default();
+        let mut kept: Vec<_> = (0..2).map(|_| state.add_message(vec![1])).collect();
+        let mut dropped = state.add_message(vec![2]);
+        assert!(matches!(dropped.try_recv(), Err(oneshot::Canceled)));
+        let mut huge = state.add_message(vec![0; 8 * 1024 * 1024 + 1]);
+        assert!(matches!(huge.try_recv(), Err(oneshot::Canceled)));
+        assert!(kept
+            .iter_mut()
+            .all(|r| matches!(r.try_recv(), Ok(None))));
+        let (tx, rx) = std::sync::mpsc::sync_channel(0);
+        let mut full = WebviewConnectionState::Connected { edits_outgoing: tx };
+        let mut lost = full.add_message(vec![3]);
+        assert!(matches!(lost.try_recv(), Err(oneshot::Canceled)));
+        drop(rx);
+    }
+    #[test]
+    fn hardened_applied_batch_stays_applied_on_later_polls() {
+        let queue = EditWebsocket::start(true).create_queue();
+        let waker = futures_util::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+        let (applied, rx) = oneshot::channel();
+        queue.inner.borrow_mut().edits_in_progress = Some(rx);
+        assert!(queue.poll_edits_flushed(&mut cx).is_pending());
+        applied.send(()).unwrap();
+        // Later wake-ups without a new batch must not look like a dropped one.
+        for _ in 0..3 {
+            assert_eq!(queue.poll_edits_flushed(&mut cx), std::task::Poll::Ready(true));
+        }
+        let (dropped, rx) = oneshot::channel::<()>();
+        queue.inner.borrow_mut().edits_in_progress = Some(rx);
+        drop(dropped);
+        assert_eq!(queue.poll_edits_flushed(&mut cx), std::task::Poll::Ready(false));
+    }
     #[test]
     fn hardened_handshake_reader_and_actual_stalled_peer_are_bounded() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();

@@ -2,8 +2,7 @@
 
 //! Explicit attachment file operations; plaintext never goes to command output.
 use crate::{
-    address,
-    attachment_files::{Input, Output},
+    address, attachment_files,
     cli::Ctx,
     exit::{AMBIGUOUS, CliError, NOT_FOUND, OTHER},
     json::Json,
@@ -87,7 +86,7 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
         qv_core::Text::new(name).map_err(|_| CliError::usage("invalid attachment name"))?;
         qv_core::Text::new(mime).map_err(|_| CliError::usage("invalid attachment MIME"))?;
     }
-    let mut input = path.map(|p| Input::open(p)).transpose()?;
+    let mut input = path.map(|p| attachment_files::open(p)).transpose()?;
     let session = ctx.unlock()?;
     let entry = address::entry(&session, arg(m, "entry"))?;
     if cmd == "add" {
@@ -165,11 +164,11 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
                         .get_one::<PathBuf>("path")
                         .map(PathBuf::as_path)
                         .unwrap_or(Path::new(""));
-                    let mut output = Output::create(path)?;
+                    let mut output = attachment_files::create(path)?;
                     let result = session
                         .save_attachment(handle, &mut output, None)
                         .map_err(CliError::from)
-                        .and_then(|()| output.finish());
+                        .and_then(|()| attachment_files::finish(&output));
                     if let Err(e) = result {
                         return Err(CliError::new(
                             e.code,

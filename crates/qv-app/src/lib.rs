@@ -4,10 +4,16 @@
 #[cfg(all(feature = "desktop", target_os = "android"))]
 mod android;
 pub mod controller;
+mod documents;
+mod ops;
 #[cfg(feature = "desktop")]
 mod runtime;
 #[cfg(feature = "desktop")]
 mod ui;
+pub mod views;
+pub mod workspace;
+#[cfg(test)]
+mod workspace_tests;
 #[cfg(feature = "desktop")]
 pub use runtime::run;
 

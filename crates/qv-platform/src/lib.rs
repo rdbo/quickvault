@@ -13,6 +13,9 @@ use std::time::Duration;
 
 #[cfg(target_os = "linux")]
 pub mod clipboard;
+/// No-follow explicit user file input/output (Linux).
+#[cfg(target_os = "linux")]
+pub mod files;
 #[cfg(target_os = "linux")]
 pub mod linux;
 

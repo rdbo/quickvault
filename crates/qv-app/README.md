@@ -1,10 +1,43 @@
 # QuickVault shared app foundation
 
-The shared Android/Linux Dioxus UI currently supports create, recovery-phrase
-confirmation or recorded skip, password unlock, phrase unlock, explicit
-snapshot-backed anchor recovery and lock. Entry browsing/editing is roadmap 2.5.
-Phase 2.4 foundation is implemented; fresh-context review remains pending. See
-[validation](../../plans/0030-app-foundation/VALIDATION.md).
+The shared Android/Linux Dioxus UI provides the CLI's offline feature set:
+- create, phrase confirmation or recorded skip, password/phrase unlock,
+  snapshot-backed anchor recovery and lock;
+- browsing, search, entry view and edit, groups, move, trash;
+- reveal (30 s) and copy (Rust → OS clipboard, 20 s), TOTP codes, generator;
+- history, conflicts, snapshots, archive export/merge, attachments;
+- settings, password change, phrase redisplay, key rotation (including
+  finishing an interrupted one), verify and vault information.
+
+Validation: [2.4](../../plans/0030-app-foundation/VALIDATION.md),
+[2.5](../../plans/0031-app-vault-workflows/VALIDATION.md).
+
+App limits (plan 0031):
+- Single-line inputs accept 1 KiB and multi-line notes or protected values
+  8 KiB, below the 64 KiB native IPC bound. Larger existing values can be
+  viewed, revealed and copied, and are edited with the CLI.
+- Protected values are never prefilled into inputs; leaving a protected value
+  blank keeps it unchanged.
+- A recovery phrase on screen allows 5 minutes of inactivity; other screens
+  lock after 60 seconds.
+- Linux files are chosen by absolute path and opened through the CLI's
+  no-follow owner rules. Linux copy uses the X11 clipboard (XWayland on
+  Wayland sessions); without an X server, copy is unavailable and says so.
+- Android uses the system document picker. Attachments stream in bounded
+  chunks with no plaintext temporary file; ciphertext archives are staged in
+  private no-backup storage and removed afterwards. Copied text and
+  attachment chunks briefly exist as JVM objects. A chosen document belongs
+  to the current screen: it is forgotten on navigation, on lock and after a
+  save into it, so a later save never overwrites it silently.
+- Android marks clips sensitive (API 33+) and clears them at expiry or lock
+  only when it can verify the clip is still its own. While another app has
+  focus, Android may hide that, so the clip is left for the system to expire.
+- Background locking is immediate on Android, except for two app-started OS
+  interactions begun in the foreground: a copy keeps the vault open until its
+  20 s hold ends, so it can be pasted, and the system document picker (which
+  always backgrounds the app) keeps it open until the app is back with a
+  choice or cancellation. Screen-off, lost protection and the 60 s inactivity
+  lock still apply.
 
 On Linux, install GTK 3, WebKitGTK 4.1, libxdo and the AppIndicator development
 libraries, then run:
@@ -21,7 +54,7 @@ inactivity timeout remain active. Linux uses `$XDG_STATE_HOME/quickvault`, or
 A second instance refuses startup. A blank vault path
 selects the app vault. Persistent use requires acknowledging the displayed
 protection limits. Inactivity locks after 60 seconds; background locks immediately
-on Android. Resume never unlocks.
+on Android (except during a foreground clipboard hold or document pick, above). Resume never unlocks.
 
 Startup failures identify the missing prerequisite:
 

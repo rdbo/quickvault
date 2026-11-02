@@ -10,7 +10,7 @@ use qv_core::{
 use std::path::PathBuf;
 use std::sync::{
     Arc, Mutex, MutexGuard,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::{Duration, Instant};
 use zeroize::Zeroize;
@@ -61,6 +61,14 @@ pub enum AppError {
     AlreadyRunning,
     /// Required platform service is unavailable.
     Unavailable,
+    /// The item has conflicting versions; choose one first.
+    Conflict,
+    /// The clipboard backend is unavailable on this system.
+    ClipboardUnavailable,
+    /// The stored value is larger than the app's edit bound; use the CLI.
+    TooLargeForApp,
+    /// An interrupted key rotation must be finished before unlocking.
+    RotationPending,
 }
 impl AppError {
     /// Fixed user-facing text.
@@ -77,6 +85,13 @@ impl AppError {
             )) => {
                 "The local anchor is missing or mismatched. Use explicit recovery to inspect this file."
             }
+            Self::Core(CoreError::Conflict) | Self::Conflict => {
+                "This item has conflicting versions. Resolve the conflict before using it here."
+            }
+            Self::Core(CoreError::SnapshotOverBudget { .. }) => {
+                "The mandatory recovery snapshot does not fit the snapshot budget. Nothing was changed."
+            }
+            Self::Core(CoreError::Cancelled) => "The operation was cancelled.",
             Self::Core(_) => {
                 "The vault operation could not be completed. Check protection status and the selected vault."
             }
@@ -98,6 +113,15 @@ impl AppError {
                 "QuickVault is already running for this private state directory. Switch to that window, or close it before reopening."
             }
             Self::Unavailable => "Required OS protection or private storage is unavailable.",
+            Self::ClipboardUnavailable => {
+                "Copying is unavailable: no supported clipboard was found on this system."
+            }
+            Self::TooLargeForApp => {
+                "This value is larger than the app can edit. View or copy it here, and edit it with the CLI."
+            }
+            Self::RotationPending => {
+                "An interrupted key rotation was found. Finish or roll it back before unlocking."
+            }
         }
     }
 }
@@ -121,6 +145,9 @@ pub enum Phase {
     Recovery,
     /// A current vault session is ready.
     Unlocked,
+    /// A prepared key rotation awaits confirmation of its new phrase. The old
+    /// session is consumed; cancelling changes nothing.
+    Rotation,
 }
 /// Foundation workflow selected on the locked screen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -162,6 +189,16 @@ pub struct View {
     pub reduced_process: bool,
     /// Linux OS lock/sleep notifications are unavailable; manual/idle locks work.
     pub reduced_lifecycle: bool,
+    /// Workspace revision; any renderer-visible unlocked change advances it.
+    pub revision: u64,
+    /// Time-dependent workspace display (reveal and clipboard countdowns).
+    pub live: crate::workspace::Live,
+    /// The prepared rotation's new phrase is confirmed.
+    pub rotation_confirmed: bool,
+    /// An interrupted rotation must be finished before unlocking.
+    pub resume: Option<Resume>,
+    /// Baseline adoption awaits over-budget consent for this many bytes.
+    pub over_budget: Option<u64>,
 }
 /// Core-backed foundation actions. None grants arbitrary IO or crypto access.
 #[derive(Clone, Copy)]
@@ -184,23 +221,66 @@ pub enum Action {
     SkipPhrase,
     /// Snapshot then accept a new recovery baseline.
     AdoptBaseline,
+    /// Accept the baseline after consenting to an over-budget recovery snapshot.
+    AdoptBaselineOverBudget,
+    /// Confirm three words of a prepared rotation's new phrase.
+    ConfirmRotation,
+    /// Install the confirmed rotation.
+    InstallRotation,
+    /// Drop the prepared rotation; nothing changes.
+    CancelRotation,
+    /// Finish an interrupted rotation by completing it.
+    ResumeComplete,
+    /// Finish an interrupted rotation by rolling it back.
+    ResumeRollback,
 }
-struct State {
-    epoch: u64,
-    phase: Phase,
+/// An interrupted rotation found before unlocking, with the passwords it needs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Resume {
+    /// The previous master password is needed.
+    pub old: bool,
+    /// The rotation's new master password is needed.
+    pub new: bool,
+}
+pub(crate) struct State {
+    pub(crate) epoch: u64,
+    pub(crate) phase: Phase,
     mode: Mode,
     inputs: [SecretBytes; 8],
-    cancel: CancelToken,
-    session: Option<Arc<Session>>,
+    pub(crate) cancel: CancelToken,
+    pub(crate) session: Option<Arc<Session>>,
     phrase: Option<RecoveryPhrase>,
     positions: [usize; 3],
-    error: Option<AppError>,
-    status: &'static str,
-    active: Instant,
+    pub(crate) error: Option<AppError>,
+    pub(crate) status: &'static str,
+    pub(crate) active: Instant,
     weak_until: Option<Instant>,
     fair_warning: bool,
     suggestion: Option<qv_core::Generated>,
     suggestion_until: Option<Instant>,
+    /// Advanced only by a lock; worker results apply to the same generation.
+    pub(crate) lock_gen: u64,
+    /// A vault worker for this lock generation has not reported yet.
+    pub(crate) op_running: bool,
+    /// The open vault's path, for operations that reopen it (snapshot restore).
+    pub(crate) vault_path: Option<PathBuf>,
+    /// The vault was opened with the recovery phrase; offer a new password.
+    recovered_with_phrase: bool,
+    /// Unlocked screens; dropped (and its holds cancelled) on every lock.
+    pub(crate) workspace: Option<crate::workspace::Workspace>,
+    /// Changes whenever renderer-visible workspace state changes.
+    pub(crate) revision: u64,
+    /// A rotation worker consumed the session; its own lock is expected.
+    pub(crate) rotating: bool,
+    /// A prepared rotation awaiting phrase confirmation.
+    pub(crate) rotation: Option<Box<qv_core::Rotation>>,
+    rotation_confirmed: bool,
+    /// An interrupted rotation for this path must be finished first.
+    resume: Option<(PathBuf, Resume)>,
+    /// Baseline adoption needs consent for this many over-budget bytes.
+    over_budget: Option<u64>,
+    /// Unverified header read before unlocking (the session then holds the file).
+    pub(crate) about: Option<crate::views::AboutView>,
 }
 impl State {
     fn clear_inputs(&mut self) {
@@ -210,8 +290,25 @@ impl State {
             *input = SecretBytes::zeroed(0);
         }
     }
-    fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         let creating = self.phase == Phase::Opening && self.status == "Creating vault…";
+        let unconfirmed = self.phase == Phase::Phrase;
+        let rotation = self.phase == Phase::Rotation;
+        let interrupted = self.op_running;
+        self.lock_gen = self.lock_gen.wrapping_add(1);
+        #[cfg(all(feature = "desktop", target_os = "android"))]
+        crate::android::forget_pick();
+        self.op_running = false;
+        self.rotating = false;
+        self.rotation = None;
+        self.rotation_confirmed = false;
+        self.resume = None;
+        self.over_budget = None;
+        self.about = None;
+        self.workspace = None;
+        self.vault_path = None;
+        self.recovered_with_phrase = false;
+        self.revision = self.revision.wrapping_add(1);
         self.cancel.cancel();
         self.cancel = CancelToken::new();
         self.epoch = self.epoch.wrapping_add(1);
@@ -226,17 +323,27 @@ impl State {
         self.mode = Mode::Unlock;
         self.status = if creating {
             "Locked. A vault created before cancellation may remain."
+        } else if rotation {
+            "Locked. The prepared key rotation was cancelled; nothing changed."
+        } else if unconfirmed {
+            "Locked before the recovery phrase was confirmed. After unlocking, use Settings → Show recovery phrase."
+        } else if interrupted {
+            "Locked. An operation was in progress; it may have completed."
         } else {
             "Locked"
         };
         self.error = None;
     }
 }
-struct Inner {
-    base: PathBuf,
-    services: Arc<dyn PlatformServices>,
+pub(crate) struct Inner {
+    pub(crate) base: PathBuf,
+    pub(crate) services: Arc<dyn PlatformServices>,
     state: Mutex<State>,
-    working: AtomicBool,
+    pub(crate) working: AtomicBool,
+    /// Worker permits released; part of the view revision because reads that
+    /// were refused while busy become available (lock-free, so a guard may be
+    /// dropped while the state lock is held).
+    released: AtomicU64,
     monitoring: AtomicBool,
     watch: Mutex<Option<Box<dyn Watch>>>,
     #[cfg(feature = "validation")]
@@ -246,21 +353,23 @@ struct Inner {
 }
 /// Shared application controller; event callbacks contain only a weak reference.
 #[derive(Clone)]
-pub struct Controller(Arc<Inner>);
+pub struct Controller(pub(crate) Arc<Inner>);
 impl PartialEq for Controller {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
 }
-struct Worker(Arc<Inner>);
+pub(crate) struct Worker(pub(crate) Arc<Inner>);
 impl Drop for Worker {
     fn drop(&mut self) {
         self.0.working.store(false, Ordering::SeqCst);
+        self.0.released.fetch_add(1, Ordering::SeqCst);
     }
 }
 enum Opened {
-    Created(qv_core::Created, [usize; 3]),
-    Session(Session),
+    Created(qv_core::Created, [usize; 3], PathBuf),
+    Session(Session, PathBuf, bool, Option<crate::views::AboutView>),
+    Resume(PathBuf, Resume),
 }
 impl Controller {
     /// Attempt lifecycle monitoring before accepting input, reporting its
@@ -287,8 +396,21 @@ impl Controller {
                 fair_warning: false,
                 suggestion: None,
                 suggestion_until: None,
+                lock_gen: 0,
+                op_running: false,
+                vault_path: None,
+                recovered_with_phrase: false,
+                workspace: None,
+                revision: 0,
+                rotating: false,
+                rotation: None,
+                rotation_confirmed: false,
+                resume: None,
+                over_budget: None,
+                about: None,
             }),
             working: AtomicBool::new(false),
+            released: AtomicU64::new(0),
             monitoring: AtomicBool::new(false),
             watch: Mutex::new(None),
             #[cfg(feature = "validation")]
@@ -434,7 +556,7 @@ impl Controller {
         eprintln!("full UI flow failed (synthetic fixture)");
         std::process::exit(1)
     }
-    fn state(&self) -> MutexGuard<'_, State> {
+    pub(crate) fn state(&self) -> MutexGuard<'_, State> {
         match self.0.state.lock() {
             Ok(s) => s,
             Err(p) => {
@@ -455,11 +577,20 @@ impl Controller {
     /// and session auto-locks destroy renderer-visible state without user action.
     pub fn snapshot(&self) -> View {
         let mut s = self.state();
-        if s.active.elapsed() >= Duration::from_secs(60)
+        let idle = if matches!(s.phase, Phase::Phrase | Phase::Rotation)
+            || s.workspace
+                .as_ref()
+                .is_some_and(crate::workspace::Workspace::shows_phrase)
+        {
+            crate::workspace::PHRASE_IDLE
+        } else {
+            Duration::from_secs(60)
+        };
+        if s.active.elapsed() >= idle
             && (s.phase != Phase::Locked
                 || s.inputs.iter().any(|v| !v.is_empty())
                 || s.suggestion.is_some())
-            || s.session.as_ref().is_some_and(|v| v.is_locked())
+            || (!s.rotating && s.session.as_ref().is_some_and(|v| v.is_locked()))
         {
             s.invalidate();
         }
@@ -467,7 +598,10 @@ impl Controller {
             .weak_until
             .map(|t| t.saturating_duration_since(Instant::now()))
             .unwrap_or_default();
+        let (revision, live) = crate::workspace::live(&mut s);
         View {
+            revision: revision.wrapping_add(self.0.released.load(Ordering::SeqCst)),
+            live,
             epoch: FormEpoch(s.epoch),
             phase: s.phase,
             mode: s.mode,
@@ -482,6 +616,9 @@ impl Controller {
             fair_warning: s.fair_warning,
             suggestion_visible: s.suggestion.is_some()
                 && s.suggestion_until.is_some_and(|t| Instant::now() < t),
+            rotation_confirmed: s.rotation_confirmed,
+            resume: s.resume.as_ref().map(|r| r.1),
+            over_budget: s.over_budget,
         }
     }
     /// Select a workflow, clearing the old form and invalidating late events.
@@ -531,10 +668,14 @@ impl Controller {
     /// copies that cannot be deterministically erased.
     pub fn phrase(&self, epoch: FormEpoch) -> Option<SecretBytes> {
         let s = self.state();
-        if s.epoch != epoch.0 || s.phase != Phase::Phrase {
+        if s.epoch != epoch.0 {
             return None;
         }
-        let phrase = s.phrase.as_ref()?.expose_secret().as_bytes();
+        let phrase = match s.phase {
+            Phase::Phrase => s.phrase.as_ref()?.expose_secret().as_bytes(),
+            Phase::Rotation => s.rotation.as_ref()?.phrase().expose_secret().as_bytes(),
+            _ => return None,
+        };
         let mut copy = SecretBytes::zeroed(phrase.len());
         copy.expose_secret_mut().copy_from_slice(phrase);
         Some(copy)
@@ -556,7 +697,7 @@ impl Controller {
     pub fn lock(&self) {
         self.state().invalidate();
     }
-    fn core(&self) -> Result<Core, AppError> {
+    pub(crate) fn core(&self) -> Result<Core, AppError> {
         for name in ["anchors", "snapshots", "vaults"] {
             private_dir(&self.0.base.join(name))?;
         }
@@ -642,6 +783,21 @@ impl Controller {
             s.error = None;
             return Ok(());
         }
+        if matches!(
+            action,
+            Action::ConfirmRotation | Action::InstallRotation | Action::CancelRotation
+        ) {
+            if s.phase != Phase::Rotation {
+                return Err(AppError::InvalidInput);
+            }
+            return self.rotation_step(s, action);
+        }
+        if matches!(action, Action::ResumeComplete | Action::ResumeRollback) {
+            if s.phase != Phase::Locked {
+                return Err(AppError::InvalidInput);
+            }
+            return self.resume_step(s, action);
+        }
         if matches!(action, Action::ConfirmPhrase) {
             if s.phase != Phase::Phrase {
                 return Err(AppError::InvalidInput);
@@ -666,9 +822,18 @@ impl Controller {
             s.epoch = s.epoch.wrapping_add(1);
             s.phase = Phase::Unlocked;
             s.status = "Vault ready";
+            enter_workspace(&mut s);
             return Ok(());
         }
-        if matches!(action, Action::SkipPhrase | Action::AdoptBaseline) {
+        if matches!(
+            action,
+            Action::SkipPhrase | Action::AdoptBaseline | Action::AdoptBaselineOverBudget
+        ) {
+            if matches!(action, Action::AdoptBaselineOverBudget) && s.over_budget.is_none() {
+                return Err(AppError::InvalidInput);
+            }
+            let allow_over = matches!(action, Action::AdoptBaselineOverBudget);
+            s.over_budget = None;
             let expected = if matches!(action, Action::SkipPhrase) {
                 Phase::Phrase
             } else {
@@ -695,7 +860,7 @@ impl Controller {
                         session.record_recovery_skip()
                     } else {
                         session
-                            .begin_destructive(false, Some(&token))
+                            .begin_destructive(allow_over, Some(&token))
                             .and_then(|copy| {
                                 session.adopt_baseline()?;
                                 cleanup_pending = session.finish_destructive(copy).is_err();
@@ -713,7 +878,13 @@ impl Controller {
                                 } else {
                                     "Vault ready"
                                 };
-                                s.error = None
+                                s.error = None;
+                                enter_workspace(&mut s);
+                            }
+                            Err(CoreError::SnapshotOverBudget { needed }) => {
+                                s.over_budget = Some(needed);
+                                s.error =
+                                    Some(AppError::Core(CoreError::SnapshotOverBudget { needed }));
                             }
                             Err(e) => {
                                 s.error = Some(e.into());
@@ -844,6 +1015,20 @@ impl Controller {
             return Err(AppError::InvalidInput);
         }
         let core = self.core()?;
+        if !matches!(action, Action::Create | Action::ConfirmWeak)
+            && core.rotation_pending(&path).unwrap_or(false)
+        {
+            let need = core.rotation_passwords(&path)?;
+            return Ok(Opened::Resume(
+                path,
+                Resume {
+                    old: need.old,
+                    new: need.new,
+                },
+            ));
+        }
+        // Read the public header while the file is still free to open.
+        let about = crate::views::about(&core, &path).ok();
         match action {
             Action::Create | Action::ConfirmWeak => {
                 let password =
@@ -858,6 +1043,7 @@ impl Controller {
                         if name.is_empty() { "My vault" } else { name },
                     )?,
                     positions,
+                    path,
                 ))
             }
             Action::Unlock | Action::RecoverPassword => {
@@ -869,16 +1055,18 @@ impl Controller {
                 } else {
                     core.unlock(&path, &password, Some(token))?
                 };
-                Ok(Opened::Session(session))
+                Ok(Opened::Session(session, path, false, about))
             }
-            Action::Recover => Ok(Opened::Session(
-                core.unlock_with_phrase(
-                    &path,
-                    values[InputField::Phrase.index()].expose_secret(),
-                    Some(token),
-                )?
-                .0,
-            )),
+            Action::Recover => {
+                let session = core
+                    .unlock_with_phrase(
+                        &path,
+                        values[InputField::Phrase.index()].expose_secret(),
+                        Some(token),
+                    )?
+                    .0;
+                Ok(Opened::Session(session, path, true, about))
+            }
             _ => Err(AppError::InvalidInput),
         }
     }
@@ -889,14 +1077,18 @@ impl Controller {
             return;
         }
         match result {
-            Ok(Opened::Created(created, positions)) => {
+            Ok(Opened::Created(created, positions, path)) => {
+                s.vault_path = Some(path);
                 s.session = Some(Arc::new(created.session));
                 s.phrase = Some(created.recovery_phrase);
                 s.positions = positions;
                 s.phase = Phase::Phrase;
                 s.status = "Write down your recovery phrase";
             }
-            Ok(Opened::Session(session)) => {
+            Ok(Opened::Session(session, path, phrase, about)) => {
+                s.vault_path = Some(path);
+                s.about = about;
+                s.recovered_with_phrase = phrase;
                 s.phase = if session.is_read_only().unwrap_or(true) {
                     Phase::Recovery
                 } else {
@@ -908,6 +1100,13 @@ impl Controller {
                     "Vault ready"
                 };
                 s.session = Some(Arc::new(session));
+                enter_workspace(&mut s);
+            }
+            Ok(Opened::Resume(path, need)) => {
+                s.phase = Phase::Locked;
+                s.status = "An interrupted key rotation was found";
+                s.resume = Some((path, need));
+                s.error = Some(AppError::RotationPending);
             }
             Err(e) => {
                 s.phase = Phase::Locked;
@@ -915,6 +1114,184 @@ impl Controller {
                 s.error = Some(e);
             }
         }
+    }
+    /// Move a prepared rotation (the session it consumed is gone) to its
+    /// phrase-confirmation phase.
+    pub(crate) fn enter_rotation(
+        s: &mut State,
+        rotation: qv_core::Rotation,
+        positions: [usize; 3],
+    ) {
+        s.rotating = false;
+        s.workspace = None;
+        if let Some(session) = s.session.take() {
+            session.lock();
+        }
+        s.clear_inputs();
+        s.rotation = Some(Box::new(rotation));
+        s.rotation_confirmed = false;
+        s.positions = positions;
+        s.phase = Phase::Rotation;
+        s.epoch = s.epoch.wrapping_add(1);
+        s.status = "Confirm the new recovery phrase";
+        s.error = None;
+        s.revision = s.revision.wrapping_add(1);
+    }
+    fn rotation_step(&self, mut s: MutexGuard<'_, State>, action: Action) -> Result<(), AppError> {
+        match action {
+            Action::CancelRotation => {
+                s.invalidate();
+                s.status = "Key rotation cancelled; nothing changed.";
+                Ok(())
+            }
+            Action::ConfirmRotation => {
+                let words: Vec<SecretBytes> =
+                    [InputField::Word0, InputField::Word1, InputField::Word2]
+                        .iter()
+                        .map(|w| crate::workspace::protect(s.inputs[w.index()].expose_secret()))
+                        .collect::<Result<_, _>>()?;
+                let positions = s.positions;
+                let rotation = s.rotation.as_mut().ok_or(AppError::InvalidInput)?;
+                let mut ok = true;
+                for (p, w) in positions.iter().zip(&words) {
+                    ok &= rotation
+                        .confirm_word(*p, w.expose_secret())
+                        .unwrap_or(false);
+                }
+                s.clear_inputs();
+                s.epoch = s.epoch.wrapping_add(1);
+                s.rotation_confirmed |= ok;
+                if !ok {
+                    s.error = Some(AppError::InvalidInput);
+                    return Err(AppError::InvalidInput);
+                }
+                s.error = None;
+                Ok(())
+            }
+            _ => {
+                if !s.rotation_confirmed {
+                    return Err(AppError::InvalidInput);
+                }
+                let rotation = s.rotation.take().ok_or(AppError::InvalidInput)?;
+                let token = s.cancel.clone();
+                let generation = s.lock_gen;
+                self.0.working.store(true, Ordering::SeqCst);
+                let worker = Worker(self.0.clone());
+                s.status = "Installing the key rotation…";
+                drop(s);
+                let controller = self.clone();
+                std::thread::Builder::new()
+                    .name("qv-app-rotation".into())
+                    .spawn(move || {
+                        let _worker = worker;
+                        let outcome = rotation.install(Some(&token));
+                        let mut s = controller.state();
+                        if s.lock_gen != generation {
+                            return;
+                        }
+                        let message = match &outcome {
+                            Ok(done) if done.cleanup_pending => {
+                                "Key rotation complete; old-generation cleanup remains. Unlock with the new master password and use the new recovery phrase."
+                            }
+                            Ok(_) => {
+                                "Key rotation complete. Unlock with the new master password and use the new recovery phrase."
+                            }
+                            Err(e) if e.journal_published => {
+                                "Key rotation was interrupted after it started. Unlock to finish or roll it back."
+                            }
+                            Err(_) => "Key rotation failed before it started; nothing changed.",
+                        };
+                        s.invalidate();
+                        s.status = message;
+                    })
+                    .map_err(|_| AppError::Unavailable)?;
+                Ok(())
+            }
+        }
+    }
+    fn resume_step(&self, mut s: MutexGuard<'_, State>, action: Action) -> Result<(), AppError> {
+        let (path, need) = s.resume.clone().ok_or(AppError::InvalidInput)?;
+        let password =
+            |field: InputField, needed: bool| -> Result<Option<MasterPassword>, AppError> {
+                if !needed {
+                    return Ok(None);
+                }
+                MasterPassword::from_utf8(s.inputs[field.index()].expose_secret())
+                    .map(Some)
+                    .map_err(|_| AppError::InvalidInput)
+            };
+        let new = password(InputField::Password, need.new)?;
+        let old = password(InputField::Repeat, need.old)?;
+        let choice = if matches!(action, Action::ResumeComplete) {
+            qv_core::RotationChoice::Complete
+        } else {
+            qv_core::RotationChoice::RollBack
+        };
+        let core = self.core()?;
+        let token = s.cancel.clone();
+        let generation = s.lock_gen;
+        s.clear_inputs();
+        s.epoch = s.epoch.wrapping_add(1);
+        s.status = "Finishing the interrupted key rotation…";
+        self.0.working.store(true, Ordering::SeqCst);
+        let worker = Worker(self.0.clone());
+        drop(s);
+        let controller = self.clone();
+        std::thread::Builder::new()
+            .name("qv-app-resume".into())
+            .spawn(move || {
+                let _worker = worker;
+                let result = (|| -> Result<&'static str, AppError> {
+                    let t =
+                        core.resume_rotation(&path, old.as_ref(), new.as_ref(), Some(&token))?;
+                    drop((old, new));
+                    let allowed = match t.state() {
+                        qv_core::RotationState::Committed => {
+                            choice == qv_core::RotationChoice::Complete
+                        }
+                        qv_core::RotationState::RollbackPending => {
+                            choice == qv_core::RotationChoice::RollBack
+                        }
+                        _ => true,
+                    };
+                    if !allowed {
+                        return Err(AppError::InvalidInput);
+                    }
+                    core.finish_rotation(t, choice, Some(&token))?;
+                    Ok(match choice {
+                        qv_core::RotationChoice::Complete => {
+                            "Key rotation complete. Unlock with the new master password."
+                        }
+                        qv_core::RotationChoice::RollBack => {
+                            "Key rotation rolled back. Unlock with the previous master password."
+                        }
+                    })
+                })();
+                let mut s = controller.state();
+                if s.lock_gen != generation {
+                    return;
+                }
+                match result {
+                    Ok(message) => {
+                        s.invalidate();
+                        s.status = message;
+                    }
+                    Err(e) => {
+                        s.status = "An interrupted key rotation was found";
+                        s.error = Some(e);
+                    }
+                }
+            })
+            .map_err(|_| AppError::Unavailable)?;
+        Ok(())
+    }
+}
+/// Open the unlocked screens once a writable session is ready. A phrase
+/// unlock first offers (never forces) a new master password, as `recover` does.
+fn enter_workspace(s: &mut State) {
+    if s.phase == Phase::Unlocked && s.workspace.is_none() {
+        s.workspace = Some(crate::workspace::Workspace::new(s.recovered_with_phrase));
+        s.revision = s.revision.wrapping_add(1);
     }
 }
 /// Create private application directories without changing permissions on an
@@ -942,7 +1319,6 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
     use qv_core::platform::*;
-    use std::sync::atomic::AtomicU64;
     static NEXT: AtomicU64 = AtomicU64::new(0);
     static KDF: Mutex<()> = Mutex::new(());
     const PASSWORD: &str = "K4L!c8vP2zR9qT7W6nM5";
@@ -1369,8 +1745,11 @@ mod tests {
             )
             .unwrap();
         env.os.event();
-        env.controller
-            .complete(epoch, &token, Ok(Opened::Created(created, [0, 1, 2])));
+        env.controller.complete(
+            epoch,
+            &token,
+            Ok(Opened::Created(created, [0, 1, 2], PathBuf::new())),
+        );
         let view = env.controller.snapshot();
         assert_eq!(view.phase, Phase::Locked);
         assert!(env.controller.phrase(view.epoch).is_none());

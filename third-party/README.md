@@ -81,6 +81,12 @@ Exact maintained changes:
   config/protocol/webview/ipc/app/desktop_context/edits and new hardened.rs,
   plus focused boundary/transport tests. No replacement
   renderer, no input-dialog workaround and no new crypto construction.
+  Plan 0031 adds, in edits.rs/webview.rs/hardened.rs: an edit batch that the
+  bounded transport drops (full queue/channel, over 8 MiB, lost connection)
+  now resolves as not applied, and hardened rendering closes the window
+  instead of treating it as flushed (a resolved batch is forgotten so a later
+  wake-up is not misread as a drop); plus a metadata-only counter of refused
+  native IPC messages used by the real-engine boundary harness.
 - glib: variant_iter.rs backports gtk-rs-core#1343's mutable output pointer
   (RUSTSEC-2024-0429). Existing iterator tests exercise forward/backward/nth/last;
   run them with optimizations to catch the original optimizer-sensitive defect.

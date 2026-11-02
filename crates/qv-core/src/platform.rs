@@ -3,7 +3,9 @@
 //! OS service injection and explicit reduced-protection policy (0008 §1.3).
 //! Frontends continue through core; no vault key reaches an OS event callback.
 use crate::{Core, CoreError, Session};
-pub use qv_platform::android::{AndroidPlatform, AndroidState};
+pub use qv_platform::android::{
+    AndroidClipboardBackend, AndroidPlatform, AndroidState, BackgroundDeferral, ClipToken,
+};
 pub use qv_platform::{
     Cancellation, Clipboard, Evidence, InputPurpose, Keystore, Lifecycle, LockCallback, LockEvent,
     PlatformError, PlatformServices, ProtectionStatus, SecureInput, Unavailable, Watch,
@@ -11,6 +13,7 @@ pub use qv_platform::{
 #[cfg(target_os = "linux")]
 pub use qv_platform::{
     clipboard::X11Clipboard,
+    files,
     linux::{InstanceLock, LinuxPlatform},
 };
 use std::sync::Arc;

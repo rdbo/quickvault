@@ -9,6 +9,42 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-11-01: App vault workflows (roadmap 2.5, plan 0031). The shared
+  Android/Linux app now reaches the CLI's offline feature set:
+  - browsing, search, entry view and edit, groups and trash;
+  - 30 s reveal and Rust→OS copy, TOTP codes and the generator;
+  - history, conflicts, snapshot restore, archive export/merge, attachments;
+  - settings, password change, phrase redisplay, key rotation with resume,
+    verification and vault information.
+
+  On Android, the system document picker no longer locks the vault when
+  started in the foreground (only background expiry is deferred; screen-off
+  and inactivity still lock), and a chosen document is forgotten on
+  navigation and after a save. Archive import on Android now works: the
+  descriptor-pinned source walk opens ancestors with `O_PATH`, because apps
+  have only search permission on `/data`. Verified on a physical phone.
+
+  Layouts are responsive (desktop sidebar, touch bottom bar). Every operation
+  is epoch-checked; results arriving after a lock are discarded. Destructive
+  operations take the mandatory recovery snapshot and ask before it exceeds
+  its budget.
+
+  Android adds a clipboard backend (sensitive clips, cleared only when still
+  owned) and document-picker streaming with no plaintext temporary files. A
+  foreground copy defers Android's background lock until the 20 s hold ends;
+  screen-off still locks at once.
+
+  Shared no-follow file helpers moved from qv-cli to qv-platform with no CLI
+  behaviour change. The hardened desktop patch now closes the window when the
+  bounded edit transport drops a batch, instead of treating it as flushed.
+  Plan 0030 review follow-ups are closed: a 5-minute phrase-screen limit with
+  guidance, over-budget baseline consent and engine-level refused-IPC
+  assertions. No release or security validation claim.
+
+- 2026-11-01: Phase 2.4 review: Linux startup now reports private-storage and
+  already-running refusals by category (previously collapsed into "Protection
+  unavailable"), with a regression test.
+
 - 2026-11-01: Owner policy amendment makes automatic OS screen-lock/sleep
   monitoring optional on Linux. Missing logind no longer prevents app startup
   or local create/unlock/recovery after reduced-protection acknowledgement.

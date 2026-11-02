@@ -92,7 +92,7 @@ rather than creating unused workspace scaffolding.
 | qv-protocol | Bounded canonical LAN/server wire types, contexts and version registry |
 | qv-sync | Shared causal merge candidates (implemented); direct LAN exchange, remote candidate state and publication orchestration (planned) |
 | qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets and the `verify` report |
-| qv-platform | Injected OS traits; Linux logind lifecycle, X11 clipboard ownership, single-instance and persistence reporting; unavailable native input/quick unlock; Android/autofill adapters planned |
+| qv-platform | Injected OS traits; Linux logind lifecycle, X11 clipboard ownership, single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; unavailable native input/quick unlock; autofill planned |
 | qv-cli / qv-app | Explicit user actions and views; no unrestricted crypto/file/SQL bridge |
 | qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
 
@@ -305,6 +305,13 @@ background,
 screen-off, destroyed activity or loss of required hardening; resume never
 unlocks. Private anchors and snapshots live outside the active vault; Android
 uses OS no-backup storage. Keystore, quick unlock and autofill remain unavailable.
+Roadmap 2.5 (plan 0031) adds the unlocked workspace: typed epoch-checked
+actions over core for browsing, editing, trash, history, conflicts, snapshots,
+archives, attachments, generator, settings and credential flows; one bounded
+worker whose late results are dropped after a lock; 30 s reveals and Rust→OS
+clipboard holds. Prepared key rotation runs as its own controller phase
+because core consumes the session. Android adds a JNI clipboard backend and
+document-picker streams in packaging glue; Uris never leave Kotlin.
 
 Dioxus 0.7.10 uses a maintained desktop integration: compiled local assets,
 strict CSP, exact native origin/navigation checks, bounded typed IPC and bounded

@@ -630,8 +630,16 @@ impl WebviewInstance {
 
             // If we're waiting for a render, wait for it to finish before we continue
             let edits_flushed_poll = self.edits.wry_queue.poll_edits_flushed(&mut cx);
-            if edits_flushed_poll.is_pending() {
-                return;
+            match edits_flushed_poll {
+                std::task::Poll::Pending => return,
+                // QuickVault: a dropped batch would leave the page out of sync
+                // with application state (for example after a lock). Close the
+                // window instead; the application's close handler locks first.
+                std::task::Poll::Ready(false) if self.hardened => {
+                    self.desktop_context.close();
+                    return;
+                }
+                std::task::Poll::Ready(_) => {}
             }
 
             {
