@@ -723,6 +723,9 @@ release; it is not weakened.
 
 #### Phase 2.7 — Android autofill (gated)
 
+- **Plan:** [0034](../0034-android-autofill/PLAN.md) (Implemented on host;
+  device run pending; fresh-context review due).
+
 - [ ] **Do:** Write the thin Kotlin/JNI `AutofillService` entry point with the
   logic in Rust: verified app signature and web origin (Digital Asset Links),
   conflicted credentials require a choice, handoff to the main app for unlock,
@@ -1121,6 +1124,14 @@ release; it is not weakened.
 - 2026-10-26 (phase 1.10, plan 0011): the owner approved splitting 1.10 into 1.10a/1.10b and decisions D-1–D-6 of plan 0011 as recommended: `zxcvbn 3.1.1` in `qv-core` (0010 §3.2); `clap 4.6.7` builder API only; for 1.10b, `signal-hook 0.4.5` and `arboard 3.6.1` (X11 only, no image support) with per-crate `BSL-1.0` exceptions for `clipboard-win` and `error-code`; the recovery-phrase skip (0002 §4.2) recorded as vault settings key 3 `recovery_skipped_at` (development value for the 1.16 freeze). These dependencies are now approved for 1.10b's standing approval. Raised, not decided: 0011 has no command to adopt a vault with a missing or mismatched anchor (suggested for 1.13/1.14).
 - 2026-11-02: Owner direction: remove all vendored third-party source except the hardened dioxus-desktop, as a priority (plan 0032, outside the phase sequence, same working tree as 2.4/2.5).
 - 2026-11-02: Owner direction after phase 2.5: the current app UI looks and feels like a website in a browser rather than an application, on desktop as well as mobile, and the owner wants an app-like design eventually. Working functionality takes priority over that redesign for now. The owner placed it as phase 2.10a (App design), after LAN exchange in the app and before the Milestone 2 release evidence, so the redesign covers every Milestone 2 screen once and release evidence uses the final design.
+- 2026-11-02 (phase 2.7, plan 0034): under the owner's standing delegation
+  ("dont ask me to approve stuff, just pick whatever is the best option"),
+  Draft 0009 §4 is implemented with a new §4.4 Android profile. Digital Asset
+  Links is deferred: it needs a network fetch, so web origins are trusted only
+  from device-validated allowlisted browsers, and app identities are explicit
+  package + signer-set links. The phase entry's "(Digital Asset Links)" is
+  satisfied by verified signer identity instead; DAL needs its own later spec
+  decision. Plan 0034 also carries the 0033 review's mutex finding.
 
 ## Execution log
 
@@ -1804,3 +1815,28 @@ release; it is not weakened.
   not implementation-phase blockers. Unvalidated devices remain disabled and no
   missing result is promoted to passed. Next fresh session reviews 0033, then
   plans phase 2.7. No commit, push, branch or staging change.
+
+- 2026-11-02: Next-phase session. Fresh-context review of committed phase 2.6
+  (`54e9764`, plan 0033): **Approved** (one low finding, the policy mutex held
+  across the native prompt, fixed in 2.7). The 0031 repairs were confirmed in
+  the same review, and both plans are Reviewed. Gates rerun on `54e9764`: 747
+  passed.
+  Phase 2.7 planned and implemented as plan 0034 under the owner's standing
+  delegation ("dont ask me to approve stuff, just pick whatever is the best
+  option"), covering Draft 0009 §4 plus the new §4.4 and the DAL deferral
+  (Revisions above). Final gates: 759 workspace tests, 31 app validation and 6
+  vendor tests pass; Android arm64 Clippy and normal/validation APK builds
+  pass; no dependency change. No phone was connected, so the device rows in
+  0034 VALIDATION.md are pending and the phase stays unticked. Autofill stays
+  disabled (empty device and browser allowlists). Next: owner commits, attended
+  device run, then fresh-context review of 0034. No commit, push or branch.
+
+- 2026-11-02 (phone connected): plan 0034 `AutofillTest` passes on the POCO
+  X7 Pro (validation build), and `PlatformTest` passes on the normal build
+  with `singleTask`. Attended rows still pending: framework round trip from a
+  foreign app and WebView origin claims.
+
+  Found, not fixed: the Rust runtime initializes once per process
+  (`ndk-context`), so a second `MainActivity` in a cached process aborts.
+  This fails closed and needs a follow-up plan before enabling autofill on any
+  device (0034 log). Phase 2.7 stays unticked; the gate is closed.

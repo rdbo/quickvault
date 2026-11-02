@@ -117,6 +117,41 @@ not a shared plaintext key file. Verify app signing identity and web origin usin
 platform association APIs; never match by app label, substring or unverified
 custom scheme. Require choosing an unresolved credential version before filling.
 
+4.4. **Android profile.** Identity matching is exact; no fill ever depends
+on titles, labels, activity names or URL substrings.
+
+- *App identity* is the requesting activity's package name as reported by the
+  system (`AssistStructure` activity component), plus the SHA-256 digests of
+  its complete current signing-certificate set read from the package manager.
+  An entry carries an app identity as a `url` field
+  `androidapp://<package>#sha256=<hex>[,<hex>…]` (lowercase hex, at most 8
+  digests). It matches only when package and digest set are equal. An
+  identity without digests, or with a malformed or partial set, never matches.
+  Linking an app to an entry is an explicit, confirmed user action that uses
+  the OS-verified values and warns that QuickVault cannot confirm the app
+  belongs to the service.
+- *Web origin* is accepted only from a browser on a built-in allowlist pinned
+  by package and exact signing-digest set. Entries are added only from digests
+  observed on a validated device; another app's claimed web domain is ignored.
+  A stored `https://` or `http://` URL matches only on an equal scheme,
+  lowercase ASCII host and port (defaults 443/80). There is no subdomain,
+  parent-domain or registrable-domain matching. Userinfo, non-ASCII and
+  percent-encoded hosts, IPv6 literals and custom schemes never match.
+  Digital Asset Links association is deferred: it needs a network fetch, which
+  this offline profile does not perform.
+- *Handoff:* the autofill service returns only an authentication entry with a
+  generic label. Its immutable explicit intent targets a non-exported activity
+  and carries a one-shot random token (at least 128 bits) for a single
+  in-process pending request, valid at most 120 seconds. Request identity and
+  results never travel in intent extras. The shared app shows the requester,
+  requires unlock and an explicit choice (including a version of a conflicted
+  entry), and returns only the chosen username/password for the requested
+  fields. The handoff activity re-reads the requester's signing digests before
+  returning the dataset. A lock after the request is bound to an unlocked
+  session cancels it.
+- *Gate:* autofill answers no request on devices without recorded
+  validation (0012 §3).
+
 ### 5. Desktop specifics
 
 - Single-instance; support manual and inactivity locking independently of OS
@@ -166,11 +201,18 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 1. CLI agent process (post-v1): design and IPC security.
 2. Minimum OS adapter/autofill glue and lifecycle integration per OS.
+   Android autofill glue is specified in §4.4 (2026-11-02); other OSes remain open.
 3. **Framework choice resolved 2026-10-26 (owner):** use Dioxus and standard
    webview input. Phase 1 (§6) validates integration and records gaps; it does
    not reconsider native input or a custom engine just for memory-copy concerns.
 
 ## Changelog
+
+- 2026-11-02: Add §4.4 Android autofill profile: exact verified app
+  signer/package and allowlisted-browser origin matching, explicit app linking,
+  non-exported one-shot handoff, lock cancellation and device gating; Digital
+  Asset Links deferred (network). Decided under the owner's standing delegation
+  (plan 0034); status remains Draft.
 
 - 2026-11-01: Owner makes Linux automatic OS lock/sleep integration optional.
   Detect/report capability and permit local use when unavailable, retaining

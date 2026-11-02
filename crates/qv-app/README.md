@@ -10,7 +10,25 @@ The shared Android/Linux Dioxus UI provides the CLI's offline feature set:
   finishing an interrupted one), verify and vault information.
 
 Validation: [2.4](../../plans/0030-app-foundation/VALIDATION.md),
-[2.5](../../plans/0031-app-vault-workflows/VALIDATION.md).
+[2.5](../../plans/0031-app-vault-workflows/VALIDATION.md),
+[2.7](../../plans/0034-android-autofill/VALIDATION.md).
+
+Android autofill (plan 0034, 0009 §4.4) is implemented behind its own
+device-validation gate; no device or browser is enabled yet. The service only
+hands off: it returns a generic "Unlock QuickVault to fill" entry. The shared
+app then shows the requester, needs unlock and an explicit choice (each
+conflicting version is listed separately), and returns only the chosen
+username/password. Matching is exact. Native apps match only entries linked
+through the confirmed "Link this app" action on the autofill screen, which stores
+`androidapp://<package>#sha256=<signer digests>`. Websites match exact
+`http(s)` origins, and only when reported by an allowlisted browser (the
+allowlist is empty until device-validated digests are recorded). Titles,
+labels and URL substrings never match. Digital Asset Links are not used, since
+they would need a network fetch. A lock after unlocking cancels the request.
+The chosen values pass through JNI/JVM arrays (zeroed after use),
+`AutofillValue` strings and the target app's own fields: best-effort framework
+copies, as for the other Android adapters. On an enabled device, Settings →
+Password → Autofill opens Android's autofill-service chooser.
 
 Android quick unlock (plan 0033) is implemented behind a device-validation gate.
 No device is enabled yet. Unsupported/unvalidated devices keep password unlock.
@@ -29,6 +47,12 @@ QuickVault aliases cleaned on startup. Nothing enters vault exports, sync or bac
 JNI/provider/JVM intermediates have bounded best-effort cleanup, like the other
 Android adapters. Physical validation and interactive commands are recorded in
 [plan 0033](../../plans/0033-android-quick-unlock/VALIDATION.md).
+
+Android process lifetime (plan 0035): the Rust runtime starts once per process.
+Configuration changes (rotation, dark mode, font size, locale) are handled in
+place. When the activity is destroyed, for example by Back, the vault locks
+and the process ends; the next launch is a fresh process, so quick unlock and
+any pending autofill request need the master password or a new request.
 
 App limits (plan 0031):
 - Single-line inputs accept 1 KiB and multi-line notes or protected values
@@ -136,8 +160,8 @@ ADB client/server; the runner never replaces that server. Only the test window
 stays awake during the run. Test fixtures use a newly created private directory
 and never open the existing app vault. Logs and failure status are retained in
 a temporary directory printed by the runner. Android uses canonical noBackupFilesDir,
-backup disabled and FLAG_SECURE. Hardware quick unlock remains disabled on
-unvalidated devices; autofill remains unavailable.
+backup disabled and FLAG_SECURE. Hardware quick unlock and autofill remain
+disabled on unvalidated devices.
 
 `QV_APP_DEVICE_VALIDATION=1` selects an explicit synthetic app build and writes
 `quickvault-validation-debug.apk` and `quickvault-validation-tests.apk`.

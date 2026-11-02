@@ -6,6 +6,7 @@ use crate::{Core, CoreError, Session};
 pub use qv_platform::android::{
     AndroidClipboardBackend, AndroidPlatform, AndroidState, BackgroundDeferral, ClipToken,
 };
+pub use qv_platform::autofill;
 pub use qv_platform::quick_unlock::{AndroidKeystore, AndroidKeystoreBackend};
 pub use qv_platform::{
     Cancellation, Clipboard, Evidence, InputPurpose, Keystore, Lifecycle, LockCallback, LockEvent,

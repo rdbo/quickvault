@@ -7,6 +7,7 @@
 use crate::controller::{Action, AppError, Controller, FormEpoch, InputField, Phase, private_dir};
 use crate::views;
 use crate::workspace::{ConfirmKind, CopyKey, Pane, Report, RevealKey, Screen, WsAction, WsField};
+use qv_core::platform::autofill;
 use qv_core::platform::*;
 use qv_core::{FieldKind, SecretBytes};
 use std::path::PathBuf;
@@ -1102,4 +1103,185 @@ fn quick_unlock_unavailable_never_falls_back_or_opens_a_session() {
     env.wait();
     assert_eq!(env.c.snapshot().phase, Phase::Locked);
     assert!(env.c.snapshot().error.is_some());
+}
+
+type FillEvent = (i64, Option<Vec<u8>>, Option<Vec<u8>>);
+static FILLS: Mutex<Vec<FillEvent>> = Mutex::new(Vec::new());
+static CANCELS: Mutex<Vec<i64>> = Mutex::new(Vec::new());
+static NATIVE: AtomicU64 = AtomicU64::new(1);
+struct TestSink;
+impl crate::autofill::AutofillSink for TestSink {
+    fn complete(&self, native: i64, u: Option<&SecretBytes>, p: Option<&SecretBytes>) -> bool {
+        if CANCELS.lock().unwrap().contains(&native) {
+            return false;
+        }
+        let copy = |v: Option<&SecretBytes>| v.map(|v| v.expose_secret().to_vec());
+        FILLS.lock().unwrap().push((native, copy(u), copy(p)));
+        true
+    }
+    fn cancel(&self, native: i64) {
+        CANCELS.lock().unwrap().push(native);
+    }
+}
+fn native() -> i64 {
+    crate::autofill::set_sink(Box::new(TestSink));
+    NATIVE.fetch_add(1, Ordering::SeqCst) as i64
+}
+fn filled(native: i64) -> Option<FillEvent> {
+    FILLS
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|f| f.0 == native)
+        .cloned()
+}
+fn cancelled(native: i64) -> bool {
+    CANCELS.lock().unwrap().contains(&native)
+}
+fn both() -> autofill::Roles {
+    autofill::Roles {
+        username: true,
+        password: true,
+    }
+}
+fn bank_app() -> autofill::FillRequest {
+    autofill::FillRequest::new("com.bank.app", &[7; 32], None, None, both()).unwrap()
+}
+fn find(env: &Env, id: &str) -> qv_core::EntryHandle {
+    match env.read(|s| s.find_id(id, false))[0] {
+        qv_core::ItemHandle::Entry(e) => e,
+        _ => panic!("entry"),
+    }
+}
+
+#[test]
+fn autofill_request_waits_for_unlock_and_needs_link_confirmation_and_choice() {
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::unlocked();
+    // The title names the requesting app and service: it must not matter.
+    let id = env.add_entry("com.bank.app Bank", SECRET).id_hex();
+    env.c.lock();
+    let n = native();
+    let request = bank_app();
+    env.c
+        .autofill_offer(n, request.requester(&[]), request.roles);
+    assert!(env.c.autofill_banner().unwrap().contains("com.bank.app"));
+    // Survives the lock it is waiting on, then binds on unlock.
+    env.c.lock();
+    assert!(!cancelled(n));
+    env.unlock(PASSWORD);
+    assert_eq!(env.screen(), Screen::Autofill);
+    assert!(env.c.autofill_banner().is_none());
+    let requester = env.c.autofill_view().unwrap().requester;
+    assert!(env.read(|s| s.autofill_candidates(&requester)).is_empty());
+    // Linking is a separately confirmed action and still requires a choice.
+    let entry = find(&env, &id);
+    env.act(WsAction::AutofillLink(entry));
+    assert_eq!(env.c.pending(env.epoch()), Some(ConfirmKind::LinkApp));
+    env.act(WsAction::Answer(true));
+    assert_eq!(env.error(), None);
+    assert!(filled(n).is_none());
+    let found = env.read(|s| s.autofill_candidates(&requester));
+    assert_eq!(found.len(), 1);
+    env.act(WsAction::AutofillFill(found[0].key()));
+    assert_eq!(env.error(), None);
+    let (_, user, pass) = filled(n).unwrap();
+    assert_eq!(user.unwrap(), b"alice@example.test");
+    assert_eq!(pass.unwrap(), SECRET.as_bytes());
+    assert!(env.c.autofill_view().is_none());
+    assert!(!cancelled(n));
+}
+
+#[test]
+fn autofill_bound_request_is_cancelled_by_lock_and_late_fill_is_refused() {
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::unlocked();
+    let id = env.add_entry("Bank", SECRET).id_hex();
+    let request = bank_app();
+    let entry = find(&env, &id);
+    env.read(|s| s.link_app(entry, &request.app));
+    // Offered while unlocked: binds immediately.
+    let n = native();
+    env.c
+        .autofill_offer(n, request.requester(&[]), request.roles);
+    assert_eq!(env.screen(), Screen::Autofill);
+    let requester = env.c.autofill_view().unwrap().requester;
+    let key = env.read(|s| s.autofill_candidates(&requester))[0].key();
+    env.c.lock();
+    assert!(cancelled(n));
+    env.unlock(PASSWORD);
+    assert_ne!(env.screen(), Screen::Autofill);
+    assert!(env.c.autofill_view().is_none());
+    env.act(WsAction::AutofillFill(key));
+    assert_eq!(env.error(), Some(AppError::AutofillExpired));
+    assert!(filled(n).is_none());
+
+    // A waiting request expires; unlocking then neither binds nor fills.
+    env.c.lock();
+    let n = native();
+    env.c
+        .autofill_offer(n, request.requester(&[]), request.roles);
+    env.c.age_autofill(qv_core::platform::autofill::REQUEST_TTL);
+    assert!(env.c.autofill_banner().is_none());
+    env.unlock(PASSWORD);
+    assert_ne!(env.screen(), Screen::Autofill);
+    assert!(cancelled(n));
+
+    // Explicit cancel abandons a bound request.
+    let n = native();
+    env.c
+        .autofill_offer(n, request.requester(&[]), request.roles);
+    env.act(WsAction::AutofillCancel);
+    assert!(cancelled(n));
+    assert_eq!(env.screen(), Screen::Browse(None));
+}
+
+#[test]
+fn autofill_untrusted_origin_claim_lists_no_web_entries() {
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::unlocked();
+    let id = env.add_entry("Bank", SECRET).id_hex();
+    let entry = find(&env, &id);
+    env.c.navigate(env.epoch(), Screen::Entry(entry));
+    let mut d = env.read(|s| s.edit_entry(entry));
+    d.add_field(
+        "Website",
+        FieldKind::Url,
+        qv_core::FieldValue::text("https://bank.example").unwrap(),
+    )
+    .unwrap();
+    env.read(|s| s.save_entry(d));
+    const BROWSER: &[autofill::TrustedBrowser] = &[autofill::TrustedBrowser {
+        package: "org.example.browser",
+        signers: &[[9; 32]],
+    }];
+    let claim = |package: &str, signer: u8, host: &str| {
+        autofill::FillRequest::new(package, &[signer; 32], Some("https"), Some(host), both())
+            .unwrap()
+            .requester(BROWSER)
+    };
+    for spoof in [
+        claim("com.evil.webview", 9, "bank.example"),
+        claim("org.example.browser", 8, "bank.example"),
+        claim("org.example.browser", 9, "bank.example.evil.test"),
+        claim("org.example.browser", 9, "evilbank.example"),
+    ] {
+        assert!(env.read(|s| s.autofill_candidates(&spoof)).is_empty());
+    }
+    let trusted = claim("org.example.browser", 9, "bank.example");
+    let n = native();
+    env.c.autofill_offer(n, trusted, both());
+    assert!(
+        env.c
+            .autofill_view()
+            .unwrap()
+            .label
+            .contains("https://bank.example")
+    );
+    assert!(env.c.autofill_view().unwrap().app.is_none());
+    let requester = env.c.autofill_view().unwrap().requester;
+    let found = env.read(|s| s.autofill_candidates(&requester));
+    assert_eq!(found.len(), 1);
+    env.act(WsAction::AutofillFill(found[0].key()));
+    assert_eq!(filled(n).unwrap().2.unwrap(), SECRET.as_bytes());
 }

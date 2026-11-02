@@ -703,6 +703,51 @@ pub(crate) fn run(
             s.disable_quick()?;
             Ok(on_ws(|ws| ws.notice = Some("Quick unlock disabled; the hardware key was removed.")))
         }),
+        WsAction::AutofillFill(key) => {
+            let (native, requester, roles) = c.autofill_bound().ok_or(AppError::AutofillExpired)?;
+            c.run_op(epoch, None, move |s, token, _| {
+                let values = s.autofill_values(&requester, key, roles)?;
+                // A lock cancels the token; never hand values over after it.
+                if token.is_cancelled()
+                    || !crate::autofill::sink().complete(
+                        native,
+                        values.username.as_ref(),
+                        values.password.as_ref(),
+                    )
+                {
+                    return Err(AppError::AutofillExpired);
+                }
+                Ok(Box::new(move |st: &mut crate::controller::State| {
+                    Controller::autofill_completed(st, native);
+                    if let Some(ws) = st.workspace.as_mut() {
+                        ws.go(Screen::Browse(None));
+                        ws.notice = Some("Login handed to the requesting app.");
+                    }
+                }))
+            })
+        }
+        WsAction::AutofillCancel => {
+            c.autofill_cancel();
+            Ok(())
+        }
+        WsAction::AutofillLink(entry) => {
+            let Some((_, qv_core::platform::autofill::Requester::App(app), _)) = c.autofill_bound()
+            else {
+                return Err(AppError::InvalidInput);
+            };
+            c.run_op(epoch, None, move |s, _, _| {
+                s.link_app(entry, &app)?;
+                Ok(on_ws(|ws| {
+                    ws.inputs.clear();
+                    ws.notice = Some("App linked. Choose the entry to fill.");
+                }))
+            })
+        }
+        WsAction::OpenAutofillSettings => {
+            #[cfg(all(feature = "desktop", target_os = "android"))]
+            crate::android::open_autofill_settings();
+            Ok(())
+        }
         WsAction::DeleteOldSnapshots => {
             let ids = c
                 .with_ws(epoch, |ws, _| std::mem::take(&mut ws.old_snapshots))

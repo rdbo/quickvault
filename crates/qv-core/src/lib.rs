@@ -185,4 +185,6 @@ pub use conflict::{
 };
 pub use qv_model::{Deletion, RecordKind};
 
+/// Android autofill candidates and explicit fill values.
+pub mod autofill;
 mod quick_unlock;

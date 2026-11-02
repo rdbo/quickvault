@@ -9,6 +9,29 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-11-02: Fixed an Android abort when QuickVault's activity was created a
+  second time in a live process: after Back and reopen while the process was
+  cached (likely with autofill), or on an in-place configuration change such
+  as dark mode or font size (plan 0035). The Rust runtime starts once per
+  process, so configuration changes are now handled in place. After the
+  activity is destroyed, the app locks, Rust acknowledges and the process ends,
+  so the next launch is fresh; this also means reopening needs the master
+  password again. Android builds now reuse one `dist/android-project` copy
+  instead of adding a new ~175 MB directory per build.
+
+- 2026-11-02: Android autofill (roadmap 2.7, plan 0034), behind a device and
+  browser validation gate (both allowlists empty). The thin service returns
+  only a generic "Unlock QuickVault to fill" entry. A non-exported one-shot
+  handoff opens the shared app, which requires unlock and an explicit choice
+  (each conflicting version listed separately) and returns only the chosen
+  login. Matching is exact: verified package plus full signer set (linked by an
+  explicitly confirmed action), or an exact origin reported by an allowlisted
+  browser. Titles, labels, URL substrings and custom schemes never match.
+  Locking cancels a bound request. Spec 0009 §4.4 added (Draft, owner standing
+  delegation); Digital Asset Links deferred. Quick unlock no longer holds its
+  policy lock during the native prompt (0033 review finding). Device evidence
+  is pending.
+
 - 2026-11-02: Phase 2.6 implementation completed under the owner's closure
   decision (plan 0033). Remaining physical-device checks are recorded separately
   as prerequisites for device enablement; unvalidated hardware stays disabled.

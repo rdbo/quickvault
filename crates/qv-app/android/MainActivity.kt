@@ -20,6 +20,24 @@ import android.content.Intent
 import android.os.PersistableBundle
 import android.provider.OpenableColumns
 
+import android.app.Activity
+import android.app.PendingIntent
+import android.app.assist.AssistStructure
+import android.os.CancellationSignal
+import android.os.SystemClock
+import android.service.autofill.AutofillService
+import android.service.autofill.Dataset
+import android.service.autofill.FillCallback
+import android.service.autofill.FillRequest
+import android.service.autofill.FillResponse
+import android.service.autofill.SaveCallback
+import android.service.autofill.SaveRequest
+import android.text.InputType
+import android.view.autofill.AutofillId
+import android.view.autofill.AutofillManager
+import android.view.autofill.AutofillValue
+import android.widget.RemoteViews
+
 typealias BuildConfig = org.quickvault.app.BuildConfig
 
 class MainActivity : WryActivity() {
@@ -32,6 +50,29 @@ class MainActivity : WryActivity() {
     fun qvQuickResult(id:Long):ByteArray? = quick.result(id)
     fun qvQuickFinish(id:Long,keep:Boolean) = quick.finish(id,keep)
     fun qvQuickDelete(envelope:ByteArray):Boolean = quick.delete(envelope)
+
+    // Autofill handoff (0009 §4.4): Rust polls the in-process registry; only
+    // bounded metadata and the explicitly chosen values cross this boundary.
+    fun qvAutofillAvailable(): Boolean = AutofillGate.enabled()
+    fun qvAutofillPending(): Long = AutofillRegistry.pending()
+    fun qvAutofillPackage(id: Long): String? = AutofillRegistry.claimed(id)?.pkg
+    fun qvAutofillSigners(id: Long): ByteArray? = AutofillRegistry.claimed(id)?.signers?.copyOf()
+    fun qvAutofillScheme(id: Long): String? = AutofillRegistry.claimed(id)?.scheme
+    fun qvAutofillHost(id: Long): String? = AutofillRegistry.claimed(id)?.host
+    fun qvAutofillRoles(id: Long): Int = AutofillRegistry.claimed(id)?.let { (if (it.userId != null) 1 else 0) or (if (it.passId != null) 2 else 0) } ?: 0
+    fun qvAutofillComplete(id: Long, user: ByteArray?, pass: ByteArray?): Boolean {
+        val ok = AutofillRegistry.complete(id, user, pass)
+        // Return to the requesting app, where the handoff activity delivers.
+        if (ok) runOnUiThread { moveTaskToBack(true) }
+        return ok
+    }
+    fun qvAutofillCancel(id: Long) = AutofillRegistry.cancel(id)
+    fun qvOwnSigners(): ByteArray? = AutofillIdentity.signers(this, packageName)
+    fun qvOpenAutofillSettings() = runOnUiThread {
+        try {
+            startActivity(Intent(android.provider.Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE).setData(Uri.parse("package:" + packageName)))
+        } catch (_: Exception) {}
+    }
 
     @Volatile private var foreground = false
     @Volatile private var destroyed = false
@@ -95,7 +136,23 @@ class MainActivity : WryActivity() {
     }
     override fun onResume() { super.onResume(); foreground = true }
     override fun onPause() { foreground = false; lifecycleGeneration++; super.onPause() }
-    override fun onDestroy() { foreground = false; destroyed = true; lifecycleGeneration++; unregisterReceiver(screenEvents); super.onDestroy() }
+    // The Rust/Dioxus runtime starts once per process (wry/ndk-context, and
+    // this app's own bridge). After destroy, Rust locks and acknowledges, then
+    // the process ends so any later activity starts fresh (plan 0035).
+    @Volatile private var runtimeStopped = false
+    fun qvRuntimeStopped() { runtimeStopped = true }
+    override fun onDestroy() {
+        foreground = false; destroyed = true; lifecycleGeneration++; unregisterReceiver(screenEvents); super.onDestroy()
+        val handler = android.os.Handler(mainLooper)
+        val deadline = android.os.SystemClock.elapsedRealtime() + 2000
+        handler.post(object : Runnable {
+            override fun run() {
+                if (!runtimeStopped && android.os.SystemClock.elapsedRealtime() < deadline) { handler.postDelayed(this, 50); return }
+                AutofillRegistry.wipeAll()
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }
+        })
+    }
     // Clipboard: Rust owns the hold policy; these calls carry only the copied
     // text (a documented JVM intermediate) or metadata.
     private val clipLabel = "QuickVault"
@@ -359,4 +416,256 @@ private class NativeQuickUnlock(private val activity: MainActivity) {
         check(java.security.MessageDigest.isEqual(device,envelope.copyOfRange(3,19)))
         born.remove(alias(envelope));store.deleteEntry(alias(envelope));true
     }catch(_:Exception){false}
+}
+
+// ---- Autofill (plan 0034, 0009 §4.4). Kept in this file because the Dioxus
+// CLI compiles only the configured main-activity source in its own build.
+
+/**
+ * Autofill answers no request unless this device's build is recorded as
+ * validated (plan 0034 VALIDATION.md). The build script sets VALIDATION only
+ * for the explicitly marked, fixture-restricted device-validation build.
+ */
+object AutofillGate {
+    const val VALIDATION = false
+    private val validatedFingerprints = emptySet<String>()
+    fun enabled(): Boolean = android.os.Build.VERSION.SDK_INT >= 30 &&
+        (VALIDATION || validatedFingerprints.contains(android.os.Build.FINGERPRINT))
+}
+
+/** Thin OS glue (0009 §4.4): detect fields and hand off. Matching is Rust's. */
+class QvAutofillService : AutofillService() {
+    override fun onFillRequest(request: FillRequest, cancellation: CancellationSignal, callback: FillCallback) {
+        val response = try { respond(request) } catch (_: Exception) { null }
+        callback.onSuccess(response)
+    }
+    // No save support; nothing is stored from other apps.
+    override fun onSaveRequest(request: SaveRequest, callback: SaveCallback) { callback.onSuccess() }
+
+    private fun respond(request: FillRequest): FillResponse? {
+        if (!AutofillGate.enabled()) return null
+        val structure = request.fillContexts.lastOrNull()?.structure ?: return null
+        // The activity component is set by the system, not by the app.
+        val pkg = structure.activityComponent?.packageName ?: return null
+        if (pkg == packageName || pkg.length > AutofillRegistry.MAX_PACKAGE) return null
+        val signers = AutofillIdentity.signers(this, pkg) ?: return null
+        val found = Detected()
+        for (i in 0 until structure.windowNodeCount) {
+            walk(structure.getWindowNodeAt(i).rootViewNode, 0, null, null, found)
+        }
+        if (found.conflict || (found.user == null && found.pass == null)) return null
+        val r = AutofillRegistry.register(pkg, signers, found.scheme, found.host, found.user, found.pass)
+        val intent = Intent(this, AutofillAuthActivity::class.java).putExtra(AutofillAuthActivity.EXTRA_TOKEN, r.token)
+        val sender = PendingIntent.getActivity(this, (r.id and 0x7fffffff).toInt(), intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_CANCEL_CURRENT).intentSender
+        // Generic label: no titles, usernames or counts reach the other app's UI.
+        val presentation = RemoteViews(packageName, android.R.layout.simple_list_item_1).apply {
+            setTextViewText(android.R.id.text1, "Unlock QuickVault to fill")
+        }
+        @Suppress("DEPRECATION")
+        val dataset = Dataset.Builder(presentation).apply {
+            found.user?.let { setValue(it, null) }
+            found.pass?.let { setValue(it, null) }
+            setAuthentication(sender)
+        }.build()
+        return FillResponse.Builder().addDataset(dataset).build()
+    }
+
+    private class Detected {
+        var user: AutofillId? = null
+        var pass: AutofillId? = null
+        var scheme: String? = null
+        var host: String? = null
+        var conflict = false
+        var nodes = 0
+    }
+    private fun walk(node: AssistStructure.ViewNode, depth: Int, scheme: String?, host: String?, f: Detected) {
+        if (depth > 64 || f.nodes >= 512) return
+        f.nodes++
+        var s = scheme
+        var h = host
+        node.webDomain?.let { h = it; s = if (android.os.Build.VERSION.SDK_INT >= 28) node.webScheme else null }
+        val id = node.autofillId
+        if (id != null && node.autofillType == View.AUTOFILL_TYPE_TEXT && node.visibility == View.VISIBLE) {
+            val role = role(node)
+            if (role == 2 && f.pass == null) { f.pass = id; origin(f, s, h) }
+            if (role == 1 && f.user == null) { f.user = id; origin(f, s, h) }
+        }
+        for (i in 0 until node.childCount) walk(node.getChildAt(i), depth + 1, s, h, f)
+    }
+    // Both detected fields must come from the same claimed origin (or none).
+    private fun origin(f: Detected, scheme: String?, host: String?) {
+        val first = f.user == null || f.pass == null
+        if (first) { f.scheme = scheme; f.host = host }
+        else if (f.scheme != scheme || f.host != host) f.conflict = true
+    }
+    /** 1 = username, 2 = password, 0 = neither. Detection only, never matching. */
+    private fun role(node: AssistStructure.ViewNode): Int {
+        val hints = node.autofillHints?.map { it.lowercase() } ?: emptyList()
+        val type = node.inputType
+        val cls = type and InputType.TYPE_MASK_CLASS
+        val variation = type and InputType.TYPE_MASK_VARIATION
+        val html = node.htmlInfo?.attributes?.associate { it.first.lowercase() to it.second.lowercase() } ?: emptyMap()
+        val password = hints.any { it.contains("password") } || html["type"] == "password" ||
+            (cls == InputType.TYPE_CLASS_TEXT && (variation == InputType.TYPE_TEXT_VARIATION_PASSWORD ||
+                variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD || variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD)) ||
+            (cls == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD)
+        if (password) return 2
+        val user = hints.any { it == View.AUTOFILL_HINT_USERNAME.lowercase() || it == View.AUTOFILL_HINT_EMAIL_ADDRESS.lowercase() } ||
+            html["autocomplete"] == "username" || html["autocomplete"] == "email" || html["type"] == "email" ||
+            (cls == InputType.TYPE_CLASS_TEXT && (variation == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS ||
+                variation == InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS))
+        return if (user) 1 else 0
+    }
+}
+
+/** OS-verified identity: SHA-256 of every current APK-contents signer. */
+object AutofillIdentity {
+    fun signers(context: Context, pkg: String): ByteArray? = try {
+        val info = context.packageManager.getPackageInfo(pkg, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+        val certs = info.signingInfo?.apkContentsSigners
+        if (certs == null || certs.isEmpty() || certs.size > 8) null else {
+            val out = java.io.ByteArrayOutputStream()
+            for (c in certs) out.write(java.security.MessageDigest.getInstance("SHA-256").digest(c.toByteArray()))
+            out.toByteArray()
+        }
+    } catch (_: Exception) { null }
+}
+
+/**
+ * The single in-process pending request. Intents carry only its one-shot
+ * token; identity and results never travel in extras. Pending requests expire
+ * after 120 s, any request after 10 minutes. Results are zeroed when replaced,
+ * cancelled, consumed or expired. A cancel never revokes a completed result:
+ * that fill was explicitly chosen and only the auth activity can consume it.
+ */
+object AutofillRegistry {
+    const val MAX_PACKAGE = 255
+    const val MAX_HOST = 253
+    const val MAX_VALUE = 8 * 1024
+    private const val PENDING_MS = 120_000L
+    private const val TOTAL_MS = 600_000L
+    const val PENDING = 0; const val CLAIMED = 1; const val COMPLETED = 2
+    class Request(val id: Long, val token: ByteArray, val pkg: String, val signers: ByteArray,
+                  val scheme: String?, val host: String?, val userId: AutofillId?, val passId: AutofillId?) {
+        val created = SystemClock.elapsedRealtime()
+        var state = PENDING
+        var delivered = false
+        var user: ByteArray? = null
+        var pass: ByteArray? = null
+    }
+    private val random = java.security.SecureRandom()
+    private var next = 0L
+    private var current: Request? = null
+
+    @Synchronized fun register(pkg: String, signers: ByteArray, scheme: String?, host: String?, user: AutofillId?, pass: AutofillId?): Request {
+        drop()
+        val token = ByteArray(16).also { random.nextBytes(it) }
+        val usable = host != null && host.length <= MAX_HOST && scheme != null && scheme.length <= 8
+        return Request(++next, token, pkg, signers, if (usable) scheme else null, if (usable) host else null, user, pass).also { current = it }
+    }
+    private fun expired(r: Request): Boolean {
+        val age = SystemClock.elapsedRealtime() - r.created
+        return age < 0 || age >= TOTAL_MS || (r.state == PENDING && age >= PENDING_MS)
+    }
+    private fun clear(r: Request) {
+        r.user?.fill(0); r.pass?.fill(0); r.user = null; r.pass = null
+    }
+    private fun drop() { current?.let { clear(it) }; current = null }
+    private fun live(): Request? { val r = current ?: return null; if (expired(r)) { drop(); return null }; return r }
+
+    /** Auth activity: claim a pending request exactly once. */
+    @Synchronized fun claim(token: ByteArray): Boolean {
+        val r = live() ?: return false
+        if (r.state != PENDING || !java.security.MessageDigest.isEqual(token, r.token)) return false
+        r.state = CLAIMED
+        return true
+    }
+    /** Rust poll: the id of a newly claimed request, else 0. */
+    @Synchronized fun pending(): Long {
+        val r = live() ?: return 0
+        if (r.state != CLAIMED || r.delivered) return 0
+        r.delivered = true
+        return r.id
+    }
+    @Synchronized fun claimed(id: Long): Request? = live()?.takeIf { it.id == id && it.state == CLAIMED }
+    @Synchronized fun complete(id: Long, user: ByteArray?, pass: ByteArray?): Boolean {
+        try {
+            val r = claimed(id) ?: return false
+            if ((user?.size ?: 0) > MAX_VALUE || (pass?.size ?: 0) > MAX_VALUE) return false
+            if ((r.userId == null || user == null) && (r.passId == null || pass == null)) return false
+            r.user = if (r.userId != null) user?.copyOf() else null
+            r.pass = if (r.passId != null) pass?.copyOf() else null
+            r.state = COMPLETED
+            return true
+        } finally { user?.fill(0); pass?.fill(0) }
+    }
+    @Synchronized fun cancel(id: Long) { if (current?.id == id && current?.state != COMPLETED) drop() }
+    /** Auth activity: remove and return a completed request for this token. */
+    @Synchronized fun take(token: ByteArray): Request? {
+        val r = live() ?: return null
+        if (!java.security.MessageDigest.isEqual(token, r.token)) return null
+        current = null
+        if (r.state != COMPLETED) { clear(r); return null }
+        return r
+    }
+    fun wipe(r: Request) = clear(r)
+    @Synchronized fun wipeAll() = drop()
+}
+
+/**
+ * Non-exported handoff (0009 §4.4): started only through the immutable
+ * PendingIntent from QvAutofillService. It claims the one-shot token, brings
+ * the shared app forward for unlock and choice, and on return delivers only a
+ * completed result for the same, re-verified requester.
+ */
+class AutofillAuthActivity : Activity() {
+    companion object { const val EXTRA_TOKEN = "org.quickvault.autofill.token" }
+    private var token: ByteArray? = null
+
+    override fun onCreate(state: Bundle?) {
+        super.onCreate(state)
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        val t = intent.getByteArrayExtra(EXTRA_TOKEN)
+        // A recreated instance has lost the handoff; never resume it.
+        if (state != null || t == null || t.size != 16 || !AutofillRegistry.claim(t)) { abandon(); return }
+        token = t
+        startActivity(Intent(this, MainActivity::class.java)
+            .setAction(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+    // Back in the requesting app's task after the shared app finished or was left.
+    override fun onRestart() {
+        super.onRestart()
+        deliver()
+    }
+    private fun deliver() {
+        val t = token ?: return abandon()
+        token = null
+        val r = AutofillRegistry.take(t) ?: return abandon()
+        try {
+            // The requester must still be the same signed package.
+            val now = AutofillIdentity.signers(this, r.pkg)
+            if (now == null || !java.security.MessageDigest.isEqual(now, r.signers)) return abandon()
+            val presentation = RemoteViews(packageName, android.R.layout.simple_list_item_1).apply {
+                setTextViewText(android.R.id.text1, "QuickVault")
+            }
+            @Suppress("DEPRECATION")
+            val builder = Dataset.Builder(presentation)
+            var any = false
+            val user = r.user
+            val pass = r.pass
+            if (r.userId != null && user != null) { builder.setValue(r.userId, AutofillValue.forText(String(user, Charsets.UTF_8))); any = true }
+            if (r.passId != null && pass != null) { builder.setValue(r.passId, AutofillValue.forText(String(pass, Charsets.UTF_8))); any = true }
+            if (!any) return abandon()
+            setResult(RESULT_OK, Intent().putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, builder.build()))
+            finish()
+        } finally { AutofillRegistry.wipe(r) }
+    }
+    private fun abandon() {
+        token?.let { AutofillRegistry.take(it) }
+        token = null
+        setResult(RESULT_CANCELED)
+        finish()
+    }
 }

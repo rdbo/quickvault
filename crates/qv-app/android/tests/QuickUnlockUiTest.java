@@ -127,7 +127,7 @@ public final class QuickUnlockUiTest extends PlatformTest {
             lockFixture(os,view);assertFalse("Password change removes quick action",quickButton());
             stage("password change revoked quick unlock");
             passwordOpen(CHANGED);lockFixture(os,view);
-        } finally { if(fixture!=null && fixture.exists())removeFixture(fixture,fixture);os.runOnMainSync(activity::finish); }
+        } finally { if(fixture!=null && fixture.exists())removeFixture(fixture,fixture);/* Leave the activity: destroy ends the process (plan 0035); the run ends it anyway. */ }
     }
     public void testBiometricAppEnrollUnlockAndPasswordChange() throws Exception {runPolicy(1,false);}
     public void testCredentialAppEnrollUnlockAndPasswordChange() throws Exception {runPolicy(2,false);}

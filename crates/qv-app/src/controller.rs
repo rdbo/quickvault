@@ -69,6 +69,8 @@ pub enum AppError {
     TooLargeForApp,
     /// An interrupted key rotation must be finished before unlocking.
     RotationPending,
+    /// The native autofill request is no longer waiting.
+    AutofillExpired,
 }
 impl AppError {
     /// Fixed user-facing text.
@@ -121,6 +123,9 @@ impl AppError {
             }
             Self::RotationPending => {
                 "An interrupted key rotation was found. Finish or roll it back before unlocking."
+            }
+            Self::AutofillExpired => {
+                "The autofill request expired or was cancelled. Start it again from the other app."
             }
         }
     }
@@ -283,6 +288,8 @@ pub(crate) struct State {
     over_budget: Option<u64>,
     /// Unverified header read before unlocking (the session then holds the file).
     pub(crate) about: Option<crate::views::AboutView>,
+    /// A native autofill request (0009 §4.4); see [`crate::autofill`].
+    pub(crate) autofill: Option<crate::autofill::Pending>,
 }
 impl State {
     fn clear_inputs(&mut self) {
@@ -335,6 +342,7 @@ impl State {
             "Locked"
         };
         self.error = None;
+        crate::autofill::on_lock(self);
     }
 }
 pub(crate) struct Inner {
@@ -410,6 +418,7 @@ impl Controller {
                 resume: None,
                 over_budget: None,
                 about: None,
+                autofill: None,
             }),
             working: AtomicBool::new(false),
             released: AtomicU64::new(0),
@@ -1135,6 +1144,7 @@ impl Controller {
                 };
                 s.session = Some(Arc::new(session));
                 enter_workspace(&mut s);
+                crate::autofill::bind(&mut s);
             }
             Ok(Opened::Resume(path, need)) => {
                 s.phase = Phase::Locked;

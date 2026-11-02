@@ -65,7 +65,7 @@ public final class QuickUnlockTest extends InstrumentationTestCase {
             finally { activity.qvQuickFinish(wrong,false); }
         } finally {
             if(envelope!=null){assertTrue("Hardware handle deleted",activity.qvQuickDelete(envelope));Arrays.fill(envelope,(byte)0);}
-            Arrays.fill(plain,(byte)0);getInstrumentation().runOnMainSync(activity::finish);
+            Arrays.fill(plain,(byte)0);/* Leave the activity: destroy ends the process (plan 0035); the run ends it anyway. */
         }
     }
     public void testClass3RoundTripAndWrongVaultAAD() throws Exception { roundTrip(1); }
@@ -92,7 +92,7 @@ public final class QuickUnlockTest extends InstrumentationTestCase {
             long lost=activity.qvQuickStart(false,context,1,envelope.clone());
             try { assertEquals("Lost policy refuses before prompting",2,activity.qvQuickState(lost)); }
             finally { activity.qvQuickFinish(lost,false); }
-        } finally { activity.qvQuickDelete(envelope);Arrays.fill(envelope,(byte)0);getInstrumentation().runOnMainSync(activity::finish); }
+        } finally { activity.qvQuickDelete(envelope);Arrays.fill(envelope,(byte)0);/* Leave the activity: destroy ends the process (plan 0035); the run ends it anyway. */ }
     }
     public void testBiometricEnrollmentInvalidatesTheHardwareKey() throws Exception {
         MainActivity activity=launch();byte[] context=new byte[36];context[19]=1;
@@ -110,6 +110,6 @@ public final class QuickUnlockTest extends InstrumentationTestCase {
                 assertTrue("KeyStore must report permanent invalidation, not merely missing state",activity.qvQuickEvidence(id).contains("invalidatedKey=true"));
             }
             finally { activity.qvQuickFinish(id,false); }
-        } finally { activity.qvQuickDelete(envelope);Arrays.fill(envelope,(byte)0);getInstrumentation().runOnMainSync(activity::finish); }
+        } finally { activity.qvQuickDelete(envelope);Arrays.fill(envelope,(byte)0);/* Leave the activity: destroy ends the process (plan 0035); the run ends it anyway. */ }
     }
 }

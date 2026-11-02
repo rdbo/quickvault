@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-11-01 | 2026-11-01 | 0009 §1, §5; 0008 §1.4, §3, §4; 0007 §1–3; 0010; 0002 §3.4–3.5, §4.2; 0011 §4 (feature parity reference); 0005 §4; 0004 §6 |
+| Reviewed | 2026-11-01 | 2026-11-01 | 0009 §1, §5; 0008 §1.4, §3, §4; 0007 §1–3; 0010; 0002 §3.4–3.5, §4.2; 0011 §4 (feature parity reference); 0005 §4; 0004 §6 |
 
 ## Intent
 
@@ -787,3 +787,9 @@ dated revision under roadmap step 4.
   hardware, and the repaired code still needs its ordinary later fresh review.
   Explicit owner continuation authorizes phase 2.6 while that evidence is kept
   open. No staging, commit, push or branch changes.
+
+- 2026-11-02: Repairs for review findings 1–4 confirmed in the fresh-context
+  0033 review of `54e9764` (candidate-bound Rust deadline, Back/transition pick
+  cleanup, `require_each_class` round trip, expanded engine flows; device
+  PlatformTest with Back/destination cleanup recorded in 0033 VALIDATION.md).
+  Status Reviewed.

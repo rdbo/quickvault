@@ -3,6 +3,7 @@
 //! Shared Android/Linux app, using core as its only vault boundary.
 #[cfg(all(feature = "desktop", target_os = "android"))]
 mod android;
+pub mod autofill;
 pub mod controller;
 mod documents;
 mod ops;

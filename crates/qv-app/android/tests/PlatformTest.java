@@ -276,7 +276,7 @@ public class PlatformTest extends InstrumentationTestCase {
             runSyntheticFlows(instrumentation, main, view[0]);
         } finally {instrumentation.runOnMainSync(()->{
             activity.getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-            activity.finish();
+            /* Leave the activity: destroy ends the process (plan 0035); the run ends it anyway. */
         });}
     }
 }

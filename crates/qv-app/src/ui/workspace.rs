@@ -210,6 +210,11 @@ pub fn Shell(
                         if let Some(kind) = pending {
                             Confirm { controller: controller.clone(), epoch, kind, seconds: live.weak_seconds }
                         }
+                        if screen != Screen::Autofill && controller.autofill_view().is_some() {
+                            p { class: "notice ws-banner", role: "status", "An autofill request is waiting. "
+                                button { class: "text-button", onclick: go(&controller, epoch, Screen::Autofill), "Choose a login" }
+                            }
+                        }
                         if let Some(n) = notice { p { class: "notice", role: "status", "{n}" } }
                         if let Some(e) = error { p { class: "error", role: "alert", "{e.message()}" } }
                         if let Some(r) = report { ReportView { controller: controller.clone(), epoch, report: r } }
@@ -244,6 +249,7 @@ fn Confirm(controller: Controller, epoch: FormEpoch, kind: ConfirmKind, seconds:
         ConfirmKind::RestoreConflicts => "Restore this version and resolve the entry's current conflict with it?".to_owned(),
         ConfirmKind::OverBudget(n) => format!("The mandatory recovery snapshot needs {n} bytes and exceeds the snapshot budget. Allow it to exceed the budget? Nothing changes otherwise."),
         ConfirmKind::OldSnapshots(n) => format!("{n} local snapshots were taken before this password change and still open with the old password. Delete them? Copies elsewhere remain; deletion is not cryptographic erasure."),
+        ConfirmKind::LinkApp => "Link this app to the entry? QuickVault verified the app's package and signing certificate, but cannot tell whether the app belongs to the service. Link only an app you trust.".to_owned(),
         ConfirmKind::ReducedQuick => "Reduced protection: this makes your device PIN, pattern or password a vault credential. Enable this separate policy? Biometrics never fall back to it automatically.".to_owned(),
         ConfirmKind::WeakPassword => "This password is weak and could be guessed by an attacker who obtains your vault file. Use it anyway?".to_owned(),
     };
@@ -374,6 +380,7 @@ fn Body(
         Screen::Snapshots => rsx! { Snapshots { controller: c, epoch, revision } },
         Screen::Archives => rsx! { Archives { controller: c, epoch, revision } },
         Screen::Settings(p) => rsx! { Settings { controller: c, epoch, revision, pane: p } },
+        Screen::Autofill => rsx! { AutofillScreen { controller: c, epoch, revision } },
     }
 }
 #[component]
@@ -1132,6 +1139,76 @@ fn QuickSettings(controller: Controller, epoch: FormEpoch, revision: u64) -> Ele
             button { class: "text-button", "data-qv-clear": "true", onclick: act(&controller, epoch, WsAction::EnrollQuick(qv_core::platform::QuickPolicy::DeviceCredential)), "Enable device credential · reduced protection…" }
             button { class: "text-button", onclick: act(&controller, epoch, WsAction::DisableQuick), "Disable quick unlock" }
         }
+        h3 { "Autofill" }
+        if controller.autofill_available() {
+            p { class: "hint", "Fills only entries linked to a verified app or an exact website origin from a validated browser, after you unlock and choose." }
+            button { class: "secondary-small", onclick: act(&controller, epoch, WsAction::OpenAutofillSettings), "Open Android autofill settings" }
+        } else {
+            p { class: "hint", "Unavailable: autofill is disabled on devices without recorded validation." }
+        }
+    }
+}
+#[component]
+fn AutofillScreen(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
+    let _ = revision;
+    let Some(view) = controller.autofill_view() else {
+        return rsx! {
+            h2 { "Autofill" }
+            p { class: "muted", "No autofill request is waiting." }
+        };
+    };
+    let requester = view.requester.clone();
+    let candidates = controller
+        .read(epoch, move |s| s.autofill_candidates(&requester))
+        .and_then(Result::ok)
+        .unwrap_or_default();
+    let query = controller
+        .peek(epoch, |ws| {
+            String::from_utf8_lossy(ws.input(WsField::Query)).into_owned()
+        })
+        .unwrap_or_default();
+    let results = if view.app.is_some() && !query.is_empty() {
+        controller
+            .read(epoch, |s| views::search(s, &query))
+            .and_then(Result::ok)
+            .map(|(_, entries)| entries)
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    rsx! {
+        h2 { "Fill a login" }
+        p { class: "notice", "For: {view.label}" }
+        p { class: "muted", "Only entries linked to this exact verified identity are listed. Titles and app names are never used for matching." }
+        if candidates.is_empty() { p { class: "muted", "No entry matches this verified identity." } }
+        ul { class: "list",
+            for c in candidates {
+                li { button { class: "row-button", "data-qv-autofill": "candidate", onclick: act(&controller, epoch, WsAction::AutofillFill(c.key())),
+                    span { class: "row-text",
+                        span { class: "row-title", "{c.title.expose()}" }
+                        span { class: "row-sub",
+                            if c.conflicted { "Conflicting version · check before filling · " }
+                            "{c.username.as_ref().map_or(\"\", |u| u.expose())}"
+                        }
+                    }
+                } }
+            }
+        }
+        if let Some((package, signers)) = view.app.clone() {
+            details { summary { "Link this app to an entry…" }
+                p { class: "warning", "QuickVault cannot tell whether this app belongs to the service. Link only an app you trust." }
+                p { class: "hint", "Package {package} · signer {signers}…" }
+                Input { controller: controller.clone(), epoch, field: WsField::Query, label: "Find the entry to link", kind: Kind::Line, value: Some(query.clone()), disabled: false }
+                ul { class: "list",
+                    for e in results {
+                        li { button { class: "row-button", "data-qv-autofill": "link", onclick: act(&controller, epoch, WsAction::AutofillLink(e.handle)),
+                            span { class: "row-text", span { class: "row-title", "{e.title.as_str()}" } span { class: "row-sub", "Link this app" } }
+                        } }
+                    }
+                }
+            }
+        }
+        button { class: "secondary", "data-qv-autofill": "cancel", onclick: act(&controller, epoch, WsAction::AutofillCancel), "Cancel autofill" }
     }
 }
 fn strength_label(bits: f64) -> &'static str {

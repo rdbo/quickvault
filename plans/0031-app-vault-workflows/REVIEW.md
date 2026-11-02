@@ -173,3 +173,11 @@ VALIDATION.md. The earlier review verdict is retained as the independent
 baseline: repairs were implemented in the same continuation, and fresh review
 of those changes/device evidence remains due. The earlier stop handoff is
 superseded by the owner's explicit continuation; phase 2.6 code proceeds.
+
+## Follow-up review (2026-11-02)
+
+The fresh-context review of commit `54e9764` (recorded in plan 0033 REVIEW.md)
+confirmed the repairs for findings 1–4 in code, and gates were rerun: 747
+workspace tests, 28 app validation tests and 6 vendor tests pass. Device
+PlatformTest evidence including Back/destination cleanup is recorded in 0033
+VALIDATION.md. Plan status: Reviewed.

@@ -92,7 +92,7 @@ rather than creating unused workspace scaffolding.
 | qv-protocol | Bounded canonical LAN/server wire types, contexts and version registry |
 | qv-sync | Shared causal merge candidates (implemented); direct LAN exchange, remote candidate state and publication orchestration (planned) |
 | qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets and the `verify` report |
-| qv-platform | Injected OS traits; Linux logind lifecycle, X11 clipboard ownership, single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; gated Android keystore quick unlock with process-local policy; native input unavailable; autofill planned |
+| qv-platform | Injected OS traits; Linux logind lifecycle, X11 clipboard ownership, single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; gated Android keystore quick unlock with process-local policy; gated exact-identity autofill matching; native input unavailable |
 | qv-cli / qv-app | Explicit user actions and views; no unrestricted crypto/file/SQL bridge |
 | qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
 
@@ -307,7 +307,20 @@ explicit reduced-protection retry. Android's metadata-only adapter locks on
 background,
 screen-off, destroyed activity or loss of required hardening; resume never
 unlocks. Private anchors and snapshots live outside the active vault; Android
-uses OS no-backup storage. Autofill remains unavailable.
+uses OS no-backup storage.
+Android hosts one Rust runtime per process (plan 0035): configuration changes
+are handled in place, and a destroyed activity locks, acknowledges and ends
+the process.
+Roadmap 2.7 (plan 0034) adds gated Android autofill (0009 §4.4). A thin
+Kotlin `AutofillService` detects fields and returns only an authentication
+entry. Its immutable PendingIntent targets a non-exported handoff activity with
+a one-shot token for one in-process request (120 s pending). Rust polls,
+bounds and validates the request. `qv-platform::autofill` matches exactly:
+system-reported package plus full signer set, or an exact origin from an
+allowlisted browser (empty). `qv-core` lists live heads and releases values
+only for the chosen head after re-matching. The shared app requires unlock and
+choice; lock cancels a bound request. The handoff re-verifies signers before
+returning the dataset. Digital Asset Links are deferred (network).
 Roadmap 2.6 (plan 0033) adds a gated Android AES-256-GCM keystore backend:
 Class 3 per-operation biometrics, separate reduced-protection device credentials,
 StrongBox preferred over an equally authenticated TEE key, explicit key-policy
@@ -357,7 +370,7 @@ validation, and does not require separate application implementations per OS.
 flowchart TB
     ui["CLI / shared Dioxus UI and input"] --> core["qv-core: policy and sessions"]
     core --> rust["trusted Rust: model, crypto, store, sync"]
-    core --> platform["qv-platform: lifecycle, clipboard, protection status; gated Android keystore; future autofill"]
+    core --> platform["qv-platform: lifecycle, clipboard, protection status; gated Android keystore and autofill"]
     platform -. "lock/cancel notifications" .-> core
     ui --> clip["CLI clipboard via core reexports; keys already dropped"]
     clip --> platform

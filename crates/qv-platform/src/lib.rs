@@ -6,6 +6,8 @@
 
 /// Android lifecycle/protection adapter, also testable without a device.
 pub mod android;
+/// Exact Android autofill identity matching (0009 §4.4).
+pub mod autofill;
 /// Bound, device-local Android quick-unlock policy.
 pub mod quick_unlock;
 pub use quick_unlock::{QuickBinding, QuickPolicy};

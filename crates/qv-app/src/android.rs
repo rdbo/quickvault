@@ -3,6 +3,7 @@
 //! Minimal Wry dispatch glue; OS observations go to qv-platform through core.
 //! Clipboard text and attachment chunks cross JNI as documented best-effort
 //! JVM intermediates (0008 §4.4); Uris stay in Kotlin. No unsafe code.
+use crate::autofill::AutofillSink;
 use crate::controller::{AppError, Controller, FormEpoch, private_dir};
 use crate::documents::{Output, PickKind};
 use dioxus_desktop::wry::prelude::jni::{
@@ -356,6 +357,7 @@ pub(crate) fn initialize() {
                     .with_keystore(Arc::new(qv_core::platform::AndroidKeystore::new(quick))),
             );
             let _ = OS.set(os.clone());
+            crate::autofill::set_sink(Box::new(NativeAutofill));
             let Ok(mut env) = poll_vm.attach_current_thread() else {
                 let _ = crate::ui::ACTIVE.set(Err(AppError::Unavailable));
                 return;
@@ -401,10 +403,12 @@ pub(crate) fn initialize() {
                     .and_then(|v| v.i());
                 let Ok(flags) = flags else {
                     os.update(AndroidState::default());
+                    stopped(&mut env, &activity);
                     break;
                 };
                 if flags & 16 != 0 {
                     os.update(AndroidState::default());
+                    stopped(&mut env, &activity);
                     break;
                 }
                 let observed = AndroidState {
@@ -423,6 +427,7 @@ pub(crate) fn initialize() {
                     });
                 let Ok(next) = next else {
                     os.update(AndroidState::default());
+                    stopped(&mut env, &activity);
                     break;
                 };
                 // Preserve a pause/resume or screen-off transition that happened
@@ -446,6 +451,7 @@ pub(crate) fn initialize() {
                 generation = Some(next);
                 os.update(observed);
                 poll_pick(observed.foreground, &mut seen_pick);
+                poll_autofill();
                 if !ready && observed.secure_window {
                     #[cfg(not(feature = "validation"))]
                     let controller = Controller::new(root.clone(), os.clone());
@@ -637,4 +643,175 @@ impl qv_core::platform::AndroidKeystoreBackend for FixtureKeystore {
     fn delete(&self, s: &qv_core::SecretBytes) -> Result<(), PlatformError> {
         qv_core::platform::AndroidKeystoreBackend::delete(&NativeKeystore, s)
     }
+}
+
+/// Bounded strings from the native registry (already length-limited there).
+fn autofill_string(id: i64, method: &str, max: usize) -> Result<Option<String>, ()> {
+    call(|env, a| {
+        let value = env
+            .call_method(a, method, "(J)Ljava/lang/String;", &[JValue::Long(id)])?
+            .l()?;
+        if value.is_null() {
+            return Ok(None);
+        }
+        let value: jni::objects::JString = value.into();
+        let text = env.get_string(&value)?.to_string_lossy().into_owned();
+        Ok(Some(text))
+    })
+    .map_err(|_| ())
+    .and_then(|v| match v {
+        Some(t) if t.len() > max => Err(()),
+        v => Ok(v),
+    })
+}
+/// Fetch and validate a newly claimed request; anything invalid is cancelled.
+fn poll_autofill() {
+    use qv_core::platform::autofill::{FillRequest, MAX_HOST, MAX_PACKAGE, MAX_SIGNERS, Roles};
+    let Ok(id) = call(|env, a| env.call_method(a, "qvAutofillPending", "()J", &[])?.j()) else {
+        return;
+    };
+    if id <= 0 {
+        return;
+    }
+    let request = (|| {
+        let package = autofill_string(id, "qvAutofillPackage", MAX_PACKAGE)?.ok_or(())?;
+        let scheme = autofill_string(id, "qvAutofillScheme", 8)?;
+        let host = autofill_string(id, "qvAutofillHost", MAX_HOST)?;
+        let signers = call(|env, a| {
+            let array: jni::objects::JByteArray = env
+                .call_method(a, "qvAutofillSigners", "(J)[B", &[JValue::Long(id)])?
+                .l()?
+                .into();
+            let length = env.get_array_length(&array)?;
+            if length <= 0 || length as usize > MAX_SIGNERS * 32 {
+                return Err(jni::errors::Error::NullPtr("autofill signer bounds"));
+            }
+            env.convert_byte_array(array)
+        })
+        .map_err(|_| ())?;
+        let roles = call(|env, a| {
+            env.call_method(a, "qvAutofillRoles", "(J)I", &[JValue::Long(id)])?
+                .i()
+        })
+        .map_err(|_| ())?;
+        let roles = Roles {
+            username: roles & 1 != 0,
+            password: roles & 2 != 0,
+        };
+        FillRequest::new(
+            &package,
+            &signers,
+            scheme.as_deref(),
+            host.as_deref(),
+            roles,
+        )
+        .map_err(|_| ())
+    })();
+    let controller = crate::ui::ACTIVE.get().and_then(|c| c.as_ref().ok());
+    match (request, controller) {
+        (Ok(request), Some(c)) => {
+            let requester = requester(&request);
+            c.autofill_offer(id, requester, request.roles);
+        }
+        _ => NativeAutofill.cancel(id),
+    }
+}
+/// Browser trust is the compiled allowlist. Only the marked validation build
+/// additionally trusts its own instrumentation package, signed by this app's
+/// own key, so device tests can exercise the exact-origin path.
+fn requester(
+    request: &qv_core::platform::autofill::FillRequest,
+) -> qv_core::platform::autofill::Requester {
+    #[cfg(feature = "validation")]
+    if let Some(origin) = &request.web
+        && request.app.package.as_str() == "org.quickvault.app.test"
+        && call(|env, a| {
+            let array: jni::objects::JByteArray =
+                env.call_method(a, "qvOwnSigners", "()[B", &[])?.l()?.into();
+            let length = env.get_array_length(&array)?;
+            if length <= 0 || length > 256 {
+                return Err(jni::errors::Error::NullPtr("own signer bounds"));
+            }
+            env.convert_byte_array(array)
+        })
+        .ok()
+        .and_then(|own| qv_core::platform::autofill::SignerSet::from_flat(&own))
+        .is_some_and(|own| own == request.app.signers)
+    {
+        return qv_core::platform::autofill::Requester::Web {
+            browser: request.app.clone(),
+            origin: origin.clone(),
+        };
+    }
+    request.requester(qv_core::platform::autofill::TRUSTED_BROWSERS)
+}
+/// Native side of the handoff registry.
+struct NativeAutofill;
+impl crate::autofill::AutofillSink for NativeAutofill {
+    fn complete(
+        &self,
+        native: i64,
+        username: Option<&qv_core::SecretBytes>,
+        password: Option<&qv_core::SecretBytes>,
+    ) -> bool {
+        use qv_core::platform::autofill::MAX_FILL_VALUE;
+        if [username, password]
+            .iter()
+            .flatten()
+            .any(|v| v.len() > MAX_FILL_VALUE)
+        {
+            return false;
+        }
+        // The JVM arrays are zeroed by the registry after copying (0008 §4.4).
+        call(|env, a| {
+            let null = JObject::null();
+            let user = match username {
+                Some(v) => JObject::from(env.byte_array_from_slice(v.expose_secret())?),
+                None => null,
+            };
+            let null = JObject::null();
+            let pass = match password {
+                Some(v) => JObject::from(env.byte_array_from_slice(v.expose_secret())?),
+                None => null,
+            };
+            env.call_method(
+                a,
+                "qvAutofillComplete",
+                "(J[B[B)Z",
+                &[
+                    JValue::Long(native),
+                    JValue::Object(&user),
+                    JValue::Object(&pass),
+                ],
+            )?
+            .z()
+        })
+        .unwrap_or(false)
+    }
+    fn cancel(&self, native: i64) {
+        let _ = call(|env, a| {
+            env.call_method(a, "qvAutofillCancel", "(J)V", &[JValue::Long(native)])
+                .map(|_| ())
+        });
+    }
+}
+/// Whether this device's autofill gate is open.
+pub(crate) fn autofill_available() -> bool {
+    call(|env, a| env.call_method(a, "qvAutofillAvailable", "()Z", &[])?.z()).unwrap_or(false)
+}
+/// Open the system autofill-service chooser (backgrounds, and so locks, the app).
+pub(crate) fn open_autofill_settings() {
+    let _ = call(|env, a| {
+        env.call_method(a, "qvOpenAutofillSettings", "()V", &[])
+            .map(|_| ())
+    });
+}
+
+/// After the destroy lock: give worker and clipboard-hold threads (which wake
+/// at least every 250 ms) time to observe cancellation, then let the activity
+/// end this process. One Rust runtime per process (plan 0035).
+fn stopped(env: &mut JNIEnv<'_>, activity: &GlobalRef) {
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let _ = env.call_method(activity.as_obj(), "qvRuntimeStopped", "()V", &[]);
+    let _ = env.exception_clear();
 }

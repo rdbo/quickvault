@@ -71,11 +71,13 @@ struct Slot {
     envelope: SecretBytes,
     since: Instant,
     failures: u8,
+    serial: u64,
 }
 /// Serialized trusted policy. No persistence, export, Debug or plaintext cache.
 pub struct AndroidKeystore {
     backend: Arc<dyn AndroidKeystoreBackend>,
     slot: Mutex<Option<Slot>>,
+    serial: std::sync::atomic::AtomicU64,
 }
 impl AndroidKeystore {
     /// Inject the native adapter; availability still requires device validation.
@@ -83,6 +85,7 @@ impl AndroidKeystore {
         Self {
             backend,
             slot: Mutex::new(None),
+            serial: std::sync::atomic::AtomicU64::new(0),
         }
     }
     fn destroy(&self, slot: &mut Option<Slot>) -> Result<(), PlatformError> {
@@ -155,6 +158,10 @@ impl Keystore for AndroidKeystore {
             envelope,
             since: Instant::now(),
             failures: 0,
+            serial: self
+                .serial
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                .wrapping_add(1),
         });
         Ok(())
     }
@@ -163,24 +170,40 @@ impl Keystore for AndroidKeystore {
         binding: QuickBinding,
         cancel: Cancellation,
     ) -> Result<SecretBytes, PlatformError> {
-        let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
-        if !self.available()
-            || slot.as_ref().is_none_or(|s| {
-                s.binding != binding || s.since.elapsed() >= MAX_AGE || s.failures >= 3
-            })
-        {
-            self.destroy(&mut slot)?;
-            return Err(PlatformError::Unavailable);
-        }
-        let Some(current) = slot.as_mut() else {
-            return Err(PlatformError::Unavailable);
+        // Reserve the attempt and copy the envelope, then release the policy
+        // mutex for the native prompt so readiness queries never wait on it.
+        let (serial, policy, envelope) = {
+            let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
+            if !self.available()
+                || slot.as_ref().is_none_or(|s| {
+                    s.binding != binding || s.since.elapsed() >= MAX_AGE || s.failures >= 3
+                })
+            {
+                self.destroy(&mut slot)?;
+                return Err(PlatformError::Unavailable);
+            }
+            let Some(current) = slot.as_mut() else {
+                return Err(PlatformError::Unavailable);
+            };
+            current.failures += 1;
+            let envelope = SecretBytes::try_init(current.envelope.len(), |b| {
+                b.copy_from_slice(current.envelope.expose_secret());
+                Ok::<(), PlatformError>(())
+            })?;
+            (current.serial, current.policy, envelope)
         };
-        current.failures += 1; // Reserve the attempt before native authentication.
         let result = if cancel() {
             Err(PlatformError::Cancelled)
         } else {
             self.backend
-                .open(binding, current.policy, &current.envelope, cancel.clone())
+                .open(binding, policy, &envelope, cancel.clone())
+        };
+        drop(envelope);
+        let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
+        // Invalidated or re-enrolled during the prompt: the result belongs to
+        // no current policy and is discarded without touching the new slot.
+        let Some(current) = slot.as_mut().filter(|s| s.serial == serial) else {
+            return Err(PlatformError::Cancelled);
         };
         match result {
             Ok(plain) if !plain.is_empty() && plain.len() <= MAX_PLAINTEXT && !cancel() => {
@@ -309,6 +332,100 @@ mod tests {
         assert!(os.binding().is_none());
         assert!(os.wrap(&bytes()).is_err());
         assert!(os.unwrap(&bytes()).is_err());
+    }
+
+    /// Blocks `open` until released, so concurrent policy calls can be observed.
+    struct Gated {
+        entered: std::sync::mpsc::SyncSender<()>,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+    impl AndroidKeystoreBackend for Gated {
+        fn validated(&self) -> bool {
+            true
+        }
+        fn seal(
+            &self,
+            _: QuickBinding,
+            _: QuickPolicy,
+            _: &SecretBytes,
+            _: Cancellation,
+        ) -> Result<SecretBytes, PlatformError> {
+            Ok(bytes())
+        }
+        fn open(
+            &self,
+            _: QuickBinding,
+            _: QuickPolicy,
+            _: &SecretBytes,
+            _: Cancellation,
+        ) -> Result<SecretBytes, PlatformError> {
+            self.entered.send(()).unwrap();
+            self.release.lock().unwrap().recv().unwrap();
+            Ok(bytes())
+        }
+        fn delete(&self, _: &SecretBytes) -> Result<(), PlatformError> {
+            Ok(())
+        }
+    }
+
+    // 0012 §1: Hardware assumptions
+    #[test]
+    fn native_prompt_does_not_hold_policy_and_stale_results_are_discarded() {
+        let (entered_tx, entered) = std::sync::mpsc::sync_channel(0);
+        let (release, release_rx) = std::sync::mpsc::sync_channel(0);
+        let os = Arc::new(AndroidKeystore::new(Arc::new(Gated {
+            entered: entered_tx,
+            release: Mutex::new(release_rx),
+        })));
+        os.enroll(binding(), QuickPolicy::Class3, &bytes(), cancel())
+            .unwrap();
+        let worker = {
+            let os = os.clone();
+            std::thread::spawn(move || os.unlock_bound(binding(), cancel()))
+        };
+        entered.recv().unwrap();
+        // The prompt is in flight: readiness answers without waiting for it.
+        assert!(os.binding().is_some());
+        // Re-enrollment during the prompt replaces the slot; the old prompt's
+        // plaintext must not be returned or charged to the new slot.
+        os.enroll(binding(), QuickPolicy::DeviceCredential, &bytes(), cancel())
+            .unwrap();
+        release.send(()).unwrap();
+        assert!(matches!(
+            worker.join().unwrap(),
+            Err(PlatformError::Cancelled)
+        ));
+        assert_eq!(
+            os.slot.lock().unwrap().as_ref().map(|s| s.failures),
+            Some(0)
+        );
+        // Invalidation during a prompt likewise discards the late result.
+        let worker = {
+            let os = os.clone();
+            std::thread::spawn(move || os.unlock_bound(binding(), cancel()))
+        };
+        entered.recv().unwrap();
+        os.invalidate().unwrap();
+        release.send(()).unwrap();
+        assert!(matches!(
+            worker.join().unwrap(),
+            Err(PlatformError::Cancelled)
+        ));
+        assert!(os.binding().is_none());
+        // An undisturbed prompt still succeeds and restores the attempt.
+        os.enroll(binding(), QuickPolicy::Class3, &bytes(), cancel())
+            .unwrap();
+        let worker = {
+            let os = os.clone();
+            std::thread::spawn(move || os.unlock_bound(binding(), cancel()))
+        };
+        entered.recv().unwrap();
+        release.send(()).unwrap();
+        assert_eq!(worker.join().unwrap().unwrap().expose_secret(), b"test");
+        assert_eq!(
+            os.slot.lock().unwrap().as_ref().map(|s| s.failures),
+            Some(0)
+        );
     }
 
     // 0012 §1: Hardware assumptions

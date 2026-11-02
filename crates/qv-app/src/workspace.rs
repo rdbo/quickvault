@@ -73,6 +73,8 @@ pub enum Screen {
     Archives,
     /// Settings.
     Settings(Pane),
+    /// Choose a login for the bound autofill request.
+    Autofill,
 }
 // Variant names only: no handle, ID or vault text reaches debug output.
 impl std::fmt::Debug for Screen {
@@ -95,6 +97,7 @@ impl std::fmt::Debug for Screen {
             Self::Snapshots => "Snapshots",
             Self::Archives => "Archives",
             Self::Settings(_) => "Settings",
+            Self::Autofill => "Autofill",
         })
     }
 }
@@ -313,6 +316,14 @@ pub enum WsAction {
     EnrollQuick(qv_core::platform::QuickPolicy),
     /// Destroy the quick-unlock handle and process policy.
     DisableQuick,
+    /// Fill the bound autofill request from this chosen entry head.
+    AutofillFill(qv_core::autofill::CandidateKey),
+    /// Abandon the bound autofill request.
+    AutofillCancel,
+    /// Link the requesting app's verified identity to this entry.
+    AutofillLink(EntryHandle),
+    /// Open the OS autofill-service settings.
+    OpenAutofillSettings,
     /// Delete snapshots taken before a password change.
     DeleteOldSnapshots,
     /// Show the recovery phrase after reauthentication.
@@ -360,6 +371,8 @@ pub enum ConfirmKind {
     WeakPassword,
     /// Device PIN/pattern becomes a vault credential.
     ReducedQuick,
+    /// Link an OS-verified app identity to an entry.
+    LinkApp,
 }
 struct Pending {
     kind: ConfirmKind,
@@ -600,7 +613,7 @@ impl Workspace {
         self.error = None;
         self.searched = false;
     }
-    fn go(&mut self, to: Screen) {
+    pub(crate) fn go(&mut self, to: Screen) {
         if self.screen != to {
             let from = std::mem::replace(&mut self.screen, to);
             if self.back.len() == BACK_MAX {
@@ -928,6 +941,7 @@ impl Controller {
             WsAction::EnrollQuick(qv_core::platform::QuickPolicy::DeviceCredential) => {
                 Some(ConfirmKind::ReducedQuick)
             }
+            WsAction::AutofillLink(_) => Some(ConfirmKind::LinkApp),
             WsAction::EmptyTrash => Some(ConfirmKind::EmptyTrash),
             WsAction::PurgeExpired => {
                 let anomaly = self

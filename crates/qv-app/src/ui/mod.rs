@@ -241,6 +241,9 @@ fn Screen(controller: Controller, revision: u64) -> Element {
                                 span {"→"}
                             }
                         }
+                        if let Some(banner) = controller.autofill_banner() {
+                            p {class:"notice",role:"status","data-qv-autofill":"banner","{banner}"}
+                        }
                         if mode==Mode::Unlock && controller.0.services.keystore().binding().is_some() {
                             button { class: "secondary", "data-qv-clear": "true", disabled: view.busy || !acknowledged || preview, onclick: invoke(Action::QuickUnlock), "Quick unlock with the enrolled hardware policy" }
                         }

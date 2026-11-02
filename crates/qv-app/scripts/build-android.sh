@@ -31,10 +31,15 @@ export QV_APP_BUILT_APK="dist/$qv_artifact-debug.apk"
 # the APK as well, without patching the framework or its registry source.
 qv_project=$(python3 - <<'PY'
 from pathlib import Path
-import shutil,time,re
+import shutil,time,re,os
 root=Path.cwd()
 source=root.parent.parent/'target/dx/quickvault/release/android/app'
-destination=root/'dist'/f'android-project-{time.time_ns()}'
+# One reusable generated copy; earlier timestamped copies are not created.
+destination=root/'dist'/'android-project'
+if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
+    raise SystemExit('Unexpected android-project path')
+if destination.exists():
+    shutil.rmtree(destination)
 shutil.copytree(source,destination,ignore=shutil.ignore_patterns('build','.gradle'))
 p=destination/'app/build.gradle.kts'
 s=p.read_text()
@@ -57,6 +62,14 @@ shutil.copyfile(root/'android/tests/AndroidManifest.xml',destination/'app/src/an
 # disallowing cleartext to remote hosts. The custom manifest references it.
 shutil.copyfile(root/'android/network_security_config.xml',
                 destination/'app/src/main/res/xml/network_security_config.xml')
+# Autofill gate (plan 0034): only the marked validation build opens it.
+main_activity=destination/'app/src/main/kotlin/dev/dioxus/main/MainActivity.kt'
+source=main_activity.read_text()
+if source.count('const val VALIDATION = false')!=1:
+    raise SystemExit('Unexpected autofill gate source')
+if os.environ.get('QV_APP_DEVICE_VALIDATION')=='1':
+    main_activity.write_text(source.replace('const val VALIDATION = false','const val VALIDATION = true'))
+shutil.copyfile(root/'android/tests/AutofillTest.java',tests/'AutofillTest.java')
 print(destination)
 PY
 )
@@ -85,6 +98,15 @@ ns='{http://schemas.android.com/apk/res/android}'
 app=manifest.find('application')
 if app is None or app.get(ns+'allowBackup')!='false':
     raise SystemExit('Backup policy is not disabled')
+auth=[a for a in app.findall('activity') if a.get(ns+'name')=='dev.dioxus.main.AutofillAuthActivity']
+if len(auth)!=1 or auth[0].get(ns+'exported')!='false':
+    raise SystemExit('Autofill handoff activity must exist and stay non-exported')
+service=[s for s in app.findall('service') if s.get(ns+'name')=='dev.dioxus.main.QvAutofillService']
+if len(service)!=1 or service[0].get(ns+'permission')!='android.permission.BIND_AUTOFILL_SERVICE':
+    raise SystemExit('Autofill service must be bindable only by the system')
+main=[a for a in app.findall('activity') if a.get(ns+'name')=='dev.dioxus.main.MainActivity']
+if len(main)!=1 or main[0].get(ns+'launchMode')!='singleTask':
+    raise SystemExit('The Rust-bridged activity must stay single-instance')
 p=Path(os.environ['QV_APP_BUILT_APK'])
 print('APK SHA-256:',hashlib.sha256(p.read_bytes()).hexdigest())
 print('Built only. Inspect the final manifest/signature before any device install.')
