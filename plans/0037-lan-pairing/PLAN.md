@@ -1270,5 +1270,13 @@ pass; `Cargo.lock` changes only for the new path edges.
     Both are UX items for 2.10. No physical-device run was needed (no
     Android glue changed). No commit, push or branch.
 
-- 2026-11-03: Applied the hint-removal revision (see Revisions). Gates were
-  rerun on the final tree; results below.
+- 2026-11-03: Applied the hint-removal revision (see Revisions); owner
+  commit `5ca6f64`. Gates rerun on that tree:
+  - SPDX, matrix, fmt, workspace and app-validation Clippy pass;
+  - `cargo test --locked`: 829 passed, 0 failed, 2 ignored (one fewer: the
+    corrupt-hint test went with the hints);
+  - app validation: 31 passed;
+  - Android arm64 Clippy passes for both feature sets;
+  - `crosscheck_lan.py`: OK.
+
+  No dependency change, so the deny/vet results from 2026-11-02 still apply.
