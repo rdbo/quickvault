@@ -84,8 +84,6 @@ pub struct Write<'v> {
     receipt_blob: Option<Vec<u8>>,
     /// The complete new `lan_link` row set, when this write changes links.
     links: Option<Vec<crate::lan_store::StoredLink>>,
-    /// Hint changes by link ID: a new sealed hint, or `None` to delete.
-    hints: Vec<([u8; 16], Option<Vec<u8>>)>,
 }
 
 impl core::fmt::Debug for Write<'_> {
@@ -218,7 +216,6 @@ impl UnlockedVault {
             finished: false,
             receipt_blob: None,
             links: None,
-            hints: Vec::new(),
         })
     }
 }
@@ -602,8 +599,8 @@ impl Write<'_> {
         self.manifest.remove_history(record, version)
     }
 
-    /// Adds a LAN link row (0013 §9.1), with an optional first endpoint
-    /// hint, applied by [`Self::commit`] as part of this one change. At most
+    /// Adds a LAN link row (0013 §9.1), applied by [`Self::commit`] as part
+    /// of this one change. At most
     /// [`crate::MAX_LAN_LINKS`] links ([`StoreError::LimitExceeded`]); a
     /// reused link ID, a negative time or an invalid label is
     /// [`StoreError::InvalidEdit`].
@@ -613,7 +610,6 @@ impl Write<'_> {
         key: &qv_crypto::lan::LinkKey,
         label: &str,
         created_at: qv_model::Timestamp,
-        hint: &[std::net::SocketAddr],
     ) -> Result<(), StoreError> {
         let mut rows = match self.links.take() {
             Some(rows) => rows,
@@ -628,25 +624,13 @@ impl Write<'_> {
             }
             let created = u64::try_from(created_at.0).map_err(|_| StoreError::InvalidEdit)?;
             let header = self.vault.file.header;
-            let sealed =
-                crate::lan_store::seal_row(&self.keys, &header, &link_id, key, label, created)?;
-            let hint = if hint.is_empty() {
-                None
-            } else {
-                Some(crate::lan_store::seal_hint(
-                    &self.keys, &header, &link_id, hint, 0,
-                )?)
-            };
-            Ok((sealed, hint))
+            crate::lan_store::seal_row(&self.keys, &header, &link_id, key, label, created)
         })();
         match result {
-            Ok((sealed, hint)) => {
+            Ok(sealed) => {
                 rows.push(crate::lan_store::StoredLink { link_id, sealed });
                 rows.sort_by_key(|a| a.link_id);
                 self.links = Some(rows);
-                if let Some(h) = hint {
-                    self.hints.push((link_id, Some(h)));
-                }
                 Ok(())
             }
             Err(e) => {
@@ -659,7 +643,7 @@ impl Write<'_> {
         }
     }
 
-    /// Removes a LAN link and its hint (0013 §12.1), applied by
+    /// Removes a LAN link (0013 §12.1), applied by
     /// [`Self::commit`]. An unknown ID is [`StoreError::NotFound`].
     pub fn remove_lan_link(&mut self, link_id: &[u8; 16]) -> Result<(), StoreError> {
         let mut rows = match self.links.take() {
@@ -675,8 +659,6 @@ impl Write<'_> {
         if !found {
             return Err(StoreError::NotFound);
         }
-        self.hints.retain(|(id, _)| id != link_id);
-        self.hints.push((*link_id, None));
         Ok(())
     }
 
@@ -814,25 +796,6 @@ impl Write<'_> {
                 )
                 .map_err(w)?;
             }
-            // A removed link's hint goes with it; hints of kept links stay.
-            conn.execute(
-                "DELETE FROM lan_hint WHERE link_id NOT IN (SELECT link_id FROM lan_link)",
-                [],
-            )
-            .map_err(w)?;
-        }
-        for (id, hint) in &self.hints {
-            conn.execute("DELETE FROM lan_hint WHERE link_id = ?1", [id.as_slice()])
-                .map_err(w)?;
-            if let Some(blob) = hint {
-                conn.execute(
-                    "INSERT INTO lan_hint (link_id, sealed) VALUES (?1, ?2)",
-                    rusqlite::params![id.as_slice(), blob.as_slice()],
-                )
-                .map_err(w)?;
-            }
-        }
-        if self.links.is_some() || !self.hints.is_empty() {
             point(CrashPoint::LanLinksWritten)?;
         }
         insert_manifest(conn, &sealed)?;

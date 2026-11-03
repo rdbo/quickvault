@@ -296,14 +296,6 @@ fn build<R: Read + Seek>(
                     ],
                 )
                 .map_err(|e| crate::error::write_err(tx, &e, 0))?;
-                if !l.hint.is_empty() {
-                    let hint = crate::lan_store::seal_hint(&keys, header, &l.link_id, l.hint, 0)?;
-                    tx.execute(
-                        "INSERT INTO lan_hint (link_id, sealed) VALUES (?1, ?2)",
-                        rusqlite::params![l.link_id.as_slice(), hint.as_slice()],
-                    )
-                    .map_err(|e| crate::error::write_err(tx, &e, 0))?;
-                }
                 links.push(crate::lan_store::StoredLink {
                     link_id: l.link_id,
                     sealed,

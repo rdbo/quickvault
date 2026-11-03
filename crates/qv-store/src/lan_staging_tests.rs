@@ -67,7 +67,6 @@ fn create(
             key: &key,
             label: "Laptop",
             created_at: Timestamp(5),
-            hint: &["192.168.0.2:4000".parse().unwrap()],
         },
         &|| false,
     )
@@ -109,10 +108,6 @@ fn lan_staging_builds_an_identical_vault_with_one_link() {
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].link_id, [9; 16]);
     assert_eq!(links[0].label.expose_secret(), b"Laptop");
-    assert_eq!(
-        joined.lan_hint(&[9; 16]),
-        vec!["192.168.0.2:4000".parse().unwrap()]
-    );
     assert_eq!(joined.local_seq(), 1);
     // A fresh replica, never the source's.
     assert_ne!(joined.state.replica.replica_id, u.state.replica.replica_id);

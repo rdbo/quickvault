@@ -88,7 +88,7 @@ rather than creating unused workspace scaffolding.
 | qv-encoding | Bounded deterministic CBOR (0004 §3.1): validates hostile input before typed reads, encodes only canonical items, builds AAD/info/transcript arrays; depends on no other qv crate |
 | qv-crypto | Profiles, key hierarchy, encryption, protected memory, X-Wing draft-11 (libcrux-kem), the LAN record layer (0013 §6) and pairing key schedule (`lan-link` root, link keys, proofs, comparison code, sealed link rows; 0013 §4, §9); hybrid signature verification from roadmap 3.3 |
 | qv-model | Canonical payloads, atomic records, deterministic tree projection |
-| qv-store | Hardened SQLite, immutable objects, manifests, transactions, authenticated archives (header, writer, role-verifying reader), new-path restore and the full `verify` pass; head-bound `lan_link`/`lan_hint` peer state, LAN serving reads and new-device staging/creation (0013 §9–10) |
+| qv-store | Hardened SQLite, immutable objects, manifests, transactions, authenticated archives (header, writer, role-verifying reader), new-path restore and the full `verify` pass; head-bound `lan_link` peer state (no remembered peer endpoints), LAN serving reads and new-device staging/creation (0013 §9–10) |
 | qv-protocol | Key-free hostile-input wire layer: bounded LAN frames, wire labels with exact arity, exact-shape message reader/writer, `lan / 1` profile, feature and error-code registry (roadmap 2.8); typed pairing/exchange/error messages and the out-of-band QR/manual code (roadmap 2.9); server wire types later; depends only on qv-encoding |
 | qv-sync | Shared causal merge candidates; LAN pairing over TCP (pairing window, joiner, new-device exchange; roadmap 2.9); LAN sessions/exchange, remote candidate state and publication orchestration (planned) |
 | qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets, the `verify` report and LAN pairing/link management for frontends |
@@ -135,7 +135,7 @@ Roadmap 2.8 adds:
 
 Roadmap 2.9 (plan 0037) adds LAN pairing (0013 §4, §8–10, §12):
 - qv-crypto: the pairing key schedule;
-- qv-store: `lan_link`/`lan_hint` rows bound to the head by key 8
+- qv-store: `lan_link` rows bound to the head by key 8
   `lan_links_digest` (format `0x7FFF0004`), serving reads, and new-device
   staging. A joining device writes the received manifest and objects as a
   private archive, authenticates it with the archive reader, and creates the

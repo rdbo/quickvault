@@ -60,13 +60,12 @@ of attacker-supplied SQL constraints.
 | `archive_receipts` | exactly one row | sealed local filename/complete-archive digest set (§2.3), bound by `local_head`; never in archives or sync |
 | `replica` | exactly one row | local-only writer state (0005 §1.3): replica ID naming this DB's external anchor, writer ID, next counter; never in archives or sync |
 | `lan_link` | link ID | sealed pairwise LAN link key, label and creation time, bound by the local head's `lan_links_digest` (0013 §9.1); local-only, never in archives or sync |
-| `lan_hint` | link ID | sealed unauthenticated endpoint hints and last-success time (0013 §9.2); local-only, never in archives or sync |
 
 Server checkpoint fields and `sync_state` rows are optional server-mode state.
 Creating or operating an offline or LAN-only vault MUST NOT require a server
 identity, account, checkpoint or dummy server row. LAN exchanges use the same
 verified objects/manifests and local commit/anchor path; the local-only peer
-state is the `lan_link`/`lan_hint` schema of 0013 §9, which MUST NOT be
+state is the `lan_link` schema of 0013 §9, which MUST NOT be
 inferred from the server `sync_state` layout.
 
 2.1. A record may have several active versions. The manifest defines active,
@@ -137,37 +136,31 @@ are local-only and never enter an archive, portable manifest or peer exchange.
 The development schema/header version for this table is `0x7FFF0003`; older
 development files are rejected, without a migration or compatibility promise.
 
-2.4. **LAN peer state** (0013 §9). The development layouts are:
+2.4. **LAN peer state** (0013 §9). The development layout is
 
 ```sql
 CREATE TABLE lan_link (link_id BLOB PRIMARY KEY CHECK (length(link_id) = 16), key_generation INTEGER NOT NULL, sealed BLOB NOT NULL) STRICT, WITHOUT ROWID
-CREATE TABLE lan_hint (link_id BLOB PRIMARY KEY CHECK (length(link_id) = 16), sealed BLOB NOT NULL) STRICT, WITHOUT ROWID
 ```
 
-Both `sealed` values use the canonical envelope
+`sealed` uses the canonical envelope
 `[1, data_profile:uint, nonce:bstr24, ciphertext:bstr]`, with stored-data/1
-framing and AEAD under the generation's `local-state` purpose key and a fresh
-random nonce. The ciphertext is at most 512 bytes. The AADs are:
-- link rows: `["qv/lan-link-row/v1", vault_id, key_generation, link_id]`,
-  over the plaintext of 0013 §9.1;
-- hints: `["qv/lan-hint/v1", vault_id, key_generation, link_id]`, over
-  `[endpoints: [[addr: bstr4|bstr16, port: uint]] (at most 4),
-  last_success_at: uint (milliseconds, 0 = never)]`.
+framing and AEAD under the generation's `local-state` purpose key, a fresh
+random nonce, AAD `["qv/lan-link-row/v1", vault_id, key_generation, link_id]`
+and the plaintext of 0013 §9.1. The ciphertext is at most 512 bytes.
 
 On open:
-- at most 64 `lan_link` rows are allowed, checked before any value is read;
+- at most 64 rows are allowed, checked before any value is read;
 - each row needs a 16-byte ID, the header's key generation and a bounded
   blob;
 - `lan_links_digest` (local-head key 8) must equal the digest of 0013 §9.1
   over the stored rows. A mismatch is an integrity error.
 
-Rows are decrypted only when used. Hints are unauthenticated convenience
-data: an invalid hint reads as absent and never fails an open. Creation,
-new-path restore and a rotation replacement start with no rows and the
-digest of the empty set. New-device creation (0013 §10) writes its single
-link row in the first head. The development schema/header version with
-these tables is `0x7FFF0004`. Older development files are rejected, without
-a migration.
+Rows are decrypted only when used. No peer endpoint is stored (0013 §9.2).
+Creation, new-path restore and a rotation replacement start with no rows and
+the digest of the empty set. New-device creation (0013 §10) writes its
+single link row in the first head. The development schema/header version
+with this table is `0x7FFF0004`. Older development files are rejected,
+without a migration.
 
 ### 3. Encoding and encryption
 
@@ -368,6 +361,10 @@ is unsupported ([SQLite warning](https://www.sqlite.org/howtocorrupt.html)).
    format. Changes require documented policy/version updates.
 
 ## Changelog
+
+- 2026-11-03: Drop the `lan_hint` table: no peer endpoint is stored (0013
+  §9.2; owner decision). The development version stays `0x7FFF0004` (that
+  format was never committed with hints).
 
 - 2026-11-02: Add §2.4 development layouts for `lan_link`/`lan_hint`. Local
   head key 8 is the mandatory `lan_links_digest`, and the schema/header

@@ -112,8 +112,6 @@ pub struct JoinedNewDevice {
     pub link_id: [u8; 16],
     /// Its key.
     pub link_key: LinkKey,
-    /// The approver's endpoint, as the first hint.
-    pub endpoint: SocketAddr,
 }
 
 impl core::fmt::Debug for JoinedNewDevice {
@@ -136,13 +134,8 @@ pub struct JoinerContext {
 pub trait JoinerVault {
     /// The vault's identity and link root.
     fn context(&self) -> Result<JoinerContext, LanError>;
-    /// Commits B's link row, with the approver's endpoint as its hint.
-    fn commit_link(
-        &self,
-        link_id: [u8; 16],
-        key: &LinkKey,
-        endpoint: SocketAddr,
-    ) -> Result<(), LanError>;
+    /// Commits B's link row.
+    fn commit_link(&self, link_id: [u8; 16], key: &LinkKey) -> Result<(), LanError>;
 }
 
 /// An authenticated pairing connection on the joiner's side.
@@ -151,7 +144,6 @@ struct Paired<'c> {
     attempt: JoinAttempt,
     ss: XWingSharedSecret,
     th: [u8; 32],
-    endpoint: SocketAddr,
 }
 
 /// Tries each candidate until one authenticates (§3.3, §4.3–4.4).
@@ -203,7 +195,6 @@ fn connect<'c>(
             attempt,
             ss,
             th,
-            endpoint,
         });
     }
     Err(LanError::NoPeer)
@@ -287,7 +278,6 @@ pub fn join_new_device(
         password,
         link_id,
         link_key,
-        endpoint: p.endpoint,
     })
 }
 
@@ -308,7 +298,7 @@ pub fn join_link(
     let keys = code.secret.keys().map_err(|_| LanError::Io)?;
     let mut p = connect(&keys, JoinMode::Link, &candidates, timeouts, cancelled)?;
     reveal(&mut p, ui, timeouts)?;
-    let (attempt, ss, th, endpoint) = (&p.attempt, &p.ss, p.th, p.endpoint);
+    let (attempt, ss, th) = (&p.attempt, &p.ss, p.th);
     guarded(&mut p.ch, |ch| {
         let proof = ctx
             .root
@@ -344,7 +334,7 @@ pub fn join_link(
                 ctx.key_generation,
             )
             .map_err(|_| LanError::Protocol)?;
-        vault.commit_link(proved.link_id, &link, endpoint)?;
+        vault.commit_link(proved.link_id, &link)?;
         // PairDone only after the commit is durable (§4.8).
         ch.send(
             &PairDone::encode().map_err(|_| LanError::Protocol)?,

@@ -27,7 +27,7 @@
 //! | `slot` | local password slots (the `qv_model::Keyslot` descriptor) | 0002 §3.2 |
 //! | `object` | [`ObjectEnvelope`], record AAD, record encryption | 0004 §2.2, §3.2 |
 //! | `manifest` | [`Manifest`]: codec, validation, budgets, digests, encryption, envelope hash | 0004 §3.4–3.5, §4.1–4.2 |
-//! | `lan_store` | `lan_link`/`lan_hint` rows: shape checks, the head-bound digest, sealing and best-effort hints | 0013 §9; 0004 §2.4 |
+//! | `lan_store` | `lan_link` rows: shape checks, the head-bound digest and sealing | 0013 §9; 0004 §2.4 |
 //! | `lan_staging` | [`LanStaging`]: a joining device's private staging archive, its §10 checks and the password proof for [`VaultFile::create_from_lan`] | 0013 §10 |
 //! | `receipts` / `receipt_store` | Bounded protected receipt metadata, sealed singleton and head/replica binding for atomic acceptance | 0004 §2.3 |
 //! | `head` | the local head, its MAC and digest, the head-versus-anchor table ([`AnchorStatus`]) | 0005 §5.4 |
@@ -65,8 +65,8 @@
 //! | labels | `qv/record/v1`, `qv/manifest/v1`, `qv/config/v1`, `qv/local-head/v1`, `qv/header-mac/v1`, [`ARCHIVE_HEADER_LABEL`] |
 //!
 //! Tables (all `STRICT`; see `schema`): `header`, `keyslot`, `object`,
-//! `manifest`, `local_head`, `replica`, `archive_receipts`, `lan_link`,
-//! `lan_hint`. The header MAC is MAC/1 under the
+//! `manifest`, `local_head`, `replica`, `archive_receipts`, `lan_link`. The
+//! header MAC is MAC/1 under the
 //! `header-mac` purpose key over `["qv/header-mac/v1", header_body,
 //! [[slot_id, type, body], …]]`, slots sorted by ID, exact stored bytes. The
 //! manifest, head and anchor layouts are in their modules. A worst-case
@@ -282,7 +282,7 @@ pub use incoming::VerifiedIncoming;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use lan_staging::{LanStaging, NewLanLink, PasswordProof, StagedKeyslot, VerifiedLanStaging};
 #[cfg(any(target_os = "linux", target_os = "android"))]
-pub use lan_store::{LanLinkRow, LanServeState, MAX_LAN_HINT_ENDPOINTS, MAX_LAN_LINKS};
+pub use lan_store::{LanLinkRow, LanServeState, MAX_LAN_LINKS};
 pub use limits::{
     MAX_ARCHIVE_MANIFEST_FRAME, MAX_ARCHIVE_OBJECT_FRAME, MAX_ARCHIVE_TOTAL_LENGTH, MAX_CHUNKS,
     MAX_CLOCK_COMPONENTS, MAX_DB_BYTES, MAX_HEADER_BYTES, MAX_MANIFEST_CIPHERTEXT, MAX_OBJECTS,

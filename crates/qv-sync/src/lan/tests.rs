@@ -203,7 +203,7 @@ impl ApproverVault for Device {
     fn commit_link(&self, link_id: [u8; 16], key: &LinkKey) -> Result<(), LanError> {
         let mut u = self.u();
         let mut w = u.write().map_err(store)?;
-        w.add_lan_link(link_id, key, "joiner", Timestamp(1), &[])
+        w.add_lan_link(link_id, key, "joiner", Timestamp(1))
             .map_err(store)?;
         w.commit().map_err(store)
     }
@@ -252,15 +252,10 @@ impl JoinerVault for Device {
             .unwrap(),
         })
     }
-    fn commit_link(
-        &self,
-        link_id: [u8; 16],
-        key: &LinkKey,
-        endpoint: SocketAddr,
-    ) -> Result<(), LanError> {
+    fn commit_link(&self, link_id: [u8; 16], key: &LinkKey) -> Result<(), LanError> {
         let mut u = self.u();
         let mut w = u.write().map_err(store)?;
-        w.add_lan_link(link_id, key, "approver", Timestamp(2), &[endpoint])
+        w.add_lan_link(link_id, key, "approver", Timestamp(2))
             .map_err(store)?;
         w.commit().map_err(store)
     }
@@ -368,7 +363,7 @@ fn lan_enroll_new_device_end_to_end() {
         .mode(0o700)
         .create(&private)
         .unwrap();
-    let (w, addr, code) = window();
+    let (w, _addr, code) = window();
     let qr = w.qr(&[IpAddr::V4(Ipv4Addr::LOCALHOST)]).unwrap();
     let mut approve = Approve::yes();
     let mut join = Join::yes();
@@ -395,7 +390,6 @@ fn lan_enroll_new_device_end_to_end() {
     assert!(approved.peer_confirmed, "{:?}", approved.failure);
     assert_eq!(approve.seen, join.seen);
     assert_eq!(joined.link_id, approved.link_id);
-    assert_eq!(joined.endpoint, addr);
     assert_eq!(joined.staging.manifest(), a.u().manifest());
     assert!(joined.vk.ct_eq(a.u().vault_key()));
     // Both sides derived the same link key.
@@ -418,7 +412,6 @@ fn lan_enroll_new_device_end_to_end() {
             key: &joined.link_key,
             label: "approver",
             created_at: Timestamp(3),
-            hint: &[joined.endpoint],
         },
         &never,
     )
@@ -472,8 +465,6 @@ fn lan_enroll_link_mode_pairs_two_replicas() {
             .unwrap()
             .ct_eq(&b.u().lan_link_key(&link).unwrap())
     );
-    assert_eq!(b.u().lan_hint(&link), vec![addr]);
-    assert!(a.u().lan_hint(&link).is_empty());
 }
 
 // 0012 §1: LAN discovery mistaken for trust
@@ -540,7 +531,7 @@ fn lan_enroll_spoofed_endpoint_first_is_skipped() {
     let a = Device::personal();
     let b = a.replica();
     let (w, addr, code) = window();
-    // A spoof at the first hinted endpoint: it answers with a wrong-MAC accept.
+    // A spoof at the first candidate endpoint: it answers with a wrong-MAC accept.
     let spoof = TcpListener::bind("127.0.0.1:0").unwrap();
     let spoof_addr = spoof.local_addr().unwrap();
     let mut approve = Approve::yes();

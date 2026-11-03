@@ -7,7 +7,6 @@
 //! ```sql
 //! CREATE TABLE archive_receipts (id INTEGER PRIMARY KEY CHECK (id = 1), sealed BLOB NOT NULL) STRICT
 //! CREATE TABLE lan_link (link_id BLOB PRIMARY KEY CHECK (length(link_id) = 16), key_generation INTEGER NOT NULL, sealed BLOB NOT NULL) STRICT, WITHOUT ROWID
-//! CREATE TABLE lan_hint (link_id BLOB PRIMARY KEY CHECK (length(link_id) = 16), sealed BLOB NOT NULL) STRICT, WITHOUT ROWID
 //! CREATE TABLE header (id INTEGER PRIMARY KEY CHECK (id = 1), body BLOB NOT NULL, mac BLOB NOT NULL) STRICT
 //! CREATE TABLE keyslot (slot_id BLOB PRIMARY KEY CHECK (length(slot_id) = 16), type INTEGER NOT NULL, body BLOB NOT NULL) STRICT, WITHOUT ROWID
 //! CREATE TABLE object (key_generation INTEGER NOT NULL, object_id BLOB NOT NULL CHECK (length(object_id) = 16), data_profile INTEGER NOT NULL, nonce BLOB NOT NULL CHECK (length(nonce) = 24), ciphertext BLOB NOT NULL, PRIMARY KEY (key_generation, object_id)) STRICT
@@ -59,13 +58,11 @@ const REPLICA_DDL: &str = "CREATE TABLE replica (id INTEGER PRIMARY KEY CHECK (i
 
 const RECEIPTS_DDL: &str = "CREATE TABLE archive_receipts (id INTEGER PRIMARY KEY CHECK (id = 1), sealed BLOB NOT NULL) STRICT";
 const LAN_LINK_DDL: &str = "CREATE TABLE lan_link (link_id BLOB PRIMARY KEY CHECK (length(link_id) = 16), key_generation INTEGER NOT NULL, sealed BLOB NOT NULL) STRICT, WITHOUT ROWID";
-const LAN_HINT_DDL: &str = "CREATE TABLE lan_hint (link_id BLOB PRIMARY KEY CHECK (length(link_id) = 16), sealed BLOB NOT NULL) STRICT, WITHOUT ROWID";
 
 /// Every table's DDL, in creation order.
-const TABLES: [&str; 9] = [
+const TABLES: [&str; 8] = [
     RECEIPTS_DDL,
     LAN_LINK_DDL,
-    LAN_HINT_DDL,
     HEADER_DDL,
     KEYSLOT_DDL,
     OBJECT_DDL,
@@ -76,7 +73,7 @@ const TABLES: [&str; 9] = [
 
 /// The exact `sqlite_schema` rows `(type, name, tbl_name, sql)`, sorted by
 /// name.
-const EXPECTED: [(&str, &str, &str, Option<&str>); 11] = [
+const EXPECTED: [(&str, &str, &str, Option<&str>); 10] = [
     (
         "table",
         "archive_receipts",
@@ -85,7 +82,6 @@ const EXPECTED: [(&str, &str, &str, Option<&str>); 11] = [
     ),
     ("table", "header", "header", Some(HEADER_DDL)),
     ("table", "keyslot", "keyslot", Some(KEYSLOT_DDL)),
-    ("table", "lan_hint", "lan_hint", Some(LAN_HINT_DDL)),
     ("table", "lan_link", "lan_link", Some(LAN_LINK_DDL)),
     ("table", "local_head", "local_head", Some(LOCAL_HEAD_DDL)),
     ("table", "manifest", "manifest", Some(MANIFEST_DDL)),

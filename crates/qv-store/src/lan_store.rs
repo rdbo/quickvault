@@ -1,23 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Local LAN peer state (0013 §9, 0004 §2.4): `lan_link` rows bound to the
-//! head by `lan_links_digest`, and unauthenticated `lan_hint` rows.
+//! head by `lan_links_digest`. No peer address is remembered: without device
+//! identity there is nothing to remember it for (owner, 2026-11-03).
 //!
 //! The row check runs before any value is read: at most [`MAX_LAN_LINKS`]
 //! rows, 16-byte IDs, the header's generation, and bounded blobs. On open the
 //! digest of the stored rows must equal head key 8, so a removed row planted
 //! back or a modified row is an integrity error. The anchor catches a moved
-//! head. Rows are decrypted only when used. Hints are convenience data: an
-//! invalid hint reads as absent.
-
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+//! head. Rows are decrypted only when used.
 
 use qv_crypto::lan::{LINK_ROW_CIPHERTEXT_MAX, LinkKey, LinkRow, open_link_row, seal_link_row};
 use qv_crypto::{ObjectHashProfile, StoredDataProfile, object_hash};
 use qv_encoding::{Decoder, encode_array};
 use qv_model::RandomId;
 use rusqlite::Connection;
-use zeroize::Zeroizing;
 
 use crate::StoreError;
 use crate::header::Header;
@@ -26,8 +23,6 @@ use crate::vault::{Keys, accepted_profile};
 
 /// Most `lan_link` rows per vault (0013 §9.1).
 pub const MAX_LAN_LINKS: usize = 64;
-/// Most endpoints in one hint (0013 §9.2).
-pub const MAX_LAN_HINT_ENDPOINTS: usize = 4;
 /// Largest stored sealed envelope: the ciphertext bound plus the envelope
 /// fields.
 pub(crate) const MAX_LAN_ENVELOPE: usize = LINK_ROW_CIPHERTEXT_MAX + 64;
@@ -230,118 +225,6 @@ pub(crate) fn open_row(
     .map_err(|_| StoreError::Integrity)
 }
 
-fn hint_aad(header: &Header, link_id: &[u8; 16]) -> Result<Zeroizing<Vec<u8>>, StoreError> {
-    encode_array(|a| {
-        a.text("qv/lan-hint/v1");
-        a.bytes(&header.vault_id.0);
-        a.uint(u64::from(header.key_generation.0));
-        a.bytes(link_id);
-        Ok(())
-    })
-    .map_err(|_| StoreError::Internal)
-}
-
-/// Seals a hint: up to [`MAX_LAN_HINT_ENDPOINTS`] endpoints and the last
-/// successful session time (0 = never). Extra endpoints are dropped.
-pub(crate) fn seal_hint(
-    keys: &Keys,
-    header: &Header,
-    link_id: &[u8; 16],
-    endpoints: &[SocketAddr],
-    last_success_at: u64,
-) -> Result<Vec<u8>, StoreError> {
-    let plaintext = encode_array(|a| {
-        a.array(|a| {
-            for e in endpoints.iter().take(MAX_LAN_HINT_ENDPOINTS) {
-                a.array(|a| {
-                    match e.ip() {
-                        IpAddr::V4(v4) => a.bytes(&v4.octets()),
-                        IpAddr::V6(v6) => a.bytes(&v6.octets()),
-                    }
-                    a.uint(e.port().into());
-                    Ok(())
-                })?;
-            }
-            Ok(())
-        })?;
-        a.uint(last_success_at);
-        Ok(())
-    })
-    .map_err(|_| StoreError::Internal)?;
-    let sealed = qv_crypto::seal(
-        &keys.local,
-        header.data_profile,
-        &hint_aad(header, link_id)?,
-        &plaintext,
-        LINK_ROW_CIPHERTEXT_MAX,
-    )?;
-    envelope(header.data_profile, &sealed.nonce, &sealed.ciphertext)
-}
-
-/// Opens a hint. `None` for anything invalid: hints are never trusted.
-pub(crate) fn open_hint(
-    keys: &Keys,
-    header: &Header,
-    link_id: &[u8; 16],
-    blob: &[u8],
-) -> Option<Vec<SocketAddr>> {
-    let (profile, nonce, ciphertext) = parse_envelope(header, blob).ok()?;
-    let plaintext = qv_crypto::open(
-        &keys.local,
-        profile,
-        &hint_aad(header, link_id).ok()?,
-        &nonce,
-        ciphertext,
-        LINK_ROW_CIPHERTEXT_MAX,
-    )
-    .ok()?;
-    let mut d = Decoder::new(plaintext.expose_secret()).ok()?;
-    if d.array().ok()? != 2 {
-        return None;
-    }
-    let n = usize::try_from(d.array().ok()?).ok()?;
-    if n > MAX_LAN_HINT_ENDPOINTS {
-        return None;
-    }
-    let mut out = Vec::with_capacity(n);
-    for _ in 0..n {
-        if d.array().ok()? != 2 {
-            return None;
-        }
-        let raw = d.bytes().ok()?;
-        let ip = if let Ok(v4) = <[u8; 4]>::try_from(raw) {
-            IpAddr::V4(Ipv4Addr::from(v4))
-        } else {
-            IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(raw).ok()?))
-        };
-        let port = u16::try_from(d.uint().ok()?).ok().filter(|p| *p != 0)?;
-        out.push(SocketAddr::new(ip, port));
-    }
-    d.uint().ok()?;
-    d.finish().ok()?;
-    Some(out)
-}
-
-/// Reads one hint row, bounded; `None` if absent or invalid.
-pub(crate) fn read_hint(conn: &Connection, link_id: &[u8; 16]) -> Option<Vec<u8>> {
-    let (kind, len): (String, i64) = conn
-        .query_row(
-            "SELECT typeof(sealed), octet_length(sealed) FROM lan_hint WHERE link_id = ?1",
-            [link_id.as_slice()],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .ok()?;
-    if kind != "blob" || usize::try_from(len).ok()? > MAX_LAN_ENVELOPE {
-        return None;
-    }
-    conn.query_row(
-        "SELECT sealed FROM lan_hint WHERE link_id = ?1",
-        [link_id.as_slice()],
-        |r| r.get(0),
-    )
-    .ok()
-}
-
 /// A decrypted link row without its key: what a frontend lists.
 pub struct LanLinkRow {
     /// The link ID.
@@ -433,16 +316,6 @@ impl crate::UnlockedVault {
             .find(|r| r.link_id == *link_id)
             .ok_or(StoreError::NotFound)?;
         Ok(open_row(&keys, &self.file.header, r)?.key)
-    }
-
-    /// The link's endpoint hints, best-effort: absent or invalid → empty.
-    pub fn lan_hint(&self, link_id: &[u8; 16]) -> Vec<SocketAddr> {
-        let Ok(keys) = Keys::derive(&self.vk, &self.file.header) else {
-            return Vec::new();
-        };
-        read_hint(&self.file.conn, link_id)
-            .and_then(|blob| open_hint(&keys, &self.file.header, link_id, &blob))
-            .unwrap_or_default()
     }
 
     /// The committed manifest envelope and its references, for serving.

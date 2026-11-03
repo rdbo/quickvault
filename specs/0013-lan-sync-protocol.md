@@ -135,8 +135,11 @@ Committed local state stays committed (0005 §6.5).
 3.1. Endpoints come only from:
 - the pairing QR (§4.2);
 - manual entry;
-- the link's remembered endpoint hints (§9.2);
+- an address-only QR shown by a receive window (specified with roadmap
+  phase 2.10);
 - DNS-SD results collected during an explicit user action.
+
+No endpoint is remembered between actions (§9.2).
 
 All of them are untrusted hints (0005 §6.2). Authentication comes only from
 §4 and §5.
@@ -530,13 +533,13 @@ The commit writes a new local head whose `lan_links_digest` is
 - removed rows cannot be planted back without moving the head, which the
   anchor catches.
 
-9.2. **`lan_hint`** holds unauthenticated convenience data, local-only
-and not in the digest: per `link_id`, sealed the same way with label
-`"qv/lan-hint/v1"`, up to 4 last-seen endpoints and the time of the last
-successful session. Losing it or rolling it back costs only convenience.
-A hint is never trusted.
+9.2. **No endpoint hints.** A device does not store where a linked peer
+was last reached. An address cannot tell which device answers it, and v1
+has no device identity, so a remembered address would only send hellos to
+whatever device now holds it. Every pairing and sync action takes its
+endpoints from §3.1 at that time.
 
-9.3. Both tables are excluded from manifests, archives, snapshots and
+9.3. The `lan_link` table is excluded from manifests, archives, snapshots and
 restores (0004 §3.5, 0007). A restored or rotated vault starts with no
 links.
 
@@ -601,7 +604,7 @@ port. Unknown codes are treated as `protocol`. Frontends map the codes onto
 
 ### 12. Generation transitions and removal
 
-12.1. **Removing a link** is a local commit that deletes the row and hint.
+12.1. **Removing a link** is a local commit that deletes the row.
 The peer is not notified. Its next hello fails authentication and looks
 like an unreachable peer, so I's frontend says: "no linked device
 answered; it may have removed this link or rotated the vault key". A
@@ -723,6 +726,12 @@ Release evidence for the 0012 §3 LAN gate and the 0012 §1 LAN rows:
    and per session. A device can still hold links for several vaults.
 
 ## Changelog
+
+- 2026-11-03: Remove the `lan_hint` table and remembered endpoints (§3.1,
+  §9.2, §9.3, §12.1; owner decision). Remembering where a peer is needs a
+  device identity that v1 does not have. A receive window will instead show
+  an address-only QR, specified with roadmap 2.10. The §13 amendment text
+  below is kept as applied on 2026-10-30.
 
 - 2026-11-02: Clarifications for the implementation (plan 0037;
   owner-delegated, standing 2026-11-02):

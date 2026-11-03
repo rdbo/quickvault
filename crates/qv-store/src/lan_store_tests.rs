@@ -3,8 +3,6 @@
 //! LAN peer-state suites (plan 0037 step 4; 0013 §9, testing rows "Peer state
 //! rollback" and "Generation transitions").
 
-use std::net::SocketAddr;
-
 use qv_crypto::lan::{LinkKey, LinkRoot, PairNonce};
 use qv_crypto::{DerivationProfile, XWingDecapsKey};
 use qv_model::{ObjectId, Timestamp};
@@ -41,7 +39,7 @@ pub(crate) fn link_key(u: &UnlockedVault, link_id: &[u8; 16]) -> LinkKey {
     .unwrap()
 }
 
-fn add(u: &mut UnlockedVault, id: u8, hint: &[SocketAddr]) -> Result<(), StoreError> {
+fn add(u: &mut UnlockedVault, id: u8) -> Result<(), StoreError> {
     let key = link_key(u, &[id; 16]);
     let mut w = u.write()?;
     w.add_lan_link(
@@ -49,7 +47,6 @@ fn add(u: &mut UnlockedVault, id: u8, hint: &[SocketAddr]) -> Result<(), StoreEr
         &key,
         &format!("peer {id}"),
         Timestamp(1_000 + i64::from(id)),
-        hint,
     )?;
     w.commit()
 }
@@ -72,24 +69,21 @@ fn count(path: &std::path::Path, table: &str) -> i64 {
 }
 
 #[test]
-fn lan_links_add_list_hint_remove_and_survive_reopen() {
+fn lan_links_add_list_remove_and_survive_reopen() {
     let (d, a) = (TestDir::new(), TestDir::new());
     let (p, dir) = copy_fixture(&d, &a, "v.qvault");
-    let endpoint: SocketAddr = "192.168.1.9:40123".parse().unwrap();
     let mut u = unlock(&p, &dir, PASSWORD).unwrap();
     assert!(u.lan_links().unwrap().is_empty());
     let digest = u.state.head.lan_links_digest;
     assert_eq!(digest, crate::lan_store::empty_digest().unwrap());
-    add(&mut u, 2, &[endpoint]).unwrap();
-    add(&mut u, 1, &[]).unwrap();
+    add(&mut u, 2).unwrap();
+    add(&mut u, 1).unwrap();
     assert_ne!(u.state.head.lan_links_digest, digest);
     let links = u.lan_links().unwrap();
     assert_eq!(links.len(), 2);
     assert_eq!(links[0].link_id, [1; 16]);
     assert_eq!(links[0].label.expose_secret(), b"peer 1");
     assert_eq!(links[1].created_at, Timestamp(1_002));
-    assert_eq!(u.lan_hint(&[2; 16]), vec![endpoint]);
-    assert!(u.lan_hint(&[1; 16]).is_empty());
     let key = u.lan_link_key(&[1; 16]).unwrap();
     assert!(!key.ct_eq(&u.lan_link_key(&[2; 16]).unwrap()));
     assert_eq!(
@@ -104,12 +98,10 @@ fn lan_links_add_list_hint_remove_and_survive_reopen() {
     remove(&mut u, 2).unwrap();
     assert_eq!(err(remove(&mut u, 2)), StoreError::NotFound);
     drop(u);
-    assert_eq!(count(&p, "lan_hint"), 0);
     let u = unlock(&p, &dir, PASSWORD).unwrap();
     let links = u.lan_links().unwrap();
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].link_id, [1; 16]);
-    assert!(u.lan_hint(&[2; 16]).is_empty());
 }
 
 #[test]
@@ -121,36 +113,36 @@ fn lan_links_limits_and_invalid_edits_change_nothing() {
     {
         let mut w = u.write().unwrap();
         for id in 0..64u8 {
-            w.add_lan_link([id; 16], &keys[usize::from(id)], "x", Timestamp(1), &[])
+            w.add_lan_link([id; 16], &keys[usize::from(id)], "x", Timestamp(1))
                 .unwrap();
         }
         let key = &keys[64];
         assert_eq!(
-            err(w.add_lan_link([64; 16], key, "x", Timestamp(1), &[])),
+            err(w.add_lan_link([64; 16], key, "x", Timestamp(1))),
             StoreError::LimitExceeded
         );
         w.commit().unwrap();
     }
     assert_eq!(u.lan_links().unwrap().len(), 64);
-    assert_eq!(err(add(&mut u, 99, &[])), StoreError::LimitExceeded);
+    assert_eq!(err(add(&mut u, 99)), StoreError::LimitExceeded);
     remove(&mut u, 63).unwrap();
     let seq = u.local_seq();
     let key = link_key(&u, &[1; 16]);
     let mut w = u.write().unwrap();
     assert_eq!(
-        err(w.add_lan_link([1; 16], &key, "dup", Timestamp(1), &[])),
+        err(w.add_lan_link([1; 16], &key, "dup", Timestamp(1))),
         StoreError::InvalidEdit
     );
     assert_eq!(
-        err(w.add_lan_link([70; 16], &key, "", Timestamp(1), &[])),
+        err(w.add_lan_link([70; 16], &key, "", Timestamp(1))),
         StoreError::InvalidEdit
     );
     assert_eq!(
-        err(w.add_lan_link([70; 16], &key, &"x".repeat(65), Timestamp(1), &[])),
+        err(w.add_lan_link([70; 16], &key, &"x".repeat(65), Timestamp(1))),
         StoreError::InvalidEdit
     );
     assert_eq!(
-        err(w.add_lan_link([70; 16], &key, "ok", Timestamp(-1), &[])),
+        err(w.add_lan_link([70; 16], &key, "ok", Timestamp(-1))),
         StoreError::InvalidEdit
     );
     drop(w);
@@ -164,8 +156,8 @@ fn lan_link_rows_planted_back_modified_or_foreign_are_integrity_errors() {
         let (d, a) = (TestDir::new(), TestDir::new());
         let (p, dir) = copy_fixture(&d, &a, "v.qvault");
         let mut u = unlock(&p, &dir, PASSWORD).unwrap();
-        add(&mut u, 1, &[]).unwrap();
-        add(&mut u, 2, &[]).unwrap();
+        add(&mut u, 1).unwrap();
+        add(&mut u, 2).unwrap();
         drop(u);
         let removed: (Vec<u8>, i64, Vec<u8>) = rusqlite::Connection::open(&p)
             .unwrap()
@@ -232,22 +224,6 @@ fn lan_link_row_count_is_bounded_before_reading() {
 }
 
 #[test]
-fn lan_corrupt_hint_reads_as_absent() {
-    let (d, a) = (TestDir::new(), TestDir::new());
-    let (p, dir) = copy_fixture(&d, &a, "v.qvault");
-    let mut u = unlock(&p, &dir, PASSWORD).unwrap();
-    add(&mut u, 1, &["10.0.0.1:9".parse().unwrap()]).unwrap();
-    drop(u);
-    sql(&p, |c| {
-        c.execute("UPDATE lan_hint SET sealed = x'8401'", [])
-            .unwrap();
-    });
-    let u = unlock(&p, &dir, PASSWORD).unwrap();
-    assert!(u.lan_hint(&[1; 16]).is_empty());
-    assert_eq!(u.lan_links().unwrap().len(), 1);
-}
-
-#[test]
 fn lan_link_commit_crash_points_leave_old_or_new_state() {
     use CrashPoint::*;
     for (point, durable) in [
@@ -261,7 +237,7 @@ fn lan_link_commit_crash_points_leave_old_or_new_state() {
         {
             let mut u = unlock(&p, &dir, PASSWORD).unwrap();
             arm(point, &p, &a.join("anchors"), s.path());
-            assert_eq!(err(add(&mut u, 1, &[])), StoreError::Internal, "{point:?}");
+            assert_eq!(err(add(&mut u, 1)), StoreError::Internal, "{point:?}");
             assert!(!disarm(), "{point:?} was not reached");
         }
         let anchors = AnchorDir::open(&s.join("anchors")).unwrap();
@@ -288,7 +264,7 @@ fn lan_links_never_enter_archives_or_restores() {
     let (d, a) = (TestDir::new(), TestDir::new());
     let (p, dir) = copy_fixture(&d, &a, "v.qvault");
     let mut u = unlock(&p, &dir, PASSWORD).unwrap();
-    add(&mut u, 1, &["10.0.0.1:9".parse().unwrap()]).unwrap();
+    add(&mut u, 1).unwrap();
     let mut bytes = Vec::new();
     u.write_archive(&mut bytes, Timestamp(1), &|| false)
         .unwrap();
@@ -305,7 +281,6 @@ fn lan_links_never_enter_archives_or_restores() {
     let r = unlock(&target, &u.anchors, PASSWORD).unwrap();
     assert!(r.lan_links().unwrap().is_empty());
     assert_eq!(count(&target, "lan_link"), 0);
-    assert_eq!(count(&target, "lan_hint"), 0);
 }
 
 #[test]

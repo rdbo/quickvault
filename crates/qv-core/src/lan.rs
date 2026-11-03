@@ -291,7 +291,7 @@ impl Session {
         })
     }
 
-    /// Removes a link and its hints in one commit (0013 §12.1). The peer is
+    /// Removes a link in one commit (0013 §12.1). The peer is
     /// not told; its next attempt fails like an unreachable device. Removal
     /// is not compromise recovery: that is rotation (§12.3).
     pub fn remove_lan_link(&self, link: &LanLinkHandle) -> Result<(), CoreError> {
@@ -421,7 +421,7 @@ impl ApproverVault for SessionApprover<'_> {
                 ctx.check_cancel()?;
                 let now = ctx.now();
                 let mut w = ctx.open.vault.write()?;
-                w.add_lan_link(link_id, key, self.label, now, &[])?;
+                w.add_lan_link(link_id, key, self.label, now)?;
                 w.commit()?;
                 Ok(())
             })
@@ -494,18 +494,13 @@ impl JoinerVault for SessionJoiner<'_> {
             .map_err(lan)
     }
 
-    fn commit_link(
-        &self,
-        link_id: [u8; 16],
-        key: &LinkKey,
-        endpoint: SocketAddr,
-    ) -> Result<(), LanError> {
+    fn commit_link(&self, link_id: [u8; 16], key: &LinkKey) -> Result<(), LanError> {
         self.session
             .mutate(|ctx| {
                 ctx.check_cancel()?;
                 let now = ctx.now();
                 let mut w = ctx.open.vault.write()?;
-                w.add_lan_link(link_id, key, self.label, now, &[endpoint])?;
+                w.add_lan_link(link_id, key, self.label, now)?;
                 w.commit()?;
                 Ok(())
             })
@@ -553,7 +548,6 @@ impl Core {
                 key: &joined.link_key,
                 label: &options.label,
                 created_at: self.time.now(),
-                hint: &[joined.endpoint],
             },
             &cancelled,
         )?;

@@ -73,7 +73,9 @@ amendments to 0001, 0002, 0004 and 0005 are applied. Acceptance does not
 authorize a LAN release: the 0012 §3 gate, including independent review,
 still applies. Plan 0037 (2026-11-02, owner-delegated) adds implementation
 clarifications to 0013 §1.3, §7.1 and §8.3, and the development
-`lan_link`/`lan_hint` layouts to 0004 §2.4.
+`lan_link` layout to 0004 §2.4. On 2026-11-03 the owner removed remembered
+endpoints (`lan_hint`) from 0013 §9.2: there is no device identity to remember
+them for.
 
 The Android-priority follow-up brings Android and Linux into initial shared-core
 and UI validation, with usable offline apps before the remote server. iOS stays

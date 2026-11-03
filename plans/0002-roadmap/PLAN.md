@@ -780,11 +780,19 @@ release; it is not weakened.
   retry, lock cancellation, manual initiation only, receive availability per
   the 2.1 spec. Add `qvault lan …` and the app UI (pairing included).
   Moved from 2.9:
-  - DNS-SD advertising and browsing (0013 §3.2–3.4), with interface-address
-    enumeration for QR endpoints;
+  - interface-address enumeration for QR endpoints;
   - the exchange that follows link-mode pairing (§4.8);
-  - hint updates after sessions;
   - the LAN error → exit-code mapping.
+
+  Owner decisions (2026-11-03):
+  - No endpoint is remembered: without device identity there is nothing to
+    remember it for (0013 §9.2, amended). Every receive window shows an
+    address-only "scan to sync" QR, with typing as the fallback. 2.10
+    specifies that QR in 0013 first; it carries no secret.
+  - DNS-SD advertising and browsing (§3.2–3.4) stays deferred; windows keep
+    discovery off. If it ever returns, only with a per-window vault tag
+    (unlinkable, recognizable only by holders of the vault's keys) and off
+    by default.
 - **Specs:** the 2.1 LAN spec; 0005 §0.5, §6.
 - **Depends on:** 2.9, 2.5.
 - **Files:** `crates/qv-sync/`, `crates/qv-cli/`, `crates/qv-app/`.
@@ -1243,7 +1251,8 @@ release; it is not weakened.
   - **Phase 2.9 planned and implemented as plan 0037** (standing approval
     plus the owner's delegation):
     - pairing key schedule, typed messages and out-of-band codes;
-    - head-bound `lan_link`/`lan_hint` storage (format `0x7FFF0004`);
+    - head-bound `lan_link` storage (format `0x7FFF0004`; the `lan_hint`
+      table was dropped on 2026-11-03 by owner decision);
     - new-device staging and creation through the restore path;
     - the pairing window and joiner over TCP, and the core API.
 

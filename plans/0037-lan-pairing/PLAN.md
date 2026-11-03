@@ -1058,7 +1058,20 @@ pass; `Cargo.lock` changes only for the new path edges.
 
 ## Revisions
 
-None.
+- 2026-11-03 (owner decision, after implementation): drop remembered
+  endpoints. "Remembering a device or address requires identity; either it
+  remembers and there is an identity, or neither."
+  - Removed:
+    - the `lan_hint` table and its sealing;
+    - `UnlockedVault::lan_hint`;
+    - the hint argument of `Write::add_lan_link`, and `NewLanLink.hint`;
+    - `JoinedNewDevice.endpoint`;
+    - the endpoint argument of `JoinerVault::commit_link`.
+  - Amended: 0013 §3.1, §9.2, §9.3, §12.1 and 0004 §2/§2.4.
+  - The format stays `0x7FFF0004`: it was never committed with hints.
+  - Decision 9 (hints) is void. Superseded wording elsewhere in this plan is
+    historical.
+  - Roadmap 2.10 now plans an address-only receive-window QR instead.
 
 ## Execution log
 
@@ -1256,3 +1269,6 @@ None.
 
     Both are UX items for 2.10. No physical-device run was needed (no
     Android glue changed). No commit, push or branch.
+
+- 2026-11-03: Applied the hint-removal revision (see Revisions). Gates were
+  rerun on the final tree; results below.

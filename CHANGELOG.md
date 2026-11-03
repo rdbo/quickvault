@@ -20,6 +20,9 @@ Dates are ISO 8601. Newest first within each section.
     after comparing a six-digit code.
   - Links are local:
     - each one can be listed and removed;
+    - no peer address is remembered (there is no device identity to
+      remember it for); each pairing or sync gets the address from a QR or
+      the user;
     - rotation, restore and archives carry none;
     - planted-back or modified link rows are detected on open.
   - Windows accept one session at a time and close after 16 failed attempts,
@@ -28,7 +31,7 @@ Dates are ISO 8601. Newest first within each section.
   - Not yet: discovery (DNS-SD), sync sessions, the CLI and the app (roadmap
     2.10). No independent protocol review yet (D12); no LAN release.
   - **Development format change:** vault files move to schema/header
-    `0x7FFF0004` (new `lan_link`/`lan_hint` tables, local-head key 8).
+    `0x7FFF0004` (new `lan_link` table, local-head key 8).
     Older development vaults are refused, with no migration (pre-1.0).
   - Spec clarifications (0013 §1.3, §7.1, §8.3; 0004 §2.4), development
     interoperability vectors with an independent Python check, and the new

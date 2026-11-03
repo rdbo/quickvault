@@ -405,8 +405,6 @@ pub struct NewLanLink<'a> {
     pub label: &'a str,
     /// Creation time.
     pub created_at: qv_model::Timestamp,
-    /// The approving device's endpoint, as the first hint.
-    pub hint: &'a [std::net::SocketAddr],
 }
 
 impl core::fmt::Debug for NewLanLink<'_> {
