@@ -117,6 +117,7 @@ mod tests {
         }
         assert_eq!(ProtocolError::Closed.wire_code(), None);
         assert_eq!(ProtocolError::Io.wire_code(), None);
+        assert_eq!(ProtocolError::FrameTooLarge.wire_code(), None);
         assert_eq!(
             ProtocolError::Unsupported.wire_code(),
             Some(ErrorCode::Unsupported)

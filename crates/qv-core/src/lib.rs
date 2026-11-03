@@ -185,6 +185,17 @@ pub use conflict::{
 };
 pub use qv_model::{Deletion, RecordKind};
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod lan;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub use lan::{
+    ApproveReport, ApproverUi, JoinCode, JoinMode, JoinOptions, JoinerUi, LanError, LanLinkHandle,
+    LanLinkSummary, LanTimeouts, ListenScope, PAIRING_WINDOW_MAX, PairingCode, PairingOptions,
+    PairingWindow, Sas,
+};
+#[cfg(all(test, any(target_os = "linux", target_os = "android")))]
+mod lan_tests;
+
 /// Android autofill candidates and explicit fill values.
 pub mod autofill;
 mod quick_unlock;

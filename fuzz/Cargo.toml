@@ -88,3 +88,10 @@ path = "fuzz_targets/lan_message.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "lan_oob"
+path = "fuzz_targets/lan_oob.rs"
+test = false
+doc = false
+bench = false

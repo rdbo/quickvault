@@ -1,6 +1,6 @@
 [package]
 name = "qv-sync"
-description = "QuickVault shared causal merge candidates"
+description = "QuickVault shared causal merge candidates and LAN pairing"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,11 +10,14 @@ publish.workspace = true
 
 [dependencies]
 qv-crypto.workspace = true
+qv-encoding.workspace = true
 qv-model.workspace = true
+qv-protocol.workspace = true
 qv-store.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
-qv-encoding.workspace = true
+qv-crypto = { workspace = true, features = ["test-vectors"] }
 
 [lints]
 workspace = true

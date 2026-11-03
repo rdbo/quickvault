@@ -3,13 +3,18 @@
 //! Hostile LAN frames and messages (spec 0013 §1.2–1.3; 0012 §1, "Hostile
 //! SQLite/CBOR"). The first byte picks the frame phase; the rest is a byte
 //! stream read as up to four frames, each opened as any wire message and read
-//! with every typed accessor. Errors are expected; any panic, or a frame body
-//! above its phase bound, is a finding.
+//! with every typed accessor, then given to every typed LAN decoder (0013 §4,
+//! §7, §11; plan 0037). Errors are expected; any panic, or a frame body above
+//! its phase bound, is a finding.
 
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
 use qv_protocol::frame::{FramePhase, read_frame};
+use qv_protocol::lan::{
+    Done, ErrorMsg, ManifestPart, ObjectMsg, PairAccept, PairDone, PairGrant, PairHello, PairProve,
+    PairProved, PairReveal, State, Want,
+};
 use qv_protocol::message::{Label, MessageReader, body_without_last};
 
 fuzz_target!(|data: &[u8]| {
@@ -28,6 +33,19 @@ fuzz_target!(|data: &[u8]| {
         }
         assert!(!buf.is_empty() && buf.len() <= phase.max());
         let _ = body_without_last(&buf);
+        let _ = PairHello::decode(&buf);
+        let _ = PairAccept::decode(&buf);
+        let _ = PairReveal::decode(&buf);
+        let _ = PairGrant::decode(&buf);
+        let _ = PairProve::decode(&buf);
+        let _ = PairProved::decode(&buf);
+        let _ = PairDone::decode(&buf);
+        let _ = State::decode(&buf);
+        let _ = ManifestPart::decode(&buf);
+        let _ = Want::decode(&buf);
+        let _ = ObjectMsg::decode(&buf);
+        let _ = Done::decode(&buf);
+        let _ = ErrorMsg::peek(&buf);
         let Ok(mut r) = MessageReader::open_any(&buf, Label::ALL) else {
             continue;
         };

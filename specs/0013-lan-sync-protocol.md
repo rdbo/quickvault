@@ -94,8 +94,15 @@ the zero-length string.
 - afterwards, at most 1,052,672 bytes (1 MiB plus 4 KiB).
 
 A larger length closes the connection before any allocation. A peer
-reads at most one frame ahead. Time limits: 10 s per handshake message,
-60 s idle during an exchange, and the window limits in §8.
+reads at most one frame ahead. Time limits:
+- 10 s per handshake message: each cleartext hello and accept, the
+  pairing reveal and the confirm. Opening a connection is also bounded by
+  10 s;
+- a read that waits on the other user's confirmation (the grant, the
+  link-mode proof and its reply) is bounded by the pairing window limit
+  (§8.2), not by the 10 s limit;
+- 60 s idle during an exchange;
+- the window limits in §8.
 
 1.4. **Addresses.** An endpoint is an IP literal (4 or 16 bytes) and a
 port. v1 does not resolve hostnames, so manual entry leaks nothing to
@@ -377,6 +384,11 @@ each side: verify → merge → commit (§7.6)
 I: Done    R: Done
 ```
 
+Each `*` turn is complete before the other side's turn starts. A side
+sends all its `Want` messages, the last with `last = true`, before the
+other side sends any `Object`. An empty request is one `Want` with no IDs
+and `last = true`, answered by no `Object`.
+
 If both states name the same `manifest_hash`, both send `Done` with
 outcome 0 straight after the state messages.
 
@@ -485,6 +497,11 @@ the window's secrets.
 
 8.3. **Abuse limits.**
 - One session at a time; other connections close immediately, unanswered.
+  Exception: while a pairing has accepted a valid hello, A may read one
+  handshake frame from another connection, with the handshake time limit,
+  and then close it without answering. That frame is checked as a pairing
+  hello (§4.3): a valid hello with different bytes aborts the window, an
+  identical one is refused, and anything else counts as a failed attempt.
 - 16 failed hellos or pairing hellos close the window, and the user is
   told "unexpected connection attempts".
 - Handshake time limits are in §1.3.
@@ -707,6 +724,16 @@ Release evidence for the 0012 §3 LAN gate and the 0012 §1 LAN rows:
 
 ## Changelog
 
+- 2026-11-02: Clarifications for the implementation (plan 0037;
+  owner-delegated, standing 2026-11-02):
+  - §1.3 says which reads the 10 s limit covers, and bounds reads that
+    wait on the other user's confirmation by the pairing window;
+  - §7.1 completes each turn before the next, and defines the empty
+    request;
+  - §8.3 lets A read one hello from an extra connection, so it can detect
+    the second valid hello of §4.3.
+
+  No message, key or state changes.
 - 2026-10-30: Accepted (owner-delegated). The §13 amendments to 0001, 0002, 0004 and 0005 are applied. Release still requires the 0012 §3 LAN gate, including the D12 independent review and interoperability vectors.
 - 2026-10-30: Initial Draft (roadmap phase 2.1, plan 0025):
   - proposes the resolution of 0005 OQ3–OQ6 (D10, delegated by the

@@ -190,6 +190,9 @@ pub mod purpose {
         RecoveryEd25519 = "recovery-ed25519";
         /// Independent ML-DSA-65 recovery-key seed (uses come in later phases).
         RecoveryMlDsa65 = "recovery-mldsa65";
+        /// Root of pairwise LAN link keys (0002 §3.3, 0013 §4.6). Only
+        /// [`crate::lan::LinkRoot`] uses it.
+        LanLink = "lan-link";
     }
 }
 
@@ -277,6 +280,31 @@ impl VaultKey {
         })
     }
 
+    /// Writes VK as a 32-byte byte string into a LAN grant under
+    /// construction (0013 §4.7). The encoder's buffers are wiped on growth and
+    /// drop; the caller seals the message at once.
+    pub fn encode_for_transfer(&self, e: &mut Encoder) {
+        e.bytes(self.0.expose_secret());
+    }
+
+    /// VK from a received grant field, copied into locked memory. Anything but
+    /// exactly 32 bytes is [`CryptoError::LimitExceeded`].
+    pub fn from_transfer(bytes: &[u8]) -> Result<Self, CryptoError> {
+        if bytes.len() != 32 {
+            return Err(CryptoError::LimitExceeded);
+        }
+        Ok(Self(SecretArray::try_init(|out| {
+            out.copy_from_slice(bytes);
+            Ok::<(), CryptoError>(())
+        })?))
+    }
+
+    /// Constant-time equality, for checking that a password slot wraps the
+    /// VK received from a peer.
+    pub fn ct_eq(&self, other: &VaultKey) -> bool {
+        self.0.ct_eq(other.0.expose_secret())
+    }
+
     #[cfg(test)]
     pub(crate) fn from_bytes(bytes: [u8; 32]) -> Self {
         Self(
@@ -309,6 +337,13 @@ pub struct PurposeKey<P: KeyPurpose> {
 impl<P: KeyPurpose> fmt::Debug for PurposeKey<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "PurposeKey<{}>(<redacted>)", P::LABEL)
+    }
+}
+
+impl PurposeKey<purpose::LanLink> {
+    /// The link root bytes, for the LAN key schedule only.
+    pub(crate) fn expose_secret(&self) -> &[u8; 32] {
+        self.key.expose_secret()
     }
 }
 
@@ -470,7 +505,8 @@ mod tests {
             LocalState,
             DeviceStorage,
             RecoveryEd25519,
-            RecoveryMlDsa65
+            RecoveryMlDsa65,
+            LanLink
         )
     }
 
@@ -493,6 +529,7 @@ mod tests {
                 "device-storage",
                 "recovery-ed25519",
                 "recovery-mldsa65",
+                "lan-link",
             ]
         );
     }

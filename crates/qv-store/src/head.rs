@@ -3,7 +3,8 @@
 //! The authenticated local head (spec 0005 §5.4, 0004 §2).
 //!
 //! Every commit writes one head: `{ vault_id, key_generation, local_seq,
-//! previous_digest, manifest_hash, remote_checkpoint_id?, remote_sequence?, archive_receipts_digest }`,
+//! previous_digest, manifest_hash, remote_checkpoint_id?, remote_sequence?,
+//! archive_receipts_digest, lan_links_digest }`,
 //! MAC'd under the `local-state` purpose key. Body (canonical CBOR map;
 //! unknown keys fail closed). Development values, volatile until the pre-1.0 freeze:
 //!
@@ -17,7 +18,7 @@
 //! | 5 | remote_checkpoint_id | bstr 32, optional (server mode; never written yet) |
 //! | 6 | remote_sequence | uint, present iff key 5 is |
 //! | 7 | archive_receipts_digest | bstr 32, mandatory (0004 §2.3) |
-//! | 8 | reserved for future LAN-link digest | not implemented |
+//! | 8 | lan_links_digest | bstr 32, mandatory (0013 §9.1, 0004 §2.4) |
 //!
 //! MAC: MAC/1 over `["qv/local-head/v1", body]`. `local_digest` is SHA-256
 //! of the canonical `[body, mac]`.
@@ -75,6 +76,7 @@ pub(crate) struct LocalHead {
     pub(crate) manifest_hash: [u8; 32],
     pub(crate) remote: Option<([u8; 32], u64)>,
     pub(crate) archive_receipts_digest: [u8; 32],
+    pub(crate) lan_links_digest: [u8; 32],
 }
 
 fn malformed<E>(_: E) -> StoreError {
@@ -126,6 +128,10 @@ impl LocalHead {
                 e.bytes(&self.archive_receipts_digest);
                 Ok(())
             })?;
+            m.entry(8, |e| {
+                e.bytes(&self.lan_links_digest);
+                Ok(())
+            })?;
             Ok(())
         })
         .map_err(|_| StoreError::Internal)?;
@@ -140,7 +146,7 @@ impl LocalHead {
         let mut d = Decoder::new(input).map_err(malformed)?;
         let (mut vault_id, mut generation, mut seq, mut previous, mut manifest) =
             (None, None, None, None, None);
-        let (mut checkpoint, mut remote_seq, mut receipts) = (None, None, None);
+        let (mut checkpoint, mut remote_seq, mut receipts, mut links) = (None, None, None, None);
         for _ in 0..d.map().map_err(malformed)? {
             match d.int().map_err(malformed)? {
                 0 => {
@@ -158,6 +164,7 @@ impl LocalHead {
                 5 => checkpoint = Some(digest32(&mut d)?),
                 6 => remote_seq = Some(d.uint().map_err(malformed)?),
                 7 => receipts = Some(digest32(&mut d)?),
+                8 => links = Some(digest32(&mut d)?),
                 _ => return Err(StoreError::Unsupported),
             }
         }
@@ -183,6 +190,7 @@ impl LocalHead {
             manifest_hash: manifest.ok_or(StoreError::Integrity)?,
             remote,
             archive_receipts_digest: receipts.ok_or(StoreError::Integrity)?,
+            lan_links_digest: links.ok_or(StoreError::Integrity)?,
         })
     }
 }
@@ -271,6 +279,7 @@ mod tests {
             manifest_hash: [0xee; 32],
             remote: None,
             archive_receipts_digest: [0xab; 32],
+            lan_links_digest: [0xcd; 32],
         }
     }
 
@@ -287,12 +296,14 @@ mod tests {
     fn head_round_trip_and_golden() {
         let h = head(1);
         let body = h.encode().unwrap();
-        let mut expected = vec![0xa5, 0x00, 0x50];
+        let mut expected = vec![0xa6, 0x00, 0x50];
         expected.extend_from_slice(&v4(1));
         expected.extend_from_slice(&[0x01, 0x01, 0x02, 0x01, 0x04, 0x58, 0x20]);
         expected.extend_from_slice(&[0xee; 32]);
         expected.extend_from_slice(&[0x07, 0x58, 0x20]);
         expected.extend_from_slice(&[0xab; 32]);
+        expected.extend_from_slice(&[0x08, 0x58, 0x20]);
+        expected.extend_from_slice(&[0xcd; 32]);
         assert_eq!(body, expected);
         assert_eq!(LocalHead::decode(&body).unwrap(), h);
         let mut r = head(7);
@@ -349,8 +360,20 @@ mod tests {
         let id = |e: &mut Encoder| e.bytes(&v4(1));
         let one = |e: &mut Encoder| e.uint(1);
         let d32 = |e: &mut Encoder| e.bytes(&[0; 32]);
-        let base: Vec<Entry<'_>> = vec![(0, &id), (1, &one), (2, &one), (4, &d32), (7, &d32)];
+        let base: Vec<Entry<'_>> = vec![
+            (0, &id),
+            (1, &one),
+            (2, &one),
+            (4, &d32),
+            (7, &d32),
+            (8, &d32),
+        ];
         assert!(LocalHead::decode(&raw(&base)).is_ok());
+        // Key 8 (lan_links_digest) is mandatory.
+        assert_eq!(
+            LocalHead::decode(&raw(&base[..5])).err(),
+            Some(StoreError::Integrity)
+        );
         let mut only6 = base.clone();
         only6.insert(4, (6, &one));
         assert_eq!(

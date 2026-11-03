@@ -2,10 +2,12 @@
 
 //! The vault schema and its validation (spec 0004 §1.2, §2, §4.1).
 //!
-//! Development schema 3 (all tables `STRICT`):
+//! Development schema 4 (all tables `STRICT`):
 //!
 //! ```sql
 //! CREATE TABLE archive_receipts (id INTEGER PRIMARY KEY CHECK (id = 1), sealed BLOB NOT NULL) STRICT
+//! CREATE TABLE lan_link (link_id BLOB PRIMARY KEY CHECK (length(link_id) = 16), key_generation INTEGER NOT NULL, sealed BLOB NOT NULL) STRICT, WITHOUT ROWID
+//! CREATE TABLE lan_hint (link_id BLOB PRIMARY KEY CHECK (length(link_id) = 16), sealed BLOB NOT NULL) STRICT, WITHOUT ROWID
 //! CREATE TABLE header (id INTEGER PRIMARY KEY CHECK (id = 1), body BLOB NOT NULL, mac BLOB NOT NULL) STRICT
 //! CREATE TABLE keyslot (slot_id BLOB PRIMARY KEY CHECK (length(slot_id) = 16), type INTEGER NOT NULL, body BLOB NOT NULL) STRICT, WITHOUT ROWID
 //! CREATE TABLE object (key_generation INTEGER NOT NULL, object_id BLOB NOT NULL CHECK (length(object_id) = 16), data_profile INTEGER NOT NULL, nonce BLOB NOT NULL CHECK (length(nonce) = 24), ciphertext BLOB NOT NULL, PRIMARY KEY (key_generation, object_id)) STRICT
@@ -56,10 +58,14 @@ const LOCAL_HEAD_DDL: &str = "CREATE TABLE local_head (id INTEGER PRIMARY KEY CH
 const REPLICA_DDL: &str = "CREATE TABLE replica (id INTEGER PRIMARY KEY CHECK (id = 1), replica_id BLOB NOT NULL CHECK (length(replica_id) = 16), writer_id BLOB NOT NULL CHECK (length(writer_id) = 16), next_counter INTEGER NOT NULL) STRICT";
 
 const RECEIPTS_DDL: &str = "CREATE TABLE archive_receipts (id INTEGER PRIMARY KEY CHECK (id = 1), sealed BLOB NOT NULL) STRICT";
+const LAN_LINK_DDL: &str = "CREATE TABLE lan_link (link_id BLOB PRIMARY KEY CHECK (length(link_id) = 16), key_generation INTEGER NOT NULL, sealed BLOB NOT NULL) STRICT, WITHOUT ROWID";
+const LAN_HINT_DDL: &str = "CREATE TABLE lan_hint (link_id BLOB PRIMARY KEY CHECK (length(link_id) = 16), sealed BLOB NOT NULL) STRICT, WITHOUT ROWID";
 
 /// Every table's DDL, in creation order.
-const TABLES: [&str; 7] = [
+const TABLES: [&str; 9] = [
     RECEIPTS_DDL,
+    LAN_LINK_DDL,
+    LAN_HINT_DDL,
     HEADER_DDL,
     KEYSLOT_DDL,
     OBJECT_DDL,
@@ -70,7 +76,7 @@ const TABLES: [&str; 7] = [
 
 /// The exact `sqlite_schema` rows `(type, name, tbl_name, sql)`, sorted by
 /// name.
-const EXPECTED: [(&str, &str, &str, Option<&str>); 9] = [
+const EXPECTED: [(&str, &str, &str, Option<&str>); 11] = [
     (
         "table",
         "archive_receipts",
@@ -79,6 +85,8 @@ const EXPECTED: [(&str, &str, &str, Option<&str>); 9] = [
     ),
     ("table", "header", "header", Some(HEADER_DDL)),
     ("table", "keyslot", "keyslot", Some(KEYSLOT_DDL)),
+    ("table", "lan_hint", "lan_hint", Some(LAN_HINT_DDL)),
+    ("table", "lan_link", "lan_link", Some(LAN_LINK_DDL)),
     ("table", "local_head", "local_head", Some(LOCAL_HEAD_DDL)),
     ("table", "manifest", "manifest", Some(MANIFEST_DDL)),
     ("table", "object", "object", Some(OBJECT_DDL)),
@@ -798,13 +806,23 @@ pub(crate) mod tests {
         let big = vec![0x42u8; 3000];
         let slots: Vec<_> = (1..=20).map(|n| (id(n), 0, big.clone())).collect();
         fill(&conn, &[0xa0], &slots);
+        // The header table's root page holds a row (page numbers are 1-based).
+        let root: i64 = conn
+            .query_row(
+                "SELECT rootpage FROM sqlite_schema WHERE name = 'header'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         drop(conn);
         let good = std::fs::read(&p).unwrap();
         assert!(good.len() >= 4 * 4096);
+        let page = usize::try_from(root - 1).unwrap() * 4096;
+        assert!(page > 0);
 
         // Corrupt the middle of a b-tree page (not page 1).
         let mut bad = good.clone();
-        for b in &mut bad[2 * 4096 + 8..2 * 4096 + 64] {
+        for b in &mut bad[page + 8..page + 64] {
             *b ^= 0xff;
         }
         let c = d.join("c.qvault");

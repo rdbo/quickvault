@@ -66,6 +66,10 @@ pub enum CoreError {
     /// the anchor could be copied or restored with the vault and would
     /// detect nothing (0005 §5.4). Move the vault elsewhere.
     AnchorLocation,
+    /// A LAN pairing failed (0013; exit codes come with the CLI commands in
+    /// roadmap 2.10).
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    Lan(qv_sync::lan::LanError),
     /// A bug.
     Internal,
 }
@@ -76,6 +80,8 @@ impl fmt::Display for CoreError {
             Self::Store(e) => e.fmt(f),
             Self::Generator(e) => e.fmt(f),
             Self::Totp(e) => e.fmt(f),
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            Self::Lan(e) => e.fmt(f),
             Self::SnapshotOverBudget { needed } => write!(
                 f,
                 "the recovery snapshot needs {needed} bytes and does not fit the snapshot budget"

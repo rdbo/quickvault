@@ -337,6 +337,46 @@ pub(crate) fn remove_best_effort(path: &Path) {
     let _ = std::fs::remove_file(path);
 }
 
+/// Removes temporary siblings that [`create_temp`] made for `final_path` and
+/// a crash left behind: exactly `.<name>.tmp-<16 hex>` and its `-journal`.
+/// Only regular files owned by this user are removed, checked with `lstat`
+/// (never following a symlink). Every other name is left alone.
+pub(crate) fn remove_stale_temps(final_path: &Path) -> Result<(), StoreError> {
+    let Some(name) = final_path.file_name().and_then(OsStr::to_str) else {
+        return Err(StoreError::Unsupported);
+    };
+    let prefix = format!(".{name}.tmp-");
+    let parent = parent_of(final_path);
+    let entries = match std::fs::read_dir(parent) {
+        Ok(e) => e,
+        Err(_) => return Err(StoreError::Io),
+    };
+    for entry in entries {
+        let Ok(entry) = entry else { continue };
+        let file_name = entry.file_name();
+        let Some(n) = file_name.to_str() else {
+            continue;
+        };
+        let Some(rest) = n.strip_prefix(&prefix) else {
+            continue;
+        };
+        let hex = rest.strip_suffix("-journal").unwrap_or(rest);
+        if hex.len() != 16 || !hex.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')) {
+            continue;
+        }
+        let path = parent.join(n);
+        let Ok(st) = rustix::fs::lstat(&path) else {
+            continue;
+        };
+        if rustix::fs::FileType::from_raw_mode(st.st_mode) == rustix::fs::FileType::RegularFile
+            && st.st_uid == geteuid().as_raw()
+        {
+            remove_best_effort(&path);
+        }
+    }
+    Ok(())
+}
+
 /// `path` with `suffix` appended to its file name (e.g. `-journal`).
 pub(crate) fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut s: OsString = path.as_os_str().to_owned();

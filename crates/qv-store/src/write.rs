@@ -82,6 +82,10 @@ pub struct Write<'v> {
     poisoned: bool,
     finished: bool,
     receipt_blob: Option<Vec<u8>>,
+    /// The complete new `lan_link` row set, when this write changes links.
+    links: Option<Vec<crate::lan_store::StoredLink>>,
+    /// Hint changes by link ID: a new sealed hint, or `None` to delete.
+    hints: Vec<([u8; 16], Option<Vec<u8>>)>,
 }
 
 impl core::fmt::Debug for Write<'_> {
@@ -169,6 +173,10 @@ impl UnlockedVault {
             if crate::receipt_store::digest(&blob) != self.state.head.archive_receipts_digest {
                 return Err(StoreError::Integrity);
             }
+            // The link rows must still be the ones the verified head names.
+            if crate::lan_store::read(&self.file.conn, &self.file.header)? != self.state.links {
+                return Err(StoreError::Integrity);
+            }
             Ok((h, schema::read_replica(&self.file.conn)?))
         });
         match fresh {
@@ -209,6 +217,8 @@ impl UnlockedVault {
             poisoned: false,
             finished: false,
             receipt_blob: None,
+            links: None,
+            hints: Vec::new(),
         })
     }
 }
@@ -592,6 +602,84 @@ impl Write<'_> {
         self.manifest.remove_history(record, version)
     }
 
+    /// Adds a LAN link row (0013 §9.1), with an optional first endpoint
+    /// hint, applied by [`Self::commit`] as part of this one change. At most
+    /// [`crate::MAX_LAN_LINKS`] links ([`StoreError::LimitExceeded`]); a
+    /// reused link ID, a negative time or an invalid label is
+    /// [`StoreError::InvalidEdit`].
+    pub fn add_lan_link(
+        &mut self,
+        link_id: [u8; 16],
+        key: &qv_crypto::lan::LinkKey,
+        label: &str,
+        created_at: qv_model::Timestamp,
+        hint: &[std::net::SocketAddr],
+    ) -> Result<(), StoreError> {
+        let mut rows = match self.links.take() {
+            Some(rows) => rows,
+            None => self.vault.state.links.clone(),
+        };
+        let result = (|| {
+            if rows.len() >= crate::lan_store::MAX_LAN_LINKS {
+                return Err(StoreError::LimitExceeded);
+            }
+            if rows.iter().any(|r| r.link_id == link_id) {
+                return Err(StoreError::InvalidEdit);
+            }
+            let created = u64::try_from(created_at.0).map_err(|_| StoreError::InvalidEdit)?;
+            let header = self.vault.file.header;
+            let sealed =
+                crate::lan_store::seal_row(&self.keys, &header, &link_id, key, label, created)?;
+            let hint = if hint.is_empty() {
+                None
+            } else {
+                Some(crate::lan_store::seal_hint(
+                    &self.keys, &header, &link_id, hint, 0,
+                )?)
+            };
+            Ok((sealed, hint))
+        })();
+        match result {
+            Ok((sealed, hint)) => {
+                rows.push(crate::lan_store::StoredLink { link_id, sealed });
+                rows.sort_by_key(|a| a.link_id);
+                self.links = Some(rows);
+                if let Some(h) = hint {
+                    self.hints.push((link_id, Some(h)));
+                }
+                Ok(())
+            }
+            Err(e) => {
+                // Nothing staged; an earlier change in this write is kept.
+                if rows != self.vault.state.links {
+                    self.links = Some(rows);
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Removes a LAN link and its hint (0013 §12.1), applied by
+    /// [`Self::commit`]. An unknown ID is [`StoreError::NotFound`].
+    pub fn remove_lan_link(&mut self, link_id: &[u8; 16]) -> Result<(), StoreError> {
+        let mut rows = match self.links.take() {
+            Some(rows) => rows,
+            None => self.vault.state.links.clone(),
+        };
+        let before = rows.len();
+        rows.retain(|r| r.link_id != *link_id);
+        let found = rows.len() != before;
+        if found || rows != self.vault.state.links {
+            self.links = Some(rows);
+        }
+        if !found {
+            return Err(StoreError::NotFound);
+        }
+        self.hints.retain(|(id, _)| id != link_id);
+        self.hints.push((*link_id, None));
+        Ok(())
+    }
+
     /// Commits the mutation (steps 3–8 of the module docs).
     pub fn commit(self) -> Result<(), StoreError> {
         self.commit_cancellable(&|| false)
@@ -694,6 +782,10 @@ impl Write<'_> {
                 .map_or(old.head.archive_receipts_digest, |b| {
                     crate::receipt_store::digest(b)
                 }),
+            lan_links_digest: match &self.links {
+                Some(rows) => crate::lan_store::digest(rows)?,
+                None => old.head.lan_links_digest,
+            },
         };
         let (stored_head, digest) = sign_head(&self.keys, &header, &head)?;
         let old_hash = old.head.manifest_hash;
@@ -708,6 +800,40 @@ impl Write<'_> {
             )
             .map_err(w)?;
             point(CrashPoint::ReceiptsWritten)?;
+        }
+        if let Some(rows) = &self.links {
+            conn.execute("DELETE FROM lan_link", []).map_err(w)?;
+            for r in rows {
+                conn.execute(
+                    "INSERT INTO lan_link (link_id, key_generation, sealed) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![
+                        r.link_id.as_slice(),
+                        i64::from(header.key_generation.0),
+                        r.sealed.as_slice()
+                    ],
+                )
+                .map_err(w)?;
+            }
+            // A removed link's hint goes with it; hints of kept links stay.
+            conn.execute(
+                "DELETE FROM lan_hint WHERE link_id NOT IN (SELECT link_id FROM lan_link)",
+                [],
+            )
+            .map_err(w)?;
+        }
+        for (id, hint) in &self.hints {
+            conn.execute("DELETE FROM lan_hint WHERE link_id = ?1", [id.as_slice()])
+                .map_err(w)?;
+            if let Some(blob) = hint {
+                conn.execute(
+                    "INSERT INTO lan_hint (link_id, sealed) VALUES (?1, ?2)",
+                    rusqlite::params![id.as_slice(), blob.as_slice()],
+                )
+                .map_err(w)?;
+            }
+        }
+        if self.links.is_some() || !self.hints.is_empty() {
+            point(CrashPoint::LanLinksWritten)?;
         }
         insert_manifest(conn, &sealed)?;
         conn.execute(
@@ -784,6 +910,9 @@ impl Write<'_> {
         state.digest = digest;
         state.replica = replica;
         state.writer = self.writer;
+        if let Some(rows) = self.links.take() {
+            state.links = rows;
+        }
         self.vault.gate = WriteGate::AnchorPending;
         point(CrashPoint::Committed)?;
         self.vault.anchors.store(

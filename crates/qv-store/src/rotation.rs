@@ -357,6 +357,9 @@ impl UnlockedVault {
                         &header,
                         &replica.replica_id,
                     )?,
+                    // The replacement generation starts with no links
+                    // (0013 §12.2).
+                    lan_links_digest: crate::lan_store::empty_digest()?,
                 };
                 let (head, digest) = sign_head(&new_keys, &header, &head)?;
                 #[cfg(test)]

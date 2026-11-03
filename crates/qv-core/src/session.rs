@@ -405,6 +405,11 @@ impl Session {
         r
     }
 
+    /// This session's tag, for handles created outside a call.
+    pub(crate) fn tag(&self) -> SessionTag {
+        self.tag
+    }
+
     /// Takes the open state out and locks the session: every later call is
     /// [`CoreError::SessionLocked`] and handles are stale. Rotation consumes
     /// the unlocked vault this way (plan 0023).

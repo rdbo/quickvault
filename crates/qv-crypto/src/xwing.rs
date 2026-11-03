@@ -95,9 +95,11 @@ impl XWingDecapsKey {
         Ok((Self(seed), encaps_key_bytes(&pk)?))
     }
 
-    /// The key pair the draft derives from `seed` (known-answer tests).
-    #[cfg(test)]
-    pub(crate) fn from_test_seed(seed: &[u8; 32]) -> Result<(Self, XWingEncapsKey), CryptoError> {
+    /// The key pair the draft derives from `seed`. Known-answer and
+    /// interoperability vectors only: the `test-vectors` feature is never
+    /// enabled in normal builds.
+    #[cfg(any(test, feature = "test-vectors"))]
+    pub fn from_test_seed(seed: &[u8; 32]) -> Result<(Self, XWingEncapsKey), CryptoError> {
         let seed = SecretArray::try_init(|out| {
             out.copy_from_slice(seed);
             Ok::<(), CryptoError>(())
@@ -137,9 +139,10 @@ impl XWingEncapsKey {
         self.encapsulate_with(&eseed)
     }
 
-    /// Draft `EncapsulateDerand` (known-answer tests).
-    #[cfg(test)]
-    pub(crate) fn encapsulate_derand(
+    /// Draft `EncapsulateDerand`. Known-answer and interoperability vectors
+    /// only (the `test-vectors` feature).
+    #[cfg(any(test, feature = "test-vectors"))]
+    pub fn encapsulate_derand(
         &self,
         eseed: &[u8; 64],
     ) -> Result<(XWingSharedSecret, XWingCiphertext), CryptoError> {
@@ -203,6 +206,22 @@ impl core::fmt::Debug for XWingEncapsKey {
 impl core::fmt::Debug for XWingCiphertext {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("XWingCiphertext(1120 bytes)")
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests_support {
+    use super::*;
+
+    /// A shared secret with chosen bytes, for key-schedule tests.
+    pub(crate) fn shared_secret(bytes: [u8; 32]) -> XWingSharedSecret {
+        XWingSharedSecret(
+            SecretArray::try_init(|out| {
+                *out = bytes;
+                Ok::<(), CryptoError>(())
+            })
+            .unwrap_or_else(|_| unreachable!()),
+        )
     }
 }
 

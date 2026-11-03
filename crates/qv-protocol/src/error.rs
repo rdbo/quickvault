@@ -32,16 +32,15 @@ pub enum ProtocolError {
 
 impl ProtocolError {
     /// The 0013 §11 code to send once a session is authenticated, or `None`
-    /// for transport failures (nothing is sent; the connection just closes).
+    /// for transport failures and oversized frames: nothing is sent and the
+    /// connection just closes (0013 §1.3).
     pub fn wire_code(self) -> Option<ErrorCode> {
         match self {
-            Self::Closed | Self::Truncated | Self::Io => None,
+            Self::Closed | Self::Truncated | Self::Io | Self::FrameTooLarge => None,
             Self::Unsupported => Some(ErrorCode::Unsupported),
-            Self::FrameTooLarge
-            | Self::EmptyFrame
-            | Self::Malformed
-            | Self::UnknownLabel
-            | Self::UnexpectedLabel => Some(ErrorCode::Protocol),
+            Self::EmptyFrame | Self::Malformed | Self::UnknownLabel | Self::UnexpectedLabel => {
+                Some(ErrorCode::Protocol)
+            }
         }
     }
 }

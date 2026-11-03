@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-11-02 | 2026-11-02 | 0002 §1, §6.1, §7; 0013 §1, §2, §6, §11; 0004 §4; 0012 §1–3 |
+| Reviewed | 2026-11-02 | 2026-11-02 | 0002 §1, §6.1, §7; 0013 §1, §2, §6, §11; 0004 §4; 0012 §1–3 |
 
 ## Intent
 
@@ -644,3 +644,8 @@ denies, stop.
   never called.
   The normal and validation APK and instrumentation builds pass with libcrux
   linked for arm64 Android, and the build script's manifest checks pass.
+
+- 2026-11-02: Fresh-context review (next-phase session, committed `bfdcfdf`):
+  **Approved with minor fixes**. The reviewer mapped `FrameTooLarge` to no
+  wire code (0013 §1.3: the connection just closes). See REVIEW.md. Status
+  Reviewed.

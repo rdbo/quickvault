@@ -29,5 +29,10 @@ rustix.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 
+[features]
+# Derandomized X-Wing for interoperability vectors (plan 0037). Enabled only
+# by dev-dependencies; never in normal builds.
+test-vectors = []
+
 [lints]
 workspace = true

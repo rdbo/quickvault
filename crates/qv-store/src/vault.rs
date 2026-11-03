@@ -122,6 +122,8 @@ pub(crate) struct State {
     pub(crate) digest: [u8; 32],
     pub(crate) replica: StoredReplica,
     pub(crate) writer: WriterId,
+    /// The `lan_link` rows the head's `lan_links_digest` names, sorted by ID.
+    pub(crate) links: Vec<crate::lan_store::StoredLink>,
 }
 
 /// A vault whose password slot, header MAC, head, manifest and heads have
@@ -231,6 +233,11 @@ pub(crate) fn load_state(
         header,
         &stored.replica.replica_id,
     )?;
+    // LAN links: shape checks before any value, then the head-bound digest.
+    let links = crate::lan_store::read(conn, header)?;
+    if crate::lan_store::digest(&links)? != head.lan_links_digest {
+        return Err(StoreError::Integrity);
+    }
 
     // The manifest the head names.
     let m = &stored.manifest;
@@ -307,6 +314,7 @@ pub(crate) fn load_state(
         digest,
         replica: stored.replica,
         writer,
+        links,
     })
 }
 
@@ -860,6 +868,7 @@ fn build(
             &header,
             &replica_id,
         )?,
+        lan_links_digest: crate::lan_store::empty_digest()?,
     };
     let (stored_head, digest) = sign_head(&keys, &header, &head)?;
 
@@ -1299,7 +1308,7 @@ pub(crate) mod tests {
         let (p, dir) = copy_fixture(&d, &a, "v.qvault");
         let header = {
             let f = VaultFile::open(&p).unwrap();
-            assert_eq!(f.schema_version(), 0x7FFF_0003);
+            assert_eq!(f.schema_version(), 0x7FFF_0004);
             assert_eq!(f.password_kdf(), Ok(PasswordKdfProfile::V1));
             *f.header()
         };

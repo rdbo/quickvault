@@ -54,6 +54,51 @@ impl VaultFile {
         cancelled: &dyn Fn() -> bool,
         working: Option<&LocalSlot>,
     ) -> Result<(), StoreError> {
+        Self::create_from_archive_inner(path, input, expect, vk, anchors, cancelled, working, None)
+    }
+
+    /// Creates a vault from a verified new-device staging archive (0013 §10
+    /// step 5): the 1.13b creation protocol, with the pairing's link row in
+    /// the first head. The password proof must name the staged keyslot.
+    /// Stale temporary files from a crashed attempt are removed first.
+    pub fn create_from_lan(
+        path: &Path,
+        mut staging: crate::VerifiedLanStaging,
+        proof: crate::PasswordProof,
+        vk: &VaultKey,
+        anchors: &AnchorDir,
+        link: crate::NewLanLink<'_>,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), StoreError> {
+        fs::remove_stale_temps(path)?;
+        let scope = staging.scope;
+        let input = staging.rewind()?;
+        Self::create_from_archive_inner(
+            path,
+            input,
+            scope,
+            vk,
+            anchors,
+            cancelled,
+            None,
+            Some(LanFill {
+                link: &link,
+                proof: &proof,
+            }),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)] // the shared restore inputs plus the LAN fill
+    fn create_from_archive_inner<R: Read + Seek>(
+        path: &Path,
+        input: &mut R,
+        expect: ArchiveScope,
+        vk: &VaultKey,
+        anchors: &AnchorDir,
+        cancelled: &dyn Fn() -> bool,
+        working: Option<&LocalSlot>,
+        lan: Option<LanFill<'_>>,
+    ) -> Result<(), StoreError> {
         crate::rotation_guard::check(path)?;
         check_cancel(cancelled)?;
         if path.extension().and_then(|e| e.to_str()) != Some(vault::VAULT_EXTENSION) {
@@ -112,6 +157,11 @@ impl VaultFile {
                 slot.encode()?
             }
         };
+        if let Some(fill) = &lan
+            && fill.proof.body.as_slice() != body.as_slice()
+        {
+            return Err(StoreError::Integrity);
+        }
         let slot = qv_model::Keyslot::decode(&body)?;
         let local = LocalSlot::from_stored(StoredSlot {
             slot_id: slot.slot.slot_id.0,
@@ -122,7 +172,16 @@ impl VaultFile {
         let mut anchored = None;
         let mut published = false;
         let result = (|| {
-            build(&temp, input, &opened, &header, &local, vk, cancelled)?;
+            build(
+                &temp,
+                input,
+                &opened,
+                &header,
+                &local,
+                vk,
+                lan.as_ref(),
+                cancelled,
+            )?;
             let file = Self::open_locked(&temp, lock)?;
             file.verify_header(vk)?;
             let state = load_state(&file.conn, &header, vk)?;
@@ -174,6 +233,13 @@ impl VaultFile {
     }
 }
 
+/// The new-device link written into the first head (0013 §10 step 5).
+struct LanFill<'a> {
+    link: &'a crate::NewLanLink<'a>,
+    proof: &'a crate::PasswordProof,
+}
+
+#[allow(clippy::too_many_arguments)] // the shared restore inputs plus the LAN fill
 fn build<R: Read + Seek>(
     temp: &Path,
     input: &mut R,
@@ -181,6 +247,7 @@ fn build<R: Read + Seek>(
     header: &Header,
     local: &LocalSlot,
     vk: &VaultKey,
+    lan: Option<&LanFill<'_>>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<(), StoreError> {
     let keys = Keys::derive(vk, header)?;
@@ -214,6 +281,34 @@ fn build<R: Read + Seek>(
                 header.data_profile,
                 opened.manifest(),
             )?;
+            let mut links = Vec::new();
+            if let Some(fill) = lan {
+                let l = fill.link;
+                let created = u64::try_from(l.created_at.0).map_err(|_| StoreError::InvalidEdit)?;
+                let sealed =
+                    crate::lan_store::seal_row(&keys, header, &l.link_id, l.key, l.label, created)?;
+                tx.execute(
+                    "INSERT INTO lan_link (link_id, key_generation, sealed) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![
+                        l.link_id.as_slice(),
+                        i64::from(header.key_generation.0),
+                        sealed.as_slice()
+                    ],
+                )
+                .map_err(|e| crate::error::write_err(tx, &e, 0))?;
+                if !l.hint.is_empty() {
+                    let hint = crate::lan_store::seal_hint(&keys, header, &l.link_id, l.hint, 0)?;
+                    tx.execute(
+                        "INSERT INTO lan_hint (link_id, sealed) VALUES (?1, ?2)",
+                        rusqlite::params![l.link_id.as_slice(), hint.as_slice()],
+                    )
+                    .map_err(|e| crate::error::write_err(tx, &e, 0))?;
+                }
+                links.push(crate::lan_store::StoredLink {
+                    link_id: l.link_id,
+                    sealed,
+                });
+            }
             let head = LocalHead {
                 vault_id: header.vault_id,
                 key_generation: header.key_generation,
@@ -227,6 +322,7 @@ fn build<R: Read + Seek>(
                     header,
                     &replica.replica_id,
                 )?,
+                lan_links_digest: crate::lan_store::digest(&links)?,
             };
             let (head, _) = sign_head(&keys, header, &head)?;
             Ok(creation::Filled { manifest, head })

@@ -121,8 +121,8 @@ replica_id:bstr16, data_profile:uint]`. Ciphertext is at most 32 MiB and the
 complete envelope at most 32 MiB + 128 bytes; the maximal plaintext under the
 row/path limits is below 17 MiB. Unknown versions/profiles fail closed.
 `archive_receipts_digest` is object-hash/1 (SHA-256) of the complete canonical
-envelope. It is mandatory local-head CBOR key 7; key 8 is reserved for the
-future `lan_links_digest` binding. Verify the head MAC and envelope digest,
+envelope. It is mandatory local-head CBOR key 7; key 8 is the mandatory
+`lan_links_digest` (§2.4). Verify the head MAC and envelope digest,
 then authenticate/decrypt the envelope before parsing receipt plaintext.
 Missing or invalid receipt state MUST NOT become an empty default.
 
@@ -136,6 +136,38 @@ after a durable commit must finish its pending anchor update first. Receipts
 are local-only and never enter an archive, portable manifest or peer exchange.
 The development schema/header version for this table is `0x7FFF0003`; older
 development files are rejected, without a migration or compatibility promise.
+
+2.4. **LAN peer state** (0013 §9). The development layouts are:
+
+```sql
+CREATE TABLE lan_link (link_id BLOB PRIMARY KEY CHECK (length(link_id) = 16), key_generation INTEGER NOT NULL, sealed BLOB NOT NULL) STRICT, WITHOUT ROWID
+CREATE TABLE lan_hint (link_id BLOB PRIMARY KEY CHECK (length(link_id) = 16), sealed BLOB NOT NULL) STRICT, WITHOUT ROWID
+```
+
+Both `sealed` values use the canonical envelope
+`[1, data_profile:uint, nonce:bstr24, ciphertext:bstr]`, with stored-data/1
+framing and AEAD under the generation's `local-state` purpose key and a fresh
+random nonce. The ciphertext is at most 512 bytes. The AADs are:
+- link rows: `["qv/lan-link-row/v1", vault_id, key_generation, link_id]`,
+  over the plaintext of 0013 §9.1;
+- hints: `["qv/lan-hint/v1", vault_id, key_generation, link_id]`, over
+  `[endpoints: [[addr: bstr4|bstr16, port: uint]] (at most 4),
+  last_success_at: uint (milliseconds, 0 = never)]`.
+
+On open:
+- at most 64 `lan_link` rows are allowed, checked before any value is read;
+- each row needs a 16-byte ID, the header's key generation and a bounded
+  blob;
+- `lan_links_digest` (local-head key 8) must equal the digest of 0013 §9.1
+  over the stored rows. A mismatch is an integrity error.
+
+Rows are decrypted only when used. Hints are unauthenticated convenience
+data: an invalid hint reads as absent and never fails an open. Creation,
+new-path restore and a rotation replacement start with no rows and the
+digest of the empty set. New-device creation (0013 §10) writes its single
+link row in the first head. The development schema/header version with
+these tables is `0x7FFF0004`. Older development files are rejected, without
+a migration.
 
 ### 3. Encoding and encryption
 
@@ -336,6 +368,11 @@ is unsupported ([SQLite warning](https://www.sqlite.org/howtocorrupt.html)).
    format. Changes require documented policy/version updates.
 
 ## Changelog
+
+- 2026-11-02: Add §2.4 development layouts for `lan_link`/`lan_hint`. Local
+  head key 8 is the mandatory `lan_links_digest`, and the schema/header
+  version is `0x7FFF0004` (plan 0037; owner-delegated, standing 2026-11-02).
+  Formats remain volatile.
 
 - 2026-10-31: Define working-source-slot fallback for ambiguous slotless local snapshot recovery without resolving incoming keyslot heads (0028 continuation).
 

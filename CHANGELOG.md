@@ -9,6 +9,34 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-11-02: LAN pairing (roadmap 2.9, plan 0037; spec 0013 §4, §8–10, §12).
+  - An unlocked vault can open a time-limited pairing window that shows a
+    QR payload or a 26-character code. A second device then joins:
+    - **new device:** receive, fully verify, confirm and password-check the
+      vault, then create it at a new path;
+    - **link mode:** an existing copy of the same vault.
+
+    Both sides keep a pairwise link key bound to the vault's key generation,
+    after comparing a six-digit code.
+  - Links are local:
+    - each one can be listed and removed;
+    - rotation, restore and archives carry none;
+    - planted-back or modified link rows are detected on open.
+  - Windows accept one session at a time and close after 16 failed attempts,
+    a second valid hello (the code may have been observed), their time limit,
+    a lock or a cancel. Nothing is sent to an unauthenticated peer.
+  - Not yet: discovery (DNS-SD), sync sessions, the CLI and the app (roadmap
+    2.10). No independent protocol review yet (D12); no LAN release.
+  - **Development format change:** vault files move to schema/header
+    `0x7FFF0004` (new `lan_link`/`lan_hint` tables, local-head key 8).
+    Older development vaults are refused, with no migration (pre-1.0).
+  - Spec clarifications (0013 §1.3, §7.1, §8.3; 0004 §2.4), development
+    interoperability vectors with an independent Python check, and the new
+    `lan_oob` fuzz target. The `lan_message` target covers the typed
+    decoders.
+  - The review of phase 2.8 (plan 0036) made oversized frames close the
+    connection without a wire error code.
+
 - 2026-11-02: LAN protocol foundation (roadmap 2.8, plan 0036).
   - New `qv-protocol` crate: bounded `u32` frames (4096 bytes before the
     session keys, 1,052,672 after), checked before allocation and read without

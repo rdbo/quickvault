@@ -3579,7 +3579,9 @@ dependencies = [
  "qv-crypto",
  "qv-encoding",
  "qv-model",
+ "qv-protocol",
  "qv-store",
+ "zeroize",
 ]
 
 [[package]]

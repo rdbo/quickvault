@@ -741,8 +741,8 @@ release; it is not weakened.
 
 #### Phase 2.8 — Protocol foundation and hybrid primitives
 
-- **Plan:** [0036](../0036-protocol-foundation/PLAN.md) (Implemented;
-  fresh-context review due). The hybrid signature moves to phase 3.3; see
+- **Plan:** [0036](../0036-protocol-foundation/PLAN.md) (Reviewed: approved
+  with one minor fix). The hybrid signature moves to phase 3.3; see
   Revisions 2026-11-02 (phase 2.8).
 
 - [x] **Do:** Create `qv-protocol`: a bounded canonical message framework with
@@ -759,7 +759,10 @@ release; it is not weakened.
 
 #### Phase 2.9 — LAN enrollment and peer state
 
-- [ ] **Do:** Implement the 2.1 enrollment protocol, local peer-authorization
+- **Plan:** [0037](../0037-lan-pairing/PLAN.md) (Implemented; fresh-context
+  review due). Discovery and the post-link-mode exchange move to 2.10; see
+  Revisions 2026-11-02 (phase 2.9).
+- [x] **Do:** Implement the 2.1 enrollment protocol, local peer-authorization
   storage, new-device initialization, peer removal and the LAN part of rotation
   re-approval.
 - **Specs:** the 2.1 LAN spec; 0002 §3.5.5.
@@ -775,7 +778,13 @@ release; it is not weakened.
 - [ ] **Do:** LAN session and exchange: bounded authenticated manifest and
   object transfer, merge and local commit through the 1.7 path, idempotent
   retry, lock cancellation, manual initiation only, receive availability per
-  the 2.1 spec. Add `qvault lan …` and the app UI.
+  the 2.1 spec. Add `qvault lan …` and the app UI (pairing included).
+  Moved from 2.9:
+  - DNS-SD advertising and browsing (0013 §3.2–3.4), with interface-address
+    enumeration for QR endpoints;
+  - the exchange that follows link-mode pairing (§4.8);
+  - hint updates after sessions;
+  - the LAN error → exit-code mapping.
 - **Specs:** the 2.1 LAN spec; 0005 §0.5, §6.
 - **Depends on:** 2.9, 2.5.
 - **Files:** `crates/qv-sync/`, `crates/qv-cli/`, `crates/qv-app/`.
@@ -1161,6 +1170,21 @@ release; it is not weakened.
   candidate table). Its draft-06 API is byte-identical to draft-11: the
   change log is editorial and the vectors match.
 
+- 2026-11-02 (phase 2.9, plan 0037), under the owner's standing delegation:
+  - **Moved to 2.10:**
+    - DNS-SD advertising and browsing (0013 §3.2–3.4, `p=` tag);
+    - interface-address enumeration for QR endpoints;
+    - the ordinary exchange that follows link-mode pairing (§4.8).
+
+    2.9 windows run with discovery off, which §3.2 permits. Link-mode
+    pairing closes after `PairDone`, the failure path §4.8 already allows
+    (links stay; the user syncs later).
+  - **Kept in 2.9:** the exchange messages for the new-device grant (§4.7,
+    §10). The entry's "spoofed advertisements" criterion is tested as
+    hostile responders at hinted endpoints (§3.1).
+  - **Spec clarifications:** 0013 §1.3, §7.1, §8.3, and the 0004 §2.4
+    development layouts.
+
 ## Execution log
 
 - 2026-11-02: Clean-tree next-phase session at `87f1267`.
@@ -1210,6 +1234,27 @@ release; it is not weakened.
     attended follow-up.
   - Next: owner commits, then a fresh-context review of 0036 before phase
     2.9. No commit, push or branch.
+
+- 2026-11-02: Next-phase session on clean tree `bfdcfdf` (the commit titled
+  "phase 2.9" holds the phase 2.8 work).
+  - **Fresh-context review of 0036** (phase 2.8): Approved with minor fixes.
+    `FrameTooLarge` no longer maps to a wire code (0013 §1.3). Gates on
+    `bfdcfdf` passed: 781 tests, deny and vet.
+  - **Phase 2.9 planned and implemented as plan 0037** (standing approval
+    plus the owner's delegation):
+    - pairing key schedule, typed messages and out-of-band codes;
+    - head-bound `lan_link`/`lan_hint` storage (format `0x7FFF0004`);
+    - new-device staging and creation through the restore path;
+    - the pairing window and joiner over TCP, and the core API.
+
+    Spec clarifications to 0013 and 0004, and development LAN vectors with
+    a Python check. Discovery and the post-link-mode exchange move to 2.10
+    (Revisions).
+  - **Final gates:** 830 tests (2 pre-existing ignored), 31 app validation
+    tests, deny/vet, Android arm64 Clippy, and the fuzz smoke for
+    `lan_message` and `lan_oob` all pass. No new external dependency.
+  - **Next:** owner commits, then the fresh-context review of 0037 before
+    phase 2.10. No commit, push or branch.
 
 - 2026-11-02: Owner explicitly corrected the earlier stop handoff: carry out
   "next phase" without approval checkpoints, fixing prerequisites and continuing

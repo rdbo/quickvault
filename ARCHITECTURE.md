@@ -86,12 +86,12 @@ rather than creating unused workspace scaffolding.
 | Component | Responsibility |
 |-----------|----------------|
 | qv-encoding | Bounded deterministic CBOR (0004 §3.1): validates hostile input before typed reads, encodes only canonical items, builds AAD/info/transcript arrays; depends on no other qv crate |
-| qv-crypto | Profiles, key hierarchy, encryption, protected memory, X-Wing draft-11 (libcrux-kem) and the LAN record layer (0013 §6); hybrid signature verification from roadmap 3.3 |
+| qv-crypto | Profiles, key hierarchy, encryption, protected memory, X-Wing draft-11 (libcrux-kem), the LAN record layer (0013 §6) and pairing key schedule (`lan-link` root, link keys, proofs, comparison code, sealed link rows; 0013 §4, §9); hybrid signature verification from roadmap 3.3 |
 | qv-model | Canonical payloads, atomic records, deterministic tree projection |
-| qv-store | Hardened SQLite, immutable objects, manifests, transactions, authenticated archives (header, writer, role-verifying reader), new-path restore and the full `verify` pass |
-| qv-protocol | Key-free hostile-input wire layer: bounded LAN frames, wire labels with exact arity, exact-shape message reader/writer, `lan / 1` profile, feature and error-code registry (implemented, roadmap 2.8); server wire types later; depends only on qv-encoding |
-| qv-sync | Shared causal merge candidates (implemented); direct LAN exchange, remote candidate state and publication orchestration (planned) |
-| qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets and the `verify` report |
+| qv-store | Hardened SQLite, immutable objects, manifests, transactions, authenticated archives (header, writer, role-verifying reader), new-path restore and the full `verify` pass; head-bound `lan_link`/`lan_hint` peer state, LAN serving reads and new-device staging/creation (0013 §9–10) |
+| qv-protocol | Key-free hostile-input wire layer: bounded LAN frames, wire labels with exact arity, exact-shape message reader/writer, `lan / 1` profile, feature and error-code registry (roadmap 2.8); typed pairing/exchange/error messages and the out-of-band QR/manual code (roadmap 2.9); server wire types later; depends only on qv-encoding |
+| qv-sync | Shared causal merge candidates; LAN pairing over TCP (pairing window, joiner, new-device exchange; roadmap 2.9); LAN sessions/exchange, remote candidate state and publication orchestration (planned) |
+| qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets, the `verify` report and LAN pairing/link management for frontends |
 | qv-platform | Injected OS traits; Linux logind lifecycle, X11 clipboard ownership, single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; gated Android keystore quick unlock with process-local policy; gated exact-identity autofill matching; native input unavailable |
 | qv-cli / qv-app | Explicit user actions and views; no unrestricted crypto/file/SQL bridge |
 | qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
@@ -133,8 +133,23 @@ Roadmap 2.8 adds:
   registry);
 - in `qv-crypto`: the X-Wing KEM and the 0013 §6 record layer.
 
-The LAN key schedule, state machines, windows and sockets are not
-implemented yet (2.9–2.10).
+Roadmap 2.9 (plan 0037) adds LAN pairing (0013 §4, §8–10, §12):
+- qv-crypto: the pairing key schedule;
+- qv-store: `lan_link`/`lan_hint` rows bound to the head by key 8
+  `lan_links_digest` (format `0x7FFF0004`), serving reads, and new-device
+  staging. A joining device writes the received manifest and objects as a
+  private archive, authenticates it with the archive reader, and creates the
+  vault through the new-path restore protocol with its link in the first
+  head;
+- qv-sync: the pairing window (one session at a time, 16 failures,
+  second-hello detection, time limit, prompt cancellation), the joiner and
+  the new-device exchange;
+- qv-core: the frontend API. The session mutex is held only for short reads
+  and the link commit.
+
+Rotation and restore start with no links. Discovery (DNS-SD), sync sessions,
+the post-link-mode exchange, the CLI and the app follow in 2.10. No
+independent review exists yet (D12).
 Attachment content uses existing per-attachment keys, fixed full-chunk framing
 and canonical chunk AAD, with ciphertext reference/hash checks, per-chunk AEAD
 and whole-content SHA-256/length verification. Imports stage encrypted objects
@@ -397,9 +412,10 @@ locked-device protection.
 
 LAN connectivity and discovery do not establish peer trust. Peers must be
 explicitly authorized for the vault; network input remains hostile. LAN sync
-does not use server accounts, sessions or grants. Exact discovery, enrollment
-and session protocols remain open in 0005 §6 and must be specified and reviewed
-before implementation. Snapshot exchange is a backup/interoperability utility,
+does not use server accounts, sessions or grants. Discovery, enrollment and
+sessions are specified in 0013. Pairing is implemented (roadmap 2.9), and
+sessions follow in 2.10. The independent protocol review (0012 §3, D12) is
+still required before any LAN release. Snapshot exchange is a backup/interoperability utility,
 not a third live network sync mode.
 
 ## 4. Key hierarchy and lifecycle
@@ -489,7 +505,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Application signatures | Ed25519 + ML-DSA-65, both required |
 | Remote transport | TLS 1.3, X25519MLKEM768, pinned application server identity |
 | Remote account authentication | Pinned RFC 9807 OPAQUE application profile |
-| Direct LAN discovery / enrollment / transport | Specified in 0013 (Accepted): DNS-SD only during explicit windows (`_qvault._tcp`, random instance), QR/manual pairing into pairwise link keys, X-Wing draft-11 + HKDF-SHA-512 + MAC/1 handshake, XChaCha20-Poly1305 counter-nonce records over TCP. X-Wing is `libcrux-kem` 0.0.10 (Cryspen; its draft-06 API matches the draft-11 vectors byte for byte); framing and records in qv-protocol/qv-crypto (roadmap 2.8); discovery and sockets chosen in 2.9–2.10 |
+| Direct LAN discovery / enrollment / transport | Specified in 0013 (Accepted): DNS-SD only during explicit windows (`_qvault._tcp`, random instance), QR/manual pairing into pairwise link keys, X-Wing draft-11 + HKDF-SHA-512 + MAC/1 handshake, XChaCha20-Poly1305 counter-nonce records over TCP. X-Wing is `libcrux-kem` 0.0.10 (Cryspen; its draft-06 API matches the draft-11 vectors byte for byte); framing and records in qv-protocol/qv-crypto (roadmap 2.8); pairing over `std::net` TCP with no new dependency (2.9); DNS-SD discovery chosen in 2.10 |
 | Linux OS adapters | Optional logind lifecycle monitoring via zbus 6.2.0 over the fixed system-bus Unix socket; existing rustix file locks/configuration probes; shared maintained X11 clipboard; quick unlock unavailable |
 | CLI / license | clap (builder API), rustix termios/poll for bounded no-echo prompts, signal-hook atomic flags for cancellation, own escaping and JSON writer, shared qv-platform X11 adapter over published x11rb 0.13.2 with QuickVault's bounded transport and framing budgets; `zxcvbn` (in `qv-core`) for typed master passwords / AGPL-3.0-or-later |
 

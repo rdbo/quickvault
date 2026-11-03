@@ -483,6 +483,39 @@ impl ArchiveHeader {
         .map_err(|_| StoreError::Integrity)
     }
 
+    /// A slotless header for a private staging archive built from a peer's
+    /// verified manifest (0013 §10; plan 0037), MAC'd under `vk`.
+    #[allow(clippy::too_many_arguments)] // the header's fields
+    pub(crate) fn for_staging(
+        vault_id: VaultId,
+        key_generation: KeyGeneration,
+        data_profile: StoredDataProfile,
+        minimum: (StoredDataProfile, DerivationProfile),
+        manifest_hash: [u8; 32],
+        reference_digest: [u8; 32],
+        object_count: u64,
+        total_length: u64,
+        vk: &VaultKey,
+    ) -> Result<Self, StoreError> {
+        let mut h = Self {
+            archive_id: qv_crypto::random_array::<16>().map_err(|_| StoreError::Rng)?,
+            vault_id,
+            key_generation,
+            data_profile,
+            min_data_profile: minimum.0,
+            min_derivation_profile: minimum.1,
+            created_at: Timestamp(0),
+            manifest_hash,
+            reference_digest,
+            object_count,
+            total_length,
+            password_slot: None,
+            header_mac: MacTag::from_bytes([0; 32]),
+        };
+        h.seal_mac(vk)?;
+        Ok(h)
+    }
+
     /// Computes `header_mac` in place, for a header being written.
     fn seal_mac(&mut self, vk: &VaultKey) -> Result<(), StoreError> {
         let key = self.mac_key(vk)?;
@@ -492,7 +525,7 @@ impl ArchiveHeader {
 }
 
 /// Writes the fixed prefix (0004 §6.1).
-fn write_prefix<W: Write>(out: &mut W) -> Result<(), StoreError> {
+pub(crate) fn write_prefix<W: Write>(out: &mut W) -> Result<(), StoreError> {
     out.write_all(&ARCHIVE_MAGIC).map_err(|_| StoreError::Io)?;
     out.write_all(&[ARCHIVE_FORMAT]).map_err(|_| StoreError::Io)
 }

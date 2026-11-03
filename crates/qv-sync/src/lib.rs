@@ -10,6 +10,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Direct LAN pairing (0013; plan 0037).
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub mod lan;
+
 use qv_crypto::RecordId;
 use qv_model::{
     Clock, Deletion, HistoryFloor, ObjectId, Payload, RecordBody, RecordKind, RecordVersion,

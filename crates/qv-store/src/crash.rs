@@ -24,6 +24,8 @@ pub(crate) enum CrashPoint {
     ManifestWritten,
     /// Incoming acceptance has staged its receipt envelope, before the head/commit.
     ReceiptsWritten,
+    /// LAN link and hint rows are changed, before the manifest and head.
+    LanLinksWritten,
     /// The new head is written.
     HeadWritten,
     /// The counter is updated and unreferenced objects are pruned.
