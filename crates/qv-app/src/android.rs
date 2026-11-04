@@ -819,3 +819,105 @@ fn stopped(env: &mut JNIEnv<'_>, activity: &GlobalRef) {
     let _ = env.call_method(activity.as_obj(), "qvRuntimeStopped", "()V", &[]);
     let _ = env.exception_clear();
 }
+
+/// Native camera capability, including the independent physical-device gate.
+pub(crate) fn qr_available() -> bool {
+    call(|env, a| env.call_method(a, "qvQrAvailable", "()Z", &[])?.z()).unwrap_or(false)
+}
+static QR_SCAN: Mutex<Option<i64>> = Mutex::new(None);
+/// Lock may close capture while its worker is decoding a frame.
+pub(crate) fn forget_scan() {
+    if let Some(id) = QR_SCAN.lock().ok().and_then(|mut slot| slot.take()) {
+        let _ = call(|env, a| {
+            env.call_method(a, "qvQrFinish", "(J)V", &[JValue::Long(id)])
+                .map(|_| ())
+        });
+    }
+}
+struct CameraScan(i64);
+impl Drop for CameraScan {
+    fn drop(&mut self) {
+        if let Ok(mut slot) = QR_SCAN.lock()
+            && *slot == Some(self.0)
+        {
+            *slot = None;
+        }
+        let _ = call(|env, a| {
+            env.call_method(a, "qvQrFinish", "(J)V", &[JValue::Long(self.0)])
+                .map(|_| ())
+        });
+    }
+}
+/// A bounded camera action. Images never enter the renderer or a file.
+pub(crate) fn capture_qr(cancel: &CancelToken) -> Result<qv_core::SecretBytes, AppError> {
+    use std::time::{Duration, Instant};
+    if cancel.is_cancelled() {
+        return Err(qv_core::CoreError::Cancelled.into());
+    }
+    let id = call(|env, a| env.call_method(a, "qvQrStart", "()J", &[])?.j())?;
+    if id <= 0 {
+        return Err(AppError::Unavailable);
+    }
+    let _guard = CameraScan(id);
+    *QR_SCAN.lock().map_err(|_| AppError::Unavailable)? = Some(id);
+    let end = Instant::now() + Duration::from_secs(30);
+    let mut attempts = 0;
+    while Instant::now() < end && attempts < 60 {
+        if cancel.is_cancelled() {
+            return Err(qv_core::CoreError::Cancelled.into());
+        }
+        let state = call(|env, a| {
+            env.call_method(a, "qvQrState", "(J)I", &[JValue::Long(id)])?
+                .i()
+        })?;
+        if state != 0 {
+            return Err(if state == 1 {
+                qv_core::CoreError::Cancelled.into()
+            } else {
+                AppError::Unavailable
+            });
+        }
+        let frame = call(|env, a| {
+            let object = env
+                .call_method(a, "qvQrFrame", "(J)[B", &[JValue::Long(id)])?
+                .l()?;
+            if object.is_null() {
+                return Ok(None);
+            }
+            let array = jni::objects::JByteArray::from(object);
+            let len = env.get_array_length(&array)?;
+            if len < 8 || len as usize > crate::qr::MAX_PIXELS + 8 {
+                return Ok(Some(Err(AppError::InvalidInput)));
+            }
+            let raw = Zeroizing::new(env.convert_byte_array(&array)?);
+            // Clear the returned JVM array in bounded chunks before dropping
+            // its local JNI reference. Provider/VM intermediates remain best effort.
+            let zeros = [0i8; 4096];
+            let mut offset = 0;
+            while offset < len {
+                let n = (len - offset).min(4096);
+                env.set_byte_array_region(&array, offset, &zeros[..n as usize])?;
+                offset += n;
+            }
+            Ok(Some(crate::workspace::protect(&raw)))
+        })?;
+        if let Some(frame) = frame {
+            attempts += 1;
+            if let Some(payload) = crate::qr::decode_frame(frame?.expose_secret())? {
+                if Instant::now() >= end || cancel.is_cancelled() {
+                    return Err(qv_core::CoreError::Cancelled.into());
+                }
+                let live = call(|env, a| {
+                    env.call_method(a, "qvQrState", "(J)I", &[JValue::Long(id)])?
+                        .i()
+                })?;
+                if live != 0 {
+                    return Err(qv_core::CoreError::Cancelled.into());
+                }
+                return Ok(payload);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Err(qv_core::CoreError::Cancelled.into())
+}

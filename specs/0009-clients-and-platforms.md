@@ -58,6 +58,30 @@ implement these adapters where they satisfy the security contract. Do not
 duplicate the application per OS or claim that cross-platform rendering alone
 implements OS security and autofill integration.
 
+1.7. **LAN QR camera input (Android).** The shared app renders the exact binary
+QR payloads of 0013 §4.2 and §8.5 with a four-module quiet zone; typing remains
+available. Scanning fills a selected Join/Link/Sync form and MUST NOT start a
+network operation. Apply the same canonical payload/profile and endpoint policy
+as typed input; scanned addresses grant no trust. Reject ambiguous multiple codes.
+
+Request camera permission only after an explicit Scan action, never at startup.
+Use an in-app native preview in the existing activity; the webview's camera
+permission remains denied. Keep camera frames in memory only, with one pending
+bounded luminance frame (at most 1024 pixels per axis and 786432 pixels total),
+at most two offered frames per second and a 30-second scan action. No gallery,
+external camera app, captured-image file, cloud/service decoder or background
+camera is used. A scan closes on cancel, denial, failure, timeout, lock, pause
+or destruction; erase pending frames and reject stale request/epoch results.
+Camera windows use FLAG_SECURE. Scans do not defer background locking.
+
+Binary pairing payloads and QR modules use protected Rust buffers. Wipe exposed
+JVM/native adapter and decoder buffers promptly; OS/camera/JVM/library scratch
+copies follow 0008's documented best-effort cleanup limits. No QR payload or
+image enters logs, errors, argv, saved state or clipboard. Camera support is
+optional and remains disabled in ordinary packages until physical-device
+permission/lifecycle/cleanup validation passes (0012 §3); explicitly marked
+validation packages may exercise the implemented path.
+
 ### 2. Platform priority
 
 Android is the primary mobile target and Linux is its initial desktop companion;
@@ -209,6 +233,11 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
    not reconsider native input or a custom engine just for memory-copy concerns.
 
 ## Changelog
+
+- 2026-11-03: Add §1.7, the owner-delegated Android LAN QR camera profile
+  (plan 0039): binary QR display, bounded in-memory Camera2 capture, action-only
+  permission, form-only scan acceptance, lifecycle cleanup and device gate.
+
 
 - 2026-11-02: §4.4 states the handoff lifetimes as implemented: the token can
   be claimed for up to 120 seconds, and a claimed request lives for up to

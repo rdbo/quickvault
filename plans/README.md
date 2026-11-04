@@ -75,4 +75,6 @@ plan, or a new plan that names the one it supersedes.
 | [0034](0034-android-autofill/PLAN.md) | Android autofill (roadmap 2.7) | Reviewed — reviewer fixed cold-start handoff and empty-field fills; device round trip pending; gate closed |
 | [0035](0035-android-single-runtime/PLAN.md) | Android: one Rust runtime per process; single build project dir | Reviewed |
 | [0036](0036-protocol-foundation/PLAN.md) | Protocol foundation and X-Wing, `qv-protocol` (roadmap 2.8) | Reviewed — reviewer fixed the oversized-frame wire code |
-| [0037](0037-lan-pairing/PLAN.md) | LAN pairing, link storage and new-device initialization (roadmap 2.9) | Implemented — fresh-context review due |
+| [0037](0037-lan-pairing/PLAN.md) | LAN pairing, link storage and new-device initialization (roadmap 2.9) | Reviewed — reviewer added the creation guards to new-device join |
+| [0038](0038-lan-exchange/PLAN.md) | LAN sessions, exchange, CLI and app (roadmap 2.10) | Reviewed — repairs approved; remaining attended testing carried to 0039 step 6 |
+| [0039](0039-lan-qr/PLAN.md) | LAN QR display and Android camera scanning (roadmap 2.10b) | Implemented — fresh-context review pending; native/optical phone checks pass, remaining live LAN checks pending |

@@ -2,9 +2,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Dioxus renderer IPC binds a loopback TCP socket; Android requires this
-         permission even for localhost. No remote-network feature is implemented. -->
+         permission even for localhost. Explicit LAN actions also use this permission. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <application android:hasCode="true" android:supportsRtl="true"
         android:extractNativeLibs="true" android:allowNativeHeapPointerTagging="false"
         android:allowBackup="false" android:fullBackupContent="false"

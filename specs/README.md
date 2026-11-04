@@ -5,6 +5,10 @@ what they say, and behaviour changes start with a spec change.
 
 ## Index
 
+0009 §1.7 specifies the owner-delegated bounded Android LAN QR camera profile
+(2026-11-03, plan 0039), approved for implementation; its overall Draft status
+and actual-device release requirements are unchanged.
+
 Owner-approved 2026-11-01 amendment to Draft 0008 §1.4 and 0009 §5: Linux
 OS lock/sleep monitoring is optional and disclosed when unavailable; manual
 and inactivity locking remain active. Reduced-protection acknowledgement still
@@ -75,7 +79,10 @@ still applies. Plan 0037 (2026-11-02, owner-delegated) adds implementation
 clarifications to 0013 §1.3, §7.1 and §8.3, and the development
 `lan_link` layout to 0004 §2.4. On 2026-11-03 the owner removed remembered
 endpoints (`lan_hint`) from 0013 §9.2: there is no device identity to remember
-them for.
+them for. Plan 0038 (2026-11-03, owner-delegated) adds the
+address-only receive-window code (0013 §8.5), the initiator's single-link
+rule (§5.1) and the `Want` count bound (§7.4), and specifies the `qvault lan`
+commands and exit code 10 in 0011.
 
 The Android-priority follow-up brings Android and Linux into initial shared-core
 and UI validation, with usable offline apps before the remote server. iOS stays

@@ -22,6 +22,8 @@ use crate::registry::{ErrorCode, LanProfile};
 pub const MESSAGE_MAX: usize = 1_048_576 + 1_024;
 /// Most IDs in one `Want` (0013 §7.4).
 pub const MAX_WANT_IDS: usize = 4096;
+/// Most `Want` messages in one turn: ⌈250,000 / 4,096⌉ (0013 §7.4).
+pub const MAX_WANT_MESSAGES: usize = 62;
 /// Largest manifest part (0013 §7.3).
 pub const MAX_MANIFEST_PART: usize = 1 << 20;
 /// Largest manifest a state may announce (0013 §7.2).
@@ -261,6 +263,166 @@ pub fn pair_th_input(
         Ok(())
     })
     .map_err(bad)
+}
+
+/// `SyncHello` (0013 §5.1): `body ++ [mac]`. It names no link or vault.
+#[derive(Debug)]
+pub struct SyncHello<'a> {
+    /// The raw `lan_profile`, checked by the caller after the shape.
+    pub profile: u64,
+    /// `nonce_I`.
+    pub nonce_i: [u8; 32],
+    /// I's X-Wing encapsulation key (not yet validated).
+    pub ek: &'a [u8; EK_LEN],
+    /// `MAC/1(K_i, canonical(body))`.
+    pub mac: [u8; 32],
+}
+
+impl<'a> SyncHello<'a> {
+    fn fields(a: &mut Encoder, profile: LanProfile, nonce_i: &[u8; 32], ek: &[u8; EK_LEN]) {
+        a.uint(profile.id());
+        a.bytes(nonce_i);
+        a.bytes(ek);
+    }
+
+    /// The canonical body that the tag covers: the first four elements.
+    pub fn body(
+        profile: LanProfile,
+        nonce_i: &[u8; 32],
+        ek: &[u8; EK_LEN],
+    ) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
+        qv_encoding::encode_array(|a| {
+            a.text(Label::Hello.as_str());
+            Self::fields(a, profile, nonce_i, ek);
+            Ok(())
+        })
+        .map_err(bad)
+    }
+
+    /// The complete hello.
+    pub fn encode(
+        profile: LanProfile,
+        nonce_i: &[u8; 32],
+        ek: &[u8; EK_LEN],
+        mac: &[u8; 32],
+    ) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
+        write_message(Label::Hello, HANDSHAKE_FRAME_MAX, |a| {
+            Self::fields(a, profile, nonce_i, ek);
+            a.bytes(mac);
+            Ok(())
+        })
+    }
+
+    /// Decodes the exact shape; use [`crate::message::body_without_last`]
+    /// for the tagged bytes.
+    pub fn decode(bytes: &'a [u8]) -> Result<Self, ProtocolError> {
+        let mut r = MessageReader::open(bytes, Label::Hello)?;
+        let m = Self {
+            profile: r.uint()?,
+            nonce_i: r.bytes_exact()?,
+            ek: exact(&mut r)?,
+            mac: r.bytes_exact()?,
+        };
+        r.finish()?;
+        Ok(m)
+    }
+}
+
+/// `SyncAccept` (0013 §5.2).
+#[derive(Debug)]
+pub struct SyncAccept<'a> {
+    /// `nonce_R`.
+    pub nonce_r: [u8; 32],
+    /// The X-Wing ciphertext.
+    pub ct: &'a [u8; CT_LEN],
+    /// `MAC/1(K_r, canonical([label, H(hello), nonce_R, ct]))`.
+    pub mac: [u8; 32],
+}
+
+impl<'a> SyncAccept<'a> {
+    /// The canonical array that the accept tag covers.
+    pub fn transcript(
+        hello_hash: &[u8; 32],
+        nonce_r: &[u8; 32],
+        ct: &[u8; CT_LEN],
+    ) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
+        qv_encoding::encode_array(|a| {
+            a.text(Label::Accept.as_str());
+            a.bytes(hello_hash);
+            a.bytes(nonce_r);
+            a.bytes(ct);
+            Ok(())
+        })
+        .map_err(bad)
+    }
+
+    /// The complete accept.
+    pub fn encode(
+        nonce_r: &[u8; 32],
+        ct: &[u8; CT_LEN],
+        mac: &[u8; 32],
+    ) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
+        write_message(Label::Accept, HANDSHAKE_FRAME_MAX, |a| {
+            a.bytes(nonce_r);
+            a.bytes(ct);
+            a.bytes(mac);
+            Ok(())
+        })
+    }
+
+    /// Decodes the exact shape.
+    pub fn decode(bytes: &'a [u8]) -> Result<Self, ProtocolError> {
+        let mut r = MessageReader::open(bytes, Label::Accept)?;
+        let m = Self {
+            nonce_r: r.bytes_exact()?,
+            ct: exact(&mut r)?,
+            mac: r.bytes_exact()?,
+        };
+        r.finish()?;
+        Ok(m)
+    }
+}
+
+/// The canonical `["qv/lan-th/v1", H(hello), H(accept)]`; the session `th`
+/// is its hash (0013 §5.2).
+pub fn session_th_input(
+    hello_hash: &[u8; 32],
+    accept_hash: &[u8; 32],
+) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
+    qv_encoding::encode_array(|a| {
+        a.text("qv/lan-th/v1");
+        a.bytes(hello_hash);
+        a.bytes(accept_hash);
+        Ok(())
+    })
+    .map_err(bad)
+}
+
+/// `Confirm` (0013 §5.3): I's first record.
+#[derive(Debug)]
+pub struct Confirm {
+    /// The session transcript hash.
+    pub th: [u8; 32],
+}
+
+impl Confirm {
+    /// Encodes a confirm.
+    pub fn encode(th: &[u8; 32]) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
+        write_message(Label::Confirm, MESSAGE_MAX, |a| {
+            a.bytes(th);
+            Ok(())
+        })
+    }
+
+    /// Decodes the exact shape.
+    pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        let mut r = MessageReader::open(bytes, Label::Confirm)?;
+        let m = Self {
+            th: r.bytes_exact()?,
+        };
+        r.finish()?;
+        Ok(m)
+    }
 }
 
 /// `PairReveal` (0013 §4.5).
@@ -799,6 +961,76 @@ mod tests {
     }
 
     #[test]
+    fn lan_session_messages_round_trip_and_refuse_bad_shapes() {
+        let body = SyncHello::body(LanProfile::V1, &[1; 32], &EK).unwrap();
+        let hello = SyncHello::encode(LanProfile::V1, &[1; 32], &EK, &[2; 32]).unwrap();
+        assert!(hello.len() <= HANDSHAKE_FRAME_MAX);
+        assert_eq!(body_without_last(&hello).unwrap(), body);
+        let h = SyncHello::decode(&hello).unwrap();
+        assert_eq!((h.profile, h.nonce_i, h.mac), (1, [1; 32], [2; 32]));
+        assert_eq!(h.ek, &EK);
+        // The body is exactly the spec's array: label, profile, nonce, ek.
+        let expected = msg("qv/lan-hello/v1", |a| {
+            a.uint(1);
+            a.bytes(&[1; 32]);
+            a.bytes(&EK);
+        });
+        assert_eq!(body.as_slice(), expected.as_slice());
+
+        let accept = SyncAccept::encode(&[3; 32], &CT, &[4; 32]).unwrap();
+        assert!(accept.len() <= HANDSHAKE_FRAME_MAX);
+        let a = SyncAccept::decode(&accept).unwrap();
+        assert_eq!((a.nonce_r, a.ct, a.mac), ([3; 32], &CT, [4; 32]));
+        let t = SyncAccept::transcript(&[5; 32], &[3; 32], &CT).unwrap();
+        let expected = msg("qv/lan-accept/v1", |a| {
+            a.bytes(&[5; 32]);
+            a.bytes(&[3; 32]);
+            a.bytes(&CT);
+        });
+        assert_eq!(t.as_slice(), expected.as_slice());
+        let th = session_th_input(&[6; 32], &[7; 32]).unwrap();
+        let expected = msg("qv/lan-th/v1", |a| {
+            a.bytes(&[6; 32]);
+            a.bytes(&[7; 32]);
+        });
+        assert_eq!(th.as_slice(), expected.as_slice());
+        let c = Confirm::decode(&Confirm::encode(&[8; 32]).unwrap()).unwrap();
+        assert_eq!(c.th, [8; 32]);
+
+        // Wrong labels, arity and lengths.
+        assert!(SyncHello::decode(&accept).is_err());
+        assert!(SyncAccept::decode(&hello).is_err());
+        assert!(PairHello::decode(&hello).is_err());
+        let short_ek = msg("qv/lan-hello/v1", |a| {
+            a.uint(1);
+            a.bytes(&[1; 32]);
+            a.bytes(&EK[..EK_LEN - 1]);
+            a.bytes(&[2; 32]);
+        });
+        assert!(SyncHello::decode(&short_ek).is_err());
+        let short_nonce = msg("qv/lan-hello/v1", |a| {
+            a.uint(1);
+            a.bytes(&[1; 31]);
+            a.bytes(&EK);
+            a.bytes(&[2; 32]);
+        });
+        assert!(SyncHello::decode(&short_nonce).is_err());
+        let extra = msg("qv/lan-confirm/v1", |a| {
+            a.bytes(&[8; 32]);
+            a.uint(0);
+        });
+        assert!(Confirm::decode(&extra).is_err());
+        let short_th = msg("qv/lan-confirm/v1", |a| a.bytes(&[8; 31]));
+        assert!(Confirm::decode(&short_th).is_err());
+        let short_ct = msg("qv/lan-accept/v1", |a| {
+            a.bytes(&[3; 32]);
+            a.bytes(&CT[..CT_LEN - 1]);
+            a.bytes(&[4; 32]);
+        });
+        assert!(SyncAccept::decode(&short_ct).is_err());
+    }
+
+    #[test]
     fn lan_messages_refuse_bad_shapes_and_ranges() {
         let malformed = |r: Result<(), ProtocolError>| assert_eq!(r, Err(ProtocolError::Malformed));
         let hello = |mode: u64| {
@@ -904,6 +1136,9 @@ mod tests {
             let _ = ObjectMsg::decode(&bytes);
             let _ = Done::decode(&bytes);
             let _ = ErrorMsg::peek(&bytes);
+            let _ = SyncHello::decode(&bytes);
+            let _ = SyncAccept::decode(&bytes);
+            let _ = Confirm::decode(&bytes);
         }
     }
 }

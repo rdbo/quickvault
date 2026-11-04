@@ -23,6 +23,9 @@ pub mod clipboard;
 pub mod files;
 #[cfg(target_os = "linux")]
 pub mod linux;
+/// Local addresses for a LAN window's endpoints (0013 §8.5), std only.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub mod net;
 
 /// Cancellation is sampled between bounded units of OS work; contains no secrets.
 pub type Cancellation = Arc<dyn Fn() -> bool + Send + Sync>;

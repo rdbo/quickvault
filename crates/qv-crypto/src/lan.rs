@@ -603,6 +603,85 @@ impl core::fmt::Debug for LinkKey {
     }
 }
 
+impl LinkKey {
+    /// `K_i` and `K_r` of this link (0013 §5.1): `HKDF(link_key, empty,
+    /// ["qv/lan-auth/v1", "i"|"r"])`.
+    pub fn session_auth(&self) -> Result<SessionAuth, CryptoError> {
+        let key = |role: &str| {
+            derive_secret(
+                self.0.expose_secret(),
+                Some(&[]),
+                &cbor_array(|a| {
+                    a.text("qv/lan-auth/v1");
+                    a.text(role);
+                })?,
+            )
+        };
+        Ok(SessionAuth {
+            i: key("i")?,
+            r: key("r")?,
+        })
+    }
+}
+
+/// The session authentication keys of one link (0013 §5.1–5.2): `K_i` MACs
+/// the initiator's hello, `K_r` the responder's accept.
+pub struct SessionAuth {
+    i: SecretArray<32>,
+    r: SecretArray<32>,
+}
+
+impl SessionAuth {
+    /// `MAC/1(K_i, canonical(body))` of a sync hello.
+    pub fn hello_mac(&self, body: &[u8]) -> Result<MacTag, CryptoError> {
+        mac1(self.i.expose_secret(), body)
+    }
+
+    /// Verifies a sync hello tag in constant time ([`CryptoError::Integrity`]).
+    pub fn verify_hello(&self, body: &[u8], tag: &MacTag) -> Result<(), CryptoError> {
+        mac1_verify(self.i.expose_secret(), body, tag)
+    }
+
+    /// `MAC/1(K_r, canonical(["qv/lan-accept/v1", H(hello), nonce_R, ct]))`;
+    /// `transcript` is that canonical array.
+    pub fn accept_mac(&self, transcript: &[u8]) -> Result<MacTag, CryptoError> {
+        mac1(self.r.expose_secret(), transcript)
+    }
+
+    /// Verifies a sync accept tag in constant time ([`CryptoError::Integrity`]).
+    pub fn verify_accept(&self, transcript: &[u8], tag: &MacTag) -> Result<(), CryptoError> {
+        mac1_verify(self.r.expose_secret(), transcript, tag)
+    }
+}
+
+impl core::fmt::Debug for SessionAuth {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("SessionAuth(<redacted>)")
+    }
+}
+
+/// `(k_i2r, k_r2i)`, each `HKDF(ss ‖ link_key, th, ["qv/lan-session/v1",
+/// "i2r"|"r2i"])` (0013 §5.2).
+pub fn session_record_keys(
+    ss: &XWingSharedSecret,
+    link: &LinkKey,
+    th: &[u8; 32],
+) -> Result<(RecordKey, RecordKey), CryptoError> {
+    let key = |direction: &str| -> Result<RecordKey, CryptoError> {
+        let info = cbor_array(|a| {
+            a.text("qv/lan-session/v1");
+            a.text(direction);
+        })?;
+        Ok(RecordKey::from_secret(derive_concat::<64>(
+            ss.expose_secret(),
+            link.0.expose_secret(),
+            th,
+            &info,
+        )?))
+    };
+    Ok((key("i2r")?, key("r2i")?))
+}
+
 /// A decrypted link row (0013 §9.1).
 pub struct LinkRow {
     /// The link key.
@@ -720,8 +799,19 @@ pub fn open_link_row(
 /// `test-vectors` feature is enabled only by dev-dependencies.
 #[cfg(any(test, feature = "test-vectors"))]
 pub mod vectors {
-    use super::{LinkKey, LinkRoot, PairingKeys, RecordKey};
+    use super::{LinkKey, LinkRoot, PairingKeys, RecordKey, SessionAuth};
 
+    /// `K_i` and `K_r`.
+    pub fn session_auth(k: &SessionAuth) -> ([u8; 32], [u8; 32]) {
+        (*k.i.expose_secret(), *k.r.expose_secret())
+    }
+    /// A link key with chosen bytes, for the session vectors.
+    pub fn link_key_from(bytes: [u8; 32]) -> Result<LinkKey, crate::CryptoError> {
+        Ok(LinkKey(crate::memory::SecretArray::try_init(|out| {
+            *out = bytes;
+            Ok::<(), crate::CryptoError>(())
+        })?))
+    }
     /// `K_hello` and `K_accept`.
     pub fn pairing_mac_keys(k: &PairingKeys) -> ([u8; 32], [u8; 32]) {
         (*k.hello.expose_secret(), *k.accept.expose_secret())
@@ -1084,6 +1174,57 @@ mod tests {
             );
         }
         assert!(seal_link_row(&local, p, VAULT, GEN, &LINK, &link, &"é".repeat(32), 0).is_ok());
+    }
+
+    fn link(byte: u8) -> LinkKey {
+        vectors::link_key_from([byte; 32]).unwrap()
+    }
+
+    #[test]
+    fn lan_session_keys_match_an_independent_construction() {
+        let l = link(0x66);
+        let auth = l.session_auth().unwrap();
+        let (ki, kr) = vectors::session_auth(&auth);
+        let info = |role: &str| arr(&[t("qv/lan-auth/v1"), t(role)]);
+        assert_eq!(ki.to_vec(), hkdf(&[0x66; 32], &[], &info("i"), 32));
+        assert_eq!(kr.to_vec(), hkdf(&[0x66; 32], &[], &info("r"), 32));
+        // The hello tag is K_i's, the accept tag K_r's; neither verifies
+        // under the other (no reflection).
+        let body = b"hello body";
+        let tag = auth.hello_mac(body).unwrap();
+        assert_eq!(tag.as_bytes(), &mac(&ki, body));
+        auth.verify_hello(body, &tag).unwrap();
+        assert_eq!(
+            auth.verify_accept(body, &tag).unwrap_err(),
+            CryptoError::Integrity
+        );
+        let accept = auth.accept_mac(body).unwrap();
+        assert_eq!(accept.as_bytes(), &mac(&kr, body));
+        assert!(auth.verify_hello(body, &accept).is_err());
+        // Another link's keys refuse both.
+        let other = link(0x67).session_auth().unwrap();
+        assert!(other.verify_hello(body, &tag).is_err());
+        assert!(other.verify_accept(body, &accept).is_err());
+
+        let (i2r, r2i) = session_record_keys(&ss(0x99), &l, &TH).unwrap();
+        let ikm = [[0x99; 32], [0x66; 32]].concat();
+        let info = |d: &str| arr(&[t("qv/lan-session/v1"), t(d)]);
+        assert_eq!(
+            vectors::record_key(&i2r).to_vec(),
+            hkdf(&ikm, &TH, &info("i2r"), 32)
+        );
+        assert_eq!(
+            vectors::record_key(&r2i).to_vec(),
+            hkdf(&ikm, &TH, &info("r2i"), 32)
+        );
+        assert_ne!(vectors::record_key(&i2r), vectors::record_key(&r2i));
+        // Each input changes both keys.
+        for (s, k, th) in [(0x98, 0x66, TH), (0x99, 0x67, TH), (0x99, 0x66, [9; 32])] {
+            let (a, b) = session_record_keys(&ss(s), &link(k), &th).unwrap();
+            assert_ne!(vectors::record_key(&a), vectors::record_key(&i2r));
+            assert_ne!(vectors::record_key(&b), vectors::record_key(&r2i));
+        }
+        assert_eq!(format!("{auth:?}"), "SessionAuth(<redacted>)");
     }
 
     #[test]

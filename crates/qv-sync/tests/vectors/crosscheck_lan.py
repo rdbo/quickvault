@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Independent cross-check of qv-dev-lan-pairing.txt (spec 0013; plan 0037).
+"""Independent cross-check of qv-dev-lan-pairing.txt (spec 0013; plans 0037, 0038).
 
 Python 3 standard library only (hashlib, hmac). Run by hand, not in CI:
 
     python3 -I crates/qv-sync/tests/vectors/crosscheck_lan.py
 
 From the vector inputs (P, nonces, VK, IDs, X-Wing ek/ct/ss), this script
-recomputes every pairing value with its own canonical CBOR and HKDF, then
+recomputes every pairing and session-handshake value, and the address QR,
+with its own canonical CBOR and HKDF, then
 compares it with the file. It cannot check the *_record values (XChaCha20-
 Poly1305 is not in the stdlib) or X-Wing itself (draft-11 KATs cover it).
 It exits non-zero on any mismatch.
@@ -128,6 +129,40 @@ def main():
         reveal=arr(t("qv/lan-pair-reveal/v1"), b(nb)),
         grant=arr(t("qv/lan-pair-grant/v1"), b(vault), u(gen), b(vk), b(link_id)),
         error_integrity=arr(t("qv/lan-error/v1"), u(4)),
+    )
+
+    # The session handshake (0013 §5) with the same X-Wing vector.
+    lk, ni, nr = v["session_link_key"], v["nonce_i"], v["nonce_r"]
+    k_i = hkdf(lk, b"", arr(t("qv/lan-auth/v1"), t("i")))
+    k_r = hkdf(lk, b"", arr(t("qv/lan-auth/v1"), t("r")))
+    sfields = [t("qv/lan-hello/v1"), u(1), b(ni), b(ek)]
+    sbody = arr(*sfields)
+    shello = arr(*sfields, b(mac1(k_i, sbody)))
+    shh = sha256(shello)
+    stranscript = arr(t("qv/lan-accept/v1"), b(shh), b(nr), b(ct))
+    saccept = arr(t("qv/lan-accept/v1"), b(nr), b(ct), b(mac1(k_r, stranscript)))
+    sah = sha256(saccept)
+    sth = sha256(arr(t("qv/lan-th/v1"), b(shh), b(sah)))
+    want.update(
+        k_i=k_i,
+        k_r=k_r,
+        sync_hello_body=sbody,
+        sync_hello=shello,
+        sync_hello_hash=shh,
+        sync_accept_transcript=stranscript,
+        sync_accept=saccept,
+        sync_accept_hash=sah,
+        session_th=sth,
+        k_i2r=hkdf(ss + lk, sth, arr(t("qv/lan-session/v1"), t("i2r"))),
+        k_r2i=hkdf(ss + lk, sth, arr(t("qv/lan-session/v1"), t("r2i"))),
+        confirm=arr(t("qv/lan-confirm/v1"), b(sth)),
+    )
+    # The address-only receive-window code (0013 §8.5).
+    v6 = bytes.fromhex("20010db8000000000000000000000010")
+    want["addr_qr"] = arr(
+        t("qv/lan-addr-qr/v1"),
+        u(1),
+        arr(arr(b(bytes([192, 0, 2, 10])), u(7777)), arr(b(v6), u(7777))),
     )
     bad = [k for k, x in want.items() if v.get(k) != x]
     # Record lengths: plaintext + 16-byte tag (0013 §6).

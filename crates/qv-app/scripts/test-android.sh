@@ -23,8 +23,9 @@ devices = subprocess.check_output([adb, 'devices'], text=True, timeout=10)
 rows = [row.split() for row in devices.splitlines()[1:] if row.strip()]
 if len(rows) != 1 or rows[0][1] != 'device':
     sys.exit('Exactly one authorized test device is required.')
-for name, package in [('quickvault-debug.apk', 'org.quickvault.app'),
-                      ('quickvault-tests.apk', 'org.quickvault.app.test')]:
+variant = 'quickvault-validation' if os.environ.get('QV_APP_DEVICE_VALIDATION') == '1' else 'quickvault'
+for name, package in [(variant + '-debug.apk', 'org.quickvault.app'),
+                      (variant + '-tests.apk', 'org.quickvault.app.test')]:
     apk = app / 'dist' / name
     if not apk.is_file():
         sys.exit('Build the app and instrumentation APKs first.')
@@ -42,11 +43,21 @@ for name, package in [('quickvault-debug.apk', 'org.quickvault.app'),
     with (logs / (name + '.install.log')).open('w') as output:
         subprocess.run([adb, 'install', '-r', str(apk)], stdout=output,
                        stderr=subprocess.STDOUT, timeout=90, check=True)
+test_class = os.environ.get('QV_ANDROID_TEST_CLASS', 'org.quickvault.app.PlatformTest')
+if test_class not in ('org.quickvault.app.PlatformTest', 'org.quickvault.app.QrTest'):
+    sys.exit('Unsupported explicit instrumentation class.')
+test_args = []
+for option, argument in [('QV_ANDROID_QR_CAMERA', 'qv_camera'), ('QV_ANDROID_QR_OPTICS', 'qv_optics')]:
+    if os.environ.get(option) != '1':
+        continue
+    if test_class != 'org.quickvault.app.QrTest' or os.environ.get('QV_APP_DEVICE_VALIDATION') != '1':
+        sys.exit('Live camera checks require explicit QrTest and validation packaging.')
+    test_args.extend(['-e', argument, 'true'])
 log = logs / 'instrumentation.log'
 with log.open('w') as output:
     runner = subprocess.Popen([
         adb, 'shell', 'am', 'instrument', '-w', '-e', 'class',
-        'org.quickvault.app.PlatformTest',
+        test_class, *test_args,
         'org.quickvault.app.test/android.test.InstrumentationTestRunner',
     ], stdout=output, stderr=subprocess.STDOUT)
     try:
@@ -54,7 +65,7 @@ with log.open('w') as output:
         # Explicit foreground launch handles OEM background-launch restrictions.
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline and runner.poll() is None:
-            if 'PlatformTest:' in log.read_text():
+            if test_class.rsplit('.', 1)[-1] + ':' in log.read_text():
                 break
             time.sleep(.1)
         if runner.poll() is None:

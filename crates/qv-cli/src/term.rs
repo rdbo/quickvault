@@ -56,6 +56,8 @@ impl core::fmt::Debug for Typed {
 pub(crate) struct Tty<'a> {
     input: BorrowedFd<'a>,
     output: BorrowedFd<'a>,
+    deadline: Option<std::time::Instant>,
+    cancelled: Option<&'a (dyn Fn() -> bool + Sync)>,
 }
 
 /// Restores the saved terminal state when dropped.
@@ -96,6 +98,8 @@ pub(crate) fn stdio_tty() -> Result<Tty<'static>, CliError> {
     Ok(Tty {
         input: rustix::stdio::stdin(),
         output: rustix::stdio::stderr(),
+        deadline: None,
+        cancelled: None,
     })
 }
 
@@ -107,7 +111,31 @@ enum Key {
 impl<'a> Tty<'a> {
     #[cfg(test)]
     pub(crate) fn new(input: BorrowedFd<'a>, output: BorrowedFd<'a>) -> Self {
-        Self { input, output }
+        Self {
+            input,
+            output,
+            deadline: None,
+            cancelled: None,
+        }
+    }
+
+    /// Bound prompts by the lifetime of their pairing window.
+    pub(crate) fn until(mut self, deadline: std::time::Instant) -> Self {
+        self.deadline = Some(deadline);
+        self
+    }
+
+    /// Frontend callback waits must also end when their session locks.
+    pub(crate) fn with_cancel<'b>(self, cancelled: &'b (dyn Fn() -> bool + Sync)) -> Tty<'b>
+    where
+        'a: 'b,
+    {
+        Tty {
+            input: self.input,
+            output: self.output,
+            deadline: self.deadline,
+            cancelled: Some(cancelled),
+        }
     }
 
     fn raw(&self) -> Result<RawGuard<'a>, CliError> {
@@ -143,7 +171,7 @@ impl<'a> Tty<'a> {
     fn key(&self) -> Result<Key, CliError> {
         let mut b = Zeroizing::new([0u8; 1]);
         loop {
-            readable(self.input)?;
+            readable_until(self.input, self.deadline, self.cancelled)?;
             match rustix::io::read(self.input, &mut b[..]) {
                 Ok(0) => return Ok(Key::Eof),
                 Ok(_) => return Ok(Key::Byte(b[0])),
@@ -290,8 +318,21 @@ impl<'a> Tty<'a> {
 
 /// Wait for data while remaining responsive to cancellation even on a pipe.
 fn readable(fd: BorrowedFd<'_>) -> Result<(), CliError> {
+    readable_until(fd, None, None)
+}
+
+fn readable_until(
+    fd: BorrowedFd<'_>,
+    deadline: Option<std::time::Instant>,
+    cancelled: Option<&(dyn Fn() -> bool + Sync)>,
+) -> Result<(), CliError> {
     loop {
         crate::signals::check()?;
+        if deadline.is_some_and(|t| std::time::Instant::now() >= t)
+            || cancelled.is_some_and(|c| c())
+        {
+            return Err(CliError::cancelled());
+        }
         let mut fds = [rustix::event::PollFd::new(
             &fd,
             rustix::event::PollFlags::IN,
@@ -512,6 +553,37 @@ pub(crate) mod tests {
             assert_eq!(r.unwrap_err(), CliError::cancelled());
             assert!(pty.echo_on());
         }
+    }
+
+    #[test]
+    fn term_pairing_deadline_ends_an_unanswered_prompt_and_restores_terminal() {
+        let pty = Pty::new();
+        let start = std::time::Instant::now();
+        let result = pty
+            .tty()
+            .until(start + Duration::from_millis(150))
+            .confirm("Pair?");
+        assert_eq!(result.unwrap_err(), CliError::cancelled());
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(pty.echo_on());
+    }
+
+    #[test]
+    fn term_pairing_session_cancel_ends_prompt_and_restores_terminal() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let pty = Pty::new();
+        let stopped = AtomicBool::new(false);
+        let result = std::thread::scope(|s| {
+            s.spawn(|| {
+                std::thread::sleep(Duration::from_millis(150));
+                stopped.store(true, Ordering::SeqCst);
+            });
+            pty.tty()
+                .with_cancel(&|| stopped.load(Ordering::SeqCst))
+                .confirm("Pair?")
+        });
+        assert_eq!(result.unwrap_err(), CliError::cancelled());
+        assert!(pty.echo_on());
     }
 
     #[test]

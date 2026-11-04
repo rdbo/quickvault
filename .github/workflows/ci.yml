@@ -146,3 +146,5 @@ jobs:
         run: cargo +"$NIGHTLY" fuzz run lan_message -- -max_total_time=60 -max_len=65536
       - name: Fuzz lan_oob (60 s)
         run: cargo +"$NIGHTLY" fuzz run lan_oob -- -max_total_time=60 -max_len=1100
+      - name: Fuzz lan_qr (60 s)
+        run: cargo +"$NIGHTLY" fuzz run lan_qr -- -max_total_time=60 -max_len=65536

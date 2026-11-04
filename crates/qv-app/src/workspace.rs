@@ -71,6 +71,8 @@ pub enum Screen {
     Snapshots,
     /// Archive export and merge.
     Archives,
+    /// LAN links, pairing and sync (0013).
+    Devices,
     /// Settings.
     Settings(Pane),
     /// Choose a login for the bound autofill request.
@@ -96,6 +98,7 @@ impl std::fmt::Debug for Screen {
             Self::Generator => "Generator",
             Self::Snapshots => "Snapshots",
             Self::Archives => "Archives",
+            Self::Devices => "Devices",
             Self::Settings(_) => "Settings",
             Self::Autofill => "Autofill",
         })
@@ -171,6 +174,12 @@ pub enum WsField {
     AttachName,
     /// A typed confirmation word (key rotation).
     Confirmation,
+    /// A typed LAN pairing code (protected: it carries the pairing secret).
+    LanCode,
+    /// The other device's address, `ip:port`.
+    LanEndpoint,
+    /// This device's name for the other device (1–64 bytes).
+    LanLabel,
 }
 impl WsField {
     fn limit(self, multiline: bool) -> usize {
@@ -337,6 +346,16 @@ pub enum WsAction {
     BeginRotation,
     /// Verify integrity.
     Verify,
+    /// Open a pairing window (0013 §4).
+    LanPair,
+    /// Open a receive window (0013 §8).
+    LanReceive,
+    /// Sync with the link of this ID against the typed endpoint.
+    LanSync(String),
+    /// Join a pairing window with this vault (link mode).
+    LanLink,
+    /// Remove the link of this ID (after confirmation).
+    LanRemove(String),
     /// Answer the pending confirmation.
     Answer(bool),
     /// Dismiss the current notice or report.
@@ -373,6 +392,8 @@ pub enum ConfirmKind {
     ReducedQuick,
     /// Link an OS-verified app identity to an entry.
     LinkApp,
+    /// Remove a LAN link.
+    RemoveLink,
 }
 struct Pending {
     kind: ConfirmKind,
@@ -474,6 +495,8 @@ pub struct Workspace {
     pub(crate) screen: Screen,
     back: Vec<Screen>,
     pub(crate) inputs: BTreeMap<WsField, SecretBytes>,
+    /// Scanned address-only hints, retained only for this form.
+    pub(crate) lan_endpoints: Vec<std::net::SocketAddr>,
     pub(crate) entry_form: Option<EntryForm>,
     pub(crate) group_form: Option<GroupForm>,
     pub(crate) settings: Option<SettingsDraft>,
@@ -559,6 +582,7 @@ impl Workspace {
             screen: Screen::Browse(None),
             back: Vec::new(),
             inputs: BTreeMap::new(),
+            lan_endpoints: Vec::new(),
             entry_form: None,
             group_form: None,
             settings: None,
@@ -599,6 +623,7 @@ impl Workspace {
     }
     fn clear_transient(&mut self) {
         self.inputs.clear();
+        self.lan_endpoints.clear();
         self.generated = None;
         self.weak_until = None;
         self.weak_accepted = false;
@@ -797,6 +822,9 @@ impl Controller {
         let mut s = self.state();
         let current = s.epoch == epoch.0 && s.phase == Phase::Unlocked && !busy;
         if current && let Some(ws) = s.workspace.as_mut() {
+            if matches!(field, WsField::LanEndpoint | WsField::LanCode) {
+                ws.lan_endpoints.clear();
+            }
             if matches!(
                 field,
                 WsField::NewPassword | WsField::Repeat | WsField::Confirmation
@@ -942,6 +970,7 @@ impl Controller {
                 Some(ConfirmKind::ReducedQuick)
             }
             WsAction::AutofillLink(_) => Some(ConfirmKind::LinkApp),
+            WsAction::LanRemove(_) => Some(ConfirmKind::RemoveLink),
             WsAction::EmptyTrash => Some(ConfirmKind::EmptyTrash),
             WsAction::PurgeExpired => {
                 let anomaly = self

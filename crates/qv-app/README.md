@@ -183,3 +183,45 @@ inactivity locking work without it; Android requires its native lifecycle
 monitoring and secure window. The maintained renderer
 integration and dependency patch scope are documented in
 [third-party](../../third-party/README.md).
+
+
+LAN QR codes (plan 0039) are displayed by the shared Devices screen for pairing
+and Receive. They carry the exact binary 0013 payload, with a four-module quiet
+zone; the typed code/address fallback remains available. Scanning only fills
+Join, Link or Sync; the user must still explicitly connect and approve the SAS.
+A manually edited endpoint supersedes scanned address hints. Lock/navigation
+clear pending scanned secrets and hints, and each LAN action consumes them.
+
+Android uses an in-app Camera2 preview, asks CAMERA permission only at Scan,
+keeps one bounded luminance frame in memory and closes on cancel, timeout,
+lock/pause or destruction. No captured image file or external camera/scanner
+app is used. Camera/autofocus hardware are optional. Rust encoder scratch,
+modules and retained payloads are protected; exposed decoder/JVM buffers wipe.
+Camera/provider/JVM/decoder stack and renderer copies still have best-effort
+cleanup limits (0008); do not claim complete erasure.
+
+The ordinary APK's QR camera gate remains closed pending physical validation.
+Build a marked validation APK with `QV_APP_DEVICE_VALIDATION=1`; then select
+that same variant when running its focused adapter instrumentation:
+
+```sh
+QV_APP_DEVICE_VALIDATION=1 QV_ANDROID_TEST_CLASS=org.quickvault.app.QrTest sh crates/qv-app/scripts/test-android.sh
+```
+
+Add `QV_ANDROID_QR_CAMERA=1` for the explicit live-camera adapter check:
+grant permission on the phone when requested, then it checks bounded sensor
+frames, stale requests, cancellation, pause cleanup and the 30-second timeout.
+Only its test window stays awake; it saves no frame. This mode requires the
+marked validation package. `QV_ANDROID_QR_OPTICS=1` instead checks the shared
+Join Scan button through the camera, JNI, Rust decoder and core form insertion;
+aim the phone at a known synthetic pairing QR displayed on Linux. It checks
+that no pairing payload prefills DOM controls and that navigation clears the
+form. Neither mode pairs a real peer or establishes offline sync evidence.
+
+The runner supports just the named PlatformTest/QrTest classes and verifies
+installed hashes. It does not clear app data. Physical camera permission,
+optics/lifecycle and the deferred phase 2.10 offline-LAN test are the final
+combined step in [DEVICE-VALIDATION.md](../../plans/0039-lan-qr/DEVICE-VALIDATION.md).
+Validation has resumed on the connected phone; results and remaining rows
+are recorded separately from cross-build and synthetic evidence. [DEPENDENCIES.md](../../plans/0039-lan-qr/DEPENDENCIES.md)
+records the new library pins, targeted source inspection and unaudited debt.

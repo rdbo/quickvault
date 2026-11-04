@@ -7,7 +7,75 @@ Dates are ISO 8601. Newest first within each section.
 
 ## Unreleased
 
+### Changed
+
+- 2026-11-03: Android QR device validation uses a bounded MIUI-compatible
+  activity launcher. Explicit validation-only modes exercise live camera
+  frames/lifecycle/timeout and optical Join form filling. The native camera
+  and optical Join checks pass on the connected Android 15 phone; remaining
+  live pairing and offline two-device evidence is tracked in plan 0039.
+
+- 2026-11-03: Owner moved remaining attended phase 2.10 testing to the end of
+  QR phase 2.10b (plan 0039), authorizing implementation now. Device evidence
+  and release gates remain pending. Added the Android QR camera profile in
+  0009 §1.7.
+
+- 2026-11-03: Repair phase 2.10 review findings (plan 0038): active LAN
+  transfers and CLI pairing prompts respect window expiry; app questions and
+  initiated operations retain inactivity locking. Local acceptance reports
+  survive a subsequent lock, and app results retain completion errors beside
+  committed outcomes. Fresh-context review now approves the repairs; the
+  WebKit flow completes pairing through the real approval control and checks
+  the joining core peer. The pinned-tool debug APK builds. The attended
+  offline Linux/phone test remains pending before phase 2.10b.
+
 ### Added
+
+- 2026-11-03: LAN QR display and Android camera scanning (roadmap 2.10b,
+  plan 0039). The shared app shows binary pairing and address-only Receive
+  codes. Scans fill the appropriate current form through strict core
+  validation; Join/Link/Sync and comparison-code approval remain explicit.
+  Android Camera2 keeps a bounded preview in memory, with action-only camera
+  permission and cleanup on cancellation/expiry/lock/pause. Manual entry works
+  without a camera; ordinary packages keep scanning gated until device
+  validation, with an explicitly marked validation APK available. Remaining
+  2.10 and QR device testing is combined at the end of 0039, owner-deferred.
+  Added decoder fuzzing, form/cleanup regressions, synthetic QR pairing/link/
+  sync coverage, Android adapter instrumentation and package checks. New exact
+  QR dependency pins and their unaudited supply-chain debt are recorded.
+
+- 2026-11-03: LAN sync (roadmap 2.10, plan 0038; spec 0013 §5, §7, §8).
+  - Linked devices sync directly on the local network, with no account,
+    server or Internet access. One device opens a receive window; the other
+    starts a round with the link the user chose. Both merge the other's
+    state through the archive acceptance path and commit locally. Local
+    acceptance, conflicts and the other device's receipt are reported
+    separately. A round with nothing new commits nothing, and retries are
+    idempotent. Link-mode pairing now ends with one sync round.
+  - **CLI:** `qvault lan pair|join|receive|sync|links|unlink` (0011 *LAN
+    command contracts*). The pairing code is typed at a hidden prompt and
+    shown only on the alternate screen. New exit code 10: LAN peer
+    unavailable.
+  - **App:** a Devices screen (links, pairing, link an existing copy,
+    receive, sync, remove) and a Join mode on the locked screen for new
+    devices. Comparison codes, the vault name and the master password are
+    asked while the operation waits. Cancel and lock end every window and
+    prompt.
+  - This device's addresses come from route probes, with no new
+    dependency. DNS-SD discovery stays deferred. Rendering and camera
+    scanning of the QR codes move to roadmap 2.10b; until then the code and
+    address are typed.
+  - Spec amendments: 0013 §8.5 (address-only receive-window code), §5.1
+    (one link per attempt), §7.4 (`Want` bounds); 0011 LAN commands and
+    exit code 10.
+  - **Fixed during the phase:** a cancel or lock took effect only while
+    socket I/O blocked, so a fast round could finish after it. It now
+    applies before every frame.
+  - Development vectors cover the session handshake and the address code.
+    The fuzz targets cover the new decoders. No independent protocol review
+    yet (D12); no LAN release.
+  - The review of phase 2.9 (plan 0037) made new-device join apply the
+    platform and anchor-location checks of vault creation before pairing.
 
 - 2026-11-02: LAN pairing (roadmap 2.9, plan 0037; spec 0013 §4, §8–10, §12).
   - An unlocked vault can open a time-limited pairing window that shows a

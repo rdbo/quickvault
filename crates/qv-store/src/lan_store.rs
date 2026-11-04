@@ -363,7 +363,21 @@ impl crate::UnlockedVault {
         id: qv_model::ObjectId,
     ) -> Result<Vec<u8>, StoreError> {
         let (profile, length, sha) = *state.refs.get(&id).ok_or(StoreError::InvalidEdit)?;
+        self.local_envelope(id, profile, length, &sha)
+    }
+
+    /// The archive-format envelope of this vault's object row `id`, checked
+    /// against the expected profile, length and SHA-256 (Integrity). A
+    /// missing row is [`StoreError::NotFound`].
+    pub(crate) fn local_envelope(
+        &self,
+        id: qv_model::ObjectId,
+        profile: StoredDataProfile,
+        length: u64,
+        sha: &[u8; 32],
+    ) -> Result<Vec<u8>, StoreError> {
         let generation = self.file.header.key_generation;
+        self.file.budget.reset();
         let mut reader = crate::schema::ObjectReader::new(&self.file.conn)?;
         if reader.meta(generation, &id.to_bytes())?.is_none() {
             return Err(StoreError::NotFound);
@@ -371,7 +385,7 @@ impl crate::UnlockedVault {
         let (stored_profile, nonce, ciphertext) =
             reader.read(generation, &id.to_bytes(), length)?;
         if stored_profile != profile.id()
-            || object_hash(ObjectHashProfile::V1, &ciphertext).0 != sha
+            || object_hash(ObjectHashProfile::V1, &ciphertext).0 != *sha
         {
             return Err(StoreError::Integrity);
         }

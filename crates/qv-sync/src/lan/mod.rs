@@ -11,37 +11,54 @@
 //!   detection (§8.3), the time limit and cancellation.
 //! - [`join_new_device`] and [`join_link`] (the joining device B): candidate
 //!   endpoints tried one at a time until one authenticates (§3.3).
-//! - `exchange`: the new-device exchange (§4.7, §7, §10). A serves its state;
-//!   B stages everything and verifies it before `Done`.
+//! - `exchange`: the exchange (§7) between two holders of the vault, and the
+//!   new-device form (§4.7, §10). Each side stages the peer's state and
+//!   verifies it completely before merging and committing.
+//! - `session`: the pure session-handshake computations (§5).
+//! - [`ReceiveWindow`] (the responder) and [`sync`] (the initiator): sync
+//!   rounds between linked devices (§5, §7, §8).
+//! - `window`: the listener and acceptor shared by both windows.
 //!
 //! **Trust.** Endpoints are hints (§3.1). Nothing is sent before the hello
 //! MAC verifies, and nothing is decapsulated before the accept MAC verifies.
 //! After the pairing keys exist, a local failure sends one error record; a
 //! frame-level failure only closes. Every secret lives in a `qv_crypto`
 //! protected container and is dropped (zeroized) on abort. Discovery (DNS-SD)
-//! and sync sessions arrive in phase 2.10; until then windows run with
-//! discovery off.
+//! is deferred (owner decision 2026-11-03); windows run with discovery off.
 
 mod approver;
 mod endpoint;
 mod exchange;
+mod initiator;
 mod joiner;
+mod qr;
+mod receiver;
+pub(crate) mod session;
 pub(crate) mod steps;
 mod transport;
+mod window;
 
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use qv_protocol::registry::ErrorCode;
 use qv_store::StoreError;
 
-pub use approver::{Approved, ApproverContext, ApproverVault, Confirm, PairingWindow};
-pub use endpoint::{EndpointPolicy, ListenScope};
-pub use exchange::grant_plaintext;
+pub use approver::{Approved, ApproverContext, ApproverVault, Confirm, PairingWindow, Sealer};
+pub use endpoint::{EndpointPolicy, ListenScope, parse_endpoint};
+pub use exchange::{Accepted, ExchangeVault, Role, RoundReport, grant_plaintext};
+pub use initiator::sync;
 pub use joiner::{
-    JoinCode, JoinedNewDevice, JoinerContext, JoinerUi, JoinerVault, join_link, join_new_device,
+    JoinCode, JoinedLink, JoinedNewDevice, JoinerContext, JoinerUi, JoinerVault, join_link,
+    join_new_device,
 };
+pub use qr::{LanQrInfo, LanQrKind, inspect_lan_qr};
 pub use qv_crypto::lan::Sas;
 pub use qv_protocol::lan::JoinMode;
+pub use qv_protocol::lan::Outcome;
+pub use receiver::{
+    RECEIVE_WINDOW_DEFAULT, RECEIVE_WINDOW_MAX, ReceiveWindow, ResponderVault, WindowEnd,
+};
 
 /// Why a LAN pairing failed. Carries no data (0008 §1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -147,8 +164,10 @@ impl LanError {
         })
     }
 
-    /// A staging or serving failure on received data.
-    pub(crate) fn from_staging(e: StoreError) -> Self {
+    /// A staging or verification failure on received data: integrity,
+    /// unsupported and budget failures keep their wire codes; an ID out of
+    /// order or unrequested is a protocol error.
+    pub fn from_staging(e: StoreError) -> Self {
         match e {
             StoreError::Integrity => Self::Integrity,
             StoreError::Unsupported => Self::Unsupported,
@@ -209,6 +228,21 @@ impl LanTimeouts {
 
 /// The longest pairing window (0013 §8.2).
 pub const PAIRING_WINDOW_MAX: Duration = Duration::from_secs(600);
+
+/// Most candidate endpoints tried per action (0013 §3.3).
+const MAX_CANDIDATES: usize = 16;
+
+/// The endpoints to try, in order: deduplicated, at most 16, and filtered by
+/// `policy` (0013 §1.4, §3.3).
+pub(crate) fn candidates(endpoints: &[SocketAddr], policy: EndpointPolicy) -> Vec<SocketAddr> {
+    let mut out: Vec<SocketAddr> = Vec::new();
+    for a in endpoints {
+        if policy.accepts(a) && !out.contains(a) && out.len() < MAX_CANDIDATES {
+            out.push(*a);
+        }
+    }
+    out
+}
 
 #[cfg(test)]
 mod tests;

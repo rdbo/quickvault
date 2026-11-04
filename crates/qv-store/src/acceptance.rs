@@ -2,6 +2,7 @@
 
 //! Transaction-local candidate validation and atomic incoming acceptance.
 
+use crate::incoming::StagedArchive;
 use crate::vault::{self, UnlockedVault};
 use crate::{IncomingRead, IncomingSource, Manifest, StoreError, VerifiedIncoming};
 use crate::{
@@ -40,6 +41,40 @@ impl UnlockedVault {
         ) -> Result<Manifest, StoreError>,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<bool, StoreError> {
+        let receipt = (incoming.path.expose_secret(), *incoming.digest());
+        self.accept_staged(&mut incoming.archive, Some(receipt), build, cancelled)
+    }
+
+    /// Atomically accept a fully authenticated LAN staging (0013 §7.6)
+    /// through the same transaction as [`Self::accept_incoming`], without a
+    /// filename receipt. Returns false, committing nothing, when the built
+    /// candidate equals the current manifest (the peer had nothing new).
+    pub fn accept_lan(
+        &mut self,
+        staging: &mut crate::VerifiedLanStaging,
+        build: &mut impl FnMut(
+            &Manifest,
+            &Manifest,
+            &mut IncomingRead<'_>,
+        ) -> Result<Manifest, StoreError>,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<bool, StoreError> {
+        self.accept_staged(&mut staging.archive, None, build, cancelled)
+    }
+
+    /// The shared acceptance body. With a receipt, an identical redelivery
+    /// returns false; without one, an unchanged candidate does.
+    fn accept_staged(
+        &mut self,
+        incoming: &mut StagedArchive,
+        receipt: Option<(&[u8], [u8; 32])>,
+        build: &mut impl FnMut(
+            &Manifest,
+            &Manifest,
+            &mut IncomingRead<'_>,
+        ) -> Result<Manifest, StoreError>,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<bool, StoreError> {
         cancel(cancelled)?;
         if incoming.header().vault_id() != self.header().vault_id
             || incoming.header().key_generation() != self.header().key_generation
@@ -49,17 +84,23 @@ impl UnlockedVault {
         let mut write = self.write()?;
         let header = write.vault.file.header;
         let local = &write.vault.state.manifest;
-        let mut receipts = receipt_store::open(
-            &receipt_store::read(&write.vault.file.conn)?,
-            &write.vault.state.head.archive_receipts_digest,
-            &write.keys,
-            &header,
-            &write.vault.state.replica.replica_id,
-        )?;
-        if !receipts.remember(incoming.path.expose_secret(), *incoming.digest())? {
-            cancel(cancelled)?;
-            return Ok(false); // Write drops/rolls back; no sequence/counter advance.
-        }
+        let mut receipts = match receipt {
+            Some((path, digest)) => {
+                let mut receipts = receipt_store::open(
+                    &receipt_store::read(&write.vault.file.conn)?,
+                    &write.vault.state.head.archive_receipts_digest,
+                    &write.keys,
+                    &header,
+                    &write.vault.state.replica.replica_id,
+                )?;
+                if !receipts.remember(path, digest)? {
+                    cancel(cancelled)?;
+                    return Ok(false); // Write drops/rolls back; no sequence/counter advance.
+                }
+                Some(receipts)
+            }
+            None => None,
+        };
         let incoming_manifest = incoming.manifest().clone();
         if !local.same_configuration(&incoming_manifest) {
             return Err(StoreError::Integrity);
@@ -113,13 +154,20 @@ impl UnlockedVault {
         let candidate = build(local, &incoming_manifest, &mut read)?;
         let kinds =
             validate_projection(local, &incoming_manifest, &candidate, &mut read, cancelled)?;
+        if receipts.is_none() && candidate == *local {
+            cancel(cancelled)?;
+            return Ok(false); // Nothing new: the Write rolls back unchanged.
+        }
         // The reader borrow ends here; objects are copied without re-encryption.
-        let blob = receipt_store::seal(
-            &receipts,
-            &write.keys,
-            &header,
-            &write.vault.state.replica.replica_id,
-        )?;
+        let blob = match receipts.as_mut() {
+            Some(receipts) => Some(receipt_store::seal(
+                receipts,
+                &write.keys,
+                &header,
+                &write.vault.state.replica.replica_id,
+            )?),
+            None => None,
+        };
         for reference in candidate.references() {
             cancel(cancelled)?;
             write.vault.file.budget.reset();
@@ -161,8 +209,10 @@ impl UnlockedVault {
         verify_candidate(write.vault, &write.keys, &candidate, cancelled)?;
         write.manifest = candidate;
         write.new_kinds = kinds.into_iter().collect();
-        write.growth = write.growth.saturating_add(blob.len() as u64);
-        write.receipt_blob = Some(blob);
+        if let Some(blob) = blob {
+            write.growth = write.growth.saturating_add(blob.len() as u64);
+            write.receipt_blob = Some(blob);
+        }
         write.commit_cancellable(&|| cancelled())?;
         Ok(true)
     }

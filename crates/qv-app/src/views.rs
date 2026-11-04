@@ -510,6 +510,27 @@ pub struct SnapshotRow {
     /// Bytes on disk.
     pub size: u64,
 }
+/// One LAN link (0013 §9.1), for listing.
+#[derive(Clone, PartialEq)]
+pub struct LinkRow {
+    /// The link ID, 32 hex digits.
+    pub id: String,
+    /// The user's label for the other device.
+    pub label: String,
+    /// When the link was created.
+    pub created: String,
+}
+/// The vault's LAN links.
+pub fn lan_links(s: &Session) -> Result<Vec<LinkRow>, CoreError> {
+    Ok(s.lan_links()?
+        .into_iter()
+        .map(|l| LinkRow {
+            id: l.handle.id_hex(),
+            label: l.label.expose().to_owned(),
+            created: date(l.created_at),
+        })
+        .collect())
+}
 /// Read local snapshots and the unreadable count.
 pub fn snapshots(s: &Session) -> Result<(Vec<SnapshotRow>, u64), CoreError> {
     let l = s.snapshots()?;

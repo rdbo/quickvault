@@ -135,8 +135,7 @@ Committed local state stays committed (0005 §6.5).
 3.1. Endpoints come only from:
 - the pairing QR (§4.2);
 - manual entry;
-- an address-only QR shown by a receive window (specified with roadmap
-  phase 2.10);
+- the address-only code shown by a receive window (§8.5);
 - DNS-SD results collected during an explicit user action.
 
 No endpoint is remembered between actions (§9.2).
@@ -316,6 +315,12 @@ The hello carries **no link or vault identifier**. R evaluates the tag
 against every link of the window's vault (at most 64, §9.1). It SHOULD
 check all of them rather than stopping at the first match, and compare
 each tag in constant time.
+
+I uses one link per attempt: the link the user selected for this action,
+or the vault's only link. It does not try other links against the same
+window. Each wrong tag counts as a failed attempt there (§8.3), so trying
+every link could close the window, and it would tell R how many links I
+holds.
 - No match: R closes the connection, sends nothing and counts a failure.
 - A `nonce_I` already seen in this window: R refuses the hello.
 
@@ -434,6 +439,9 @@ objects it does not hold with an identical reference
   §4.3).
 - The sender refuses an ID that is not in the manifest it sent
   (`protocol`).
+- An empty `Want` must have `last = true`, and a side sends at most 62
+  `Want` messages per turn (⌈250,000 / 4,096⌉). Anything else is
+  `protocol`.
 
 7.5. **Object.** `["qv/lan-object/v1", envelope: bstr]`. Objects arrive in
 request order, one per record. The receiver:
@@ -513,6 +521,21 @@ the window's secrets.
 user action. The action may retry within itself (bounded, while unlocked),
 but nothing is scheduled afterwards (0005 §0.5). Both vaults must be
 unlocked (0005 §6.1).
+
+8.5. **Receive-window code.** A receive window shows its endpoints as an
+address-only QR and as text:
+- **QR:** `["qv/lan-addr-qr/v1", lan_profile: uint, endpoints: [ [addr:
+  bstr(4)|bstr(16), port: uint] ]]`, with 1–8 entries and at most 1024
+  bytes in canonical encoding. Decoders reject any other shape.
+- **Text:** one endpoint per line, `a.b.c.d:port` or `[v6]:port`. Entry
+  accepts the same form: IP literals only (§1.4), port 1–65535, no zone
+  identifier.
+
+The code carries no secret and no vault, link, device or user data, so
+showing or photographing it reveals only addresses (accepted leakage,
+0001). It is a §3.1 hint: the initiator applies §1.4 and authenticates the
+responder only through §5. Link-local addresses are not listed, because the
+code has no scope identifier.
 
 ### 9. Peer state
 
@@ -726,6 +749,17 @@ Release evidence for the 0012 §3 LAN gate and the 0012 §1 LAN rows:
    and per session. A device can still hold links for several vaults.
 
 ## Changelog
+
+- 2026-11-03: Amendments for roadmap 2.10 (plan 0038; owner-delegated,
+  standing 2026-11-02; the receive-window code is owner-directed,
+  2026-11-03):
+  - new §8.5, the address-only receive-window code and its text form,
+    referenced from §3.1;
+  - §5.1: the initiator uses one link per attempt;
+  - §7.4: an empty `Want` must be final, and at most 62 `Want` messages
+    are sent per turn.
+
+  No existing message, key or state changes.
 
 - 2026-11-03: Remove the `lan_hint` table and remembered endpoints (§3.1,
   §9.2, §9.3, §12.1; owner decision). Remembering where a peer is needs a

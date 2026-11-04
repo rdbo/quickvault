@@ -224,7 +224,7 @@ impl Core {
     /// directory or lies inside it: an anchor copied or restored together
     /// with the vault detects nothing (0005 §5.4). Paths that cannot be
     /// resolved are left to the store, which refuses them itself.
-    fn check_anchor_location(&self, path: &Path) -> Result<(), CoreError> {
+    pub(crate) fn check_anchor_location(&self, path: &Path) -> Result<(), CoreError> {
         let parent = match path.parent() {
             Some(p) if !p.as_os_str().is_empty() => p,
             _ => Path::new("."),

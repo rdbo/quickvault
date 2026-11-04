@@ -37,8 +37,9 @@ use qv_model::{ObjectId, Payload, RandomId, RecordBody};
 
 use zeroize::Zeroizing;
 
-use crate::archive::{ArchiveHeader, OpenedArchive, object_envelope, read_archive, write_prefix};
-use crate::manifest::{Manifest, config_digest_for, open_manifest};
+use crate::archive::{ArchiveHeader, object_envelope, read_archive, write_prefix};
+use crate::incoming::StagedArchive;
+use crate::manifest::{Manifest, ObjectRef, config_digest_for, open_manifest};
 use crate::object::Scope;
 use crate::{
     ArchiveScope, MAX_ARCHIVE_HEADER_BYTES, MAX_ARCHIVE_MANIFEST_FRAME, MAX_ARCHIVE_OBJECT_FRAME,
@@ -60,11 +61,20 @@ fn check_cancel(cancelled: &dyn Fn() -> bool) -> Result<(), StoreError> {
     }
 }
 
+/// Where the next object of a staging comes from (0013 §7.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Planned {
+    /// This vault holds an identical object; it is copied from its row.
+    Local,
+    /// It is requested from the peer.
+    Peer,
+}
+
 /// A staging archive being received.
 pub struct LanStaging {
     file: File,
     header: ArchiveHeader,
-    wanted: Vec<ObjectId>,
+    plan: Vec<(ObjectId, Planned)>,
     manifest: Manifest,
     next: usize,
 }
@@ -75,9 +85,18 @@ impl core::fmt::Debug for LanStaging {
     }
 }
 
+/// The expectations a staging checks a peer's manifest against.
+pub(crate) struct StagingScope {
+    pub(crate) vault: VaultId,
+    pub(crate) generation: KeyGeneration,
+    /// The archive header's minimum profiles.
+    pub(crate) minimum: (StoredDataProfile, DerivationProfile),
+}
+
 impl LanStaging {
     /// Verifies the peer's manifest envelope and starts the staging file in
-    /// `private_dir` (see the module docs for the order of checks).
+    /// `private_dir` for a new device: every object is requested (see the
+    /// module docs for the order of checks).
     #[allow(clippy::too_many_arguments)] // the scope, the envelope and its hash
     pub fn begin(
         private_dir: &Path,
@@ -88,6 +107,35 @@ impl LanStaging {
         envelope: &[u8],
         cancelled: &dyn Fn() -> bool,
     ) -> Result<Self, StoreError> {
+        let scope = StagingScope {
+            vault,
+            generation,
+            minimum: (StoredDataProfile::V1, DerivationProfile::V1),
+        };
+        Self::start(
+            private_dir,
+            vk,
+            &scope,
+            manifest_hash,
+            envelope,
+            &mut |_| Ok(Planned::Peer),
+            cancelled,
+        )
+    }
+
+    /// The shared start: bounds, hash, envelope, manifest under `vk`, the
+    /// configuration digest of `scope`'s minima (else Unsupported), budgets,
+    /// the plan, then the unlinked file.
+    pub(crate) fn start(
+        private_dir: &Path,
+        vk: &VaultKey,
+        scope: &StagingScope,
+        manifest_hash: &[u8; 32],
+        envelope: &[u8],
+        plan_of: &mut dyn FnMut(&ObjectRef) -> Result<Planned, StoreError>,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<Self, StoreError> {
+        let (vault, generation, minimum) = (scope.vault, scope.generation, scope.minimum);
         check_cancel(cancelled)?;
         fs::check_private_dir(private_dir)?;
         if envelope.len() > MAX_ARCHIVE_MANIFEST_FRAME {
@@ -113,13 +161,16 @@ impl LanStaging {
             .map_err(malformed)?;
         let ciphertext = d.bytes().map_err(malformed)?;
         d.finish().map_err(malformed)?;
-        let minimum = (StoredDataProfile::V1, DerivationProfile::V1);
-        let key = vk.purpose_key::<purpose::Manifest>(vault, generation, minimum.1)?;
-        let scope = Scope {
+        let key = vk.purpose_key::<purpose::Manifest>(
+            vault,
+            generation,
+            crate::ARCHIVE_DERIVATION_PROFILE,
+        )?;
+        let manifest_scope = Scope {
             vault_id: vault,
             key_generation: generation,
         };
-        let manifest = open_manifest(&key, scope, profile, &nonce, ciphertext)?;
+        let manifest = open_manifest(&key, manifest_scope, profile, &nonce, ciphertext)?;
         if *manifest.config_digest() != config_digest_for(vault, generation, minimum.0, minimum.1)?
         {
             return Err(StoreError::Unsupported);
@@ -133,6 +184,11 @@ impl LanStaging {
             .try_fold(0u64, |t, r| t.checked_add(r.length()))
             .filter(|t| *t <= MAX_ARCHIVE_TOTAL_LENGTH)
             .ok_or(StoreError::LimitExceeded)?;
+        let mut plan = Vec::with_capacity(references.len());
+        for r in references {
+            check_cancel(cancelled)?;
+            plan.push((r.object_id(), plan_of(r)?));
+        }
         let header = ArchiveHeader::for_staging(
             vault,
             generation,
@@ -144,7 +200,6 @@ impl LanStaging {
             total,
             vk,
         )?;
-        let wanted = references.iter().map(|r| r.object_id()).collect();
 
         let name = private_dir.join(STAGING_NAME);
         fs::remove_stale_temps(&name)?;
@@ -170,15 +225,30 @@ impl LanStaging {
         Ok(Self {
             file,
             header,
-            wanted,
+            plan,
             manifest,
             next: 0,
         })
     }
 
-    /// The object IDs to request, in sorted reference order.
-    pub fn wanted(&self) -> &[ObjectId] {
-        &self.wanted
+    /// Every peer reference in archive order with its source.
+    pub fn plan(&self) -> &[(ObjectId, Planned)] {
+        &self.plan
+    }
+
+    /// The objects to request from the peer, in order.
+    pub fn requested(&self) -> Vec<ObjectId> {
+        self.plan
+            .iter()
+            .filter(|(_, p)| *p == Planned::Peer)
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
+    /// Where the next object comes from, or `None` once every planned
+    /// object is staged.
+    pub fn next(&self) -> Option<Planned> {
+        self.plan.get(self.next).map(|(_, p)| *p)
     }
 
     /// The verified manifest being staged.
@@ -186,17 +256,26 @@ impl LanStaging {
         &self.manifest
     }
 
-    /// Appends the next expected object. Another ID (unrequested, duplicate
-    /// or out of order) is [`StoreError::NotFound`]; a wrong generation,
-    /// profile, length or SHA-256 is [`StoreError::Integrity`], checked
-    /// before anything is written.
+    /// Appends the next expected peer object. Another ID (unrequested,
+    /// duplicate or out of order) is [`StoreError::NotFound`]; a wrong
+    /// generation, profile, length or SHA-256 is [`StoreError::Integrity`],
+    /// checked before anything is written.
     pub fn add_object(&mut self, envelope: &[u8]) -> Result<(), StoreError> {
+        self.append(envelope, Planned::Peer)
+    }
+
+    /// Appends the next planned object from `envelope`, which must come from
+    /// `source`'s side of the plan.
+    pub(crate) fn append(&mut self, envelope: &[u8], source: Planned) -> Result<(), StoreError> {
         if envelope.len() > MAX_ARCHIVE_OBJECT_FRAME {
             return Err(StoreError::LimitExceeded);
         }
-        let Some(&expected) = self.wanted.get(self.next) else {
+        let Some(&(expected, planned)) = self.plan.get(self.next) else {
             return Err(StoreError::NotFound);
         };
+        if planned != source {
+            return Err(StoreError::NotFound);
+        }
         let mut d = Decoder::new(envelope).map_err(malformed)?;
         if d.array().map_err(malformed)? != 5 {
             return Err(StoreError::Integrity);
@@ -216,14 +295,19 @@ impl LanStaging {
         Ok(())
     }
 
-    /// Requires every wanted object, then authenticates the complete staging
-    /// archive with the archive reader.
+    /// The reference of the next planned object.
+    pub(crate) fn next_reference(&self) -> Option<&ObjectRef> {
+        self.manifest.references().get(self.next)
+    }
+
+    /// Requires every planned object, then authenticates the complete
+    /// staging archive with the archive reader.
     pub fn finish(
         mut self,
         vk: &VaultKey,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<VerifiedLanStaging, StoreError> {
-        if self.next != self.wanted.len() {
+        if self.next != self.plan.len() {
             return Err(StoreError::Integrity);
         }
         self.file.flush().map_err(|_| StoreError::Io)?;
@@ -233,8 +317,10 @@ impl LanStaging {
         let scope = self.scope();
         let opened = read_archive(&mut self.file, scope, vk, &mut |_| Ok(()), cancelled)?;
         Ok(VerifiedLanStaging {
-            file: self.file,
-            opened,
+            archive: StagedArchive {
+                file: self.file,
+                opened,
+            },
             scope,
         })
     }
@@ -242,6 +328,74 @@ impl LanStaging {
     fn scope(&self) -> ArchiveScope {
         ArchiveScope::new(self.header.vault_id(), self.header.key_generation())
             .with_archive_id(self.header.archive_id())
+    }
+}
+
+impl crate::UnlockedVault {
+    /// Starts staging a peer's state for a merge into this vault (0013
+    /// §7.3–7.5). The checks run in the order of [`LanStaging::begin`],
+    /// against this vault's ID, generation, VK and configuration (another
+    /// configuration is [`StoreError::Unsupported`]). Each reference this
+    /// vault holds identically is planned [`Planned::Local`]; one it holds
+    /// under the same ID with another reference is [`StoreError::Integrity`]
+    /// (substitution evidence); the rest are [`Planned::Peer`].
+    ///
+    /// The staging file is created unlinked in this vault's private anchor
+    /// directory, as for a new device.
+    pub fn lan_stage(
+        &self,
+        manifest_hash: &[u8; 32],
+        envelope: &[u8],
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<LanStaging, StoreError> {
+        let private_dir = self.anchors.path().to_path_buf();
+        let header = self.file.header;
+        let scope = StagingScope {
+            vault: header.vault_id,
+            generation: header.key_generation,
+            minimum: (header.min_data_profile, header.min_derivation_profile),
+        };
+        let local = &self.state.manifest;
+        LanStaging::start(
+            &private_dir,
+            &self.vk,
+            &scope,
+            manifest_hash,
+            envelope,
+            &mut |r| match local.reference(r.object_id()) {
+                Some(known) if known == r => Ok(Planned::Local),
+                Some(_) => Err(StoreError::Integrity),
+                None => Ok(Planned::Peer),
+            },
+            cancelled,
+        )
+    }
+
+    /// Appends the next planned [`Planned::Local`] object from this vault's
+    /// row, rechecked against the peer's reference. A row that is gone is
+    /// [`StoreError::NotFound`].
+    pub fn lan_stage_local(&self, staging: &mut LanStaging) -> Result<(), StoreError> {
+        if staging.next() != Some(Planned::Local) {
+            return Err(StoreError::Internal);
+        }
+        let r = *staging.next_reference().ok_or(StoreError::Internal)?;
+        let envelope =
+            self.local_envelope(r.object_id(), r.data_profile(), r.length(), r.sha256())?;
+        staging.append(&envelope, Planned::Local)
+    }
+
+    /// The full authentication of a complete staging under this vault's VK.
+    pub fn lan_finish(
+        &self,
+        staging: LanStaging,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<VerifiedLanStaging, StoreError> {
+        staging.finish(&self.vk, cancelled)
+    }
+
+    /// SHA-256 of the current manifest envelope (what `Done` names).
+    pub fn manifest_hash(&self) -> [u8; 32] {
+        self.state.head.manifest_hash
     }
 }
 
@@ -258,8 +412,7 @@ pub enum StagedKeyslot {
 
 /// A fully authenticated staging archive.
 pub struct VerifiedLanStaging {
-    pub(crate) file: File,
-    opened: OpenedArchive,
+    pub(crate) archive: StagedArchive,
     pub(crate) scope: ArchiveScope,
 }
 
@@ -284,7 +437,7 @@ impl core::fmt::Debug for PasswordProof {
 impl VerifiedLanStaging {
     /// The authenticated manifest.
     pub fn manifest(&self) -> &Manifest {
-        self.opened.manifest()
+        self.archive.opened.manifest()
     }
 
     fn read_head(
@@ -292,24 +445,24 @@ impl VerifiedLanStaging {
         vk: &VaultKey,
         record: qv_crypto::RecordId,
     ) -> Result<Option<qv_model::RecordVersion>, StoreError> {
-        let manifest = self.opened.manifest();
+        let manifest = self.archive.opened.manifest();
         let Some(entry) = manifest.record(record) else {
             return Ok(None);
         };
         let Some(role) = entry.heads().first() else {
             return Err(StoreError::Integrity);
         };
-        let header = self.opened.header();
+        let header = self.archive.opened.header();
         let key = vk.purpose_key::<purpose::Record>(
             header.vault_id(),
             header.key_generation(),
             crate::ARCHIVE_DERIVATION_PROFILE,
         )?;
         let version = crate::archive_verify::read_version(
-            &mut self.file,
+            &mut self.archive.file,
             header,
             manifest,
-            &self.opened.frames,
+            &self.archive.opened.frames,
             &key,
             record,
             role,
@@ -319,8 +472,9 @@ impl VerifiedLanStaging {
 
     /// Whether the staged vault has exactly one password keyslot head.
     pub fn keyslot(&mut self, vk: &VaultKey) -> Result<StagedKeyslot, StoreError> {
-        let id = self.opened.manifest().keyslot_id();
+        let id = self.archive.opened.manifest().keyslot_id();
         let heads = self
+            .archive
             .opened
             .manifest()
             .record(id)
@@ -339,7 +493,7 @@ impl VerifiedLanStaging {
     /// The vault's name (the first head of the vault-meta record), display
     /// only.
     pub fn vault_name(&mut self, vk: &VaultKey) -> Result<SecretBytes, StoreError> {
-        let id = self.opened.manifest().vault_meta_id();
+        let id = self.archive.opened.manifest().vault_meta_id();
         let Some(RecordBody::Live(Payload::VaultMeta(meta))) =
             self.read_head(vk, id)?.map(|v| v.body)
         else {
@@ -360,7 +514,7 @@ impl VerifiedLanStaging {
         vk: &VaultKey,
         password: &MasterPassword,
     ) -> Result<PasswordProof, StoreError> {
-        let id = self.opened.manifest().keyslot_id();
+        let id = self.archive.opened.manifest().keyslot_id();
         if self.keyslot(vk)? != StagedKeyslot::Unique {
             return Err(StoreError::Integrity);
         }
@@ -388,10 +542,11 @@ impl VerifiedLanStaging {
 
     /// Rewinds the staging file for the creation pass.
     pub(crate) fn rewind(&mut self) -> Result<&mut File, StoreError> {
-        self.file
+        self.archive
+            .file
             .seek(SeekFrom::Start(0))
             .map_err(|_| StoreError::Io)?;
-        Ok(&mut self.file)
+        Ok(&mut self.archive.file)
     }
 }
 

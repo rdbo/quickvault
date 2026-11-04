@@ -41,6 +41,17 @@ import android.widget.RemoteViews
 typealias BuildConfig = org.quickvault.app.BuildConfig
 
 class MainActivity : WryActivity() {
+    private val qr by lazy { NativeQrCamera(this) }
+    fun qvQrAvailable(): Boolean = qr.available()
+    fun qvQrValidation(): Boolean = NativeQrCamera.QR_VALIDATION
+    fun qvQrStart(): Long = qr.start()
+    fun qvQrState(id: Long): Int = qr.state(id)
+    fun qvQrFrame(id: Long): ByteArray? = qr.takeFrame(id)
+    fun qvQrFinish(id: Long) = qr.finish(id)
+    override fun onRequestPermissionsResult(code: Int, permissions: Array<out String>, results: IntArray) {
+        super.onRequestPermissionsResult(code, permissions, results)
+        if (code == NativeQrCamera.PERMISSION) qr.permission(results.isNotEmpty() && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED)
+    }
     private val quick by lazy { NativeQuickUnlock(this) }
     fun qvQuickAvailable(): Boolean = quick.available()
     fun qvQuickStart(encrypt:Boolean,binding:ByteArray,policy:Int,payload:ByteArray):Long = quick.start(encrypt,binding,policy,payload)
@@ -81,7 +92,7 @@ class MainActivity : WryActivity() {
     @Volatile private var lifecycleGeneration = 0L
     @Volatile private var screenGeneration = 0L
     private val screenEvents = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: android.content.Intent) { screenGeneration++; lifecycleGeneration++ }
+        override fun onReceive(context: Context, intent: android.content.Intent) { screenGeneration++; lifecycleGeneration++; qr.cancel() }
     }
     override fun onCreate(state: Bundle?) {
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -135,14 +146,14 @@ class MainActivity : WryActivity() {
         return null
     }
     override fun onResume() { super.onResume(); foreground = true }
-    override fun onPause() { foreground = false; lifecycleGeneration++; super.onPause() }
+    override fun onPause() { foreground = false; lifecycleGeneration++; qr.cancel(); super.onPause() }
     // The Rust/Dioxus runtime starts once per process (wry/ndk-context, and
     // this app's own bridge). After destroy, Rust locks and acknowledges, then
     // the process ends so any later activity starts fresh (plan 0035).
     @Volatile private var runtimeStopped = false
     fun qvRuntimeStopped() { runtimeStopped = true }
     override fun onDestroy() {
-        foreground = false; destroyed = true; lifecycleGeneration++; unregisterReceiver(screenEvents); super.onDestroy()
+        foreground = false; destroyed = true; lifecycleGeneration++; qr.cancel(); unregisterReceiver(screenEvents); super.onDestroy()
         val handler = android.os.Handler(mainLooper)
         val deadline = android.os.SystemClock.elapsedRealtime() + 2000
         handler.post(object : Runnable {
@@ -667,5 +678,185 @@ class AutofillAuthActivity : Activity() {
         token = null
         setResult(RESULT_CANCELED)
         finish()
+    }
+}
+
+/** In-memory Camera2 adapter. No bitmap file, external activity or webview camera. */
+class NativeQrCamera(private val activity: MainActivity) {
+    companion object {
+        const val QR_VALIDATION = false
+        const val PERMISSION = 0x5143
+        const val MAX_AXIS = 1024
+        const val MAX_PIXELS = 786432
+        /** Copy only bounded luminance, honoring row/pixel strides and buffer position. */
+        @JvmStatic fun packFrame(w:Int,h:Int,row:Int,pixel:Int,source:java.nio.ByteBuffer):ByteArray? {
+            if(w<=0 || h<=0 || w>MAX_AXIS || h>MAX_AXIS || w.toLong()*h>MAX_PIXELS || row<=0 || pixel<=0) return null
+            if((w.toLong()-1)*pixel>=row) return null
+            val start=source.position()
+            val last=start.toLong()+(h.toLong()-1)*row+(w.toLong()-1)*pixel
+            if(last>=source.limit()) return null
+            val out=ByteArray(8+w*h)
+            for(i in 0..3) {out[i]=(w ushr (8*i)).toByte();out[4+i]=(h ushr (8*i)).toByte()}
+            for(y in 0 until h) for(x in 0 until w) out[8+y*w+x]=source.get(start+y*row+x*pixel)
+            return out
+        }
+    }
+    private val handler=android.os.Handler(android.os.Looper.getMainLooper())
+    private var next=0L
+    private var id=0L
+    private var status=1
+    private var permissionId=0L
+    private var deadline=0L
+    private var offered=0L
+    private var frame:ByteArray?=null
+    // Camera resources below are owned by the UI thread; callback frames use the monitor.
+    private var dialog:android.app.Dialog?=null
+    private var texture:android.view.TextureView?=null
+    private var camera:android.hardware.camera2.CameraDevice?=null
+    private var session:android.hardware.camera2.CameraCaptureSession?=null
+    private var reader:android.media.ImageReader?=null
+    private var surface:android.view.Surface?=null
+    private var thread:android.os.HandlerThread?=null
+    fun available():Boolean = QR_VALIDATION && try {
+        activity.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_ANY) &&
+            activity.getSystemService(android.hardware.camera2.CameraManager::class.java).cameraIdList.isNotEmpty()
+    } catch(_:Exception) {false}
+    @Synchronized fun state(request:Long):Int = if(request==id && id>0) status else 1
+    @Synchronized private fun running(request:Long):Boolean = request==id && id>0 && status==0 && android.os.SystemClock.elapsedRealtime()<deadline
+    @Synchronized fun takeFrame(request:Long):ByteArray? = if(running(request)) frame.also{frame=null} else null
+    fun start():Long {
+        if(!available()) return 0
+        val request=synchronized(this) {
+            if(id!=0L || permissionId!=0L) return 0
+            next++; id=next; status=0; deadline=android.os.SystemClock.elapsedRealtime()+30000; offered=0
+            frame?.fill(0);frame=null;id
+        }
+        activity.runOnUiThread {
+            if(!running(request)) return@runOnUiThread
+            if((activity.qvStatus() and 7)!=7){end(request,1);return@runOnUiThread}
+            handler.postDelayed({end(request,1)},30000)
+            if(activity.checkSelfPermission(android.Manifest.permission.CAMERA)!=android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                synchronized(this){permissionId=request}
+                try {activity.requestPermissions(arrayOf(android.Manifest.permission.CAMERA),PERMISSION)} catch(_:Exception){end(request,2)}
+            } else show(request)
+        }
+        return request
+    }
+    fun permission(granted:Boolean) {
+        val request=synchronized(this){permissionId.also{permissionId=0}}
+        if(!running(request)) return
+        if(granted && (activity.qvStatus() and 7) == 7) show(request) else end(request,2)
+    }
+    fun cancel() {val request=synchronized(this){id};if(request>0) end(request,1)}
+    fun finish(request:Long) = activity.runOnUiThread {
+        end(request,1)
+        synchronized(this) {if(id==request){id=0;frame?.fill(0);frame=null}}
+    }
+    private fun end(request:Long,result:Int) {
+        synchronized(this) {
+            if(request!=id || id==0L) return
+            status=result;frame?.fill(0);frame=null
+        }
+        var clean=true
+        fun attempt(close:()->Unit){try{close()}catch(_:Exception){clean=false}}
+        attempt{session?.close()};session=null
+        attempt{camera?.close()};camera=null
+        attempt{reader?.close()};reader=null
+        attempt{surface?.release()};surface=null
+        attempt{thread?.quitSafely()};thread=null
+        attempt{texture?.surfaceTextureListener=null};texture=null
+        attempt{dialog?.setOnDismissListener(null)}
+        attempt{dialog?.dismiss()};dialog=null
+        if(!clean)synchronized(this){if(id==request)status=2}
+    }
+    private fun show(request:Long) {
+        if(!running(request)) return
+        try {
+        val layout=android.widget.LinearLayout(activity).apply{orientation=android.widget.LinearLayout.VERTICAL}
+        layout.addView(android.widget.TextView(activity).apply{text="Scan the other device's QuickVault QR code. No image is saved."})
+        val preview=android.view.TextureView(activity)
+        layout.addView(preview,android.widget.LinearLayout.LayoutParams(-1,0,1f))
+        layout.addView(android.widget.Button(activity).apply{text="Cancel scan";setOnClickListener{end(request,1)}})
+        val window=android.app.Dialog(activity)
+        dialog=window
+        window.setContentView(layout)
+        val protected=window.window
+        if(protected==null){end(request,2);return}
+        protected.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        if((protected.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE)==0){end(request,2);return}
+        window.setOnCancelListener{end(request,1)}
+        window.setOnDismissListener{end(request,1)}
+        dialog=window;texture=preview
+        preview.surfaceTextureListener=object:android.view.TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(t:android.graphics.SurfaceTexture,w:Int,h:Int){open(request,t)}
+            override fun onSurfaceTextureSizeChanged(t:android.graphics.SurfaceTexture,w:Int,h:Int){}
+            override fun onSurfaceTextureUpdated(t:android.graphics.SurfaceTexture){}
+            override fun onSurfaceTextureDestroyed(t:android.graphics.SurfaceTexture):Boolean{end(request,1);return true}
+        }
+        window.show()
+        window.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT)
+        } catch(_:Exception){end(request,2)}
+    }
+    @Suppress("DEPRECATION")
+    private fun open(request:Long,t:android.graphics.SurfaceTexture) {
+        if(!running(request)) return
+        try {
+            val manager=activity.getSystemService(android.hardware.camera2.CameraManager::class.java)
+            val cameras=manager.cameraIdList
+            val selected=cameras.firstOrNull{manager.getCameraCharacteristics(it).get(android.hardware.camera2.CameraCharacteristics.LENS_FACING)==android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK}?:cameras.firstOrNull()
+            if(selected==null){end(request,2);return}
+            val chars=manager.getCameraCharacteristics(selected)
+            val sizes=chars.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)?.getOutputSizes(android.graphics.ImageFormat.YUV_420_888)
+            val size=sizes?.filter{it.width in 160..MAX_AXIS && it.height in 120..MAX_AXIS && it.width.toLong()*it.height<=MAX_PIXELS}
+                ?.minByOrNull{kotlin.math.abs(it.width-640)+kotlin.math.abs(it.height-480)}
+            if(size==null){end(request,2);return}
+            t.setDefaultBufferSize(size.width,size.height)
+            val target=android.view.Surface(t);surface=target
+            val images=android.media.ImageReader.newInstance(size.width,size.height,android.graphics.ImageFormat.YUV_420_888,2);reader=images
+            val worker=android.os.HandlerThread("qv-camera").apply{start()};thread=worker
+            images.setOnImageAvailableListener({source->
+                var image:android.media.Image?=null
+                try {
+                    image=source.acquireLatestImage()
+                    val current=image
+                    if(current!=null && running(request)) {
+                        val now=android.os.SystemClock.elapsedRealtime()
+                        val ready=synchronized(this){now-offered>=500 && frame==null}
+                        if(ready) {
+                            val p=current.planes[0]
+                            val bytes=packFrame(current.width,current.height,p.rowStride,p.pixelStride,p.buffer)
+                            if(bytes==null) activity.runOnUiThread{end(request,2)}
+                            else synchronized(this) {
+                                if(running(request)){frame?.fill(0);frame=bytes;offered=now}else bytes.fill(0)
+                            }
+                        }
+                    }
+                } catch(_:Exception){activity.runOnUiThread{if(running(request))end(request,2)}}
+                finally {image?.close()}
+            },android.os.Handler(worker.looper))
+            manager.openCamera(selected,object:android.hardware.camera2.CameraDevice.StateCallback(){
+                override fun onOpened(device:android.hardware.camera2.CameraDevice){
+                    if(!running(request)){device.close();return}
+                    camera=device
+                    try { device.createCaptureSession(listOf(target,images.surface),object:android.hardware.camera2.CameraCaptureSession.StateCallback(){
+                        override fun onConfigured(active:android.hardware.camera2.CameraCaptureSession){
+                            if(!running(request)){active.close();return}
+                            try {
+                                session=active
+                                val capture=device.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+                                capture.addTarget(target);capture.addTarget(images.surface)
+                                val modes=chars.get(android.hardware.camera2.CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)
+                                if(modes?.contains(android.hardware.camera2.CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE)==true)
+                                    capture.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE,android.hardware.camera2.CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                                active.setRepeatingRequest(capture.build(),null,handler)
+                            }catch(_:Exception){end(request,2)}
+                        }
+                        override fun onConfigureFailed(active:android.hardware.camera2.CameraCaptureSession){runCatching{active.close()};end(request,2)}
+                    },handler) } catch(_:Exception){end(request,2)}
+                }
+                override fun onDisconnected(device:android.hardware.camera2.CameraDevice){runCatching{device.close()};end(request,2)}
+                override fun onError(device:android.hardware.camera2.CameraDevice,error:Int){runCatching{device.close()};end(request,2)}
+            },handler)
+        } catch(_:Exception){end(request,2)}
     }
 }

@@ -14,6 +14,11 @@
 //! | 7 | integrity or rollback failure | `Integrity`, `Rollback`, `NoAnchor` |
 //! | 8 | unresolved conflict | `CoreError::Conflict` |
 //! | 9 | resource or safety limit | `LimitExceeded`, `CoreError::SnapshotOverBudget`, input over a bound |
+//! | 10 | LAN peer unavailable | `LanError::{NoPeer, Timeout, PeerCancelled, CodeObserved, TooManyAttempts, WindowExpired, VaultMismatch, Io}` |
+//!
+//! Other LAN failures map as 0011 §6 says: `Integrity`/`Protocol` 7,
+//! `Keyslot` 8, `Limit` 9, `Busy`/`StateChanged` 6, `Cancelled`/`Unsupported`
+//! 1, and `Store(e)` like the store error.
 //!
 //! Messages are fixed text. The only variable parts are non-secret context
 //! (a config line number, an escaped path or the matches of an ambiguous
@@ -39,6 +44,8 @@ pub(crate) const INTEGRITY: u8 = 7;
 pub(crate) const CONFLICT: u8 = 8;
 /// Resource or safety limit.
 pub(crate) const LIMIT: u8 = 9;
+/// LAN peer unavailable (0011 §6).
+pub(crate) const LAN: u8 = 10;
 
 /// A failed command: its exit code and the message for stderr.
 #[derive(Debug, PartialEq, Eq)]
@@ -86,6 +93,28 @@ pub(crate) fn core_code(e: CoreError) -> u8 {
         CoreError::StaleHandle => BUSY,
         CoreError::Conflict => CONFLICT,
         CoreError::LimitExceeded | CoreError::SnapshotOverBudget { .. } => LIMIT,
+        CoreError::Lan(l) => lan_code(l),
+        _ => OTHER,
+    }
+}
+
+/// The exit code of a LAN error (0011 §6, plan 0038 decision 4).
+pub(crate) fn lan_code(e: qv_core::LanError) -> u8 {
+    use qv_core::LanError as L;
+    match e {
+        L::NoPeer
+        | L::Timeout
+        | L::PeerCancelled
+        | L::CodeObserved
+        | L::TooManyAttempts
+        | L::WindowExpired
+        | L::VaultMismatch
+        | L::Io => LAN,
+        L::Integrity | L::Protocol => INTEGRITY,
+        L::Keyslot => CONFLICT,
+        L::Limit => LIMIT,
+        L::Busy | L::StateChanged => BUSY,
+        L::Store(s) => store_code(s),
         _ => OTHER,
     }
 }
@@ -186,6 +215,33 @@ mod tests {
         assert_eq!(core(CoreError::LimitExceeded), 9);
         assert_eq!(core(CoreError::SnapshotOverBudget { needed: 4096 }), 9);
         assert_eq!(CliError::from(CryptoError::LimitExceeded).code, 9);
+        // 10 and the other LAN mappings (0011 §6).
+        use qv_core::LanError as L;
+        for e in [
+            L::NoPeer,
+            L::Timeout,
+            L::PeerCancelled,
+            L::CodeObserved,
+            L::TooManyAttempts,
+            L::WindowExpired,
+            L::VaultMismatch,
+            L::Io,
+        ] {
+            assert_eq!(core(CoreError::Lan(e)), 10, "{e:?}");
+        }
+        for (e, code) in [
+            (L::Integrity, 7),
+            (L::Protocol, 7),
+            (L::Keyslot, 8),
+            (L::Limit, 9),
+            (L::Busy, 6),
+            (L::StateChanged, 6),
+            (L::Cancelled, 1),
+            (L::Unsupported, 1),
+            (L::Store(StoreError::Integrity), 7),
+        ] {
+            assert_eq!(core(CoreError::Lan(e)), code, "{e:?}");
+        }
         // 2
         assert_eq!(CliError::usage("x").code, 2);
         // 1: everything else.

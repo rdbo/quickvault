@@ -53,6 +53,9 @@ fn dom_id(field: WsField) -> String {
         WsField::AttachMime => "ws-attach-mime".into(),
         WsField::AttachName => "ws-attach-name".into(),
         WsField::Confirmation => "ws-confirmation".into(),
+        WsField::LanCode => "ws-lan-code".into(),
+        WsField::LanEndpoint => "ws-lan-endpoint".into(),
+        WsField::LanLabel => "ws-lan-label".into(),
     }
 }
 
@@ -130,6 +133,7 @@ pub fn Shell(
     revision: u64,
     live: Live,
     busy: bool,
+    scanning: bool,
     reduced_lifecycle: bool,
     fixture: bool,
     on_fixture: EventHandler<FormEvent>,
@@ -158,6 +162,7 @@ pub fn Shell(
         (Screen::Conflicts, "Conflicts", "⇄"),
         (Screen::Snapshots, "Snapshots", "◷"),
         (Screen::Archives, "Archives", "⇅"),
+        (Screen::Devices, "Devices", "⇆"),
         (Screen::Settings(Pane::General), "Settings", "⚙"),
     ];
     let current = |s: &Screen| match (s, &screen) {
@@ -204,7 +209,11 @@ pub fn Shell(
                     }
                 }
                 section { class: "ws-main",
-                    if busy {
+                    if scanning {
+                        ScanPanel { controller: controller.clone(), epoch }
+                    } else if busy && controller.lan_view(epoch).is_some() {
+                        LanPanel { controller: controller.clone(), epoch, revision }
+                    } else if busy {
                         div { class: "busy", role: "status", "Working… The vault stays locked to other actions until this finishes." }
                     } else {
                         if let Some(kind) = pending {
@@ -252,6 +261,7 @@ fn Confirm(controller: Controller, epoch: FormEpoch, kind: ConfirmKind, seconds:
         ConfirmKind::LinkApp => "Link this app to the entry? QuickVault verified the app's package and signing certificate, but cannot tell whether the app belongs to the service. Link only an app you trust.".to_owned(),
         ConfirmKind::ReducedQuick => "Reduced protection: this makes your device PIN, pattern or password a vault credential. Enable this separate policy? Biometrics never fall back to it automatically.".to_owned(),
         ConfirmKind::WeakPassword => "This password is weak and could be guessed by an attacker who obtains your vault file. Use it anyway?".to_owned(),
+        ConfirmKind::RemoveLink => "Remove this link? The other device is not notified and keeps its copy of the vault. Removal is not compromise recovery: rotate the vault key for that.".to_owned(),
     };
     rsx! {
         div { class: "dialog", role: "alertdialog", "aria-label": "Confirmation",
@@ -379,6 +389,7 @@ fn Body(
         Screen::Generator => rsx! { Generator { controller: c, epoch, revision } },
         Screen::Snapshots => rsx! { Snapshots { controller: c, epoch, revision } },
         Screen::Archives => rsx! { Archives { controller: c, epoch, revision } },
+        Screen::Devices => rsx! { Devices { controller: c, epoch, revision } },
         Screen::Settings(p) => rsx! { Settings { controller: c, epoch, revision, pane: p } },
         Screen::Autofill => rsx! { AutofillScreen { controller: c, epoch, revision } },
     }
@@ -1076,6 +1087,202 @@ fn Archives(controller: Controller, epoch: FormEpoch, revision: u64) -> Element 
             button { class: "primary-small", onclick: act(&controller, epoch, WsAction::MergeArchive), "Merge archive" }
             button { class: "secondary-small", onclick: act(&controller, epoch, WsAction::ExportArchive(false)), "Export archive" }
             button { class: "secondary-small", onclick: act(&controller, epoch, WsAction::ExportArchive(true)), "Export with password slot" }
+        }
+    }
+}
+/// The running or finished LAN operation: code, endpoints, countdown,
+/// questions and the outcome. Shown in the workspace and on the locked
+/// screen (new-device join).
+#[component]
+pub(crate) fn LanPanel(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
+    let _ = revision;
+    let Some(v) = controller.lan_view(epoch) else {
+        return rsx! {};
+    };
+    use crate::lan::{LanKind, Question};
+    let title = match v.kind {
+        LanKind::Pair => "Pairing window open",
+        LanKind::Receive => "Receive window open",
+        LanKind::Sync => "Syncing with a linked device",
+        LanKind::Link => "Joining another device's pairing window",
+        LanKind::Join => "Joining from another device",
+    };
+    let code = v
+        .code
+        .as_ref()
+        .map(|c| String::from_utf8_lossy(c.expose_secret()).into_owned());
+    let c = controller.clone();
+    let answer = move |yes: bool| {
+        let c = c.clone();
+        move |_| c.lan_answer(epoch, yes)
+    };
+    let cancel = {
+        let c = controller.clone();
+        move |_| c.lan_cancel(epoch)
+    };
+    let dismiss = {
+        let c = controller.clone();
+        move |_| c.lan_dismiss(epoch)
+    };
+    let typed = {
+        let c = controller.clone();
+        move |event: FormEvent| {
+            let mut value = event.value();
+            c.lan_secret(epoch, &mut value);
+        }
+    };
+    rsx! {
+        div { class: "card lan", role: "region", "aria-label": "Local network",
+            h2 { "{title}" }
+            if let Some(symbol) = v.qr.as_ref() { { qr_image(symbol) } }
+            if let Some(code) = code {
+                p { "Type this pairing code on the other device. Show it only to that device." }
+                div { class: "phrase", id: "lan-code", "{code}" }
+            }
+            if !v.endpoints.is_empty() {
+                p { "This device's address (type it on the other device):" }
+                ul { class: "list", for e in v.endpoints.iter() { li { class: "row-static mono", "{e}" } } }
+            }
+            if v.seconds > 0 { p { class: "hint", "The window closes in {v.seconds} s." } }
+            if let Some(i) = v.info.as_ref() { p { class: "notice", role: "status", "{i}" } }
+            match v.question.clone() {
+                Some(Question::Approve { sas, mode, vault }) => rsx! {
+                    div { class: "dialog", role: "alertdialog", "aria-label": "Compare codes",
+                        p { "A device asks to pair with “{vault}”: {mode}." }
+                        p { "Comparison code" }
+                        div { class: "phrase", id: "lan-sas", "{sas}" }
+                        p { "Confirm only if the other device shows exactly this code." }
+                        div { class: "row",
+                            button { class: "secondary", onclick: answer(false), "Cancel" }
+                            button { class: "primary-small", id: "lan-codes-match", onclick: answer(true), "Codes match" }
+                        }
+                    }
+                },
+                Some(Question::Matches { sas }) => rsx! {
+                    div { class: "dialog", role: "alertdialog", "aria-label": "Compare codes",
+                        p { "Comparison code" }
+                        div { class: "phrase", id: "lan-sas", "{sas}" }
+                        p { "Does the other device show exactly this code?" }
+                        div { class: "row",
+                            button { class: "secondary", onclick: answer(false), "No, cancel" }
+                            button { class: "primary-small", id: "lan-codes-match", onclick: answer(true), "Codes match" }
+                        }
+                    }
+                },
+                Some(Question::JoinVault { vault, sas }) => rsx! {
+                    div { class: "dialog", role: "alertdialog", "aria-label": "Join vault",
+                        p { "Join the vault “{vault}”?" }
+                        p { "Comparison code {sas}. Join only a vault you expect, from a device showing this code." }
+                        div { class: "row",
+                            button { class: "secondary", onclick: answer(false), "Cancel" }
+                            button { class: "primary-small", id: "lan-join-vault", onclick: answer(true), "Join this vault" }
+                        }
+                    }
+                },
+                Some(Question::Password { retry }) => rsx! {
+                    div { class: "dialog", role: "alertdialog", "aria-label": "Master password",
+                        if retry { p { class: "error", "Wrong password. Try again." } }
+                        label { class: "field",
+                            span { "The joined vault's master password" }
+                            input { id: "lan-password", r#type: "password", maxlength: crate::workspace::LINE_MAX, autocomplete: "off", spellcheck: "false", oninput: typed }
+                        }
+                        div { class: "row",
+                            button { class: "secondary", onclick: answer(false), "Cancel" }
+                            button { class: "primary-small", "data-qv-clear": "true", id: "lan-password-submit", onclick: answer(true), "Open the vault" }
+                        }
+                    }
+                },
+                None => rsx! {},
+            }
+            if let Some(done) = v.done.as_ref() {
+                for line in done.lines.iter() { p { "{line}" } }
+                if let Some(e) = done.error { p { class: "error", role: "alert", "{e.message()}" } }
+                button { class: "secondary-small", onclick: dismiss, "Dismiss" }
+            } else {
+                button { class: "secondary-small", id: "lan-cancel", onclick: cancel, "Cancel" }
+            }
+        }
+    }
+}
+
+fn qr_image(symbol: &crate::qr::Symbol) -> Element {
+    let side = symbol.size() + 8;
+    let path = symbol.path();
+    rsx! {
+        svg { id: "lan-qr", xmlns: "http://www.w3.org/2000/svg", view_box: "0 0 {side} {side}",
+            width: "280", height: "280", style: "max-width:100%;height:auto", shape_rendering: "crispEdges",
+            role: "img", "aria-label": "LAN QR code",
+            rect { width: "100%", height: "100%", fill: "white" }
+            path { d: path.as_str(), fill: "black" }
+        }
+    }
+}
+
+#[component]
+pub(crate) fn ScanButton(
+    controller: Controller,
+    epoch: FormEpoch,
+    target: crate::qr::QrTarget,
+) -> Element {
+    if !cfg!(target_os = "android") {
+        return rsx! {};
+    }
+    let available = crate::qr::camera_available();
+    rsx! {
+        button { class: "secondary-small", disabled: !available || controller.snapshot().busy,
+            "data-qv-clear": "true", onclick: move |_| controller.request_qr(epoch, target),
+            if target == crate::qr::QrTarget::Sync { "Scan to sync" } else { "Scan pairing QR" }
+        }
+        if !available { p { class: "hint", "Camera scanning is unavailable. Type the code and address instead." } }
+    }
+}
+
+#[component]
+pub(crate) fn ScanPanel(controller: Controller, epoch: FormEpoch) -> Element {
+    rsx! { section { class: "card", role: "status", h2 { "Scan a LAN QR code" }
+        p { "Point the camera at the other device's code. Scanning fills this form; you choose when to connect." }
+        button { class: "secondary", onclick: move |_| controller.cancel_qr(epoch), "Cancel scan" }
+    } }
+}
+
+#[component]
+fn Devices(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
+    let _ = revision;
+    let links = match controller.read(epoch, views::lan_links) {
+        Some(Ok(v)) => v,
+        other => return rsx! { Unreadable { error: other.and_then(Result::err) } },
+    };
+    rsx! {
+        h2 { "Devices" }
+        p { class: "muted", "Pair devices and sync directly on the local network. No account, server or internet connection is involved. Nothing syncs until you start it here." }
+        LanPanel { controller: controller.clone(), epoch, revision }
+        h3 { "Linked devices" }
+        if links.is_empty() { p { class: "muted", "No linked devices yet." } }
+        ul { class: "list",
+            for l in links {
+                li { class: "row-static",
+                    span { class: "row-text", span { class: "row-title", "{l.label}" } span { class: "row-sub", "Linked {l.created} · {l.id}" } }
+                    button { class: "chip", onclick: act(&controller, epoch, WsAction::LanSync(l.id.clone())), "Sync" }
+                    button { class: "chip", onclick: act(&controller, epoch, WsAction::LanRemove(l.id.clone())), "Remove" }
+                }
+            }
+        }
+        Input { controller: controller.clone(), epoch, field: WsField::LanEndpoint, label: "The other device's address (ip:port), for Sync and Link", kind: Kind::Line, value: None, disabled: false }
+        ScanButton { controller: controller.clone(), epoch, target: crate::qr::QrTarget::Sync }
+        div { class: "toolbar",
+            button { class: "secondary-small", onclick: act(&controller, epoch, WsAction::LanReceive), "Let a linked device sync with this one" }
+        }
+        h3 { "Pair a device" }
+        p { class: "muted", "This device shows a code for the other device to type. Both screens then show a comparison code; confirm only if they match." }
+        Input { controller: controller.clone(), epoch, field: WsField::LanLabel, label: "A name for the other device", kind: Kind::Line, value: None, disabled: false }
+        div { class: "toolbar",
+            button { class: "primary-small", onclick: act(&controller, epoch, WsAction::LanPair), "Show a pairing code" }
+        }
+        details {
+            summary { "Link this copy to another device that shows a pairing code" }
+            Input { controller: controller.clone(), epoch, field: WsField::LanCode, label: "The other device's pairing code", kind: Kind::Secret, value: None, disabled: false }
+            ScanButton { controller: controller.clone(), epoch, target: crate::qr::QrTarget::Link }
+            button { class: "secondary-small", "data-qv-clear": "true", onclick: act(&controller, epoch, WsAction::LanLink), "Link" }
         }
     }
 }

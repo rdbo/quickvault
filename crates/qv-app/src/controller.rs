@@ -34,7 +34,15 @@ pub enum InputField {
     Word1,
     /// Third requested recovery word.
     Word2,
+    /// A typed LAN pairing code (new-device join).
+    LanCode,
+    /// The approving device's address, `ip:port`.
+    LanEndpoint,
+    /// This device's name for the approving device.
+    LanLabel,
 }
+/// How many locked-screen inputs exist.
+const INPUTS: usize = 11;
 impl InputField {
     fn index(self) -> usize {
         self as usize
@@ -163,6 +171,8 @@ pub enum Mode {
     Create,
     /// Phrase or anchor recovery.
     Recover,
+    /// Join a vault from another device over the LAN (0013 §10).
+    Join,
 }
 /// A current form generation; late input cannot affect a new generation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -204,6 +214,10 @@ pub struct View {
     pub resume: Option<Resume>,
     /// Baseline adoption awaits over-budget consent for this many bytes.
     pub over_budget: Option<u64>,
+    /// Seconds left in a running LAN window; 0 when none.
+    pub lan_seconds: u64,
+    /// A bounded native QR scan is using the worker.
+    pub scanning: bool,
 }
 /// Core-backed foundation actions. None grants arbitrary IO or crypto access.
 #[derive(Clone, Copy)]
@@ -240,6 +254,8 @@ pub enum Action {
     ResumeComplete,
     /// Finish an interrupted rotation by rolling it back.
     ResumeRollback,
+    /// Join a vault from another device as a new device (0013 §10).
+    JoinDevice,
 }
 /// An interrupted rotation found before unlocking, with the passwords it needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -253,7 +269,7 @@ pub(crate) struct State {
     pub(crate) epoch: u64,
     pub(crate) phase: Phase,
     mode: Mode,
-    inputs: [SecretBytes; 8],
+    inputs: [SecretBytes; INPUTS],
     pub(crate) cancel: CancelToken,
     pub(crate) session: Option<Arc<Session>>,
     phrase: Option<RecoveryPhrase>,
@@ -290,6 +306,9 @@ pub(crate) struct State {
     pub(crate) about: Option<crate::views::AboutView>,
     /// A native autofill request (0009 §4.4); see [`crate::autofill`].
     pub(crate) autofill: Option<crate::autofill::Pending>,
+    /// The running or finished LAN operation (see [`crate::lan`]).
+    pub(crate) lan: Option<crate::lan::LanRun>,
+    pub(crate) scan: Option<crate::qr::Scan>,
 }
 impl State {
     fn clear_inputs(&mut self) {
@@ -300,6 +319,11 @@ impl State {
         }
     }
     pub(crate) fn invalidate(&mut self) {
+        if let Some(scan) = self.scan.take() {
+            scan.cancel.cancel();
+        }
+        #[cfg(all(feature = "desktop", target_os = "android"))]
+        crate::android::forget_scan();
         let creating = self.phase == Phase::Opening && self.status == "Creating vault…";
         let unconfirmed = self.phase == Phase::Phrase;
         let rotation = self.phase == Phase::Rotation;
@@ -343,6 +367,10 @@ impl State {
         };
         self.error = None;
         crate::autofill::on_lock(self);
+        // Lock ends every LAN window, round and prompt (0013 §8.2).
+        if let Some(mut run) = self.lan.take() {
+            run.close();
+        }
     }
 }
 pub(crate) struct Inner {
@@ -419,6 +447,8 @@ impl Controller {
                 over_budget: None,
                 about: None,
                 autofill: None,
+                lan: None,
+                scan: None,
             }),
             working: AtomicBool::new(false),
             released: AtomicU64::new(0),
@@ -580,6 +610,8 @@ impl Controller {
             || std::fs::read(self.0.base.join("output.bin"))
                 .is_ok_and(|b| b == b"synthetic-attachment-canary");
         let passed = passed && attachment_ok;
+        #[cfg(target_os = "linux")]
+        let passed = passed && crate::lan::fixture::complete();
         let cleaned = std::fs::remove_dir_all(&self.0.base).is_ok();
         if passed && cleaned {
             println!("full UI flow passed");
@@ -618,7 +650,10 @@ impl Controller {
         } else {
             Duration::from_secs(60)
         };
-        if s.active.elapsed() >= idle
+        // Only a bounded listener with no unanswered question defers idle lock.
+        let lan_running = s.lan.as_ref().is_some_and(crate::lan::LanRun::defers_idle);
+        if !lan_running
+            && s.active.elapsed() >= idle
             && (s.phase != Phase::Locked
                 || s.inputs.iter().any(|v| !v.is_empty())
                 || s.suggestion.is_some())
@@ -651,6 +686,8 @@ impl Controller {
             rotation_confirmed: s.rotation_confirmed,
             resume: s.resume.as_ref().map(|r| r.1),
             over_budget: s.over_budget,
+            lan_seconds: s.lan.as_ref().map_or(0, crate::lan::LanRun::seconds),
+            scanning: s.scan.is_some(),
         }
     }
     /// Select a workflow, clearing the old form and invalidating late events.
@@ -764,6 +801,7 @@ impl Controller {
                 | Action::QuickUnlock
                 | Action::Recover
                 | Action::RecoverPassword
+                | Action::JoinDevice
         ) {
             // Re-arm the app-level subscription before each pending unlock/KDF.
             // The session's own watcher does not yet exist during that work.
@@ -999,6 +1037,8 @@ impl Controller {
         s.phase = Phase::Opening;
         s.status = if matches!(action, Action::Create | Action::ConfirmWeak) {
             "Creating vault…"
+        } else if matches!(action, Action::JoinDevice) {
+            "Joining from the other device…"
         } else {
             "Opening vault…"
         };
@@ -1029,7 +1069,7 @@ impl Controller {
     fn open(
         &self,
         action: Action,
-        values: &[SecretBytes; 8],
+        values: &[SecretBytes; INPUTS],
         token: &CancelToken,
     ) -> Result<Opened, AppError> {
         if token.is_cancelled() {
@@ -1052,6 +1092,18 @@ impl Controller {
             return Err(AppError::InvalidInput);
         }
         let core = self.core()?;
+        if matches!(action, Action::JoinDevice) {
+            // A new device: the vault is created at `path` (0013 §10).
+            let session = crate::lan::join_new_device(
+                self,
+                &core,
+                &path,
+                &values[InputField::LanCode.index()],
+                values[InputField::LanEndpoint.index()].expose_secret(),
+                values[InputField::LanLabel.index()].expose_secret(),
+            )?;
+            return Ok(Opened::Session(session, path, false, None));
+        }
         if !matches!(action, Action::Create | Action::ConfirmWeak)
             && core.rotation_pending(&path).unwrap_or(false)
         {
@@ -1338,6 +1390,171 @@ fn enter_workspace(s: &mut State) {
         s.revision = s.revision.wrapping_add(1);
     }
 }
+impl Controller {
+    fn qr_form(s: &State, target: crate::qr::QrTarget) -> bool {
+        use crate::qr::QrTarget;
+        match target {
+            QrTarget::NewDevice => s.phase == Phase::Locked && s.mode == Mode::Join,
+            QrTarget::Link | QrTarget::Sync => {
+                s.phase == Phase::Unlocked
+                    && s.workspace
+                        .as_ref()
+                        .is_some_and(|w| w.screen == crate::workspace::Screen::Devices)
+            }
+        }
+    }
+    /// Accept a validated scan for a current form; never initiate network I/O.
+    pub fn accept_qr(
+        &self,
+        epoch: FormEpoch,
+        target: crate::qr::QrTarget,
+        payload: &[u8],
+    ) -> Result<(), AppError> {
+        self.apply_qr(epoch, target, payload, false)
+    }
+    fn apply_qr(
+        &self,
+        epoch: FormEpoch,
+        target: crate::qr::QrTarget,
+        payload: &[u8],
+        scanning: bool,
+    ) -> Result<(), AppError> {
+        use crate::qr::QrTarget;
+        use crate::workspace::WsField;
+        let info = qv_core::inspect_lan_qr(payload)?;
+        if (target == QrTarget::Sync) != (info.kind == qv_core::LanQrKind::Address) {
+            return Err(AppError::InvalidInput);
+        }
+        let mut s = self.state();
+        if s.epoch != epoch.0 || !Self::qr_form(&s, target) {
+            return Err(AppError::InvalidInput);
+        }
+        if scanning
+            && s.scan
+                .as_ref()
+                .is_none_or(|scan| scan.cancel.is_cancelled())
+        {
+            return Err(CoreError::Cancelled.into());
+        }
+        if self.0.working.load(Ordering::SeqCst) && !(scanning && s.scan.is_some()) {
+            return Err(AppError::Busy);
+        }
+        let protected = if target != QrTarget::Sync {
+            Some(crate::workspace::protect(payload)?)
+        } else {
+            None
+        };
+        if target == QrTarget::NewDevice {
+            if let Some(protected) = protected {
+                s.inputs[InputField::LanCode.index()] = protected;
+            }
+            s.inputs[InputField::LanEndpoint.index()] = SecretBytes::zeroed(0);
+            s.status = "Pairing code scanned. Enter a label and choose Join.";
+        } else {
+            let ws = s.workspace.as_mut().ok_or(AppError::InvalidInput)?;
+            ws.inputs.remove(&WsField::LanEndpoint);
+            ws.lan_endpoints = if target == QrTarget::Sync {
+                info.endpoints
+            } else {
+                Vec::new()
+            };
+            if target == QrTarget::Sync {
+                ws.inputs.remove(&WsField::LanCode);
+            }
+            if let Some(protected) = protected {
+                ws.inputs.insert(WsField::LanCode, protected);
+            }
+            ws.notice = Some(if target == QrTarget::Sync {
+                "Address scanned. Choose a linked device and Sync."
+            } else {
+                "Pairing code scanned. Enter a label and choose Link."
+            });
+            ws.error = None;
+        }
+        s.error = None;
+        s.revision = s.revision.wrapping_add(1);
+        Ok(())
+    }
+    /// Record a data-free startup failure in the current rendered form.
+    #[cfg(feature = "desktop")]
+    pub(crate) fn request_qr(&self, epoch: FormEpoch, target: crate::qr::QrTarget) {
+        if let Err(error) = self.scan_qr(epoch, target) {
+            let mut s = self.state();
+            if s.epoch == epoch.0 {
+                if let Some(ws) = s.workspace.as_mut() {
+                    ws.error = Some(error);
+                } else {
+                    s.error = Some(error);
+                }
+            }
+        }
+    }
+    /// Start a bounded native camera action for this form, if available.
+    pub fn scan_qr(&self, epoch: FormEpoch, target: crate::qr::QrTarget) -> Result<(), AppError> {
+        if !crate::qr::camera_available() {
+            return Err(AppError::Unavailable);
+        }
+        let mut s = self.state();
+        if s.epoch != epoch.0 || !Self::qr_form(&s, target) {
+            return Err(AppError::InvalidInput);
+        }
+        if self.0.working.swap(true, Ordering::SeqCst) {
+            return Err(AppError::Busy);
+        }
+        let cancel = CancelToken::new();
+        s.scan = Some(crate::qr::Scan {
+            cancel: cancel.clone(),
+        });
+        s.active = Instant::now();
+        s.revision = s.revision.wrapping_add(1);
+        let worker = Worker(self.0.clone());
+        let controller = self.clone();
+        drop(s);
+        let started = std::thread::Builder::new()
+            .name("qv-qr-scan".into())
+            .spawn(move || {
+                let _worker = worker;
+                let result = crate::qr::capture(&cancel).and_then(|p| {
+                    if cancel.is_cancelled() {
+                        return Err(CoreError::Cancelled.into());
+                    }
+                    controller.apply_qr(epoch, target, p.expose_secret(), true)
+                });
+                let mut s = controller.state();
+                if s.epoch == epoch.0 {
+                    s.scan = None;
+                    if !cancel.is_cancelled()
+                        && let Err(e) = result
+                    {
+                        if let Some(ws) = s.workspace.as_mut() {
+                            ws.error = Some(e);
+                        } else {
+                            s.error = Some(e);
+                        }
+                    }
+                    s.revision = s.revision.wrapping_add(1);
+                }
+            });
+        if started.is_err() {
+            self.state().scan = None;
+            return Err(AppError::Unavailable);
+        }
+        Ok(())
+    }
+    /// Cancel the camera without locking the vault. Lock also cancels scans.
+    pub fn cancel_qr(&self, epoch: FormEpoch) {
+        let mut s = self.state();
+        if s.epoch == epoch.0
+            && let Some(scan) = s.scan.as_ref()
+        {
+            scan.cancel.cancel();
+            s.active = Instant::now();
+            #[cfg(all(feature = "desktop", target_os = "android"))]
+            crate::android::forget_scan();
+        }
+    }
+}
+
 /// Create private application directories without changing permissions on an
 /// existing path. Native guards/core perform no-follow ownership validation.
 pub(crate) fn private_dir(path: &std::path::Path) -> Result<(), AppError> {
@@ -1829,5 +2046,115 @@ mod tests {
         env.controller.state().active = Instant::now() - Duration::from_secs(61);
         assert_eq!(env.controller.snapshot().phase, Phase::Locked);
         assert!(session.is_locked());
+    }
+}
+
+#[cfg(test)]
+mod qr_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use crate::qr::{QrTarget, TEST_ADDR, TEST_PAIR};
+    use crate::workspace::{Screen, WsField};
+    use crate::workspace_tests::{Env, KDF};
+
+    // 0012 §1: LAN discovery mistaken for trust
+    #[test]
+    fn qr_form_kind_epoch_lock_and_cancelled_scan_reject_stale_results() {
+        let env = Env::new();
+        env.c.select_mode(env.epoch(), Mode::Join);
+        let epoch = env.epoch();
+        assert!(
+            env.c
+                .accept_qr(epoch, QrTarget::NewDevice, TEST_ADDR)
+                .is_err()
+        );
+        env.c
+            .accept_qr(epoch, QrTarget::NewDevice, TEST_PAIR)
+            .unwrap();
+        assert_eq!(
+            env.c.state().inputs[InputField::LanCode.index()].expose_secret(),
+            TEST_PAIR
+        );
+        assert!(
+            !env.c.snapshot().busy,
+            "scan acceptance starts no worker/network action"
+        );
+        env.fill(InputField::LanCode, "typed replacement");
+        assert_eq!(
+            env.c.state().inputs[InputField::LanCode.index()].expose_secret(),
+            b"typed replacement"
+        );
+        let cancel = CancelToken::new();
+        cancel.cancel();
+        env.c.state().scan = Some(crate::qr::Scan { cancel });
+        assert_eq!(
+            env.c.apply_qr(epoch, QrTarget::NewDevice, TEST_PAIR, true),
+            Err(CoreError::Cancelled.into())
+        );
+        env.c.lock();
+        assert!(
+            env.c
+                .accept_qr(epoch, QrTarget::NewDevice, TEST_PAIR)
+                .is_err()
+        );
+        let state = env.c.state();
+        assert!(state.inputs.iter().all(|p| p.is_empty()));
+        assert!(state.scan.is_none());
+    }
+
+    // 0012 §1: Unrequested synchronization
+    #[test]
+    fn qr_address_and_pairing_fill_only_devices_and_manual_edits_clear_hints() {
+        let _k = KDF.lock().unwrap_or_else(|e| e.into_inner());
+        let env = Env::unlocked();
+        assert!(
+            env.c
+                .accept_qr(env.epoch(), QrTarget::Sync, TEST_ADDR)
+                .is_err()
+        );
+        env.c.navigate(env.epoch(), Screen::Devices);
+        let epoch = env.epoch();
+        env.c.accept_qr(epoch, QrTarget::Sync, TEST_ADDR).unwrap();
+        assert!(!env.c.snapshot().busy);
+        assert_eq!(
+            env.c
+                .state()
+                .workspace
+                .as_ref()
+                .unwrap()
+                .lan_endpoints
+                .len(),
+            1
+        );
+        assert!(env.c.accept_qr(epoch, QrTarget::Sync, TEST_PAIR).is_err());
+        env.put(WsField::LanEndpoint, "198.51.100.7:7777");
+        assert!(
+            env.c
+                .state()
+                .workspace
+                .as_ref()
+                .unwrap()
+                .lan_endpoints
+                .is_empty()
+        );
+        env.c.accept_qr(epoch, QrTarget::Link, TEST_PAIR).unwrap();
+        {
+            let s = env.c.state();
+            let ws = s.workspace.as_ref().unwrap();
+            assert_eq!(ws.input(WsField::LanCode), TEST_PAIR);
+            assert!(ws.input(WsField::LanEndpoint).is_empty());
+            assert!(ws.lan_endpoints.is_empty());
+        }
+        env.c.navigate(epoch, Screen::Search);
+        assert!(
+            env.c
+                .state()
+                .workspace
+                .as_ref()
+                .unwrap()
+                .input(WsField::LanCode)
+                .is_empty()
+        );
+        assert!(env.c.accept_qr(epoch, QrTarget::Link, TEST_PAIR).is_err());
     }
 }

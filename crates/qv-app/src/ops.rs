@@ -796,6 +796,11 @@ pub(crate) fn run(
                 })
             }))
         }),
+        WsAction::LanPair => crate::lan::pair(c, epoch),
+        WsAction::LanReceive => crate::lan::receive(c, epoch),
+        WsAction::LanSync(link) => crate::lan::sync(c, epoch, link),
+        WsAction::LanLink => crate::lan::link(c, epoch),
+        WsAction::LanRemove(link) => crate::lan::remove(c, epoch, link),
         WsAction::Answer(_) => Err(AppError::InvalidInput),
     }
 }

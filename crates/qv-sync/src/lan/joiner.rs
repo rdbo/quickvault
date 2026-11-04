@@ -9,7 +9,7 @@
 //! which holds nothing reusable. The first valid accept authenticates the
 //! approver, and later failures abort.
 
-use std::net::{SocketAddr, TcpStream};
+use std::net::SocketAddr;
 use std::path::Path;
 
 use qv_crypto::lan::{
@@ -26,12 +26,10 @@ use qv_protocol::registry::LanProfile;
 use qv_store::{PasswordProof, StoreError, VerifiedLanStaging};
 
 use super::endpoint::EndpointPolicy;
+use super::exchange::{ExchangeVault, Role, RoundReport};
 use super::steps::{JoinAttempt, check_accept, join_attempt, record_keys, th};
-use super::transport::{Channel, Conn, guarded};
+use super::transport::{Channel, Conn, connect as open_conn, guarded};
 use super::{LanError, LanTimeouts, exchange};
-
-/// Most candidate endpoints tried per action (0013 §3.3).
-const MAX_CANDIDATES: usize = 16;
 
 /// A scanned or typed pairing code.
 pub struct JoinCode {
@@ -75,13 +73,8 @@ impl JoinCode {
         extra: &[SocketAddr],
         policy: EndpointPolicy,
     ) -> Vec<SocketAddr> {
-        let mut out: Vec<SocketAddr> = Vec::new();
-        for a in self.endpoints.iter().chain(extra) {
-            if policy.accepts(a) && !out.contains(a) && out.len() < MAX_CANDIDATES {
-                out.push(*a);
-            }
-        }
-        out
+        let all: Vec<SocketAddr> = self.endpoints.iter().chain(extra).copied().collect();
+        super::candidates(&all, policy)
     }
 }
 
@@ -131,7 +124,7 @@ pub struct JoinerContext {
 }
 
 /// The joining device's unlocked vault in link mode.
-pub trait JoinerVault {
+pub trait JoinerVault: ExchangeVault {
     /// The vault's identity and link root.
     fn context(&self) -> Result<JoinerContext, LanError>;
     /// Commits B's link row.
@@ -158,7 +151,7 @@ fn connect<'c>(
         if cancelled() {
             return Err(LanError::Cancelled);
         }
-        let Ok(stream) = TcpStream::connect_timeout(&endpoint, t.connect) else {
+        let Some(stream) = open_conn(endpoint, t.connect, cancelled)? else {
             continue;
         };
         let nonce = PairNonce::generate().map_err(|_| LanError::Io)?;
@@ -281,8 +274,18 @@ pub fn join_new_device(
     })
 }
 
-/// Link mode (§4.8): pairs an unlocked copy of the same vault and generation.
-/// Returns the committed link ID.
+/// A completed link-mode join.
+#[derive(Debug)]
+pub struct JoinedLink {
+    /// The committed link.
+    pub link_id: [u8; 16],
+    /// The ordinary exchange that followed (0013 §4.8). Its failure leaves
+    /// both links; the user syncs again later.
+    pub round: Result<RoundReport, LanError>,
+}
+
+/// Link mode (§4.8): pairs an unlocked copy of the same vault and
+/// generation, then runs one exchange as initiator over the pairing keys.
 pub fn join_link(
     code: JoinCode,
     extra: &[SocketAddr],
@@ -291,7 +294,7 @@ pub fn join_link(
     ui: &mut dyn JoinerUi,
     timeouts: &LanTimeouts,
     cancelled: &(dyn Fn() -> bool + Sync),
-) -> Result<[u8; 16], LanError> {
+) -> Result<JoinedLink, LanError> {
     timeouts.validate()?;
     let ctx = vault.context()?;
     let candidates = code.candidates(extra, policy);
@@ -299,7 +302,7 @@ pub fn join_link(
     let mut p = connect(&keys, JoinMode::Link, &candidates, timeouts, cancelled)?;
     reveal(&mut p, ui, timeouts)?;
     let (attempt, ss, th) = (&p.attempt, &p.ss, p.th);
-    guarded(&mut p.ch, |ch| {
+    let link_id = guarded(&mut p.ch, |ch| {
         let proof = ctx
             .root
             .proof(&th, ProofRole::B, ctx.vault_id, ctx.key_generation)
@@ -340,8 +343,12 @@ pub fn join_link(
             &PairDone::encode().map_err(|_| LanError::Protocol)?,
             timeouts.message,
         )?;
-        // The post-pairing exchange arrives in phase 2.10.
-        ch.conn.close();
         Ok(proved.link_id)
-    })
+    })?;
+    // The ordinary exchange over the pairing keys, B initiating (§4.8).
+    let round = guarded(&mut p.ch, |ch| {
+        exchange::exchange(ch, Role::Initiator, vault, timeouts)
+    });
+    p.ch.conn.close();
+    Ok(JoinedLink { link_id, round })
 }

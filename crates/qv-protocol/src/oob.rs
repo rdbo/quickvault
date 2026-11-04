@@ -93,19 +93,7 @@ pub fn encode_qr(
         a.text(QR_LABEL);
         a.uint(profile.id());
         a.bytes(secret);
-        a.array(|a| {
-            for e in endpoints {
-                a.array(|a| {
-                    match e.addr {
-                        IpAddr::V4(v4) => a.bytes(&v4.octets()),
-                        IpAddr::V6(v6) => a.bytes(&v6.octets()),
-                    }
-                    a.uint(e.port.into());
-                    Ok(())
-                })?;
-            }
-            Ok(())
-        })?;
+        write_endpoints(a, endpoints)?;
         a.text(instance);
         Ok(())
     })
@@ -128,8 +116,56 @@ pub fn decode_qr(bytes: &[u8]) -> Result<QrPayload<'_>, ProtocolError> {
     }
     let profile = d.uint().map_err(bad)?;
     let secret: &[u8; 16] = d.bytes().map_err(bad)?.try_into().map_err(bad)?;
+    let endpoints = read_endpoints(&mut d, 0)?;
+    let instance = d.text().map_err(bad)?;
+    if !valid_instance(instance) {
+        return Err(ProtocolError::Malformed);
+    }
+    d.finish().map_err(bad)?;
+    Ok(QrPayload {
+        profile,
+        secret,
+        endpoints,
+        instance,
+    })
+}
+
+/// The address-only receive-window QR's label (0013 §8.5).
+pub const ADDR_QR_LABEL: &str = "qv/lan-addr-qr/v1";
+/// Longest accepted endpoint text, `[v6]:port` included.
+pub const MAX_ENDPOINT_TEXT: usize = 64;
+
+/// A decoded address-only QR (0013 §8.5). It carries no secret.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AddrQr {
+    /// The raw `lan_profile`, checked by the caller.
+    pub profile: u64,
+    /// 1–8 endpoint hints.
+    pub endpoints: Vec<WireEndpoint>,
+}
+
+fn write_endpoints(
+    a: &mut qv_encoding::Encoder,
+    endpoints: &[WireEndpoint],
+) -> Result<(), qv_encoding::EncodeError> {
+    a.array(|a| {
+        for e in endpoints {
+            a.array(|a| {
+                match e.addr {
+                    IpAddr::V4(v4) => a.bytes(&v4.octets()),
+                    IpAddr::V6(v6) => a.bytes(&v6.octets()),
+                }
+                a.uint(e.port.into());
+                Ok(())
+            })?;
+        }
+        Ok(())
+    })
+}
+
+fn read_endpoints(d: &mut Decoder<'_>, min: usize) -> Result<Vec<WireEndpoint>, ProtocolError> {
     let n = usize::try_from(d.array().map_err(bad)?).map_err(bad)?;
-    if n > MAX_QR_ENDPOINTS {
+    if n < min || n > MAX_QR_ENDPOINTS {
         return Err(ProtocolError::Malformed);
     }
     let mut endpoints = Vec::with_capacity(n);
@@ -151,17 +187,77 @@ pub fn decode_qr(bytes: &[u8]) -> Result<QrPayload<'_>, ProtocolError> {
             .ok_or(ProtocolError::Malformed)?;
         endpoints.push(WireEndpoint { addr, port });
     }
-    let instance = d.text().map_err(bad)?;
-    if !valid_instance(instance) {
+    Ok(endpoints)
+}
+
+/// Encodes a receive window's address-only QR: 1–8 endpoints, no port 0.
+pub fn encode_addr_qr(
+    profile: LanProfile,
+    endpoints: &[WireEndpoint],
+) -> Result<Vec<u8>, ProtocolError> {
+    if endpoints.is_empty()
+        || endpoints.len() > MAX_QR_ENDPOINTS
+        || endpoints.iter().any(|e| e.port == 0)
+    {
         return Err(ProtocolError::Malformed);
     }
-    d.finish().map_err(bad)?;
-    Ok(QrPayload {
-        profile,
-        secret,
-        endpoints,
-        instance,
+    let out = qv_encoding::encode_array(|a| {
+        a.text(ADDR_QR_LABEL);
+        a.uint(profile.id());
+        write_endpoints(a, endpoints)
     })
+    .map_err(bad)?;
+    if out.len() > MAX_QR_BYTES {
+        return Err(ProtocolError::Malformed);
+    }
+    Ok(out.to_vec())
+}
+
+/// Decodes an address-only QR: bounded, canonical, exact shape. Any failure
+/// is [`ProtocolError::Malformed`].
+pub fn decode_addr_qr(bytes: &[u8]) -> Result<AddrQr, ProtocolError> {
+    if bytes.len() > MAX_QR_BYTES {
+        return Err(ProtocolError::Malformed);
+    }
+    let mut d = Decoder::new(bytes).map_err(bad)?;
+    if d.array().map_err(bad)? != 3 || d.text().map_err(bad)? != ADDR_QR_LABEL {
+        return Err(ProtocolError::Malformed);
+    }
+    let profile = d.uint().map_err(bad)?;
+    let endpoints = read_endpoints(&mut d, 1)?;
+    d.finish().map_err(bad)?;
+    Ok(AddrQr { profile, endpoints })
+}
+
+/// Parses typed endpoint text (0013 §8.5): `a.b.c.d:port` or `[v6]:port`.
+/// IP literals only, port 1–65535, no zone identifier, no whitespace, at
+/// most [`MAX_ENDPOINT_TEXT`] bytes.
+pub fn parse_endpoint(text: &str) -> Result<WireEndpoint, ProtocolError> {
+    if text.len() > MAX_ENDPOINT_TEXT
+        || text
+            .bytes()
+            .any(|c| c == b'%' || c.is_ascii_whitespace() || c.is_ascii_control())
+    {
+        return Err(ProtocolError::Malformed);
+    }
+    let addr: std::net::SocketAddr = text.parse().map_err(bad)?;
+    if addr.port() == 0 {
+        return Err(ProtocolError::Malformed);
+    }
+    if let std::net::SocketAddr::V6(v6) = addr
+        && (v6.scope_id() != 0 || v6.flowinfo() != 0)
+    {
+        return Err(ProtocolError::Malformed);
+    }
+    Ok(WireEndpoint {
+        addr: addr.ip(),
+        port: addr.port(),
+    })
+}
+
+/// The text form of an endpoint (0013 §8.5).
+pub fn format_endpoint(e: &WireEndpoint) -> String {
+    std::net::SocketAddr::new(e.addr, e.port).to_string()
 }
 
 /// RFC 4648 base32 without padding, into a wiped buffer.
@@ -345,6 +441,151 @@ mod tests {
         assert!(decode_qr(&encode_qr(LanProfile::V1, &[9; 16], &max, "").unwrap()).is_ok());
     }
 
+    fn ep(s: &str) -> WireEndpoint {
+        parse_endpoint(s).unwrap()
+    }
+
+    #[test]
+    fn oob_addr_qr_round_trips_and_has_the_spec_shape() {
+        let eps = [ep("192.0.2.10:7777"), ep("[2001:db8::10]:7777")];
+        let qr = encode_addr_qr(LanProfile::V1, &eps).unwrap();
+        let d = decode_addr_qr(&qr).unwrap();
+        assert_eq!((d.profile, d.endpoints.as_slice()), (1, &eps[..]));
+        // Built by hand from the 0013 §8.5 text.
+        let mut expected = vec![0x83, 0x71];
+        expected.extend_from_slice(b"qv/lan-addr-qr/v1");
+        expected.extend_from_slice(&[0x01, 0x82, 0x82, 0x44, 192, 0, 2, 10, 0x19, 0x1e, 0x61]);
+        expected.extend_from_slice(&[0x82, 0x50]);
+        expected.extend_from_slice(&"2001:db8::10".parse::<Ipv6Addr>().unwrap().octets());
+        expected.extend_from_slice(&[0x19, 0x1e, 0x61]);
+        assert_eq!(qr, expected);
+        let max = vec![ep("10.0.0.1:1"); MAX_QR_ENDPOINTS];
+        assert!(encode_addr_qr(LanProfile::V1, &max).is_ok());
+        for bad in [vec![], vec![ep("10.0.0.1:1"); MAX_QR_ENDPOINTS + 1]] {
+            assert_eq!(
+                encode_addr_qr(LanProfile::V1, &bad).err(),
+                Some(ProtocolError::Malformed)
+            );
+        }
+        let zero = WireEndpoint {
+            addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port: 0,
+        };
+        assert!(encode_addr_qr(LanProfile::V1, &[zero]).is_err());
+    }
+
+    #[test]
+    fn oob_addr_qr_refuses_bad_payloads() {
+        let enc = |f: &dyn Fn(&mut qv_encoding::Encoder)| {
+            qv_encoding::encode_array(|a| {
+                f(a);
+                Ok(())
+            })
+            .unwrap()
+            .to_vec()
+        };
+        let one = |a: &mut qv_encoding::Encoder, addr: &[u8], port: u64| {
+            a.array(|a| {
+                a.array(|a| {
+                    a.bytes(addr);
+                    a.uint(port);
+                    Ok(())
+                })
+            })
+            .unwrap();
+        };
+        let cases = [
+            // No endpoint.
+            enc(&|a| {
+                a.text(ADDR_QR_LABEL);
+                a.uint(1);
+                a.array(|_| Ok(())).unwrap();
+            }),
+            // A 5-byte address, port 0, port 65536.
+            enc(&|a| {
+                a.text(ADDR_QR_LABEL);
+                a.uint(1);
+                one(a, &[1, 2, 3, 4, 5], 80);
+            }),
+            enc(&|a| {
+                a.text(ADDR_QR_LABEL);
+                a.uint(1);
+                one(a, &[1, 2, 3, 4], 0);
+            }),
+            enc(&|a| {
+                a.text(ADDR_QR_LABEL);
+                a.uint(1);
+                one(a, &[1, 2, 3, 4], 65536);
+            }),
+            // The pairing label, and an extra element.
+            enc(&|a| {
+                a.text(QR_LABEL);
+                a.uint(1);
+                one(a, &[1, 2, 3, 4], 80);
+            }),
+            enc(&|a| {
+                a.text(ADDR_QR_LABEL);
+                a.uint(1);
+                one(a, &[1, 2, 3, 4], 80);
+                a.text("");
+            }),
+        ];
+        for c in &cases {
+            assert_eq!(decode_addr_qr(c).err(), Some(ProtocolError::Malformed));
+        }
+        let good = encode_addr_qr(LanProfile::V1, &[ep("10.0.0.1:80")]).unwrap();
+        let mut trailing = good.clone();
+        trailing.push(0);
+        assert!(decode_addr_qr(&trailing).is_err());
+        assert!(decode_addr_qr(&vec![0; MAX_QR_BYTES + 1]).is_err());
+        // Nine endpoints.
+        let nine = enc(&|a| {
+            a.text(ADDR_QR_LABEL);
+            a.uint(1);
+            a.array(|a| {
+                for _ in 0..9 {
+                    a.array(|a| {
+                        a.bytes(&[1, 2, 3, 4]);
+                        a.uint(80);
+                        Ok(())
+                    })?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        });
+        assert!(decode_addr_qr(&nine).is_err());
+    }
+
+    #[test]
+    fn oob_endpoint_text_is_ip_literals_only() {
+        assert_eq!(format_endpoint(&ep("192.0.2.1:9")), "192.0.2.1:9");
+        assert_eq!(
+            format_endpoint(&ep("[2001:db8::1]:65535")),
+            "[2001:db8::1]:65535"
+        );
+        for bad in [
+            "localhost:80",
+            "example.com:80",
+            "192.0.2.1",
+            "192.0.2.1:0",
+            "192.0.2.1:65536",
+            "[fe80::1%2]:80",
+            "[fe80::1%eth0]:80",
+            " 192.0.2.1:80",
+            "192.0.2.1:80\n",
+            "2001:db8::1:80",
+            "01.2.3.4:80",
+            &format!("[{}]:80", "0".repeat(70)),
+        ] {
+            assert_eq!(
+                parse_endpoint(bad).err(),
+                Some(ProtocolError::Malformed),
+                "{bad}"
+            );
+        }
+    }
+
     #[test]
     fn oob_qr_refuses_bad_payloads() {
         let enc = |f: &dyn Fn(&mut qv_encoding::Encoder)| {
@@ -468,8 +709,10 @@ mod tests {
         #[test]
         fn oob_decoders_never_panic(bytes in proptest::collection::vec(any::<u8>(), 0..1100)) {
             let _ = decode_qr(&bytes);
+            let _ = decode_addr_qr(&bytes);
             if let Ok(s) = core::str::from_utf8(&bytes) {
                 let _ = decode_manual(s);
+                let _ = parse_endpoint(s);
             }
         }
     }

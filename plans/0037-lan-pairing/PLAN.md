@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-11-02 | 2026-11-02 | 0013 §1–4, §7.2–7.7 (new-device subset), §8–12; 0002 §3.3, §3.5; 0004 §2, §5–6; 0005 §5.4; 0008 §1; 0012 §1 |
+| Reviewed | 2026-11-02 | 2026-11-02 | 0013 §1–4, §7.2–7.7 (new-device subset), §8–12; 0002 §3.3, §3.5; 0004 §2, §5–6; 0005 §5.4; 0008 §1; 0012 §1 |
 
 ## Intent
 
@@ -1280,3 +1280,12 @@ pass; `Cargo.lock` changes only for the new path edges.
   - `crosscheck_lan.py`: OK.
 
   No dependency change, so the deny/vet results from 2026-11-02 still apply.
+
+- 2026-11-03: Fresh-context review ([REVIEW.md](REVIEW.md)): **Approved with
+  minor fixes**. The reviewer made `Core::join_new_device` apply the
+  platform and anchor-location guards of `create` before pairing, with a
+  test. Findings 2–6 (Want-loop bound, `Done` outcome, grant sent under the
+  session mutex, `state_changed` test, cancellable connect) are carried to
+  phase 2.10. Status Reviewed. Gates on the reviewed tree: SPDX, matrix,
+  fmt, Clippy and `cargo test --locked` (830 passed, 0 failed, 2 ignored)
+  pass, and the Python crosscheck prints OK.

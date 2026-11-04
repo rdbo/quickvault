@@ -2,23 +2,25 @@
 
 //! The approving device's pairing window (0013 §4, §8; plan 0037 decision 6).
 //!
-//! [`PairingWindow::run`] runs the protocol on the caller's thread. One
-//! scoped acceptor thread polls the listener and hands it one connection at
-//! a time.
-//! - While a hello is being checked, other connections close at once,
-//!   unanswered.
-//! - Once a valid hello was accepted, the window is used. The acceptor reads
+//! [`PairingWindow::run`] runs the protocol on the caller's thread, with the
+//! shared acceptor of `window`:
+//! - while a hello is being checked, other connections close at once,
+//!   unanswered;
+//! - once a valid hello was accepted, the window is used. The acceptor reads
 //!   one frame from each extra connection, never answers, and closes it.
 //!   Identical bytes are refused. A different valid hello means the code was
 //!   observed, so the pairing aborts. Anything else counts as a failed
-//!   attempt.
-//! - The window closes at 16 failed attempts, at its time limit, on cancel
+//!   attempt;
+//! - the window closes at 16 failed attempts, at its time limit, on cancel
 //!   or lock, or when the pairing completes or aborts.
+//!
+//! In link mode the pairing is followed by one ordinary exchange over the
+//! pairing keys, with A as responder (0013 §4.8).
 
 use std::net::{IpAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
-use std::sync::{Mutex, PoisonError};
+use std::sync::PoisonError;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, sync_channel};
 use std::time::{Duration, Instant};
 
 use qv_crypto::lan::{
@@ -30,18 +32,14 @@ use qv_protocol::frame::FramePhase;
 use qv_protocol::lan::{JoinMode, PairProve, PairProved, PairReveal};
 use qv_protocol::oob::{WireEndpoint, encode_manual, encode_qr};
 use qv_protocol::registry::LanProfile;
-use qv_store::LanServeState;
 use zeroize::Zeroizing;
 
 use super::endpoint::{ListenScope, advertisable, bind_addrs};
+use super::exchange::{ExchangeVault, Role, RoundReport};
 use super::steps::{accept_for, check_hello, record_keys, th};
 use super::transport::{Channel, Conn, guarded};
+use super::window::{POLL, Phase, Shared, acceptor, closing};
 use super::{LanError, LanTimeouts, PAIRING_WINDOW_MAX, exchange};
-
-/// Failed attempts that close a window (0013 §8.3).
-const MAX_FAILURES: u32 = 16;
-/// Acceptor poll interval.
-const POLL: Duration = Duration::from_millis(25);
 
 /// What the approving vault provides.
 pub struct ApproverContext {
@@ -57,23 +55,19 @@ pub struct ApproverContext {
 
 /// The approving device's vault, reached through short calls (qv-core
 /// implements it over a session).
-pub trait ApproverVault: Sync {
+pub trait ApproverVault: ExchangeVault {
     /// The vault's identity and link root.
     fn context(&self) -> Result<ApproverContext, LanError>;
     /// Commits the new link row (0013 §9.1).
     fn commit_link(&self, link_id: [u8; 16], key: &LinkKey) -> Result<(), LanError>;
-    /// Builds the grant plaintext ([`super::grant_plaintext`]) and passes it
-    /// to `send`, which seals and sends it at once.
-    fn grant(
-        &self,
-        link_id: &[u8; 16],
-        send: &mut dyn FnMut(&[u8]) -> Result<(), LanError>,
-    ) -> Result<(), LanError>;
-    /// The committed state to serve.
-    fn serve_state(&self) -> Result<LanServeState, LanError>;
-    /// One object envelope of `state`.
-    fn object(&self, state: &LanServeState, id: qv_model::ObjectId) -> Result<Vec<u8>, LanError>;
+    /// Builds the grant plaintext ([`super::grant_plaintext`]), passes it to
+    /// `seal`, and returns the sealed record. The driver sends it after this
+    /// call returns, so no vault lock is held on the network.
+    fn grant(&self, link_id: &[u8; 16], seal: &mut Sealer<'_>) -> Result<Vec<u8>, LanError>;
 }
+
+/// Seals one record of the pairing channel (see [`ApproverVault::grant`]).
+pub type Sealer<'a> = dyn FnMut(&[u8]) -> Result<Vec<u8>, LanError> + 'a;
 
 /// Shows the comparison code and waits for the user (0013 §4.5).
 pub trait Confirm {
@@ -95,39 +89,9 @@ pub struct Approved {
     pub peer_confirmed: bool,
     /// Why the exchange after the link commit failed, if it did.
     pub failure: Option<LanError>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Phase {
-    /// Waiting for a connection.
-    Idle,
-    /// Checking a hello.
-    Checking,
-    /// A valid hello was accepted.
-    Used,
-}
-
-struct Shared {
-    phase: Mutex<(Phase, Zeroizing<Vec<u8>>)>,
-    failures: AtomicU32,
-    observed: AtomicBool,
-    finished: AtomicBool,
-}
-
-impl Shared {
-    fn phase(&self) -> Phase {
-        self.phase.lock().unwrap_or_else(PoisonError::into_inner).0
-    }
-    fn set(&self, p: Phase, hello: Option<&[u8]>) {
-        let mut g = self.phase.lock().unwrap_or_else(PoisonError::into_inner);
-        g.0 = p;
-        if let Some(h) = hello {
-            g.1 = Zeroizing::new(h.to_vec());
-        }
-    }
-    fn fail(&self) {
-        self.failures.fetch_add(1, Ordering::SeqCst);
-    }
+    /// Link mode: the ordinary exchange that followed the pairing (0013
+    /// §4.8). Its failure leaves both links.
+    pub round: Option<Result<RoundReport, LanError>>,
 }
 
 /// An open pairing window for one unlocked vault (0013 §8.1).
@@ -211,69 +175,24 @@ impl PairingWindow {
         cancelled: &(dyn Fn() -> bool + Sync),
     ) -> Result<Approved, LanError> {
         timeouts.validate()?;
-        let shared = Shared {
-            phase: Mutex::new((Phase::Idle, Zeroizing::new(Vec::new()))),
-            failures: AtomicU32::new(0),
-            observed: AtomicBool::new(false),
-            finished: AtomicBool::new(false),
-        };
+        let shared = Shared::new();
         let (tx, rx) = sync_channel::<TcpStream>(1);
         let keys = &self.keys;
         let expires = self.expires;
-        let listener = &self.listener;
+        let listener = self.listener;
         std::thread::scope(|s| {
-            s.spawn(|| acceptor(listener, keys, &shared, &tx, timeouts, expires, cancelled));
+            let shared_ref = &shared;
+            s.spawn(move || {
+                acceptor(&listener, shared_ref, &tx, expires, cancelled, &|stream| {
+                    probe(stream, keys, shared_ref, timeouts, expires, cancelled)
+                })
+            });
             let r = worker(
                 keys, &shared, &rx, vault, confirm, timeouts, expires, cancelled,
             );
             shared.finished.store(true, Ordering::SeqCst);
             r
         })
-    }
-}
-
-fn closing(shared: &Shared, expires: Instant, cancelled: &dyn Fn() -> bool) -> Option<LanError> {
-    if shared.observed.load(Ordering::SeqCst) {
-        Some(LanError::CodeObserved)
-    } else if cancelled() {
-        Some(LanError::Cancelled)
-    } else if shared.failures.load(Ordering::SeqCst) >= MAX_FAILURES {
-        Some(LanError::TooManyAttempts)
-    } else if Instant::now() >= expires {
-        Some(LanError::WindowExpired)
-    } else {
-        None
-    }
-}
-
-#[allow(clippy::too_many_arguments)] // the window's shared state
-fn acceptor(
-    listener: &TcpListener,
-    keys: &PairingKeys,
-    shared: &Shared,
-    tx: &SyncSender<TcpStream>,
-    t: &LanTimeouts,
-    expires: Instant,
-    cancelled: &(dyn Fn() -> bool + Sync),
-) {
-    while !shared.finished.load(Ordering::SeqCst) && closing(shared, expires, cancelled).is_none() {
-        let stream = match listener.accept() {
-            Ok((s, _)) => s,
-            Err(_) => {
-                std::thread::sleep(POLL);
-                continue;
-            }
-        };
-        match shared.phase() {
-            Phase::Idle => {
-                shared.set(Phase::Checking, None);
-                if tx.try_send(stream).is_err() {
-                    shared.set(Phase::Idle, None);
-                }
-            }
-            Phase::Checking => drop(stream),
-            Phase::Used => probe(stream, keys, shared, t, cancelled),
-        }
     }
 }
 
@@ -284,11 +203,13 @@ fn probe(
     keys: &PairingKeys,
     shared: &Shared,
     t: &LanTimeouts,
+    expires: Instant,
     cancelled: &(dyn Fn() -> bool + Sync),
 ) {
     let Ok(mut conn) = Conn::new(stream, cancelled) else {
         return;
     };
+    conn.cap(expires);
     conn.within(t.probe, None);
     let mut buf = Vec::new();
     let read = conn.recv_frame(FramePhase::Handshake, &mut buf);
@@ -329,12 +250,15 @@ fn worker(
         let stream = match rx.recv_timeout(POLL) {
             Ok(s) => s,
             Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => return Err(LanError::Io),
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err(closing(shared, expires, cancelled).unwrap_or(LanError::Io));
+            }
         };
         let Ok(mut conn) = Conn::new(stream, cancelled) else {
             shared.set(Phase::Idle, None);
             continue;
         };
+        conn.cap(expires);
         conn.within(t.message, Some(expires));
         let mut buf = Vec::new();
         let hello = conn
@@ -430,7 +354,8 @@ fn pair(
             guarded(&mut ch, |ch| {
                 observed()?;
                 vault.commit_link(link_id, &link?)?;
-                vault.grant(&link_id, &mut |plaintext| ch.send(plaintext, t.message))
+                let record = vault.grant(&link_id, &mut |plaintext| ch.seal(plaintext))?;
+                ch.send_sealed(&record, t.message)
             })?;
             drop(ss);
             let failure = guarded(&mut ch, |ch| {
@@ -442,6 +367,7 @@ fn pair(
                 link_id,
                 peer_confirmed: failure.is_none(),
                 failure,
+                round: None,
             })
         }
         JoinMode::Link => {
@@ -492,17 +418,23 @@ fn pair(
                 )?;
                 let msg = ch.recv(t.idle, None)?;
                 qv_protocol::lan::PairDone::decode(msg.expose_secret())
-                    .map_err(|_| LanError::Protocol)?;
-                // The post-pairing exchange arrives in phase 2.10.
-                ch.conn.close();
-                Ok(())
+                    .map_err(|_| LanError::Protocol)
             })
             .err();
+            // The ordinary exchange over the pairing keys, A responding.
+            let round = failure.is_none().then(|| {
+                let r = guarded(&mut ch, |ch| {
+                    exchange::exchange(ch, Role::Responder, vault, t)
+                });
+                ch.conn.close();
+                r
+            });
             Ok(Approved {
                 mode,
                 link_id,
                 peer_confirmed: failure.is_none(),
                 failure,
+                round,
             })
         }
     }

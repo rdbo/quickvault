@@ -58,6 +58,11 @@ fn fixture_report(controller: &Controller) -> impl FnMut(FormEvent) + 'static {
     let c = controller.clone();
     move |event: FormEvent| {
         let value = event.value();
+        #[cfg(target_os = "linux")]
+        if value == "LAN-PEER" {
+            crate::lan::fixture::start(&c);
+            return;
+        }
         if let Some(stage) = value
             .strip_prefix("FAIL:")
             .and_then(|n| n.parse::<u8>().ok())
@@ -139,6 +144,7 @@ fn Screen(controller: Controller, revision: u64) -> Element {
                 revision: view.revision,
                 live: view.live,
                 busy: view.busy,
+                scanning: view.scanning,
                 reduced_lifecycle: view.reduced_lifecycle,
                 fixture,
                 on_fixture: fixture_report(&controller),
@@ -198,10 +204,12 @@ fn Screen(controller: Controller, revision: u64) -> Element {
                         }
                         button {class:"text-button","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::CancelRotation),"Cancel the rotation (nothing changes)"}
                     }else if matches!(phase,Phase::Locked|Phase::Opening|Phase::WeakPassword){
-                        h2 {if mode==Mode::Unlock{"Welcome back"}else if mode==Mode::Create{"Make yourself a vault"}else{"Recover local access"}}
-                        p {class:"muted",if mode==Mode::Unlock{"Unlock a vault already on this device."}else if mode==Mode::Create{"Choose a password, then keep your recovery phrase somewhere safe."}else{"Use your recovery phrase, or explicitly inspect a missing or mismatched local anchor."}}
+                        workspace::LanPanel{controller:controller.clone(),epoch,revision:view.revision}
+                        if view.scanning { workspace::ScanPanel{controller:controller.clone(),epoch} }
+                        h2 {if mode==Mode::Unlock{"Welcome back"}else if mode==Mode::Create{"Make yourself a vault"}else if mode==Mode::Join{"Join from another device"}else{"Recover local access"}}
+                        p {class:"muted",if mode==Mode::Unlock{"Unlock a vault already on this device."}else if mode==Mode::Create{"Choose a password, then keep your recovery phrase somewhere safe."}else if mode==Mode::Join{"On the other device, open Devices and show a pairing code. Type it here with that device's address."}else{"Use your recovery phrase, or explicitly inspect a missing or mismatched local anchor."}}
                         nav {class:"tabs","aria-label":"Vault action",
-                            for (n,label) in [(Mode::Unlock,"Unlock"),(Mode::Create,"Create"),(Mode::Recover,"Recover")] {
+                            for (n,label) in [(Mode::Unlock,"Unlock"),(Mode::Create,"Create"),(Mode::Recover,"Recover"),(Mode::Join,"Join")] {
                                 button {class:if mode==n{"selected"}else{""},disabled:view.busy,onclick:{let c=controller.clone();move |_|{c.select_mode(epoch,n);}},"{label}"}
                             }
                         }
@@ -209,7 +217,12 @@ fn Screen(controller: Controller, revision: u64) -> Element {
                         if mode==Mode::Create{
                             SecretInput{controller:controller.clone(),epoch,field:InputField::Name,label:"Vault name",id:"vault-name",secret:false,disabled:view.busy}
                         }
-                        if mode!=Mode::Recover{
+                        if mode==Mode::Join{
+                            workspace::ScanButton{controller:controller.clone(),epoch,target:crate::qr::QrTarget::NewDevice}
+                            SecretInput{controller:controller.clone(),epoch,field:InputField::LanCode,label:"Pairing code from the other device",id:"lan-join-code",secret:true,disabled:view.busy}
+                            SecretInput{controller:controller.clone(),epoch,field:InputField::LanEndpoint,label:"The other device's address (ip:port)",id:"lan-join-endpoint",secret:false,disabled:view.busy}
+                            SecretInput{controller:controller.clone(),epoch,field:InputField::LanLabel,label:"A name for the other device",id:"lan-join-label",secret:false,disabled:view.busy}
+                        }else if mode!=Mode::Recover{
                             SecretInput{controller:controller.clone(),epoch,field:InputField::Password,label:"Master password",id:"password",secret:true,disabled:view.busy}
                         }else{
                             SecretInput{controller:controller.clone(),epoch,field:InputField::Phrase,label:"Recovery phrase · 24 words",id:"phrase",secret:true,disabled:view.busy}
@@ -236,8 +249,8 @@ fn Screen(controller: Controller, revision: u64) -> Element {
                                 button {disabled:view.weak_seconds>0,onclick:invoke(Action::ConfirmWeak),"Create anyway · {view.weak_seconds}s"}
                             }
                         }else{
-                            button {class:"primary","data-qv-clear":"true",disabled:view.busy||!acknowledged||preview,onclick:invoke(if mode==Mode::Create{Action::Create}else if mode==Mode::Recover{Action::Recover}else{Action::Unlock}),
-                                if view.busy{"Opening…"}else if mode==Mode::Create{"Create vault"}else if mode==Mode::Recover{"Open with recovery phrase"}else{"Unlock vault"}
+                            button {class:"primary","data-qv-clear":"true",disabled:view.busy||!acknowledged||preview,onclick:invoke(if mode==Mode::Create{Action::Create}else if mode==Mode::Recover{Action::Recover}else if mode==Mode::Join{Action::JoinDevice}else{Action::Unlock}),
+                                if view.busy{"Opening…"}else if mode==Mode::Create{"Create vault"}else if mode==Mode::Recover{"Open with recovery phrase"}else if mode==Mode::Join{"Join"}else{"Unlock vault"}
                                 span {"→"}
                             }
                         }

@@ -6,7 +6,11 @@ mod android;
 pub mod autofill;
 pub mod controller;
 mod documents;
+pub mod lan;
+#[cfg(test)]
+mod lan_tests;
 mod ops;
+pub mod qr;
 #[cfg(feature = "desktop")]
 mod runtime;
 #[cfg(feature = "desktop")]

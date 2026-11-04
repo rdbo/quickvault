@@ -63,3 +63,11 @@ pub(crate) fn bind_addrs(scope: ListenScope, port: u16) -> Vec<SocketAddr> {
         ],
     }
 }
+
+/// Parses typed endpoint text (0013 §8.5): `a.b.c.d:port` or `[v6]:port`,
+/// IP literals only, port 1–65535, no zone identifier. The result is still
+/// subject to the [`EndpointPolicy`] when used.
+pub fn parse_endpoint(text: &str) -> Result<SocketAddr, super::LanError> {
+    let e = qv_protocol::oob::parse_endpoint(text).map_err(|_| super::LanError::Protocol)?;
+    Ok(SocketAddr::new(e.addr, e.port))
+}

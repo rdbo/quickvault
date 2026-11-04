@@ -82,6 +82,7 @@ pub(crate) fn command() -> Command {
             .arg(Arg::new("version").long("version").required(true).value_name("VERSION")))
         .subcommand(attach_command())
         .subcommand(history_command())
+        .subcommand(lan_command())
         .subcommand(Command::new("restore").about("Restore a retained entry version as a new causal edit")
             .arg(Arg::new("entry").required(true)).arg(Arg::new("version").required(true))
             .arg(flag("resolve-conflicts", "Explicitly replace all known conflicting heads with this historical value")))
@@ -243,6 +244,88 @@ fn attach_command() -> Command {
             .arg(entry()).arg(attachment()).arg(path("path")))
         .subcommand(Command::new("rm").about("Permanently remove; independent copies may remain, with no secure-erasure guarantee")
             .arg(entry()).arg(attachment()))
+}
+
+fn lan_command() -> Command {
+    let endpoint = || {
+        Arg::new("endpoint")
+            .long("endpoint")
+            .value_name("IP:PORT")
+            .action(ArgAction::Append)
+            .help("The other device's address, a.b.c.d:port or [v6]:port (repeatable)")
+    };
+    let label = |help: &'static str| {
+        Arg::new("label")
+            .long("label")
+            .value_name("NAME")
+            .required(true)
+            .help(help)
+    };
+    let port = || {
+        Arg::new("port")
+            .long("port")
+            .value_name("PORT")
+            .value_parser(value_parser!(u16))
+            .help("Listen on this port (default: one the system chooses)")
+    };
+    let minutes = |help: &'static str| {
+        Arg::new("minutes")
+            .long("minutes")
+            .value_name("MINUTES")
+            .value_parser(value_parser!(u64))
+            .help(help)
+    };
+    Command::new("lan")
+        .about("Pair devices and sync directly on the local network (no account or server)")
+        .after_help(
+            "The pairing code is typed at a hidden prompt and shown only on the alternate \
+             screen; it is never an argument. Addresses are not secret.",
+        )
+        .subcommand_required(true)
+        .subcommand(
+            Command::new("pair")
+                .about("Open a pairing window and show its code (this device approves)")
+                .arg(label("This device's name for the joining device (1-64 bytes)"))
+                .arg(port())
+                .arg(minutes("How long the window stays open, 1-10 (default 10)")),
+        )
+        .subcommand(
+            Command::new("join")
+                .about("Join a pairing window with its code (link mode, or --new for a new device)")
+                .arg(endpoint())
+                .arg(label("This device's name for the approving device (1-64 bytes)"))
+                .arg(
+                    Arg::new("new")
+                        .long("new")
+                        .value_name("PATH")
+                        .value_parser(value_parser!(PathBuf))
+                        .help("Receive the vault as a new device and create it at PATH (must not exist)"),
+                ),
+        )
+        .subcommand(
+            Command::new("receive")
+                .about("Open a receive window for one sync round started by a linked device")
+                .arg(port())
+                .arg(minutes("How long the window stays open, 1-15 (default 2)"))
+                .arg(flag("stay", "Serve further rounds until the window closes")),
+        )
+        .subcommand(
+            Command::new("sync")
+                .about("Sync with a linked device that has a receive window open")
+                .arg(endpoint())
+                .arg(
+                    Arg::new("link")
+                        .long("link")
+                        .value_name("ID")
+                        .help("The link to use, by 6-32 hex digits of its ID (default: the only link)"),
+                ),
+        )
+        .subcommand(Command::new("links").about("List this vault's LAN links"))
+        .subcommand(
+            Command::new("unlink")
+                .about("Remove a LAN link (local only; not compromise recovery)")
+                .arg(Arg::new("link").required(true).value_name("ID")),
+        )
 }
 
 fn history_command() -> Command {
@@ -562,6 +645,7 @@ fn dispatch(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
         Some(("conflicts", s)) => crate::cmd::conflicts::inspect(ctx, s),
         Some(("resolve", s)) => crate::cmd::conflicts::resolve(ctx, s),
         Some(("merge", s)) => crate::cmd::merge::run(ctx, s),
+        Some(("lan", s)) => crate::cmd::lan::run(ctx, s),
         Some(("snapshot", s)) => crate::cmd::snapshot::run(ctx, s),
         Some(("verify", s)) => crate::cmd::verify::run(ctx, s),
         _ => Err(CliError::new(OTHER, "unknown command")),

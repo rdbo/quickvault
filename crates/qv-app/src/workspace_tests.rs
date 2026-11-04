@@ -136,7 +136,7 @@ impl Env {
     pub(crate) fn epoch(&self) -> FormEpoch {
         self.c.snapshot().epoch
     }
-    fn fill(&self, field: InputField, value: &str) {
+    pub(crate) fn fill(&self, field: InputField, value: &str) {
         let mut v = value.to_owned();
         self.c.input(self.epoch(), field, &mut v);
         assert!(v.is_empty());

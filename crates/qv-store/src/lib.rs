@@ -280,7 +280,9 @@ pub use header::Header;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use incoming::VerifiedIncoming;
 #[cfg(any(target_os = "linux", target_os = "android"))]
-pub use lan_staging::{LanStaging, NewLanLink, PasswordProof, StagedKeyslot, VerifiedLanStaging};
+pub use lan_staging::{
+    LanStaging, NewLanLink, PasswordProof, Planned, StagedKeyslot, VerifiedLanStaging,
+};
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use lan_store::{LanLinkRow, LanServeState, MAX_LAN_LINKS};
 pub use limits::{

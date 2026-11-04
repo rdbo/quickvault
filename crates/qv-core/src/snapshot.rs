@@ -911,6 +911,11 @@ impl Session {
     /// any failure is reported as a warning through
     /// [`Self::snapshot_status`] and never fails the unlock.
     pub(crate) fn run_automatic_snapshot(&self, cancel: Option<&CancelToken>) {
+        self.run_automatic_snapshot_cancellable(&|| cancel.is_some_and(CancelToken::is_cancelled));
+    }
+
+    /// LAN also supplies its absolute window lifetime to snapshot copying.
+    pub(crate) fn run_automatic_snapshot_cancellable(&self, cancel: &dyn Fn() -> bool) {
         let _ = self.read(|ctx| {
             let c = ctx.canceller();
             let now = ctx.now();
@@ -919,8 +924,10 @@ impl Session {
                 return Ok(());
             };
             let pinned = open.pinned();
-            let cancelled =
-                move || c.is_cancelled() || cancel.is_some_and(CancelToken::is_cancelled);
+            let cancelled = move || c.is_cancelled() || cancel();
+            if cancelled() {
+                return Ok(());
+            }
             let decision = match authenticated(&policy, &open.vault) {
                 Ok((rows, _)) => automatic_decision(&rows, now),
                 Err(_) => {

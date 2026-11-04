@@ -759,8 +759,8 @@ release; it is not weakened.
 
 #### Phase 2.9 — LAN enrollment and peer state
 
-- **Plan:** [0037](../0037-lan-pairing/PLAN.md) (Implemented; fresh-context
-  review due). Discovery and the post-link-mode exchange move to 2.10; see
+- **Plan:** [0037](../0037-lan-pairing/PLAN.md) (Reviewed: approved with
+  one minor fix). Discovery and the post-link-mode exchange move to 2.10; see
   Revisions 2026-11-02 (phase 2.9).
 - [x] **Do:** Implement the 2.1 enrollment protocol, local peer-authorization
   storage, new-device initialization, peer removal and the LAN part of rotation
@@ -775,7 +775,11 @@ release; it is not weakened.
 
 #### Phase 2.10 — LAN exchange, CLI and app
 
-- [ ] **Do:** LAN session and exchange: bounded authenticated manifest and
+- **Plan:** [0038](../0038-lan-exchange/PLAN.md) (Reviewed; repair findings closed,
+  real-engine pairing and pinned-tool APK pass; attended run moved to the end of
+  2.10b by owner direction). QR rendering and scanning
+  move to 2.10b; see Revisions 2026-11-03 (phase 2.10).
+- [x] **Do:** LAN session and exchange: bounded authenticated manifest and
   object transfer, merge and local commit through the 1.7 path, idempotent
   retry, lock cancellation, manual initiation only, receive availability per
   the 2.1 spec. Add `qvault lan …` and the app UI (pairing included).
@@ -799,8 +803,39 @@ release; it is not weakened.
 - **Done when:** interrupting at the transfer, commit or acknowledgement
   boundary preserves local edits and the anchor. Both initiation directions
   give the same result. Nothing starts a round without a user action.
-- **Verify:** `cargo test --locked -p qv-sync lan`; two-device test with networking to the Internet blocked.
+- **Verify:** `cargo test --locked -p qv-sync lan`; remaining attended
+  two-device/Internet-blocked evidence is now plan 0039 step 6 (owner-directed
+  transfer, 2026-11-03), not a prerequisite for QR implementation.
 - **0012 rows:** Account-dependent LAN sync, LAN partial acceptance, Unrequested synchronization (LAN).
+
+#### Phase 2.10b — QR codes: display and scanning
+
+- **Plan:** [0039](../0039-lan-qr/PLAN.md) (Implemented; automated gates pass;
+  fresh-context review and combined attended validation pending).
+- **Owner continuation, 2026-11-03:** implement now on the current tree. The
+  remaining attended 2.10 testing is the final step of 2.10b; lack of a phone
+  does not block implementation. Preserve pending evidence and release gates.
+
+- [ ] **Do:** Render the pairing QR (0013 §4.2) and the address-only
+  receive-window QR (§8.5) in the app, and in the CLI where useful. Scan
+  them with the phone camera, through a capture path and a decoder that the
+  plan selects and justifies. Typing stays the fallback everywhere. Any
+  camera permission is requested only at the scan action, never at
+  start-up (0013 §3.4 spirit).
+- **Specs:** 0013 §4.2, §8.5; 0009 (camera and permission rows, if needed).
+- **Depends on:** reviewed 2.10 implementation; its remaining attended testing
+  is carried into this phase's final validation step (owner 2026-11-03).
+- **Files:** `crates/qv-app/` (UI, Android glue), `crates/qv-cli/` (optional
+  terminal rendering).
+- **Done when:** a code shown on one device is scanned by the phone and
+  pairs or syncs exactly as when typed. A hostile QR is refused like a
+  hostile typed code.
+- **Verify:** decoder fuzzing over hostile images and payloads; Android
+  instrumentation; an attended scan between the Linux app or CLI and the
+  phone. This final validation also covers 2.10's pending offline Linux/phone
+  pairing and both-direction sync/interruption checks.
+- **0012 rows:** LAN discovery mistaken for trust (the scanned endpoints
+  are hints only).
 
 #### Phase 2.10a — App design
 
@@ -813,8 +848,8 @@ release; it is not weakened.
   one codebase for both platforms.
 - **Specs:** 0009 §1; 0008 §4 (no change to input cleanup, reveal, clipboard
   or lock behaviour).
-- **Depends on:** 2.10 (every Milestone 2 screen exists, so the redesign
-  covers the whole app once).
+- **Depends on:** 2.10 and 2.10b (every Milestone 2 screen exists, so the
+  redesign covers the whole app once).
 - **Files:** `crates/qv-app/` (UI components, assets).
 - **Done when:** the owner accepts the result on Linux and the phone. No
   security behaviour or functionality changes; existing app, real-engine and
@@ -1192,6 +1227,27 @@ release; it is not weakened.
     hostile responders at hinted endpoints (§3.1).
   - **Spec clarifications:** 0013 §1.3, §7.1, §8.3, and the 0004 §2.4
     development layouts.
+
+- 2026-11-03 (phase 2.10, plan 0038), under the owner's standing
+  delegation (and the owner's 2026-11-03 direction for the address-only
+  code):
+  - **New phase 2.10b**, QR display and scanning, between 2.10 and 2.10a.
+    This is a delivery boundary, not a split for size:
+    - rendering needs a QR encoder dependency;
+    - scanning needs a camera capture path and a decoder dependency
+      (Android has no system QR decoder without Play Services);
+    - both need attended device validation.
+
+    2.10 specifies both payloads in core, and frontends offer the owner's
+    typed fallback (code and `address:port`).
+  - **Spec amendments:** 0013 §8.5, §3.1, §5.1 (the initiator uses one
+    link per attempt), §7.4 (`Want` bounds); 0011 LAN command contracts
+    and exit code 10.
+  - **Addresses** come from `std` route probes in qv-platform; no
+    interface-listing dependency.
+  - **The app counts a running LAN window as activity** for the 60-second
+    idle lock. The window's own limit (2 or 10 minutes, at most 15)
+    bounds it, and lock or cancel still close it at once.
 
 ## Execution log
 
@@ -1970,3 +2026,121 @@ release; it is not weakened.
   (`ndk-context`), so a second `MainActivity` in a cached process aborts.
   This fails closed and needs a follow-up plan before enabling autofill on any
   device (0034 log). Phase 2.7 stays unticked; the gate is closed.
+
+- 2026-11-03: Next-phase session on clean tree `1d8e470`.
+  - **Fresh-context review of 0037** (phase 2.9): Approved with minor fixes
+    (REVIEW.md). New-device join now applies the platform and
+    anchor-location checks of vault creation before pairing, with a test.
+    Five low findings were carried into 2.10 and fixed there; one note is
+    left for the D12 reviewer. Gates on the reviewed tree: 830 passed.
+  - **Phase 2.10 planned and implemented as plan 0038** (standing
+    approval plus the owner's delegation; see Revisions):
+    - the session handshake, the two-way exchange, receive windows and the
+      initiator;
+    - receipt-free LAN acceptance through the archive path;
+    - `qvault lan …` with exit code 10;
+    - the app's Devices screen and Join mode;
+    - addresses from route probes;
+    - spec amendments to 0013 and 0011.
+
+    QR rendering and scanning became phase 2.10b.
+  - **Gates:**
+    - full tree: 862 passed, 0 failed, 2 ignored; SPDX, matrix, fmt and
+      Clippy pass; the vectors' Python check is OK;
+    - after a later app-only fix: app tests (30), app validation tests
+      (34), Clippy, and Android arm64 Clippy pass, and the APK builds;
+    - fuzz smoke is clean;
+    - no dependency change.
+  - **Pending:** the attended two-device run without Internet (owner's
+    phone), so the 2.10 box stays unticked. Then the fresh-context review
+    of 0038.
+  - No commit, push or branch.
+
+
+- 2026-11-03: Next-phase session on clean tree `92aa8c4`. Fresh-context
+  review of 0038: **Re-plan needed** (REVIEW.md). Active exchanges can outlive
+  receive-window expiry; unanswered app prompts suppress inactivity locking
+  without a bound; completion reporting loses errors or a committed outcome.
+  No product repair made in the reviewer role. Phase 2.10 stays unticked and
+  2.10b has not started. SPDX/matrix/fmt/Clippy pass; full tests encounter
+  missing Xvfb in the CLI clipboard suite. Phone unavailable via adb, so the
+  attended offline LAN run remains pending. No commit, push or branch.
+
+
+- 2026-11-03: Owner delegated the 0038 repair (“do whatever you think is
+  best”), authorizing continuation on the review tree. The plan was revised
+  and the four findings repaired: persistent transport/acceptance lifetime,
+  bounded app prompts and idle exemption, completion errors retained in app
+  results, and acceptance metadata that survives lock. CLI pairing prompts
+  now honor window expiry and session lock too. No new dependency or format.
+  Final gates pass with serialized test execution (870 passed,
+  2 pre-existing ignored); the default-parallel run's unchanged instance-lock
+  test failure is retained in the log. App validation/real-engine flows and
+  Android arm64 Clippy pass. APK packaging needs pinned dx 0.7.10 (available:
+  0.8.0-alpha.0); phone unavailable. Plan 0038 is Implemented, awaiting fresh
+  review and remaining evidence; 2.10 stays unticked and 2.10b has not started.
+  No commit, push, branch or staging change.
+
+- 2026-11-03: Next-phase session on clean committed `138bdde`. Fresh-context
+  review of plan 0038: **Approved with minor fixes**, now Reviewed. The four
+  repair findings are closed. Completed the existing real-engine core-peer
+  fallback: the WebKit control approves pairing, the peer opens the transferred
+  vault, and displayed codes clear. Existing cancellation checks remain;
+  additions are confined to Linux validation fixtures.
+
+  One full serialized workspace run passes (870 tests, 2 pre-existing ignored),
+  with affected app-library tests rerun after the fixture addition (32 pass).
+  The three real-engine checks, workspace/validation Clippy, SPDX, matrix, fmt
+  and Python vector crosscheck pass. Pinned Dioxus 0.7.10 now packages the
+  Android debug app/test APKs using an isolated temporary tool runtime; product
+  APK SHA-256 `5dbba78f1190ab283ef15c36f1b3e4a873cc4e2691dece09096e62728f01b9ef`.
+  No dependency change, APK install, release, commit, push, branch or staging
+  change.
+
+  `adb devices` still lists no device. The plan's attended offline Linux/phone
+  pairing and both-direction sync test remains unmet, so 2.10 stays unticked
+  and 2.10b does not begin. Review approval and a built APK do not substitute
+  for that test or the independent D12 release review.
+
+- 2026-11-03: Owner explicitly requested 2.10b implementation now, moving all
+  remaining attended 2.10 testing to its end. Plan 0039 records the combined
+  final device step; 2.10 remains unticked for missing evidence but no longer
+  blocks QR implementation. Architectural/dependency/spec choices are delegated;
+  no extra approval or commit boundary. No release gate is waived.
+
+- 2026-11-03: Clarify phase bookkeeping after the owner's explicit test transfer:
+  tick 2.10's reviewed implementation, with its remaining attended verification
+  now owned by 0039 step 6. The test has not passed. This prevents the phase
+  selector from re-entering completed implementation; 2.10b's combined device
+  acceptance remains unticked. No testing or release requirement is removed.
+
+
+- 2026-11-03: Plan 0039 / 2.10b implementation and automated gates complete:
+  binary pairing/address QR display, bounded decoding and strict core inspection,
+  current-form scan insertion, native Android Camera2/JNI lifecycle and permission
+  adapter, optional hardware packaging, fuzz/CI coverage and dependency records.
+  Final workspace tests: 876 passed, zero failed, two pre-existing ignored;
+  three real-engine WebKit flows and both APK builds pass. Ordinary Android
+  camera remains gated off; marked validation packaging enables testing.
+  Fresh-context production review remains due. Combined attended 2.10/2.10b
+  checks are the owner-deferred final step in 0039/DEVICE-VALIDATION.md, with
+  current artifact hashes; no physical result or release clearance is claimed.
+  The 2.10b acceptance checkbox stays unticked pending that evidence.
+
+
+- 2026-11-03: Connected Android 15 phone validation for 0039: bounded native
+  sensor frames, permission grant, stale request/completion, finish, pause and
+  30 s native timeout pass; optical Join Scan -> Rust/core form acceptance and
+  navigation cleanup pass (5.471 s). The ordinary camera gate remains closed.
+  Fixed only the test launcher/permission-return driver for MIUI and lock reset.
+  Real-peer Linux/phone pairing, address sync and Internet-blocked/interruption
+  rows are still pending, as is fresh-context production review. Details and
+  updated instrumentation APK identity are in 0039/DEVICE-VALIDATION.md.
+
+
+- 2026-11-04: Owner requested wrapping up 0039 device work. Retain the recorded
+  native-camera and optical Join passes; actual peer pairing/sync and offline/
+  interruption rows remain unchecked in the final combined checklist. An
+  unfinished test-driver prototype was removed. ADB disappeared before the
+  ready ordinary-package rerun, so no further install/test or radio restoration
+  was possible. No product change, release clearance or fresh review claimed.

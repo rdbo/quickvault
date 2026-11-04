@@ -24,10 +24,80 @@ use crate::{
 /// and checks exact EOF. It never opens exchange input as SQLite. This is a
 /// read capability only: it neither accepts a merge nor remembers filenames.
 pub struct VerifiedIncoming {
-    file: File,
-    opened: OpenedArchive,
+    pub(crate) archive: StagedArchive,
     digest: [u8; 32],
     pub(crate) path: qv_crypto::SecretBytes,
+}
+
+/// A complete authenticated archive in a private unlinked file: the shared
+/// reader of archive imports and LAN staging (0005 §4, 0013 §7).
+pub(crate) struct StagedArchive {
+    pub(crate) file: File,
+    pub(crate) opened: OpenedArchive,
+}
+
+impl StagedArchive {
+    /// The authenticated archive header.
+    pub(crate) fn header(&self) -> &ArchiveHeader {
+        self.opened.header()
+    }
+
+    /// The authenticated complete manifest.
+    pub(crate) fn manifest(&self) -> &Manifest {
+        self.opened.manifest()
+    }
+
+    /// Reads a complete role-bound record, rechecking its frame and AEAD.
+    pub(crate) fn read_version(
+        &mut self,
+        vk: &VaultKey,
+        record: RecordId,
+        version: VersionId,
+    ) -> Result<RecordVersion, StoreError> {
+        let header = self.opened.header();
+        let manifest = self.opened.manifest();
+        let role = manifest
+            .record(record)
+            .and_then(|r| r.version(version))
+            .ok_or(StoreError::NotFound)?;
+        let key = vk.purpose_key::<purpose::Record>(
+            header.vault_id(),
+            header.key_generation(),
+            crate::ARCHIVE_DERIVATION_PROFILE,
+        )?;
+        let decoded = crate::archive_verify::read_version(
+            &mut self.file,
+            header,
+            manifest,
+            &self.opened.frames,
+            &key,
+            record,
+            role,
+        )?;
+        crate::validation::check_head(manifest, record, role, &decoded)?;
+        Ok(decoded)
+    }
+
+    /// Reads one encrypted object with its complete-envelope commitment
+    /// checked.
+    pub(crate) fn read_object(&mut self, object: ObjectId) -> Result<ObjectEnvelope, StoreError> {
+        let manifest = self.opened.manifest();
+        let index = manifest
+            .references()
+            .binary_search_by_key(&object, |r| r.object_id())
+            .map_err(|_| StoreError::NotFound)?;
+        let reference = &manifest.references()[index];
+        let header = self.opened.header();
+        let frame = self.opened.frames[index].read(&mut self.file, header, reference)?;
+        let envelope = object_envelope(&frame, header, reference)?;
+        Ok(ObjectEnvelope {
+            object_id: envelope.object_id(),
+            key_generation: envelope.key_generation(),
+            data_profile: envelope.data_profile(),
+            nonce: *envelope.nonce(),
+            ciphertext: envelope.ciphertext().to_vec(),
+        })
+    }
 }
 
 impl core::fmt::Debug for VerifiedIncoming {
@@ -98,8 +168,7 @@ impl VerifiedIncoming {
         file.seek(SeekFrom::Start(0)).map_err(|_| StoreError::Io)?;
         let opened = read_archive(&mut file, scope, vk, &mut |_| Ok(()), cancelled)?;
         Ok(Self {
-            file,
-            opened,
+            archive: StagedArchive { file, opened },
             digest: hash.finalize().0,
             path,
         })
@@ -107,12 +176,12 @@ impl VerifiedIncoming {
 
     /// The authenticated archive header.
     pub fn header(&self) -> &ArchiveHeader {
-        self.opened.header()
+        self.archive.header()
     }
 
     /// The authenticated complete manifest.
     pub fn manifest(&self) -> &Manifest {
-        self.opened.manifest()
+        self.archive.manifest()
     }
 
     /// SHA-256 of the entire copied stream, including framing and header.
@@ -127,50 +196,14 @@ impl VerifiedIncoming {
         record: RecordId,
         version: VersionId,
     ) -> Result<RecordVersion, StoreError> {
-        let header = self.opened.header();
-        let manifest = self.opened.manifest();
-        let role = manifest
-            .record(record)
-            .and_then(|r| r.version(version))
-            .ok_or(StoreError::NotFound)?;
-        let key = vk.purpose_key::<purpose::Record>(
-            header.vault_id(),
-            header.key_generation(),
-            crate::ARCHIVE_DERIVATION_PROFILE,
-        )?;
-        let decoded = crate::archive_verify::read_version(
-            &mut self.file,
-            header,
-            manifest,
-            &self.opened.frames,
-            &key,
-            record,
-            role,
-        )?;
-        crate::validation::check_head(manifest, record, role, &decoded)?;
-        Ok(decoded)
+        self.archive.read_version(vk, record, version)
     }
 
     /// Read one encrypted object with its complete-envelope commitment checked.
     ///
     /// The returned envelope is not authorization to insert it into a vault.
     pub fn read_object(&mut self, object: ObjectId) -> Result<ObjectEnvelope, StoreError> {
-        let manifest = self.opened.manifest();
-        let index = manifest
-            .references()
-            .binary_search_by_key(&object, |r| r.object_id())
-            .map_err(|_| StoreError::NotFound)?;
-        let reference = &manifest.references()[index];
-        let header = self.opened.header();
-        let frame = self.opened.frames[index].read(&mut self.file, header, reference)?;
-        let envelope = object_envelope(&frame, header, reference)?;
-        Ok(ObjectEnvelope {
-            object_id: envelope.object_id(),
-            key_generation: envelope.key_generation(),
-            data_profile: envelope.data_profile(),
-            nonce: *envelope.nonce(),
-            ciphertext: envelope.ciphertext().to_vec(),
-        })
+        self.archive.read_object(object)
     }
 }
 
@@ -248,12 +281,12 @@ mod tests {
         // Even accidental mutation of the private descriptor cannot bypass
         // the complete-envelope commitment retained by the reader.
         let last = u.manifest().references().last().unwrap().object_id();
-        incoming.file.seek(SeekFrom::End(-1)).unwrap();
+        incoming.archive.file.seek(SeekFrom::End(-1)).unwrap();
         let mut byte = [0];
-        incoming.file.read_exact(&mut byte).unwrap();
+        incoming.archive.file.read_exact(&mut byte).unwrap();
         byte[0] ^= 1;
-        incoming.file.seek(SeekFrom::End(-1)).unwrap();
-        incoming.file.write_all(&byte).unwrap();
+        incoming.archive.file.seek(SeekFrom::End(-1)).unwrap();
+        incoming.archive.file.write_all(&byte).unwrap();
         assert_eq!(
             incoming.read_object(last).unwrap_err(),
             StoreError::Integrity

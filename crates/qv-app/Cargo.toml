@@ -20,6 +20,8 @@ required-features = ["desktop"]
 qv-core.workspace = true
 ctutils.workspace = true
 zeroize.workspace = true
+qrcodegen-no-heap = "=1.8.1"
+quircs = "=0.10.3"
 dioxus = { version = "=0.7.10", optional = true, default-features = false, features = ["minimal"] }
 dioxus-desktop = { version = "=0.7.10", optional = true, default-features = false, features = ["tokio_runtime"] }
 [lints]

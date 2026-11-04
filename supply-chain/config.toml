@@ -1088,6 +1088,11 @@ version = "0.4.8"
 criteria = "safe-to-deploy"
 notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
 
+[[exemptions.num-derive]]
+version = "0.4.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0039: owner-delegated QR dependency development baseline; targeted source inspection, no independent audit. Audit debt, not security certification or release approval."
+
 [[exemptions.num-integer]]
 version = "0.1.47"
 criteria = "safe-to-deploy"
@@ -1336,6 +1341,16 @@ criteria = "safe-to-run"
 version = "0.1.30"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.qrcodegen-no-heap]]
+version = "1.8.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0039: owner-delegated QR encoder development baseline. Caller-owned protected scratch; targeted source inspection, no independent audit. Audit debt, not security certification or release approval."
+
+[[exemptions.quircs]]
+version = "0.10.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0039: owner-delegated QR decoder development baseline. Bound dimensions and exact pixel length before allocation/unsafe library indexing, wipe exposed buffers; targeted source inspection, no independent audit. Audit debt, not security certification or release approval."
 
 [[exemptions.r-efi]]
 version = "5.3.0"

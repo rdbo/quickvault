@@ -13,6 +13,8 @@ publish = false
 cargo-fuzz = true
 
 [dependencies]
+qv-app = { path = "../crates/qv-app", version = "=0.0.0" }
+qv-core = { path = "../crates/qv-core", version = "=0.0.0" }
 libfuzzer-sys = "=0.4.13"
 qv-crypto = { path = "../crates/qv-crypto", version = "=0.0.0" }
 qv-encoding = { path = "../crates/qv-encoding", version = "=0.0.0" }
@@ -92,6 +94,13 @@ bench = false
 [[bin]]
 name = "lan_oob"
 path = "fuzz_targets/lan_oob.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lan_qr"
+path = "fuzz_targets/lan_qr.rs"
 test = false
 doc = false
 bench = false

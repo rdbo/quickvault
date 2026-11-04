@@ -22,6 +22,7 @@ pub(crate) mod verify;
 
 pub(crate) mod credentials;
 
+pub(crate) mod lan;
 pub(crate) mod merge;
 
 pub(crate) mod conflicts;

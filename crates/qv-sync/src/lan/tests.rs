@@ -175,6 +175,78 @@ impl Device {
     }
 }
 
+impl ExchangeVault for Device {
+    fn scope(&self) -> Result<(qv_crypto::VaultId, qv_crypto::KeyGeneration), LanError> {
+        let u = self.u();
+        Ok((u.header().vault_id, u.header().key_generation))
+    }
+    fn serve_state(&self) -> Result<LanServeState, LanError> {
+        self.u().lan_serve_state().map_err(store)
+    }
+    fn object(&self, state: &LanServeState, id: ObjectId) -> Result<Vec<u8>, LanError> {
+        self.u()
+            .lan_object_envelope(state, id)
+            .map_err(|e| match e {
+                StoreError::NotFound => LanError::StateChanged,
+                StoreError::InvalidEdit => LanError::Protocol,
+                StoreError::Integrity => LanError::Integrity,
+                e => LanError::Store(e),
+            })
+    }
+    fn stage(&self, hash: &[u8; 32], envelope: &[u8]) -> Result<qv_store::LanStaging, LanError> {
+        self.u()
+            .lan_stage(hash, envelope, &never)
+            .map_err(LanError::from_staging)
+    }
+    fn stage_local(&self, staging: &mut qv_store::LanStaging) -> Result<(), LanError> {
+        self.u().lan_stage_local(staging).map_err(store)
+    }
+    fn accept(&self, staging: qv_store::LanStaging) -> Result<Accepted, LanError> {
+        let mut u = self.u();
+        let mut verified = u
+            .lan_finish(staging, &never)
+            .map_err(LanError::from_staging)?;
+        let committed = u
+            .accept_lan(
+                &mut verified,
+                &mut |l, i, read| {
+                    crate::merge(l, i, &mut |s, r, v| read(s, r, v), &never)
+                        .map(|c| c.manifest().clone())
+                },
+                &never,
+            )
+            .map_err(store)?;
+        let conflicts = u.manifest().records().iter().any(|r| r.heads().len() > 1);
+        Ok(Accepted {
+            outcome: match (committed, conflicts) {
+                (false, _) => Outcome::Unchanged,
+                (true, false) => Outcome::Merged,
+                (true, true) => Outcome::MergedWithConflicts,
+            },
+            manifest_hash: u.manifest_hash(),
+        })
+    }
+}
+
+impl ResponderVault for Device {
+    fn links(&self) -> Result<Vec<([u8; 16], LinkKey)>, LanError> {
+        let u = self.u();
+        u.lan_links()
+            .map_err(store)?
+            .into_iter()
+            .map(|r| Ok((r.link_id, u.lan_link_key(&r.link_id).map_err(store)?)))
+            .collect()
+    }
+    fn has_link(&self, link_id: &[u8; 16]) -> Result<bool, LanError> {
+        Ok(self
+            .u()
+            .lan_links()
+            .map_err(store)?
+            .iter()
+            .any(|r| r.link_id == *link_id))
+    }
+}
+
 fn store(e: StoreError) -> LanError {
     LanError::Store(e)
 }
@@ -207,32 +279,15 @@ impl ApproverVault for Device {
             .map_err(store)?;
         w.commit().map_err(store)
     }
-    fn grant(
-        &self,
-        link_id: &[u8; 16],
-        send: &mut dyn FnMut(&[u8]) -> Result<(), LanError>,
-    ) -> Result<(), LanError> {
+    fn grant(&self, link_id: &[u8; 16], seal: &mut Sealer<'_>) -> Result<Vec<u8>, LanError> {
         let u = self.u();
         let h = u.header();
-        send(&grant_plaintext(
+        seal(&grant_plaintext(
             u.vault_key(),
             h.vault_id,
             h.key_generation,
             link_id,
         )?)
-    }
-    fn serve_state(&self) -> Result<LanServeState, LanError> {
-        self.u().lan_serve_state().map_err(store)
-    }
-    fn object(&self, state: &LanServeState, id: ObjectId) -> Result<Vec<u8>, LanError> {
-        self.u()
-            .lan_object_envelope(state, id)
-            .map_err(|e| match e {
-                StoreError::NotFound => LanError::StateChanged,
-                StoreError::InvalidEdit => LanError::Protocol,
-                StoreError::Integrity => LanError::Integrity,
-                e => LanError::Store(e),
-            })
     }
 }
 
@@ -454,10 +509,23 @@ fn lan_enroll_link_mode_pairs_two_replicas() {
         (h.join().unwrap(), link)
     });
     let approved = approved.unwrap();
-    let link = link.unwrap();
+    let joined = link.unwrap();
+    let link = joined.link_id;
     assert_eq!(approved.mode, JoinMode::Link);
     assert!(approved.peer_confirmed, "{:?}", approved.failure);
     assert_eq!(link, approved.link_id);
+    // The follow-up exchange (§4.8) ran: identical replicas, nothing new.
+    let ours = joined.round.unwrap();
+    let theirs = approved.round.unwrap().unwrap();
+    assert_eq!(
+        (ours.local, ours.peer, theirs.local, theirs.peer),
+        (
+            Outcome::Unchanged,
+            Some(Outcome::Unchanged),
+            Outcome::Unchanged,
+            Some(Outcome::Unchanged)
+        )
+    );
     assert_eq!(approve.seen, join.seen);
     assert!(
         a.u()
@@ -559,7 +627,7 @@ fn lan_enroll_spoofed_endpoint_first_is_skipped() {
         );
         (h.join().unwrap(), link)
     });
-    assert_eq!(link.unwrap(), approved.unwrap().link_id);
+    assert_eq!(link.unwrap().link_id, approved.unwrap().link_id);
 }
 
 /// Sends one handshake frame to `addr` and returns whether anything came back.
@@ -845,7 +913,7 @@ fn lan_enroll_cancel_during_the_confirmation_wait_is_prompt() {
 
 #[test]
 fn lan_enroll_exchange_refuses_bad_requests_and_tolerates_a_missing_done() {
-    for case in 0..4 {
+    for case in 0..5 {
         let a = Device::personal();
         let (w, addr, code) = window();
         let keys = keys_of(&code);
@@ -895,7 +963,14 @@ fn lan_enroll_exchange_refuses_bad_requests_and_tolerates_a_missing_done() {
                     }
                     let want = Want::decode(m.ch.recv(t, None).unwrap().expose_secret()).unwrap();
                     assert!(want.ids.is_empty() && want.last);
-                    if case == 3 {
+                    if case == 4 {
+                        // A Done that does not report receipt (§10 step 3).
+                        m.ch.send(
+                            &Done::encode(Outcome::Unchanged, &state.manifest_hash).unwrap(),
+                            t,
+                        )
+                        .unwrap();
+                    } else if case == 3 {
                         m.ch.send(
                             &Done::encode(Outcome::Merged, &state.manifest_hash).unwrap(),
                             t,
@@ -924,6 +999,10 @@ fn lan_enroll_exchange_refuses_bad_requests_and_tolerates_a_missing_done() {
             2 => {
                 assert!(!approved.peer_confirmed);
                 assert!(approved.failure.is_some());
+            }
+            4 => {
+                assert!(!approved.peer_confirmed);
+                assert_eq!(approved.failure, Some(LanError::Protocol));
             }
             _ => assert!(approved.peer_confirmed),
         }
@@ -1031,7 +1110,8 @@ fn hostile_approver(
             let t = Duration::from_secs(5);
             ch.recv(t, None).unwrap(); // reveal
             let link_id = [4; 16];
-            a.grant(&link_id, &mut |p| ch.send(p, t)).unwrap();
+            let record = a.grant(&link_id, &mut |p| ch.seal(p)).unwrap();
+            ch.send_sealed(&record, t).unwrap();
             let state = a.serve_state().unwrap();
             State::decode(ch.recv(t, None).unwrap().expose_secret()).unwrap();
             script(&mut ch, &state);
@@ -1177,3 +1257,6 @@ fn lan_enroll_joiner_refuses_a_hostile_approver() {
     });
     assert_eq!(e, LanError::PeerCancelled);
 }
+
+#[path = "sync_tests.rs"]
+mod sync;

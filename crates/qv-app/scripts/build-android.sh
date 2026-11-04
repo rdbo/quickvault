@@ -69,6 +69,11 @@ if source.count('const val VALIDATION = false')!=1:
     raise SystemExit('Unexpected autofill gate source')
 if os.environ.get('QV_APP_DEVICE_VALIDATION')=='1':
     main_activity.write_text(source.replace('const val VALIDATION = false','const val VALIDATION = true'))
+if source.count('const val QR_VALIDATION = false')!=1:
+    raise SystemExit('Unexpected QR camera gate source')
+if os.environ.get('QV_APP_DEVICE_VALIDATION')=='1':
+    main_activity.write_text(main_activity.read_text().replace('const val QR_VALIDATION = false','const val QR_VALIDATION = true'))
+shutil.copyfile(root/'android/tests/QrTest.java',tests/'QrTest.java')
 shutil.copyfile(root/'android/tests/AutofillTest.java',tests/'AutofillTest.java')
 print(destination)
 PY
@@ -90,11 +95,18 @@ for line in permissions.splitlines():
     if line.startswith('uses-permission:') and not any(allowed in line for allowed in (
         "name='org.quickvault.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'",
         "name='android.permission.USE_BIOMETRIC'",
+        "name='android.permission.CAMERA'",  # explicit QR scan action only
         "name='android.permission.INTERNET'",  # Dioxus loopback UI transport
     )):
         raise SystemExit('Unexpected requested permission; inspect before installing')
 manifest=ET.parse('android/AndroidManifest.xml')
 ns='{http://schemas.android.com/apk/res/android}'
+for feature in ('android.hardware.camera.any','android.hardware.camera','android.hardware.camera.autofocus'):
+    declared=[f for f in manifest.findall('uses-feature') if f.get(ns+'name')==feature]
+    if len(declared)!=1 or declared[0].get(ns+'required')!='false':
+        raise SystemExit('Camera and autofocus must remain optional')
+    if "uses-feature: name='"+feature+"'" in badging:
+        raise SystemExit('Final package unexpectedly requires camera hardware')
 app=manifest.find('application')
 if app is None or app.get(ns+'allowBackup')!='false':
     raise SystemExit('Backup policy is not disabled')
