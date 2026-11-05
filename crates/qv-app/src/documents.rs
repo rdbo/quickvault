@@ -92,7 +92,7 @@ pub(crate) fn pick_path(
                 Ok(None) => {}
                 Err(_) => {
                     NO_PICKER.store(true, std::sync::atomic::Ordering::SeqCst);
-                    c.report(epoch, AppError::Unavailable);
+                    c.report(epoch, AppError::NoFilePicker);
                 }
             }
             c.touch();

@@ -79,6 +79,10 @@ pub enum AppError {
     RotationPending,
     /// The native autofill request is no longer waiting.
     AutofillExpired,
+    /// No desktop file dialog answered; the typed path field is shown instead.
+    NoFilePicker,
+    /// An item needs a title and every field a name before it is saved.
+    NameRequired,
 }
 impl AppError {
     /// Fixed user-facing text.
@@ -134,6 +138,10 @@ impl AppError {
             }
             Self::AutofillExpired => {
                 "The autofill request expired or was cancelled. Start it again from the other app."
+            }
+            Self::NameRequired => "Give the item a title, and every field a name, before saving.",
+            Self::NoFilePicker => {
+                "No file dialog is available on this desktop. Type the full path of the file instead."
             }
         }
     }
@@ -677,6 +685,14 @@ impl Controller {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
     }
+    /// The repeated new password is typed and differs from the first one.
+    /// Only this bit reaches the renderer; submit still checks both values.
+    pub fn repeat_mismatch(&self, epoch: FormEpoch) -> bool {
+        let s = self.state();
+        let password = s.inputs[InputField::Password.index()].expose_secret();
+        let repeat = s.inputs[InputField::Repeat.index()].expose_secret();
+        s.epoch == epoch.0 && !repeat.is_empty() && !password.ct_eq(repeat).to_bool()
+    }
     /// The app theme preference.
     pub fn theme(&self) -> crate::prefs::Theme {
         self.prefs().theme
@@ -825,6 +841,13 @@ impl Controller {
                 s.inputs[field.index()] = protected;
                 s.active = Instant::now();
                 s.error = None;
+                if matches!(
+                    field,
+                    InputField::Path | InputField::Password | InputField::Repeat
+                ) {
+                    // The chosen file name and the repeat check gate creation.
+                    s.revision = s.revision.wrapping_add(1);
+                }
                 if matches!(field, InputField::Password | InputField::Repeat) {
                     s.weak_until = None;
                     if s.phase == Phase::WeakPassword {
@@ -1807,6 +1830,23 @@ mod tests {
             self.controller.lock();
             std::fs::remove_dir_all(&self.dir).unwrap();
         }
+    }
+    #[test]
+    fn repeat_mismatch_reports_only_a_typed_different_repeat() {
+        let env = Env::new();
+        let epoch = env.controller.snapshot().epoch;
+        env.fill(InputField::Password, PASSWORD);
+        assert!(!env.controller.repeat_mismatch(epoch), "empty repeat");
+        env.fill(InputField::Repeat, &PASSWORD[..PASSWORD.len() - 1]);
+        assert!(env.controller.repeat_mismatch(epoch), "shorter repeat");
+        assert!(
+            !env.controller
+                .repeat_mismatch(FormEpoch(epoch.0.wrapping_add(1))),
+            "stale epoch"
+        );
+        env.fill(InputField::Repeat, PASSWORD);
+        assert!(!env.controller.repeat_mismatch(epoch), "matching repeat");
+        assert_eq!(env.controller.snapshot().epoch, epoch);
     }
     // 0012 §1: Ambiguous trust boundary
     #[cfg(target_os = "linux")]

@@ -4,7 +4,7 @@
 //! no OS decorations, 0009 §1.8), sidebar, phone tabs, command bar, toasts
 //! and confirmations. Layout comes from CSS container queries over one DOM.
 use super::ShellView;
-use super::icons::{Icon, Svg, hue, initial, kind_icon};
+use super::icons::{Icon, Svg, id_hue, initial, kind_icon};
 use super::{items, pages};
 use crate::controller::{AppError, Controller, FormEpoch};
 use crate::prefs::Theme;
@@ -268,7 +268,9 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
             }
         }
         if fixture && cfg!(target_os = "android") { p { class: "banner inset", "Synthetic validation build · isolated test vault only" } }
-        div { class: if vault_screen { "shell" } else { "shell nolist" }, inert: pending.is_some(),
+        // `inert` is not a Dioxus boolean attribute: a false value would still
+        // render `inert="false"` and block the pointer, so omit it instead.
+        div { class: if vault_screen { "shell" } else { "shell nolist" }, inert: pending.is_some().then_some("true"),
             nav { class: "side", "aria-label": "Vault",
                 button { class: nav_class(all_on), id: "nav-all", title: "All items", disabled: busy, onclick: go(&controller, epoch, Screen::Browse(None)),
                     Svg { icon: Icon::All } span { class: "t", "All items" } span { class: "n", "{all.len()}" }
@@ -288,7 +290,7 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
                 for g in groups.iter().cloned() {
                     button { class: nav_class(vault_screen && context == Screen::Browse(Some(g.handle))), title: "{g.name.as_str()}", disabled: busy,
                         onclick: go(&controller, epoch, Screen::Browse(Some(g.handle))),
-                        span { class: "dot {hue(&g.name)}" } span { class: "t", "{g.name.as_str()}" } span { class: "n", "{in_group(g.handle)}" }
+                        span { class: "dot {id_hue(&g.handle.id_hex())}" } span { class: "t", "{g.name.as_str()}" } span { class: "n", "{in_group(g.handle)}" }
                     }
                 }
                 if recovered > 0 {
@@ -321,7 +323,7 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
         if vault_screen && screen.is_list() && !busy {
             button { class: "fab", "aria-label": "New item", onclick: new_entry, Svg { icon: Icon::Plus } }
         }
-        nav { class: "tabbar", "aria-label": "Sections", inert: pending.is_some(),
+        nav { class: "tabbar", "aria-label": "Sections", inert: pending.is_some().then_some("true"),
             for (target, label, icon, id) in tabs {
                 button { class: if tab_on(&target) { "on" } else { "" }, id, disabled: busy, onclick: go(&controller, epoch, target.clone()),
                     i { Svg { icon } } "{label}"
@@ -405,6 +407,8 @@ fn Palette(
         })
         .map(Zeroizing::new)
         .unwrap_or_default();
+    let echo = items::use_echo(&query);
+    let (shown, generation) = echo.borrow_mut().sync(&query);
     let hits = if query.is_empty() {
         Vec::new()
     } else {
@@ -524,10 +528,12 @@ fn Palette(
             div { class: "palette", role: "dialog", "aria-label": "Command bar",
                 div { class: "q",
                     Svg { icon: Icon::Search, large: true }
-                    input { id: "palette-input", autofocus: true, placeholder: "Search items, or type a command", maxlength: crate::workspace::QUERY_MAX,
-                        autocomplete: "off", spellcheck: "false", "data-qv-controlled": "true", value: "{query.as_str()}", "aria-label": "Search",
-                        oninput: { let c = controller.clone(); move |e: FormEvent| { let mut v = e.value(); c.ws_input(epoch, WsField::Command, &mut v); } },
-                        onkeydown: { let mut run = run.clone(); move |e: KeyboardEvent| { if e.key() == Key::Enter { e.prevent_default(); if let Some(cmd) = first.clone() { run(cmd); } } } }
+                    for g in [generation] {
+                        input { key: "{g}", id: "palette-input", autofocus: true, placeholder: "Search items, or type a command", maxlength: crate::workspace::QUERY_MAX,
+                            autocomplete: "off", spellcheck: "false", "data-qv-controlled": "true", initial_value: shown.as_str(), "aria-label": "Search",
+                            oninput: { let c = controller.clone(); let echo = echo.clone(); move |e: FormEvent| { let mut v = e.value(); echo.borrow_mut().typed(&v); c.ws_input(epoch, WsField::Command, &mut v); } },
+                            onkeydown: { let mut run = run.clone(); let first = first.clone(); move |e: KeyboardEvent| { if e.key() == Key::Enter { e.prevent_default(); if let Some(cmd) = first.clone() { run(cmd); } } } }
+                        }
                     }
                     kbd { "Esc" }
                 }
@@ -535,7 +541,7 @@ fn Palette(
                     if !hits.is_empty() { div { class: "grp", "ITEMS" } }
                     for e in hits.iter().cloned() {
                         button { class: "it", onclick: { let mut run = run.clone(); let h = e.handle; move |_| run(Command::Open(Screen::Entry(h))) },
-                            span { class: "tile {hue(&e.title)}", "{initial(&e.title)}" }
+                            span { class: "tile {id_hue(&e.handle.id_hex())}", "{initial(&e.title)}" }
                             span { "{e.title.as_str()}" } small { "{e.subtitle.as_str()}" }
                         }
                     }

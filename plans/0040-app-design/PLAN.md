@@ -582,3 +582,97 @@ triggers, FLAG_SECURE, the webview policy, and no raw HTML.
       rerun.
   - **Still pending:** Android instrumentation on the phone, the
     fresh-context review, and the owner's acceptance on Linux and the phone.
+
+- 2026-11-05 (owner acceptance, "can't create a vault"): Reproduced on the
+  real desktop binary under a private Xvfb with a fresh profile, then fixed:
+  - **Silent failure with an existing vault:** with the device vault present
+    and no file chosen, Create targeted the existing file and failed; the
+    wizard returned to step one and the error sat on the hidden step. Step
+    one now asks "Choose where to save…" (or, with the typed fallback,
+    disables Continue until a path is typed). Errors show on the visible
+    step.
+  - **Locked screens did not redraw on input:** `Locked` was keyed on the
+    workspace revision, not the snapshot change counter, so typed paths and
+    cleared errors never reached the screen. It now takes the change counter,
+    and path/password inputs advance the revision.
+  - **Consent did not continue:** "I understand, continue" now runs the
+    action that opened the sheet.
+  - **Mismatched repeat:** `Controller::repeat_mismatch` (constant-time,
+    returns one bit) disables Create with a hint, so a typo no longer
+    submits and wipes the form. Submit still checks both values.
+  - **Messages and focus:** a missing file dialog reports
+    `AppError::NoFilePicker` instead of the generic protection message; the
+    vault name field is focused.
+  - **Gates:** fmt, SPDX, matrix, `git diff --check`; workspace, validation
+    and Android arm64 (mobile, mobile,validation) Clippy pass;
+    `cargo test -p qv-app` 45 passed; with `validation` 46 plus the 3
+    real-engine flows passed. Full suite: see the next entry.
+
+- 2026-11-05 (owner acceptance, round 2: "can't click anything after
+  unlocking", GTK bar still present, "Create anyway" hover). The previous
+  entry's full-suite run passed on its tree. Reproduced with real X input
+  (xdotool) on the desktop binary, then fixed:
+  - **Shell unclickable:** `inert: pending.is_some()` rendered
+    `inert="false"` on the shell and tab bar whenever Dioxus wrote the false
+    value (it is not a Dioxus boolean attribute; timing-dependent, so it
+    showed up intermittently). Any `inert` attribute disables the subtree. A
+    temporary on-screen probe showed `DIV.shell=false, NAV.tabbar=false`
+    with clicks dead; with the attribute omitted when false, three repeat
+    runs showed none and clicks worked. The probe was removed.
+  - **OS title bar:** the window never disabled decorations;
+    `with_decorations(false)` is now set. Under Xvfb `_MOTIF_WM_HINTS`
+    reads `0x2, 0x0` (no decorations); a desktop with a window manager is
+    needed to see it.
+  - **Danger hover:** `.btn:hover:enabled` outranked `.btn.danger`, so
+    "Create anyway" turned dark on dark; it now keeps its colour.
+  - **Typed text dropped or reordered:** Dioxus treats `value` as volatile
+    and writes it every render, so a render racing newer keystrokes
+    overwrote them. Controlled inputs (`items::Input`, the command bar) now
+    render `initial_value`, keep what was typed, and remount only for a value
+    the user did not type (`items::Echo`).
+  - **Autofocus never worked:** HTML `autofocus` applies only at page load,
+    and Dioxus `set_focus` runs through `new AsyncFunction`, which the CSP
+    forbids. `app.js` now focuses inserted `[autofocus]` controls and the
+    app root when nothing is focused (keyboard shortcuts need it); the dead
+    `set_focus` call was removed. (The previous entry's "vault name field is
+    focused" was not true until this change.)
+  - **Smaller:** a new entry starts with an empty title (placeholder
+    "Title"); saving without a title or field name says so
+    (`AppError::NameRequired`); "+ Kind" field buttons work without a typed
+    name (lowercase kind name); toasts sit above the edit save bar.
+  - **Why the tests missed it:** the real-engine driver used `el.click()`,
+    which reaches inert and covered controls. `flow.js` now clicks only after
+    `reachable()` holds (enabled, not inside `[inert]`, has a box, topmost at
+    its centre), and the Android `flows.js` steppers use the same check.
+    Found, not fixed: with the shell bug reintroduced, the engine flow still
+    passed, because the false value was not written in that run; the check
+    catches it whenever the attribute is present, not deterministically.
+    Real pointer and keyboard input under Xvfb (xdotool) found every bug
+    above; it is not automated yet.
+
+- 2026-11-05 (owner acceptance, round 3: "why does the group color change as
+  I type a new name?"). Tile and dot colours hashed the name. They now come
+  from the record ID (`icons::id_hue`), so a rename keeps the colour and
+  synced devices agree. New drafts already have their random ID, so
+  `qv-core` gains `EntryDraft::id_hex` and `GroupDraft::id_hex`, matching the
+  handles' existing `id_hex` ("IDs are metadata, not secrets"). Owner-delegated
+  choice over freezing the colour only while editing. Name hashing remains
+  only for LAN device tiles, which have no record. Verified with real input:
+  the new-group tile kept one colour across each keystroke of "Work", and the
+  saved sidebar dot matched. Test: `id_hue_depends_only_on_the_record_id`;
+  the empty-title save test now expects `NameRequired`, and the field test
+  covers a "+ Kind" button with no typed name. Previous tree's full suite
+  (round 2): 886 passed, 0 failed, 2 ignored; validation 49 passed.
+
+- 2026-11-05 (owner request, not started): user-chosen group/item colours.
+  Proposed: keep the colour in the existing synced `icon` text field
+  (0003 §4/§5; wording amendment, no new format), with a 12-colour row plus
+  "Automatic" in the edit forms. The owner will batch it with findings from
+  further testing into a larger change.
+
+- 2026-11-05 (owner acceptance, round 4: dump3/dump4). The large icon class
+  `l` collided with the `.dev .l` / `.opt .l` / `.set-row .l` text column
+  (`flex:1; min-width:140px`), so the "No linked devices yet" icon stretched
+  over its title; it is now `ico lg`. The GROUPS "+" button's hover was a
+  cramped 20 px square; it now matches the other icon buttons (26 px,
+  radius 8, 14 px glyph, aligned with the counts). Both checked under Xvfb.

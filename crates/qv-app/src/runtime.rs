@@ -83,6 +83,8 @@ fn launch(title: &'static str, script: &'static [u8]) -> ! {
         .with_window(
             dioxus_desktop::WindowBuilder::new()
                 .with_title(title)
+                // The app draws its own title bar (0009 §1.8); no effect on Android.
+                .with_decorations(false)
                 .with_inner_size(dioxus_desktop::LogicalSize::new(width, height))
                 .with_min_inner_size(dioxus_desktop::LogicalSize::new(360.0, 480.0)),
         )

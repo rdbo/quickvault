@@ -43,7 +43,7 @@ html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none;backgrou
 .qv button:disabled{opacity:.45}
 .mono{font-family:ui-monospace,"JetBrains Mono","DejaVu Sans Mono","Noto Sans Mono",monospace;letter-spacing:.02em}
 .ico{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-.ico.l{width:20px;height:20px}
+.ico.lg{width:20px;height:20px}
 .muted{color:var(--text3);font-size:12.5px;line-height:1.55}
 .hint{color:var(--text3);font-size:12.5px;line-height:1.55}
 p{margin:6px 0}
@@ -137,8 +137,9 @@ kbd{font:11px system-ui,sans-serif;border:1px solid var(--line);border-bottom-wi
 .shell.nolist{grid-template-columns:224px minmax(0,1fr)}
 .side{background:var(--bg2);border-right:1px solid var(--line2);padding:10px 8px;display:flex;flex-direction:column;gap:1px;overflow-y:auto}
 .side .h{display:flex;align-items:center;font-size:11px;font-weight:600;color:var(--text3);letter-spacing:.05em;padding:12px 10px 4px}
-.side .h button{margin-left:auto;width:20px;height:20px;border:0;border-radius:5px;background:none;color:var(--text3);display:grid;place-items:center}
-.side .h button:hover{background:var(--raised);color:var(--text)}
+.side .h button{margin:-4px -6px -4px auto;width:26px;height:26px;border:0;border-radius:8px;background:none;color:var(--text3);display:grid;place-items:center;transition:background .12s,color .12s}
+.side .h button .ico{width:14px;height:14px}
+.side .h button:hover:enabled{background:var(--raised2);color:var(--text)}
 .nav{display:flex;align-items:center;gap:10px;width:100%;min-height:32px;padding:0 10px;border:0;border-radius:8px;background:none;color:var(--text2);text-align:left}
 .nav:hover:enabled{background:var(--raised);color:var(--text)}
 .nav.on{background:var(--soft);color:var(--text)}
@@ -248,6 +249,7 @@ kbd{font:11px system-ui,sans-serif;border:1px solid var(--line);border-bottom-wi
 .savebar{position:sticky;bottom:16px;margin:18px auto 0;width:max-content;max-width:100%;display:flex;align-items:center;gap:10px;padding:8px 8px 8px 16px;border-radius:14px;
   background:var(--panel);border:1px solid var(--line);box-shadow:var(--pop);animation:rise .2s ease-out;z-index:3;flex-wrap:wrap}
 .savebar span{color:var(--text3);font-size:12.5px}
+.qv:has(.savebar) .toasts{bottom:92px}
 
 /* Buttons */
 .btn{height:34px;padding:0 14px;border-radius:9px;border:1px solid var(--line);background:var(--raised);display:inline-flex;align-items:center;justify-content:center;gap:7px;font-weight:550;white-space:nowrap}
@@ -255,6 +257,7 @@ kbd{font:11px system-ui,sans-serif;border:1px solid var(--line);border-bottom-wi
 .btn.primary{background:var(--accent);border-color:transparent;color:var(--ink)}
 .btn.primary:hover:enabled{background:var(--accent2)}
 .btn.danger{background:var(--danger);border-color:transparent;color:var(--danger-ink)}
+.btn.danger:hover:enabled{background:var(--danger);filter:brightness(1.08)}
 .btn.subtle{background:none;border-color:transparent;color:var(--text2)}
 .btn.subtle:hover:enabled{background:var(--raised)}
 .btn.wide{width:100%}

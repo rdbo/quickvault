@@ -3,7 +3,7 @@
 //! Sections beside the vault: generator, devices and LAN pairing, trash,
 //! conflicts, snapshots, archives, settings and autofill. File choices use
 //! the system picker; a typed path appears only when no picker is available.
-use super::icons::{Icon, Svg, hue, initial};
+use super::icons::{Icon, Svg, hue, id_hue, initial};
 use super::items::{Input, Kind};
 use super::shell::{ReportCard, Unreadable, act, go};
 use crate::controller::{Controller, FormEpoch};
@@ -547,7 +547,7 @@ fn Trash(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
             div { class: "card",
                 for t in view.items.iter().cloned() {
                     div { class: "dev",
-                        span { class: "tile {hue(&t.name)}", "{initial(&t.name)}" }
+                        span { class: "tile {id_hue(&t.item.id_hex())}", "{initial(&t.name)}" }
                         div { class: "l", b { class: "row-title", "{t.name.as_str()}" } span { "{t.deleted.clone().unwrap_or_else(|| \"Deleted by a concurrent version\".into())}" if t.conflict { " · conflict" } } }
                         button { class: "btn", onclick: act(&controller, epoch, WsAction::Restore(t.item)), Svg { icon: Icon::Restore } "Restore" }
                     }
@@ -1012,7 +1012,7 @@ fn AutofillScreen(controller: Controller, epoch: FormEpoch, revision: u64) -> El
         div { class: "card",
             for c in candidates {
                 button { class: "set-row", "data-qv-autofill": "candidate", onclick: act(&controller, epoch, WsAction::AutofillFill(c.key())),
-                    span { class: "tile {hue(c.title.expose())}", "{initial(c.title.expose())}" }
+                    span { class: "tile {id_hue(&c.entry().id_hex())}", "{initial(c.title.expose())}" }
                     span { class: "l", b { "{c.title.expose()}" }
                         span { if c.conflicted { "Conflicting version · check before filling · " } "{c.username.as_ref().map_or(\"\", |u| u.expose())}" }
                     }

@@ -15,9 +15,21 @@ function clearRevealed(){
 // Dioxus can reuse a control's DOM node across a Rust form reset. Observe the
 // Rust epoch explicitly rather than assuming a virtual-DOM key wipes its value.
 let currentFormEpoch;
-const forms=new MutationObserver(()=>{
+// HTML autofocus only applies at page load, and Rust-side focus needs eval,
+// which the policy forbids: focus newly inserted autofocus controls here, and
+// keep keyboard shortcuts working by focusing the app root when nothing is.
+function focusInserted(records){
+    for(const record of records)for(const node of record.addedNodes){
+        if(!(node instanceof Element))continue;
+        const target=node.matches("[autofocus]")?node:node.querySelector("[autofocus]");
+        if(target&&!target.disabled){target.focus();return;}
+    }
+    if(document.activeElement===document.body)document.querySelector("[data-qv-epoch]")?.focus();
+}
+const forms=new MutationObserver(records=>{
     const epoch=document.querySelector("[data-qv-epoch]")?.getAttribute("data-qv-epoch");
     if(epoch!==currentFormEpoch){currentFormEpoch=epoch;clearControls();}
+    focusInserted(records);
 });
 forms.observe(document,{subtree:true,childList:true,attributes:true,attributeFilter:["data-qv-epoch"]});
 document.addEventListener("click",event=>{

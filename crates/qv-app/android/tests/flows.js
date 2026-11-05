@@ -6,7 +6,9 @@ window.qvDeviceFixture=(()=>{
  const password='K4L!c8vP2zR9qT7W6nM5';let phrase='',words=[];
  const q=s=>document.querySelector(s);
  function input(id,value){const el=document.getElementById(id);el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}))}
- function click(id){const el=document.getElementById(id);if(!el||el.disabled)return false;el.click();return true}
+ // Only where a real finger could: not inert, has a box, topmost at its centre.
+ function reachable(el){if(el.disabled||el.closest('[inert]'))return false;el.scrollIntoView({block:'center',inline:'center'});const r=el.getBoundingClientRect();if(r.width<1||r.height<1)return false;const hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return !!hit&&(hit===el||el.contains(hit))}
+ function click(id){const el=document.getElementById(id);if(!el||!reachable(el))return false;el.click();return true}
  function title(){return (q('.detail:not(.closed) h1, .page h1')?.textContent||'').trim()}
  // The old screen names, mapped onto the new screens.
  function at(name){
@@ -59,7 +61,7 @@ window.qvDeviceFixture=(()=>{
   clear:()=>{phrase='';words.fill('');window.qvDeviceFixturePath=''},
   // Unlocked workspace helpers; values are synthetic canaries. Buttons match
   // their text, their accessible name, or the item row they open.
-  button:text=>{const b=Array.from(document.querySelectorAll('button')).find(b=>!b.disabled&&(b.textContent.trim().startsWith(text)||(b.getAttribute('aria-label')||'').startsWith(text)||b.getAttribute('aria-label')==='Open '+text));if(!b)return false;b.click();return true},
+  button:text=>{const b=Array.from(document.querySelectorAll('button')).find(b=>!b.disabled&&(b.textContent.trim().startsWith(text)||(b.getAttribute('aria-label')||'').startsWith(text)||b.getAttribute('aria-label')==='Open '+text));if(!b||!reachable(b))return false;b.click();return true},
   nav:label=>{
    const ids={Vault:'nav-all',Settings:'nav-settings',Generator:'nav-generator',Devices:'nav-devices',Trash:'nav-trash'};
    if(ids[label])return click(ids[label]);

@@ -141,7 +141,7 @@ impl Icon {
 #[component]
 pub(crate) fn Svg(icon: Icon, #[props(default)] large: bool) -> Element {
     rsx! {
-        svg { class: if large { "ico l" } else { "ico" }, view_box: "0 0 16 16", "aria-hidden": "true", "focusable": "false",
+        svg { class: if large { "ico lg" } else { "ico" }, view_box: "0 0 16 16", "aria-hidden": "true", "focusable": "false",
             path { d: icon.path() }
         }
     }
@@ -158,7 +158,7 @@ pub(crate) fn kind_icon(kind: &str) -> Icon {
     }
 }
 
-/// A stable hue class (`h0`–`h11`) for a title's monogram tile; display only.
+/// A hue class (`h0`–`h11`) from text, for tiles with no record ID (devices).
 /// A class, because the webview policy allows no inline styles.
 pub(crate) fn hue(text: &str) -> &'static str {
     const HUES: [&str; 12] = [
@@ -170,10 +170,40 @@ pub(crate) fn hue(text: &str) -> &'static str {
     HUES[(h / 30) as usize % 12]
 }
 
+/// A stable colour for a vault item, from its random record ID (hex), so
+/// renaming keeps it and synced devices agree.
+pub(crate) fn id_hue(id_hex: &str) -> &'static str {
+    const HUES: [&str; 12] = [
+        "h0", "h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8", "h9", "h10", "h11",
+    ];
+    let byte = id_hex
+        .get(..4)
+        .and_then(|h| u16::from_str_radix(h, 16).ok())
+        .unwrap_or(0);
+    HUES[usize::from(byte) % 12]
+}
+
 /// A title's monogram letter, as text.
 pub(crate) fn initial(title: &str) -> String {
     title
         .chars()
         .find(|c| !c.is_whitespace())
         .map_or_else(|| "?".to_owned(), |c| c.to_uppercase().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::id_hue;
+
+    #[test]
+    fn id_hue_depends_only_on_the_record_id() {
+        let id = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+        assert_eq!(id_hue(id), id_hue(id));
+        // 0xa1b2 % 12 == 6
+        assert_eq!(id_hue(id), "h6");
+        assert_eq!(id_hue("000c0000000000000000000000000000"), "h0");
+        // Malformed or short IDs fall back instead of panicking.
+        assert_eq!(id_hue(""), "h0");
+        assert_eq!(id_hue("zz"), "h0");
+    }
 }

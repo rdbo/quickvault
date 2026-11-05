@@ -3,7 +3,7 @@
 //! Vault items: the list beside the detail, the entry card (click a field to
 //! copy, 30 s reveals), in-place editing, move, history and attachments.
 //! Protected values appear only through a reveal; forms never prefill them.
-use super::icons::{Icon, Svg, hue, initial, kind_icon};
+use super::icons::{Icon, Svg, id_hue, initial, kind_icon};
 use super::shell::{ReportCard, Unreadable, act, go, kind_label};
 use crate::controller::{Controller, FormEpoch};
 use crate::views::{self, EntryView, FieldRow, ItemRow, kind_name};
@@ -76,6 +76,45 @@ pub enum Kind {
     /// Multi-line text.
     Multi,
 }
+/// Controlled text without echo races. Each keystroke round-trips through
+/// Rust, and a render can arrive while newer keystrokes are still in flight.
+/// Dioxus writes `value` on every render (it is volatile), which dropped or
+/// reordered typing, so controls render `initial_value` only. The control
+/// keeps what the user typed; only a value the user did not type (a chip, a
+/// reset, a different form) replaces it, by remounting the control.
+pub(crate) struct Echo {
+    shown: Zeroizing<String>,
+    typed: Option<Zeroizing<String>>,
+    generation: u64,
+}
+impl Echo {
+    pub(crate) fn new(value: &str) -> Self {
+        Self {
+            shown: Zeroizing::new(value.to_owned()),
+            typed: None,
+            generation: 0,
+        }
+    }
+    /// The value to render and the control's mount generation.
+    pub(crate) fn sync(&mut self, value: &str) -> (Zeroizing<String>, u64) {
+        let echo = self.typed.as_ref().is_some_and(|t| t.as_str() == value);
+        if !echo && (self.typed.is_some() || self.shown.as_str() != value) {
+            self.shown = Zeroizing::new(value.to_owned());
+            self.typed = None;
+            self.generation = self.generation.wrapping_add(1);
+        }
+        (self.shown.clone(), self.generation)
+    }
+    /// Record what the user typed, before it moves to protected storage.
+    pub(crate) fn typed(&mut self, value: &str) {
+        self.typed = Some(Zeroizing::new(value.to_owned()));
+    }
+}
+/// The component-lifetime echo state for one controlled control.
+pub(crate) fn use_echo(value: &str) -> std::rc::Rc<std::cell::RefCell<Echo>> {
+    use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(Echo::new(value))))
+}
+
 /// One bounded workspace input. Values move to protected Rust storage on
 /// every keystroke; secrets are never prefilled.
 #[component]
@@ -100,26 +139,39 @@ pub(crate) fn Input(
         _ => crate::workspace::LINE_MAX,
     };
     let controlled = value.is_some();
+    let echo = use_echo(value.as_deref().unwrap_or_default());
+    let (shown, generation) = if controlled {
+        echo.borrow_mut().sync(value.as_deref().unwrap_or_default())
+    } else {
+        (Zeroizing::new(String::new()), 0)
+    };
     let id = dom_id(field);
     let c = controller.clone();
     let oninput = move |event: FormEvent| {
         let mut v = event.value();
+        if controlled {
+            echo.borrow_mut().typed(&v);
+        }
         c.ws_input(epoch, field, &mut v);
     };
     let control = if kind == Kind::Multi {
         rsx! {
-            textarea { id: id.clone(), class, maxlength: limit, disabled, autofocus, placeholder: placeholder.clone(), spellcheck: "false", autocomplete: "off",
-                "aria-label": if bare { label.clone() } else { String::new() },
-                "data-qv-controlled": if controlled { "true" } else { "false" },
-                value: value.clone().unwrap_or_default(), oninput }
+            for g in [generation] {
+                textarea { key: "{g}", id: id.clone(), class, maxlength: limit, disabled, autofocus, placeholder: placeholder.clone(), spellcheck: "false", autocomplete: "off",
+                    "aria-label": if bare { label.clone() } else { String::new() },
+                    "data-qv-controlled": if controlled { "true" } else { "false" },
+                    initial_value: shown.as_str(), oninput: oninput.clone() }
+            }
         }
     } else {
         rsx! {
-            input { id: id.clone(), class, r#type: if kind == Kind::Secret { "password" } else { "text" }, maxlength: limit, disabled, autofocus,
-                placeholder: placeholder.clone(), autocomplete: "off", spellcheck: "false", autocapitalize: "off", autocorrect: "off",
-                "aria-label": if bare { label.clone() } else { String::new() },
-                "data-qv-controlled": if controlled { "true" } else { "false" },
-                value: value.clone().unwrap_or_default(), oninput }
+            for g in [generation] {
+                input { key: "{g}", id: id.clone(), class, r#type: if kind == Kind::Secret { "password" } else { "text" }, maxlength: limit, disabled, autofocus,
+                    placeholder: placeholder.clone(), autocomplete: "off", spellcheck: "false", autocapitalize: "off", autocorrect: "off",
+                    "aria-label": if bare { label.clone() } else { String::new() },
+                    "data-qv-controlled": if controlled { "true" } else { "false" },
+                    initial_value: shown.as_str(), oninput: oninput.clone() }
+            }
         }
     };
     if bare {
@@ -321,7 +373,7 @@ pub(crate) fn ListPane(
                     for (row, kind) in items {
                         div { class: if current == Some(row.handle) { "row on" } else { "row" }, key: "{row.title.as_str()}-{row.subtitle.as_str()}",
                             button { class: "open item-open", "aria-label": "Open {row.title.as_str()}", disabled: form, onclick: pick(&controller, epoch, Screen::Entry(row.handle)) }
-                            span { class: "tile {hue(&row.title)}", "{initial(&row.title)}" }
+                            span { class: "tile {id_hue(&row.handle.id_hex())}", "{initial(&row.title)}" }
                             span { class: "t", b { class: "row-title", "{row.title.as_str()}" }
                                 span { if row.subtitle.is_empty() { "{kind_label(&kind)}" } else { "{row.subtitle.as_str()}" } }
                             }
@@ -519,13 +571,13 @@ fn EntryBody(
     let kind = Zeroizing::new(view.type_hint.to_lowercase());
     rsx! {
         div { class: "hero",
-            span { class: "tile {hue(&view.title)}", "{initial(&view.title)}" }
+            span { class: "tile {id_hue(&view.handle.id_hex())}", "{initial(&view.title)}" }
             div { class: "min0",
                 h1 { "{view.title.as_str()}" }
                 div { class: "meta",
                     if let Some(u) = url { span { class: "pill link", Svg { icon: Icon::Globe } "{u.as_str()}" } }
                     if !view.type_hint.is_empty() { span { class: "pill", Svg { icon: kind_icon(&kind) } "{view.type_hint.as_str()}" } }
-                    if let Some(g) = group { span { class: "pill", span { class: "dot {hue(&g)}" } "{g}" } }
+                    if let (Some(g), Some(h)) = (group, view.group) { span { class: "pill", span { class: "dot {id_hue(&h.id_hex())}" } "{g}" } }
                 }
             }
         }
@@ -655,7 +707,7 @@ fn EditEntry(controller: Controller, epoch: FormEpoch, revision: u64, live: Live
         }
         div { class: "detail-inner fade-in",
             div { class: "hero",
-                span { class: "tile {hue(&form.title)}", "{initial(&form.title)}" }
+                span { class: "tile {id_hue(&form.id)}", "{initial(&form.title)}" }
                 div { class: "grow0",
                     Input { controller: controller.clone(), epoch, field: WsField::Title, label: "Title", kind: Kind::Line, value: Some(form.title.to_string()), disabled: false, bare: true, class: "title-in", placeholder: "Title", autofocus: form.new }
                     div { class: "meta",
@@ -745,7 +797,7 @@ fn EditGroup(controller: Controller, epoch: FormEpoch, revision: u64) -> Element
     rsx! {
         div { class: "phone-bar", button { class: "icon-btn back", "aria-label": "Cancel", onclick: back(&controller, epoch), Svg { icon: Icon::Close, large: true } } }
         div { class: "detail-inner fade-in",
-            div { class: "hero", span { class: "tile {hue(&form.name)}", Svg { icon: Icon::Folder, large: true } }
+            div { class: "hero", span { class: "tile {id_hue(&form.id)}", Svg { icon: Icon::Folder, large: true } }
                 h1 { if form.new { "New group" } else { "Rename group" } }
             }
             div { class: "card", div { class: "ed",

@@ -33,6 +33,14 @@ Dates are ISO 8601. Newest first within each section.
     the existing zbus; Android Storage Access Framework) instead of typed
     paths. A typed path remains only when no picker is available.
 
+  Fixed during owner acceptance: the OS title bar was still shown; the shell
+  could become unclickable after unlocking (`inert="false"`); fast typing
+  dropped characters in edit forms; autofocus never applied; creating a
+  second vault failed silently; accepting the protection notice did not
+  continue; item and group colours changed while renaming (now from the
+  record ID). The real-engine test driver now clicks only controls a real
+  pointer could reach.
+
   No vault, crypto, storage, protocol or sync change. The webview policy is
   unchanged: the UI uses no inline styles. The real-engine and Android test
   drivers were rewritten for the new screens with the same checks.

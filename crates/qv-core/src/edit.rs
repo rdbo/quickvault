@@ -169,6 +169,12 @@ impl core::fmt::Debug for EntryDraft {
 }
 
 impl EntryDraft {
+    /// The entry's record ID as 32 lowercase hex digits, also for a new entry
+    /// not saved yet. IDs are metadata, not secrets.
+    pub fn id_hex(&self) -> String {
+        crate::setup::hex(&self.record.0)
+    }
+
     /// The entry being edited.
     pub fn entry(&self) -> &Entry {
         &self.entry
@@ -220,6 +226,12 @@ impl core::fmt::Debug for GroupDraft {
 }
 
 impl GroupDraft {
+    /// The group's record ID as 32 lowercase hex digits, also for a new
+    /// group not saved yet. IDs are metadata, not secrets.
+    pub fn id_hex(&self) -> String {
+        crate::setup::hex(&self.record.0)
+    }
+
     /// The group being edited.
     pub fn group(&self) -> &Group {
         &self.group

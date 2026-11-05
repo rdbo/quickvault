@@ -161,7 +161,6 @@ fn Root(controller: Controller, revision: u64) -> Element {
     };
     rsx! {
         div { class: "qv", "data-mode": view.theme.name(), "data-qv-epoch": "{epoch.0}", tabindex: "-1", onkeydown: keys,
-            onmounted: move |e| async move { let _ = e.set_focus(true).await; },
             shell::TitleBar {
                 controller: Some(controller.clone()), epoch, unlocked, idle_left: view.idle_left, busy: view.busy,
                 palette: unlocked.then_some(palette), vault: name,
@@ -169,7 +168,8 @@ fn Root(controller: Controller, revision: u64) -> Element {
             if unlocked {
                 shell::Shell { controller: controller.clone(), view: ShellView::from(&view), palette }
             } else {
-                Locked { controller: controller.clone(), revision: view.revision }
+                // Any snapshot change (errors, busy, typed path) redraws the locked screens.
+                Locked { controller: controller.clone(), revision }
             }
             shell::ResizeHandles {}
         }
@@ -274,6 +274,8 @@ fn Locked(controller: Controller, revision: u64) -> Element {
     let mut shown = use_signal(|| (FormEpoch(u64::MAX), false));
     let mut confirming = use_signal(|| (FormEpoch(u64::MAX), false));
     let mut skip = use_signal(|| (FormEpoch(u64::MAX), false));
+    // The action that opened the protection sheet; it runs once acknowledged.
+    let mut after_ack = use_signal(|| None::<Action>);
     let on = |s: (FormEpoch, bool)| s.0 == epoch && s.1;
     let wizard_step = if step().0 == epoch { step().1 } else { 0 };
     // Create/unlock/recover need the reduced-protection acknowledgement first.
@@ -281,6 +283,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
         let c = controller.clone();
         move |action: Action| {
             if c.protection_ack_needed() {
+                after_ack.set(Some(action));
                 sheet.set(Sheet::Protection);
             } else {
                 c.perform(epoch, action, c.consent());
@@ -474,26 +477,36 @@ fn Locked(controller: Controller, revision: u64) -> Element {
     } else if mode == Mode::Create {
         let mut g1 = gate.clone();
         let mut g2 = gate.clone();
+        // The device vault exists: the new one needs its own file first.
+        let needs_file = app_vault && picked.is_none();
+        let mismatch = controller.repeat_mismatch(epoch);
+        let pick_first = pick_new.clone();
         rsx! {
             div { class: "wizard fade-in",
                 div { class: "steps", i { class: "on" } i { class: if wizard_step >= 1 { "on" } else { "" } } i {} }
                 div { hidden: wizard_step != 0,
                     h2 { "Name your vault" }
                     p { class: "muted", "Only you see this name, after unlocking." }
-                    SecretInput { controller: controller.clone(), epoch, field: InputField::Name, label: "Vault name", id: "vault-name", secret: false, disabled: busy, placeholder: "Personal" }
+                    SecretInput { controller: controller.clone(), epoch, field: InputField::Name, label: "Vault name", id: "vault-name", secret: false, disabled: busy, autofocus: true, placeholder: "Personal" }
                     div { class: "banner ok",
                         Svg { icon: Icon::Folder }
                         span { class: "sp",
                             if let Some(file) = picked.as_ref() { "Saves to {file}" }
-                            else if app_vault { "This device already has a vault. Choose where to save the new one." }
+                            else if app_vault && (can_pick || fallback) { "This device already has a vault. Choose where to save the new one." }
+                            else if app_vault { "This device already has a vault. Open it, or recover it with your recovery phrase." }
                             else { "Saved privately on this device" }
                         }
-                        if can_pick && (app_vault || picked.is_some()) { button { class: "link", onclick: pick_new, "Choose…" } }
+                        if can_pick && !fallback && picked.is_some() { button { class: "link", onclick: pick_new, "Change…" } }
                     }
                     if fallback { SecretInput { controller: controller.clone(), epoch, field: InputField::Path, label: "Vault file (full path)", id: "vault-path", secret: false, disabled: busy } }
+                    if wizard_step == 0 { {err_view.clone()} }
                     div { class: "actions",
                         button { class: "btn subtle", onclick: to_mode(Mode::Unlock), "Cancel" }
-                        button { class: "btn primary", id: "create-next", onclick: move |_| step.set((epoch, 1)), "Continue" }
+                        if needs_file && can_pick && !fallback {
+                            button { class: "btn primary", id: "create-choose", disabled: busy, onclick: pick_first, "Choose where to save…" }
+                        } else {
+                            button { class: "btn primary", id: "create-next", disabled: needs_file, onclick: move |_| step.set((epoch, 1)), "Continue" }
+                        }
                     }
                 }
                 div { hidden: wizard_step != 1,
@@ -501,6 +514,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                     p { class: "muted", "It is the key to this vault. QuickVault cannot reset it, so make it long and memorable." }
                     SecretInput { controller: controller.clone(), epoch, field: InputField::Password, label: "Master password", id: "password", secret: true, disabled: busy }
                     SecretInput { controller: controller.clone(), epoch, field: InputField::Repeat, label: "Type it again", id: "repeat", secret: true, disabled: busy }
+                    if mismatch { p { class: "hint", role: "status", "The two passwords do not match yet." } }
                     if view.fair_warning { div { class: "banner", Svg { icon: Icon::Warn } span { "This password is fair. Consider a longer, less predictable passphrase." } } }
                     div { class: "banner ok", Svg { icon: Icon::Generator }
                         div { class: "sp",
@@ -524,11 +538,11 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                             }
                         }
                     }
-                    {err_view}
+                    if wizard_step == 1 { {err_view} }
                     if phase != Phase::WeakPassword {
                         div { class: "actions",
                             button { class: "btn subtle", disabled: busy, onclick: move |_| step.set((epoch, 0)), "Back" }
-                            button { class: "btn primary", id: "create-submit", "data-qv-clear": "true", disabled: busy || preview, onclick: move |_| g2(Action::Create), if busy { "Creating…" } else { "Create vault" } }
+                            button { class: "btn primary", id: "create-submit", "data-qv-clear": "true", disabled: busy || preview || mismatch, onclick: move |_| g2(Action::Create), if busy { "Creating…" } else { "Create vault" } }
                         }
                     }
                 }
@@ -667,7 +681,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                     div { class: "actions",
                         if view.ack_needed {
                             button { class: "btn subtle", onclick: move |_| sheet.set(Sheet::None), "Not now" }
-                            button { class: "btn primary", id: "protection-ack", onclick: { let c = controller.clone(); move |_| { if let Err(e) = c.acknowledge_protection() { c.report(epoch, e); } c.touch(); sheet.set(Sheet::None); } }, "I understand, continue" }
+                            button { class: "btn primary", id: "protection-ack", onclick: { let c = controller.clone(); move |_| { let next = after_ack.take(); sheet.set(Sheet::None); match c.acknowledge_protection() { Ok(()) => { if let Some(action) = next { c.perform(epoch, action, c.consent()); } } Err(e) => c.report(epoch, e) } c.touch(); } }, "I understand, continue" }
                         } else {
                             button { class: "btn primary", onclick: move |_| sheet.set(Sheet::None), "Done" }
                         }
@@ -685,7 +699,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
             }
             div { class: "locked-body", key: "locked-{epoch.0}", {body} }
             div { class: "locked-foot",
-                button { class: if view.ack_needed { "status-chip warn" } else { "status-chip" }, id: "protection-chip", onclick: move |_| sheet.set(Sheet::Protection), Svg { icon: Icon::Shield } "{chip_text}" }
+                button { class: if view.ack_needed { "status-chip warn" } else { "status-chip" }, id: "protection-chip", onclick: move |_| { after_ack.set(None); sheet.set(Sheet::Protection); }, Svg { icon: Icon::Shield } "{chip_text}" }
             }
             if fixture { input { id: "validation-result", oninput: fixture_report(&controller) } }
         }

@@ -674,6 +674,8 @@ pub struct FormRow {
 pub struct EntryFormView {
     /// A new entry.
     pub new: bool,
+    /// Record ID (hex), for its stable colour.
+    pub id: String,
     /// Title.
     pub title: Z,
     /// Type hint.
@@ -690,6 +692,7 @@ pub(crate) fn entry_form(f: &crate::workspace::EntryForm) -> EntryFormView {
     let e = f.draft.entry();
     EntryFormView {
         new: f.new,
+        id: f.draft.id_hex(),
         title: z(e.title.expose()),
         type_hint: z(e.type_hint.expose()),
         notes: if f.notes_too_large {
@@ -728,6 +731,8 @@ pub(crate) fn entry_form(f: &crate::workspace::EntryForm) -> EntryFormView {
 pub struct GroupFormView {
     /// A new group.
     pub new: bool,
+    /// Record ID (hex), for its stable colour.
+    pub id: String,
     /// Name.
     pub name: Z,
 }
@@ -784,6 +789,7 @@ impl crate::controller::Controller {
         self.peek(epoch, |ws| {
             ws.group_form.as_ref().map(|f| GroupFormView {
                 new: f.new,
+                id: f.draft.id_hex(),
                 name: z(f.draft.group().name.expose()),
             })
         })

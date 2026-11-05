@@ -278,7 +278,7 @@ pub(crate) fn run(
         }
         WsAction::NewEntry(group) => c
             .with_ws(epoch, |ws, session| -> Result<(), AppError> {
-                let mut draft = session.new_entry(group, "login", "New entry")?;
+                let mut draft = session.new_entry(group, "login", "")?;
                 draft.add_field("username", FieldKind::Text, field_value("")?)?;
                 draft.add_field("password", FieldKind::Secret, field_value("")?)?;
                 draft.add_field("url", FieldKind::Url, field_value("")?)?;
@@ -301,9 +301,10 @@ pub(crate) fn run(
         WsAction::AddField(kind) => c
             .with_ws(epoch, |ws, _| -> Result<(), AppError> {
                 let name = ws.text(WsField::NewFieldName)?.to_owned();
-                let name = zeroize::Zeroizing::new(name);
+                let mut name = zeroize::Zeroizing::new(name);
                 if name.is_empty() {
-                    return Err(AppError::InvalidInput);
+                    // The "+ Kind" buttons work without a typed name.
+                    *name = crate::views::kind_name(kind).to_lowercase();
                 }
                 let form = ws.entry_form.as_mut().ok_or(AppError::InvalidInput)?;
                 form.draft.add_field(&name, kind, field_value("")?)?;
@@ -382,7 +383,7 @@ pub(crate) fn run(
                     if entry.title.expose().is_empty()
                         || entry.fields.iter().any(|f| f.name.expose().is_empty())
                     {
-                        return Err(AppError::InvalidInput);
+                        return Err(AppError::NameRequired);
                     }
                     let mut form = ws.entry_form.take().ok_or(AppError::InvalidInput)?;
                     let replacements = std::mem::take(&mut form.replacements);

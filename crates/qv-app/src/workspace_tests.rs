@@ -417,7 +417,11 @@ fn edit_bounds_blank_replacement_protection_fields_and_groups() {
     env.act(WsAction::AddField(FieldKind::Secret));
     env.put(WsField::NewFieldName, "note2");
     env.act(WsAction::AddField(FieldKind::Text));
+    // A "+ Kind" button without a typed name names the field after its kind.
+    env.act(WsAction::AddField(FieldKind::Email));
+    assert_eq!(env.error(), None);
     let form = env.c.entry_form(env.epoch()).unwrap();
+    assert!(form.rows.iter().any(|r| *r.name == "email"));
     let pin = form.rows.iter().find(|r| *r.name == "pin").unwrap();
     assert!(pin.protected);
     let pin = pin.index;
@@ -451,7 +455,7 @@ fn edit_bounds_blank_replacement_protection_fields_and_groups() {
     env.act(WsAction::EditEntry(e));
     env.put(WsField::Title, "");
     env.act(WsAction::SaveEntry);
-    assert_eq!(env.error(), Some(AppError::InvalidInput));
+    assert_eq!(env.error(), Some(AppError::NameRequired));
     assert_eq!(env.screen(), Screen::EditEntry);
     // Groups: create, rename, move, delete with recursive confirmation.
     let root = env.read(|s| s.root());
