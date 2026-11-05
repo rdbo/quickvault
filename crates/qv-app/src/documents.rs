@@ -19,12 +19,84 @@ pub const MAX_ATTACHMENT: u64 = 10 * 1024 * 1024;
 
 /// What a document picker is choosing for (Android); used by the UI.
 #[cfg(feature = "desktop")]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PickKind {
     /// Attachment input or plaintext output.
     Any,
     /// Archive input or export destination.
     Archive,
+}
+/// Which screen's path input a system picker fills.
+#[cfg(feature = "desktop")]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))] // Linux portal picker only.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PathFor {
+    /// The unlocked workspace's file field.
+    Workspace,
+    /// The locked screen's vault file.
+    Locked,
+}
+#[cfg(all(feature = "desktop", target_os = "linux"))]
+static NO_PICKER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Validation fixtures never open a real desktop dialog: they use the typed
+/// fallback, which the synthetic flows exercise.
+#[cfg(all(feature = "validation", target_os = "linux"))]
+pub(crate) fn force_no_picker() {
+    NO_PICKER.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+/// No system picker answered here; screens then offer a typed path instead.
+#[cfg(feature = "desktop")]
+pub fn picker_missing() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        NO_PICKER.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+/// Linux: show the desktop's file picker on a worker thread and put the choice
+/// into the current screen's protected path input (0009 §1.8). Cancelling
+/// changes nothing; a stale screen ignores the result.
+#[cfg(all(feature = "desktop", target_os = "linux"))]
+pub(crate) fn pick_path(
+    c: &Controller,
+    epoch: crate::controller::FormEpoch,
+    to: PathFor,
+    kind: qv_core::platform::portal::Pick,
+    title: &'static str,
+    then: Option<crate::workspace::WsAction>,
+) {
+    let c = c.clone();
+    let _ = std::thread::Builder::new()
+        .name("qv-picker".into())
+        .spawn(move || {
+            match qv_core::platform::portal::pick(title, &kind) {
+                Ok(Some(path)) => match path.into_os_string().into_string() {
+                    Ok(mut text) => {
+                        match to {
+                            PathFor::Workspace => c.ws_input(epoch, WsField::Path, &mut text),
+                            PathFor::Locked => {
+                                c.input(epoch, crate::controller::InputField::Path, &mut text)
+                            }
+                        }
+                        zeroize::Zeroize::zeroize(&mut text);
+                        if let Some(action) = then {
+                            c.act(epoch, action);
+                        }
+                    }
+                    Err(_) => c.report(epoch, AppError::InvalidInput),
+                },
+                Ok(None) => {}
+                Err(_) => {
+                    NO_PICKER.store(true, std::sync::atomic::Ordering::SeqCst);
+                    c.report(epoch, AppError::Unavailable);
+                }
+            }
+            c.touch();
+        });
 }
 /// A chosen input document.
 pub(crate) enum Source {

@@ -9,25 +9,33 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
-- 2026-11-04: App redesign (roadmap 2.10a, plan 0040; direction delegated by
-  the owner). The shared Dioxus app now looks and behaves like an application
-  on desktop and phone instead of a web page:
-  - native window title bar;
-  - no whole-page scrolling, landing-page intro or footer;
-  - system fonts, with light/dark following the OS (Android AppTheme is now
-    DayNight);
-  - its own stroke icons;
-  - from 1000 px: three panes (sidebar with groups, entry list, entry detail)
-    with a toolbar and status bar; 720–999 px: icon sidebar; below 720 px:
-    app bar with Back, bottom tabs, a More screen, a floating New button and
-    bottom-sheet confirmations;
-  - desktop shortcuts for existing actions.
+- 2026-11-05: New app UI (roadmap 2.10a, plan 0040), built from the
+  prototype the owner approved after rejecting the 2026-11-04 restyle. One
+  shared UI for desktop and phone:
+  - the desktop window draws its own title bar (drag, double-click, window
+    buttons, edge resize; no OS decorations);
+  - dark by default, with an in-app theme switch (dark, light or system)
+    stored in a small non-secret preferences file;
+  - first-run welcome, vault menu, step-by-step creation and phrase
+    confirmation;
+  - "All items", type and group filters, quick copy from list rows,
+    click-to-copy fields with reveal countdown rings, and in-place editing;
+  - command bar (Ctrl K), Undo after moving an item to the trash;
+  - generator with sliders and switches, pairing and sync dialogs, and grouped
+    settings;
+  - phone layout with large titles, bottom tabs, a floating New button and
+    bottom sheets.
 
-  No security behaviour or feature changed. The input cleanup hooks, reveal,
-  clipboard, lock and webview policy are untouched, and the test assertions
-  are unchanged; two history-row selectors were scoped to the detail pane.
-  Screenshots are in the plan. Android instrumentation and the owner's review
-  on Linux and the phone are pending.
+  Behaviour changes, specified in 0009 §1.8:
+  - The reduced-protection acknowledgement is asked once per protection
+    status and remembered, instead of a checkbox on every unlock.
+  - Files are chosen through the system picker (Linux xdg-desktop-portal over
+    the existing zbus; Android Storage Access Framework) instead of typed
+    paths. A typed path remains only when no picker is available.
+
+  No vault, crypto, storage, protocol or sync change. The webview policy is
+  unchanged: the UI uses no inline styles. The real-engine and Android test
+  drivers were rewritten for the new screens with the same checks.
 
 - 2026-11-04: Phase 2.10b (plan 0039) passed its fresh-context review, which
   added a test that non-byte-mode QR codes are refused and fixed an

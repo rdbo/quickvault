@@ -236,6 +236,7 @@ pub(crate) fn run(
                 ws.notice = None;
                 ws.report = None;
                 ws.error = None;
+                ws.undo = None;
             })
             .ok_or(AppError::InvalidInput),
         WsAction::Hide => c
@@ -449,14 +450,18 @@ pub(crate) fn run(
         }),
         WsAction::Delete(item) => c.run_op(epoch, None, move |s, _, _| {
             s.delete(item, matches!(item, qv_core::ItemHandle::Group(_)))?;
-            Ok(on_ws(|ws| {
-                ws.screen = Screen::Browse(None);
+            Ok(on_ws(move |ws| {
+                ws.screen = ws.list_context();
                 ws.notice = Some("Moved to the trash.");
+                ws.undo = Some(item);
             }))
         }),
         WsAction::Restore(item) => c.run_op(epoch, None, move |s, _, _| {
             s.restore(item)?;
-            Ok(on_ws(|ws| ws.notice = Some("Restored from the trash.")))
+            Ok(on_ws(|ws| {
+                ws.undo = None;
+                ws.notice = Some("Restored from the trash.");
+            }))
         }),
         WsAction::EmptyTrash => c.run_op(epoch, retry, move |s, token, _| {
             let (report, cleanup) = with_snapshot(s, over_budget, token, || s.empty_trash())?;

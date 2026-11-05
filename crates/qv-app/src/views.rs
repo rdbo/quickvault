@@ -159,6 +159,86 @@ pub fn browse(s: &Session, group: Option<GroupHandle>) -> Result<BrowseView, Cor
         recovered,
     })
 }
+/// An item for the "All items", type and group lists (plan 0040 R6).
+#[derive(Clone, PartialEq)]
+pub struct ItemRow {
+    /// Title, subtitle and handle, as in group listings.
+    pub row: EntryRow,
+    /// The entry's type hint (`login`, `note`, …), lower-cased; UI only.
+    pub kind: Z,
+    /// Its groups from the top level down to its own; empty at the root.
+    pub path: Vec<GroupHandle>,
+    /// The top-level group's name, or empty.
+    pub top_name: Z,
+}
+/// The groups directly under the root, for the sidebar.
+pub fn top_groups(s: &Session) -> Result<Vec<GroupRow>, CoreError> {
+    Ok(s.list(s.root()?)?.groups.iter().map(group_row).collect())
+}
+/// Every live entry in the tree (and recovered ones), with its group path,
+/// walked through the existing listings; at most 64 levels deep.
+pub fn all_items(s: &Session) -> Result<Vec<ItemRow>, CoreError> {
+    let root = s.root()?;
+    let mut out = Vec::new();
+    let mut stack: Vec<(GroupHandle, Vec<GroupHandle>, Z)> = vec![(root, Vec::new(), z(""))];
+    while let Some((g, path, top)) = stack.pop() {
+        let listing = s.list(g)?;
+        for e in &listing.entries {
+            out.push(item(e, path.clone(), top.clone()));
+        }
+        if path.len() < 64 {
+            for child in &listing.groups {
+                let mut deeper = path.clone();
+                deeper.push(child.handle);
+                let top = if path.is_empty() {
+                    z(child.name.expose())
+                } else {
+                    top.clone()
+                };
+                stack.push((child.handle, deeper, top));
+            }
+        }
+    }
+    for e in s.recovered()? {
+        out.push(item(&e, Vec::new(), z("")));
+    }
+    let mut keyed: Vec<(Z, ItemRow)> = out
+        .into_iter()
+        .map(|r| (Zeroizing::new(r.row.title.to_lowercase()), r))
+        .collect();
+    keyed.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+    Ok(keyed.into_iter().map(|k| k.1).collect())
+}
+fn item(e: &qv_core::EntrySummary, path: Vec<GroupHandle>, top_name: Z) -> ItemRow {
+    ItemRow {
+        row: entry_row(e),
+        kind: Zeroizing::new(e.type_hint.expose().to_lowercase()),
+        path,
+        top_name,
+    }
+}
+/// The first non-protected and first protected field handles of an entry,
+/// for quick copy from a list row (handles are read at click time).
+pub fn quick_fields(
+    s: &Session,
+    e: EntryHandle,
+) -> Result<(Option<qv_core::FieldHandle>, Option<qv_core::FieldHandle>), CoreError> {
+    let v = entry(s, e)?;
+    if v.versions > 1 {
+        return Ok((None, None));
+    }
+    let user = v
+        .fields
+        .iter()
+        .find(|f| !f.protected && f.kind != FieldKind::Totp)
+        .map(|f| f.handle);
+    let secret = v
+        .fields
+        .iter()
+        .find(|f| f.protected && f.kind != FieldKind::Totp)
+        .map(|f| f.handle);
+    Ok((user, secret))
+}
 /// Entries whose group is missing.
 pub fn recovered(s: &Session) -> Result<Vec<EntryRow>, CoreError> {
     Ok(s.recovered()?.iter().map(entry_row).collect())

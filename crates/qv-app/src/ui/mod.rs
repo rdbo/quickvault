@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Shared responsive screens. Vault text is rendered as escaped text only.
+//! Shared app UI (plan 0040): one DOM for desktop and phone. Vault text is
+//! rendered as escaped text only; every handler sends a typed action with the
+//! current form epoch and Rust re-checks it.
 mod icons;
-mod workspace;
-use crate::controller::{Action, AppError, Controller, FormEpoch, InputField, Mode, Phase};
+mod items;
+mod pages;
+mod shell;
+use crate::controller::{Action, AppError, Controller, FormEpoch, InputField, Mode, Phase, View};
+use crate::workspace::Shortcut;
 use dioxus::prelude::*;
 use icons::{Icon, Svg};
 use std::sync::OnceLock;
+use zeroize::Zeroizing;
 
 pub(crate) static ACTIVE: OnceLock<Result<Controller, crate::controller::AppError>> =
     OnceLock::new();
@@ -36,7 +42,7 @@ pub(crate) fn app() -> Element {
     });
     let revision = *changed.read();
     match ACTIVE.get() {
-        Some(Ok(controller)) => rsx! { Screen {controller:controller.clone(),revision} },
+        Some(Ok(controller)) => rsx! { Root { controller: controller.clone(), revision } },
         _ => {
             let error = ACTIVE
                 .get()
@@ -50,7 +56,19 @@ pub(crate) fn app() -> Element {
                 _ => "Protection unavailable",
             };
             let message = error.message();
-            rsx! {main {class:"shell", div {class:"locked-body", section {class:"card", Brand{status:""} h1{"{title}"} p{"{message}"} p{class:"muted","No vault has been opened by this window."}}}}}
+            rsx! {
+                div { class: "qv", "data-mode": "dark",
+                    shell::TitleBar { controller: None, epoch: FormEpoch(0), unlocked: false, idle_left: 0, busy: false, palette: None, vault: None }
+                    div { class: "locked", div { class: "locked-body",
+                        div { class: "wizard",
+                            h2 { "{title}" }
+                            p { "{message}" }
+                            p { class: "muted", "No vault has been opened by this window." }
+                        }
+                    } }
+                    shell::ResizeHandles {}
+                }
+            }
         }
     }
 }
@@ -78,17 +96,111 @@ fn fixture_report(controller: &Controller) -> impl FnMut(FormEvent) + 'static {
 fn fixture_report(_: &Controller) -> impl FnMut(FormEvent) + 'static {
     |_| {}
 }
-/// The locked panel's heading: the app mark, its name and the task status.
+pub(crate) fn is_fixture(controller: &Controller) -> bool {
+    #[cfg(feature = "validation")]
+    {
+        controller.is_fixture()
+    }
+    #[cfg(not(feature = "validation"))]
+    {
+        let _ = controller;
+        false
+    }
+}
+fn is_preview(controller: &Controller) -> bool {
+    #[cfg(feature = "validation")]
+    {
+        controller.is_preview()
+    }
+    #[cfg(not(feature = "validation"))]
+    {
+        let _ = controller;
+        false
+    }
+}
+
+/// The app root: theme, title bar, keyboard shortcuts and the phase's screen.
 #[component]
-fn Brand(status: &'static str) -> Element {
+fn Root(controller: Controller, revision: u64) -> Element {
+    let _ = revision;
+    let view = controller.snapshot();
+    let epoch = view.epoch;
+    let palette = use_signal(|| false);
+    let unlocked = view.phase == Phase::Unlocked;
+    let keys = {
+        let c = controller.clone();
+        let mut palette = palette;
+        move |event: KeyboardEvent| {
+            let key = event.key().to_string();
+            let ctrl = event.modifiers().ctrl() || event.modifiers().meta();
+            if unlocked && ctrl && matches!(key.as_str(), "k" | "K" | "f" | "F") {
+                palette.set(true);
+                event.prevent_default();
+                return;
+            }
+            if key == "Escape" && palette() {
+                palette.set(false);
+                event.prevent_default();
+                return;
+            }
+            if let Some(shortcut) = Shortcut::from_key(&key, ctrl)
+                && shortcut != Shortcut::Search
+                && c.shortcut(epoch, shortcut)
+            {
+                event.prevent_default();
+            }
+        }
+    };
+    let name = if unlocked {
+        controller
+            .read(epoch, crate::views::overview)
+            .and_then(Result::ok)
+            .map(|o| o.name.to_string())
+    } else {
+        None
+    };
     rsx! {
-        div {class:"card-heading",
-            span {class:"brand-mark", Svg{icon:Icon::Lock}}
-            span {class:"brand","QuickVault"}
-            if !status.is_empty() {span {class:"status-pill","{status}"}}
+        div { class: "qv", "data-mode": view.theme.name(), "data-qv-epoch": "{epoch.0}", tabindex: "-1", onkeydown: keys,
+            onmounted: move |e| async move { let _ = e.set_focus(true).await; },
+            shell::TitleBar {
+                controller: Some(controller.clone()), epoch, unlocked, idle_left: view.idle_left, busy: view.busy,
+                palette: unlocked.then_some(palette), vault: name,
+            }
+            if unlocked {
+                shell::Shell { controller: controller.clone(), view: ShellView::from(&view), palette }
+            } else {
+                Locked { controller: controller.clone(), revision: view.revision }
+            }
+            shell::ResizeHandles {}
         }
     }
 }
+
+/// The parts of the snapshot the unlocked shell renders.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct ShellView {
+    pub(crate) epoch: FormEpoch,
+    pub(crate) revision: u64,
+    pub(crate) live: crate::workspace::Live,
+    pub(crate) busy: bool,
+    pub(crate) scanning: bool,
+    pub(crate) reduced_lifecycle: bool,
+}
+impl From<&View> for ShellView {
+    fn from(v: &View) -> Self {
+        Self {
+            epoch: v.epoch,
+            revision: v.revision,
+            live: v.live,
+            busy: v.busy,
+            scanning: v.scanning,
+            reduced_lifecycle: v.reduced_lifecycle,
+        }
+    }
+}
+
+/// A locked-screen input: bounded, converted to protected Rust storage on
+/// every keystroke, never prefilled.
 #[component]
 fn SecretInput(
     controller: Controller,
@@ -98,209 +210,542 @@ fn SecretInput(
     id: &'static str,
     secret: bool,
     disabled: bool,
+    #[props(default)] autofocus: bool,
+    #[props(default)] placeholder: &'static str,
 ) -> Element {
-    rsx! {label {r#for:id,class:"field", span {"{label}"}
-        input {id, r#type:if secret{"password"}else{"text"},maxlength:if field==InputField::Path{4096}else{1024},
-            disabled,autocomplete:"off",spellcheck:"false",autocapitalize:"off",autocorrect:"off",
-            oninput:move|event:FormEvent|{let mut value=event.value();controller.input(epoch,field,&mut value);}
-        }
-    }}
-}
-#[component]
-fn Screen(controller: Controller, revision: u64) -> Element {
-    let _ = revision;
-    let mut consent = use_signal(|| (FormEpoch(u64::MAX), false));
-    let mut skip_consent = use_signal(|| (FormEpoch(u64::MAX), false));
-    #[cfg(feature = "validation")]
-    let preview = controller.is_preview();
-    #[cfg(not(feature = "validation"))]
-    let preview = false;
-    #[cfg(feature = "validation")]
-    let fixture = controller.is_fixture();
-    #[cfg(not(feature = "validation"))]
-    let fixture = false;
-    let view = controller.snapshot();
-    let mode = view.mode;
-    let epoch = view.epoch;
-    let phase = view.phase;
-    let acknowledged = consent().0 == epoch && consent().1;
-    let skip_acknowledged = skip_consent().0 == epoch && skip_consent().1;
-    let os = controller.protection();
-    let protection = qv_core::harden();
-    let error = view.error;
-    let status = view.status;
-    let phrase = controller.phrase(epoch);
-    let phrase_text = phrase
-        .as_ref()
-        .and_then(|v| std::str::from_utf8(v.expose_secret()).ok())
-        .unwrap_or("");
-    let suggestion = controller.suggestion(epoch);
-    let suggestion_text = suggestion
-        .as_ref()
-        .and_then(|v| std::str::from_utf8(v.expose_secret()).ok())
-        .unwrap_or("");
-    let invoke = |action| {
-        let controller = controller.clone();
-        move |_| controller.perform(epoch, action, acknowledged)
-    };
-    if phase == Phase::Unlocked {
-        return rsx! {
-            workspace::Shell {
-                controller: controller.clone(),
-                epoch,
-                revision: view.revision,
-                live: view.live,
-                busy: view.busy,
-                scanning: view.scanning,
-                reduced_lifecycle: view.reduced_lifecycle,
-                fixture,
-                on_fixture: fixture_report(&controller),
-            }
-        };
-    }
-    let resume = view.resume;
-    let over_budget = view.over_budget;
-    let rotation_confirmed = view.rotation_confirmed;
     rsx! {
-        main {class:"shell", "data-qv-epoch":"{epoch.0}",
-            if fixture && cfg!(target_os="android") {p {class:"warning","Synthetic validation build · isolated test vault only"}}
-            if preview {p {class:"hint","Read-only preview · vault actions are disabled. Do not enter real credentials."}}
-            div {class:"locked-body",
-                section {class:"card",key:"screen-{epoch.0}",
-                    Brand{status}
-                    if view.reduced_lifecycle {
-                        p {class:"warning",role:"status","Automatic locking on screen lock or sleep is unavailable. Manual lock and the 60-second inactivity lock remain active."}
-                    }
-                    if phase == Phase::Locked && let Some(need) = resume {
-                        h2 {"Finish the interrupted key rotation"}
-                        p {class:"muted","A key rotation for this vault was interrupted. Complete it to use the new master password and phrase, or roll it back to keep the previous ones. Nothing else can open the vault until it is finished."}
-                        if need.new {
-                            SecretInput{controller:controller.clone(),epoch,field:InputField::Password,label:"New master password (chosen for the rotation)",id:"resume-new",secret:true,disabled:view.busy}
-                        }
-                        if need.old {
-                            SecretInput{controller:controller.clone(),epoch,field:InputField::Repeat,label:"Previous master password",id:"resume-old",secret:true,disabled:view.busy}
-                        }
-                        button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::ResumeComplete),"Complete the rotation"}
-                        button {class:"secondary","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::ResumeRollback),"Roll back to the previous generation"}
-                        button {class:"text-button","data-qv-clear":"true",onclick:{let c=controller.clone();move |_|c.lock()},"Cancel"}
-                    }else if phase==Phase::Rotation{
-                        h2 {"Your new recovery phrase"}
-                        p {class:"muted","Write these 24 words down in order. They replace the old phrase once the rotation is installed. Nothing has changed yet."}
-                        div {class:"phrase", "{phrase_text}"}
-                        if rotation_confirmed {
-                            p {class:"notice","The new recovery words are confirmed."}
-                            button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::InstallRotation),if view.busy{"Installing…"}else{"Install the key rotation"}}
-                        }else{
-                            p {"Confirm the requested words to continue."}
-                            for (field,id,label) in [(InputField::Word0,"rot-word-0","First requested word"),(InputField::Word1,"rot-word-1","Second requested word"),(InputField::Word2,"rot-word-2","Third requested word")] {
-                                SecretInput{controller:controller.clone(),epoch,field,label,id,secret:true,disabled:view.busy}
-                            }
-                            p {class:"hint","Word positions: {view.positions[0]}, {view.positions[1]}, {view.positions[2]}"}
-                            button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::ConfirmRotation),"Confirm recovery words"}
-                        }
-                        button {class:"text-button","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::CancelRotation),"Cancel the rotation (nothing changes)"}
-                    }else if matches!(phase,Phase::Locked|Phase::Opening|Phase::WeakPassword){
-                        workspace::LanPanel{controller:controller.clone(),epoch,revision:view.revision}
-                        if view.scanning { workspace::ScanPanel{controller:controller.clone(),epoch} }
-                        h2 {if mode==Mode::Unlock{"Welcome back"}else if mode==Mode::Create{"Make yourself a vault"}else if mode==Mode::Join{"Join from another device"}else{"Recover local access"}}
-                        p {class:"muted",if mode==Mode::Unlock{"Unlock a vault already on this device."}else if mode==Mode::Create{"Choose a password, then keep your recovery phrase somewhere safe."}else if mode==Mode::Join{"On the other device, open Devices and show a pairing code. Type it here with that device's address."}else{"Use your recovery phrase, or explicitly inspect a missing or mismatched local anchor."}}
-                        nav {class:"tabs","aria-label":"Vault action",
-                            for (n,label) in [(Mode::Unlock,"Unlock"),(Mode::Create,"Create"),(Mode::Recover,"Recover"),(Mode::Join,"Join")] {
-                                button {class:if mode==n{"selected"}else{""},disabled:view.busy,onclick:{let c=controller.clone();move |_|{c.select_mode(epoch,n);}},"{label}"}
-                            }
-                        }
-                        SecretInput{controller:controller.clone(),epoch,field:InputField::Path,label:"Vault file path (blank uses the app vault)",id:"vault-path",secret:false,disabled:view.busy}
-                        if mode==Mode::Create{
-                            SecretInput{controller:controller.clone(),epoch,field:InputField::Name,label:"Vault name",id:"vault-name",secret:false,disabled:view.busy}
-                        }
-                        if mode==Mode::Join{
-                            workspace::ScanButton{controller:controller.clone(),epoch,target:crate::qr::QrTarget::NewDevice}
-                            SecretInput{controller:controller.clone(),epoch,field:InputField::LanCode,label:"Pairing code from the other device",id:"lan-join-code",secret:true,disabled:view.busy}
-                            SecretInput{controller:controller.clone(),epoch,field:InputField::LanEndpoint,label:"The other device's address (ip:port)",id:"lan-join-endpoint",secret:false,disabled:view.busy}
-                            SecretInput{controller:controller.clone(),epoch,field:InputField::LanLabel,label:"A name for the other device",id:"lan-join-label",secret:false,disabled:view.busy}
-                        }else if mode!=Mode::Recover{
-                            SecretInput{controller:controller.clone(),epoch,field:InputField::Password,label:"Master password",id:"password",secret:true,disabled:view.busy}
-                        }else{
-                            SecretInput{controller:controller.clone(),epoch,field:InputField::Phrase,label:"Recovery phrase · 24 words",id:"phrase",secret:true,disabled:view.busy}
-                        }
-                        if mode==Mode::Create{
-                            SecretInput{controller:controller.clone(),epoch,field:InputField::Repeat,label:"Confirm master password",id:"repeat",secret:true,disabled:view.busy}
-                            p {class:"hint","Consider a generated six-word passphrase. Longer, unpredictable passwords resist offline guessing."}
-                            button {class:"text-button",disabled:view.busy||phase==Phase::WeakPassword||preview,onclick:invoke(Action::SuggestPassword),"Generate a six-word suggestion"}
-                            if view.suggestion_visible {div {class:"phrase","{suggestion_text}"} p{class:"hint","Visible for 30 seconds. Write it down, then enter it in both password fields."}}
-                        }
-                        if view.fair_warning{p {class:"warning","This password is fair. Consider a longer, less predictable passphrase."}}
-                        if view.reduced_process {p {class:"warning","Some process or memory-lock protections are unavailable. Protected copies may reach OS storage."}}
-                        details {class:"protection",summary{"Device protection status"}
-                            p {"Process and memory protection reduced: {protection.is_reduced()}"}
-                            p {"Storage: {os.storage:?} · Swap: {os.swap:?} · Hibernation: {os.hibernation:?}"}
-                            p {"Lock monitoring: {os.lifecycle} · Clipboard: {os.clipboard}"}
-                            p {if os.quick_unlock {"Hardware quick unlock requires explicit enrollment in Settings."} else {"Quick unlock is unavailable on this device."}}
-                            p {"Clearing an input cannot guarantee erasure of framework or OS copies."}
-                        }
-                        label {class:"check",input {r#type:"checkbox",checked:acknowledged,disabled:view.busy,onchange:move|event|consent.set((epoch,event.checked()))} span {"I understand these protection limits and acknowledge reduced protection where shown."}}
-                        if phase==Phase::WeakPassword{
-                            div {class:"weak warning",role:"alertdialog","aria-label":"Weak password confirmation", p{"This password is weak and could be guessed by an attacker who obtains your vault file. Create the vault anyway?"}
-                                div {class:"row",
-                                    button {class:"secondary-small",autofocus:true,onclick:{let c=controller.clone();move |_|c.select_mode(epoch,Mode::Create)},"Choose a stronger password"}
-                                    button {class:"danger-small",disabled:view.weak_seconds>0,onclick:invoke(Action::ConfirmWeak),"Create anyway · {view.weak_seconds}s"}
-                                }
-                            }
-                        }else{
-                            button {class:"primary","data-qv-clear":"true",disabled:view.busy||!acknowledged||preview,onclick:invoke(if mode==Mode::Create{Action::Create}else if mode==Mode::Recover{Action::Recover}else if mode==Mode::Join{Action::JoinDevice}else{Action::Unlock}),
-                                if view.busy{"Opening…"}else if mode==Mode::Create{"Create vault"}else if mode==Mode::Recover{"Open with recovery phrase"}else if mode==Mode::Join{"Join"}else{"Unlock vault"}
-                            }
-                        }
-                        if let Some(banner) = controller.autofill_banner() {
-                            p {class:"notice",role:"status","data-qv-autofill":"banner","{banner}"}
-                        }
-                        if mode==Mode::Unlock && controller.0.services.keystore().binding().is_some() {
-                            button { class: "secondary", "data-qv-clear": "true", disabled: view.busy || !acknowledged || preview, onclick: invoke(Action::QuickUnlock), "Quick unlock with the enrolled hardware policy" }
-                        }
-                        if mode==Mode::Recover{
-                            details {summary{"Recover using a password and inspect the local anchor"}
-                                SecretInput{controller:controller.clone(),epoch,field:InputField::Password,label:"Master password",id:"recovery-password",secret:true,disabled:view.busy}
-                                button {class:"secondary",disabled:view.busy||!acknowledged||preview,onclick:invoke(Action::RecoverPassword),"Inspect for recovery"}
-                            }
-                        }
-                        button {class:"text-button","data-qv-clear":"true",onclick:{let c=controller.clone();move |_|c.lock()},"Cancel and clear"}
-                    }else if phase==Phase::Phrase{
-                        h2 {"Your recovery phrase"}
-                        p {class:"muted","Write these 24 words down in order. Anyone with this phrase and your vault file can open it."}
-                        div {class:"phrase", "{phrase_text}"}
-                        p {"Confirm the requested words to continue."}
-                        for (field,id,label) in [(InputField::Word0,"word-0","First requested word"),(InputField::Word1,"word-1","Second requested word"),(InputField::Word2,"word-2","Third requested word")] {
-                            SecretInput{controller:controller.clone(),epoch,field,label,id,secret:true,disabled:view.busy}
-                        }
-                        p {class:"hint","Word positions: {view.positions[0]}, {view.positions[1]}, {view.positions[2]}"}
-                        button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::ConfirmPhrase),"Confirm recovery words"}
-                        details {summary{"Skip phrase confirmation"}
-                            label {class:"check",input {r#type:"checkbox",checked:skip_acknowledged,onchange:move|event|skip_consent.set((epoch,event.checked()))}span{"I understand I may lose access if I forget my password. Record that I skipped confirmation."}}
-                            button {class:"secondary",disabled:view.busy||!skip_acknowledged,onclick:{let c=controller.clone();move |_|c.perform(epoch,Action::SkipPhrase,skip_acknowledged)},"Record skip and continue"}
-                        }
-                        button {class:"text-button","data-qv-clear":"true",onclick:{let c=controller.clone();move |_|c.lock()},"Lock and clear phrase"}
-                    }else if phase==Phase::Recovery{
-                        h2 {"Check this recovery baseline"}
-                        p {"The external anchor is missing or mismatched. This verified file may be an older copy. Opening it does not prove it is the latest state."}
-                        p {"Accepting it first creates a verified recovery snapshot, then establishes a new local baseline. Nothing is adopted without your action."}
-                        if let Some(needed) = over_budget {
-                            p {class:"warning","The mandatory recovery snapshot needs {needed} bytes and exceeds the snapshot budget."}
-                            button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:{let c=controller.clone();move |_|c.perform(epoch,Action::AdoptBaselineOverBudget,true)},"Allow the snapshot to exceed the budget and accept"}
-                        } else {
-                            button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:{let c=controller.clone();move |_|c.perform(epoch,Action::AdoptBaseline,true)},"Accept this file as the recovery baseline"}
-                        }
-                        button {class:"secondary",onclick:{let c=controller.clone();move |_|c.lock()},"Decline and lock"}
-                    }else{
-                        div {class:"ready-mark", Svg{icon:Icon::Check}}
-                        h2 {"Your vault is open"}
-                        p {class:"muted","Your vault is unlocked on this device. Lock it when you step away."}
-                        p {class:"hint","The vault locks after 60 seconds of inactivity. Lock it whenever you step away."}
-                        button {class:"primary","data-qv-clear":"true",onclick:{let c=controller.clone();move |_|c.lock()},"Lock vault"}
-                    }
-                    if let Some(error)=error{p {class:"error",role:"alert","{error.message()}"}}
+        div { class: "field",
+            label { r#for: id, "{label}" }
+            input { id, r#type: if secret { "password" } else { "text" }, maxlength: if field == InputField::Path { 4096 } else { 1024 },
+                disabled, autofocus, placeholder, autocomplete: "off", spellcheck: "false", autocapitalize: "off", autocorrect: "off",
+                oninput: move |event: FormEvent| { let mut value = event.value(); controller.input(epoch, field, &mut value); }
+            }
+        }
+    }
+}
+
+/// The spinning dial around the vault mark (decorative).
+#[component]
+fn Safe(opening: bool) -> Element {
+    let ticks: Vec<(&'static str, String, String, String, String)> = (0..48)
+        .map(|i| {
+            let a = f64::from(i) * 7.5_f64.to_radians();
+            let inner = if i % 6 == 0 { 56.0 } else { 60.0 };
+            (
+                if i % 6 == 0 { "major" } else { "" },
+                format!("{:.2}", 66.0 + inner * a.sin()),
+                format!("{:.2}", 66.0 - inner * a.cos()),
+                format!("{:.2}", 66.0 + 64.0 * a.sin()),
+                format!("{:.2}", 66.0 - 64.0 * a.cos()),
+            )
+        })
+        .collect();
+    rsx! {
+        div { class: if opening { "safe opening" } else { "safe" },
+            svg { class: "ticks", view_box: "0 0 132 132", "aria-hidden": "true",
+                for (class, x1, y1, x2, y2) in ticks { line { class, x1, y1, x2, y2 } }
+            }
+            div { class: "avatar", Svg { icon: Icon::Lock } }
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Sheet {
+    None,
+    VaultMenu(f64, f64),
+    Protection,
+}
+
+/// Locked phases: welcome, unlock, create, phrase, recover, join, recovery
+/// baseline and key-rotation steps.
+#[component]
+fn Locked(controller: Controller, revision: u64) -> Element {
+    let _ = revision;
+    let view = controller.snapshot();
+    let epoch = view.epoch;
+    let mode = view.mode;
+    let phase = view.phase;
+    let busy = view.busy;
+    let preview = is_preview(&controller);
+    let fixture = is_fixture(&controller);
+    let mut sheet = use_signal(|| Sheet::None);
+    let mut step = use_signal(|| (FormEpoch(u64::MAX), 0u8));
+    let mut shown = use_signal(|| (FormEpoch(u64::MAX), false));
+    let mut confirming = use_signal(|| (FormEpoch(u64::MAX), false));
+    let mut skip = use_signal(|| (FormEpoch(u64::MAX), false));
+    let on = |s: (FormEpoch, bool)| s.0 == epoch && s.1;
+    let wizard_step = if step().0 == epoch { step().1 } else { 0 };
+    // Create/unlock/recover need the reduced-protection acknowledgement first.
+    let gate = {
+        let c = controller.clone();
+        move |action: Action| {
+            if c.protection_ack_needed() {
+                sheet.set(Sheet::Protection);
+            } else {
+                c.perform(epoch, action, c.consent());
+            }
+        }
+    };
+    let error = view.error;
+    let picked = controller.picked_vault(epoch);
+    let app_vault = controller.app_vault_exists();
+    let first_run = !app_vault && picked.is_none();
+    let phrase = controller.phrase(epoch);
+    let words: Vec<(usize, Zeroizing<String>)> = phrase
+        .as_ref()
+        .and_then(|v| std::str::from_utf8(v.expose_secret()).ok())
+        .unwrap_or("")
+        .split_whitespace()
+        .enumerate()
+        .map(|(i, w)| (i + 1, Zeroizing::new(w.to_owned())))
+        .collect();
+    let suggestion = controller.suggestion(epoch);
+    let suggestion_text = Zeroizing::new(
+        suggestion
+            .as_ref()
+            .and_then(|v| std::str::from_utf8(v.expose_secret()).ok())
+            .unwrap_or("")
+            .to_owned(),
+    );
+    let lock = {
+        let c = controller.clone();
+        move |_| c.lock()
+    };
+    let to_mode = |m: Mode| {
+        let c = controller.clone();
+        move |_| {
+            sheet.set(Sheet::None);
+            c.select_mode(epoch, m);
+        }
+    };
+    let pick_vault = {
+        let c = controller.clone();
+        move |_: MouseEvent| {
+            sheet.set(Sheet::None);
+            #[cfg(target_os = "linux")]
+            crate::documents::pick_path(
+                &c,
+                epoch,
+                crate::documents::PathFor::Locked,
+                qv_core::platform::portal::Pick::Open,
+                "Open a QuickVault vault",
+                None,
+            );
+            #[cfg(not(target_os = "linux"))]
+            let _ = &c;
+        }
+    };
+    let pick_new = {
+        let c = controller.clone();
+        move |_: MouseEvent| {
+            #[cfg(target_os = "linux")]
+            crate::documents::pick_path(
+                &c,
+                epoch,
+                crate::documents::PathFor::Locked,
+                qv_core::platform::portal::Pick::Save("vault.qvault".into()),
+                "Save the new vault",
+                None,
+            );
+            #[cfg(not(target_os = "linux"))]
+            let _ = &c;
+        }
+    };
+    let can_pick = cfg!(target_os = "linux");
+    // Validation fixtures keep their synthetic vaults at a typed private path.
+    let fallback = crate::documents::picker_missing() || fixture;
+    let quick = mode == Mode::Unlock && controller.0.services.keystore().binding().is_some();
+    let os = controller.protection();
+    let process_reduced = qv_core::harden().is_reduced();
+    let reduced = os.is_reduced() || process_reduced;
+    let err_view = rsx! {
+        if let Some(e) = error { div { class: "err", role: "alert", Svg { icon: Icon::Warn } span { "{e.message()}" } } }
+    };
+    let perform = |action: Action, consent: bool| {
+        let c = controller.clone();
+        move |_| c.perform(epoch, action, consent)
+    };
+    let body = if phase == Phase::Locked && view.resume.is_some() {
+        let need = view.resume.unwrap_or(crate::controller::Resume {
+            old: false,
+            new: false,
+        });
+        let consent = controller.consent();
+        rsx! {
+            div { class: "wizard fade-in",
+                h2 { "Finish the interrupted key rotation" }
+                p { "A key rotation for this vault was interrupted. Complete it to use the new master password and phrase, or roll it back to keep the previous ones. Nothing else can open the vault until it is finished." }
+                if need.new { SecretInput { controller: controller.clone(), epoch, field: InputField::Password, label: "New master password (chosen for the rotation)", id: "resume-new", secret: true, disabled: busy } }
+                if need.old { SecretInput { controller: controller.clone(), epoch, field: InputField::Repeat, label: "Previous master password", id: "resume-old", secret: true, disabled: busy } }
+                {err_view}
+                div { class: "actions stack",
+                    button { class: "btn primary", "data-qv-clear": "true", disabled: busy, onclick: perform(Action::ResumeComplete, consent), "Complete the rotation" }
+                    button { class: "btn", "data-qv-clear": "true", disabled: busy, onclick: perform(Action::ResumeRollback, consent), "Roll back to the previous generation" }
+                    button { class: "btn subtle", "data-qv-clear": "true", onclick: lock, "Cancel" }
                 }
             }
-            if fixture {input {id:"validation-result",oninput:fixture_report(&controller)}}
+        }
+    } else if phase == Phase::Rotation {
+        rsx! {
+            div { class: "wizard fade-in",
+                h2 { "Your new recovery phrase" }
+                p { "Write these 24 words down in order. They replace the old phrase once the rotation is installed. Nothing has changed yet." }
+                PhraseGrid { words: words.clone(), hidden: false }
+                if view.rotation_confirmed {
+                    div { class: "banner ok", Svg { icon: Icon::Check } span { "The new recovery words are confirmed." } }
+                    div { class: "actions",
+                        button { class: "btn subtle", "data-qv-clear": "true", disabled: busy, onclick: perform(Action::CancelRotation, true), "Cancel the rotation" }
+                        button { class: "btn primary", "data-qv-clear": "true", disabled: busy, onclick: perform(Action::InstallRotation, true), if busy { "Installing…" } else { "Install the key rotation" } }
+                    }
+                } else {
+                    p { class: "hint", "Word positions: {view.positions[0]}, {view.positions[1]}, {view.positions[2]}" }
+                    WordInput { controller: controller.clone(), epoch, field: InputField::Word0, id: "rot-word-0", n: view.positions[0], disabled: busy }
+                    WordInput { controller: controller.clone(), epoch, field: InputField::Word1, id: "rot-word-1", n: view.positions[1], disabled: busy }
+                    WordInput { controller: controller.clone(), epoch, field: InputField::Word2, id: "rot-word-2", n: view.positions[2], disabled: busy }
+                    {err_view}
+                    div { class: "actions",
+                        button { class: "btn subtle", "data-qv-clear": "true", disabled: busy, onclick: perform(Action::CancelRotation, true), "Cancel the rotation (nothing changes)" }
+                        button { class: "btn primary", "data-qv-clear": "true", disabled: busy, onclick: perform(Action::ConfirmRotation, true), "Confirm recovery words" }
+                    }
+                }
+            }
+        }
+    } else if phase == Phase::Phrase {
+        let confirm_stage = on(confirming());
+        let skipped = on(skip());
+        let revealed = on(shown());
+        rsx! {
+            div { class: "wizard fade-in",
+                div { class: "steps", i { class: "on" } i { class: "on" } i { class: "on" } }
+                if !confirm_stage {
+                    h2 { "Your recovery phrase" }
+                    p { "If you forget your password, these 24 words open your vault. Anyone with them and your vault file can open it, so keep them somewhere safe and offline." }
+                    div { class: "reveal-cover",
+                        PhraseGrid { words: words.clone(), hidden: !revealed }
+                        if !revealed {
+                            button { class: "btn primary", id: "phrase-show", onclick: move |_| shown.set((epoch, true)), Svg { icon: Icon::Eye } "Show words" }
+                        }
+                    }
+                    div { class: "actions",
+                        button { class: "btn subtle", "data-qv-clear": "true", onclick: lock, "Lock and clear phrase" }
+                        button { class: "btn primary", id: "phrase-written", disabled: !revealed, onclick: move |_| confirming.set((epoch, true)), "I wrote them down" }
+                    }
+                } else {
+                    h2 { "Check three words" }
+                    p { "Type the requested words from your copy to confirm it." }
+                    p { class: "hint", "Word positions: {view.positions[0]}, {view.positions[1]}, {view.positions[2]}" }
+                    WordInput { controller: controller.clone(), epoch, field: InputField::Word0, id: "word-0", n: view.positions[0], disabled: busy }
+                    WordInput { controller: controller.clone(), epoch, field: InputField::Word1, id: "word-1", n: view.positions[1], disabled: busy }
+                    WordInput { controller: controller.clone(), epoch, field: InputField::Word2, id: "word-2", n: view.positions[2], disabled: busy }
+                    {err_view}
+                    div { class: "actions",
+                        button { class: "btn subtle", onclick: move |_| confirming.set((epoch, false)), "Back to the words" }
+                        button { class: "btn primary", id: "phrase-confirm", "data-qv-clear": "true", disabled: busy, onclick: perform(Action::ConfirmPhrase, true), "Confirm and open" }
+                    }
+                    details { class: "muted",
+                        summary { "Skip phrase confirmation" }
+                        label { class: "check", input { r#type: "checkbox", checked: skipped, onchange: move |e| skip.set((epoch, e.checked())) } span { "I understand I may lose access if I forget my password. Record that I skipped confirmation." } }
+                        button { class: "btn", disabled: busy || !skipped, onclick: perform(Action::SkipPhrase, skipped), "Record skip and continue" }
+                    }
+                }
+            }
+        }
+    } else if phase == Phase::Recovery {
+        rsx! {
+            div { class: "wizard fade-in",
+                h2 { "Check this recovery baseline" }
+                p { "The external anchor is missing or mismatched. This verified file may be an older copy; opening it does not prove it is the latest state." }
+                p { "Accepting it first creates a verified recovery snapshot, then establishes a new local baseline. Nothing is adopted without your action." }
+                if let Some(needed) = view.over_budget {
+                    div { class: "banner", Svg { icon: Icon::Warn } span { "The mandatory recovery snapshot needs {needed} bytes and exceeds the snapshot budget." } }
+                }
+                {err_view}
+                div { class: "actions stack",
+                    if view.over_budget.is_some() {
+                        button { class: "btn primary", "data-qv-clear": "true", disabled: busy, onclick: perform(Action::AdoptBaselineOverBudget, true), "Allow the snapshot to exceed the budget and accept" }
+                    } else {
+                        button { class: "btn primary", "data-qv-clear": "true", disabled: busy, onclick: perform(Action::AdoptBaseline, true), "Accept this file as the recovery baseline" }
+                    }
+                    button { class: "btn", onclick: lock, "Decline and lock" }
+                }
+            }
+        }
+    } else if mode == Mode::Create {
+        let mut g1 = gate.clone();
+        let mut g2 = gate.clone();
+        rsx! {
+            div { class: "wizard fade-in",
+                div { class: "steps", i { class: "on" } i { class: if wizard_step >= 1 { "on" } else { "" } } i {} }
+                div { hidden: wizard_step != 0,
+                    h2 { "Name your vault" }
+                    p { class: "muted", "Only you see this name, after unlocking." }
+                    SecretInput { controller: controller.clone(), epoch, field: InputField::Name, label: "Vault name", id: "vault-name", secret: false, disabled: busy, placeholder: "Personal" }
+                    div { class: "banner ok",
+                        Svg { icon: Icon::Folder }
+                        span { class: "sp",
+                            if let Some(file) = picked.as_ref() { "Saves to {file}" }
+                            else if app_vault { "This device already has a vault. Choose where to save the new one." }
+                            else { "Saved privately on this device" }
+                        }
+                        if can_pick && (app_vault || picked.is_some()) { button { class: "link", onclick: pick_new, "Choose…" } }
+                    }
+                    if fallback { SecretInput { controller: controller.clone(), epoch, field: InputField::Path, label: "Vault file (full path)", id: "vault-path", secret: false, disabled: busy } }
+                    div { class: "actions",
+                        button { class: "btn subtle", onclick: to_mode(Mode::Unlock), "Cancel" }
+                        button { class: "btn primary", id: "create-next", onclick: move |_| step.set((epoch, 1)), "Continue" }
+                    }
+                }
+                div { hidden: wizard_step != 1,
+                    h2 { "Choose a master password" }
+                    p { class: "muted", "It is the key to this vault. QuickVault cannot reset it, so make it long and memorable." }
+                    SecretInput { controller: controller.clone(), epoch, field: InputField::Password, label: "Master password", id: "password", secret: true, disabled: busy }
+                    SecretInput { controller: controller.clone(), epoch, field: InputField::Repeat, label: "Type it again", id: "repeat", secret: true, disabled: busy }
+                    if view.fair_warning { div { class: "banner", Svg { icon: Icon::Warn } span { "This password is fair. Consider a longer, less predictable passphrase." } } }
+                    div { class: "banner ok", Svg { icon: Icon::Generator }
+                        div { class: "sp",
+                            "Want one that is easy to remember? "
+                            button { class: "link", disabled: busy || phase == Phase::WeakPassword || preview, onclick: perform(Action::SuggestPassword, true), "Suggest a six-word passphrase" }
+                            if view.suggestion_visible {
+                                div { class: "phrase single mono", "{suggestion_text.as_str()}" }
+                                span { class: "hint", "Visible for 30 seconds. Type it into both fields above." }
+                            }
+                        }
+                    }
+                    if phase == Phase::WeakPassword {
+                        div { class: "banner bad", role: "alertdialog", "aria-label": "Weak password confirmation",
+                            Svg { icon: Icon::Warn }
+                            div { class: "sp",
+                                p { "This password is weak and could be guessed by an attacker who obtains your vault file. Create the vault anyway?" }
+                                div { class: "actions start",
+                                    button { class: "btn", autofocus: true, onclick: to_mode(Mode::Create), "Choose a stronger password" }
+                                    button { class: "btn danger", disabled: view.weak_seconds > 0, onclick: move |_| g1(Action::ConfirmWeak), "Create anyway · {view.weak_seconds}s" }
+                                }
+                            }
+                        }
+                    }
+                    {err_view}
+                    if phase != Phase::WeakPassword {
+                        div { class: "actions",
+                            button { class: "btn subtle", disabled: busy, onclick: move |_| step.set((epoch, 0)), "Back" }
+                            button { class: "btn primary", id: "create-submit", "data-qv-clear": "true", disabled: busy || preview, onclick: move |_| g2(Action::Create), if busy { "Creating…" } else { "Create vault" } }
+                        }
+                    }
+                }
+            }
+        }
+    } else if mode == Mode::Recover {
+        let mut g1 = gate.clone();
+        let mut g2 = gate.clone();
+        rsx! {
+            div { class: "wizard fade-in",
+                h2 { "Recover with your phrase" }
+                p { "Type your 24 recovery words, separated by spaces. You can choose a new master password once the vault is open." }
+                VaultLine { picked: picked.clone(), can_pick, onpick: pick_vault.clone() }
+                SecretInput { controller: controller.clone(), epoch, field: InputField::Phrase, label: "Recovery phrase · 24 words", id: "phrase", secret: true, disabled: busy, autofocus: true }
+                if fallback { SecretInput { controller: controller.clone(), epoch, field: InputField::Path, label: "Vault file (full path)", id: "vault-path", secret: false, disabled: busy } }
+                {err_view}
+                div { class: "actions",
+                    button { class: "btn subtle", onclick: to_mode(Mode::Unlock), "Back" }
+                    button { class: "btn primary", id: "recover-submit", "data-qv-clear": "true", disabled: busy || preview, onclick: move |_| g1(Action::Recover), if busy { "Opening…" } else { "Open with recovery phrase" } }
+                }
+                details { class: "muted",
+                    summary { "Inspect a missing or mismatched anchor with your password" }
+                    SecretInput { controller: controller.clone(), epoch, field: InputField::Password, label: "Master password", id: "recovery-password", secret: true, disabled: busy }
+                    button { class: "btn", disabled: busy || preview, onclick: move |_| g2(Action::RecoverPassword), "Inspect for recovery" }
+                }
+            }
+        }
+    } else if mode == Mode::Join {
+        let mut g1 = gate.clone();
+        rsx! {
+            div { class: "wizard fade-in",
+                h2 { "Join from another device" }
+                p { "On the other device, open Devices and choose Pair a device. Scan its code, or type the code and the address it shows." }
+                pages::ScanButton { controller: controller.clone(), epoch, target: crate::qr::QrTarget::NewDevice }
+                SecretInput { controller: controller.clone(), epoch, field: InputField::LanCode, label: "Pairing code", id: "lan-join-code", secret: true, disabled: busy }
+                SecretInput { controller: controller.clone(), epoch, field: InputField::LanEndpoint, label: "The other device's address (ip:port)", id: "lan-join-endpoint", secret: false, disabled: busy }
+                SecretInput { controller: controller.clone(), epoch, field: InputField::LanLabel, label: "A name for the other device", id: "lan-join-label", secret: false, disabled: busy }
+                {err_view}
+                div { class: "actions",
+                    button { class: "btn subtle", onclick: to_mode(Mode::Unlock), "Back" }
+                    button { class: "btn primary", id: "join-submit", "data-qv-clear": "true", disabled: busy || preview, onclick: move |_| g1(Action::JoinDevice), if busy { "Joining…" } else { "Join" } }
+                }
+            }
+            pages::LanPanel { controller: controller.clone(), epoch, revision }
+            if view.scanning { pages::ScanPanel { controller: controller.clone(), epoch } }
+        }
+    } else if first_run && !busy {
+        rsx! {
+            div { class: "welcome fade-in",
+                Safe { opening: false }
+                h1 { "Welcome to QuickVault" }
+                p { "Your passwords stay encrypted on this device. No account, no server." }
+                div { class: "choices",
+                    button { class: "choice", id: "welcome-create", onclick: to_mode(Mode::Create), span { class: "ci", Svg { icon: Icon::Plus } } b { "Create a new vault" } span { "Start fresh on this device" } }
+                    button { class: "choice", id: "welcome-join", onclick: to_mode(Mode::Join), span { class: "ci", Svg { icon: Icon::Qr } } b { "Join from another device" } span { "Copy a vault from your phone or computer" } }
+                    if can_pick { button { class: "choice", id: "welcome-open", onclick: pick_vault.clone(), span { class: "ci", Svg { icon: Icon::Folder } } b { "Open a vault file" } span { "Use a vault you already have" } } }
+                    button { class: "choice", id: "welcome-recover", onclick: to_mode(Mode::Recover), span { class: "ci", Svg { icon: Icon::Key } } b { "Recover with your phrase" } span { "Use your 24 recovery words" } }
+                }
+                {err_view}
+                if fallback { SecretInput { controller: controller.clone(), epoch, field: InputField::Path, label: "Vault file (full path)", id: "vault-path", secret: false, disabled: busy } }
+            }
+        }
+    } else {
+        let mut g1 = gate.clone();
+        let mut g2 = gate.clone();
+        rsx! {
+            div { class: "unlock-card fade-in",
+                Safe { opening: busy }
+                button { class: "vault-switch", id: "vault-menu", "aria-haspopup": "menu", onclick: move |e: MouseEvent| { let p = e.client_coordinates(); sheet.set(Sheet::VaultMenu(p.x - 120.0, p.y + 14.0)); },
+                    if let Some(file) = picked.as_ref() { "{file}" } else { "Your vault" }
+                    Svg { icon: Icon::ChevronDown }
+                }
+                div { class: "vault-meta", if picked.is_some() { "Vault file" } else { "On this device" } }
+                div { class: if error.is_some() { "pw bad" } else { "pw" },
+                    input { id: "password", r#type: "password", placeholder: "Master password", "aria-label": "Master password", maxlength: 1024, autofocus: true, disabled: busy,
+                        autocomplete: "off", spellcheck: "false", autocapitalize: "off", autocorrect: "off",
+                        oninput: { let c = controller.clone(); move |event: FormEvent| { let mut value = event.value(); c.input(epoch, InputField::Password, &mut value); } },
+                        onkeydown: { let mut g = gate.clone(); move |e: KeyboardEvent| { if e.key() == Key::Enter && !preview { e.prevent_default(); g(Action::Unlock); } } }
+                    }
+                    button { class: "go", id: "unlock-submit", "aria-label": "Unlock", "data-qv-clear": "true", disabled: busy || preview, onclick: move |_| g1(Action::Unlock), Svg { icon: Icon::Right } }
+                }
+                if busy { p { class: "muted", "Opening…" } }
+                {err_view}
+                if fallback { SecretInput { controller: controller.clone(), epoch, field: InputField::Path, label: "Vault file (full path)", id: "vault-path", secret: false, disabled: busy } }
+                if quick {
+                    button { class: "ghost", "data-qv-clear": "true", disabled: busy || preview, onclick: move |_| g2(Action::QuickUnlock), Svg { icon: Icon::Finger } "Unlock with fingerprint" }
+                }
+                if let Some(banner) = controller.autofill_banner() {
+                    p { class: "banner ok", role: "status", "data-qv-autofill": "banner", "{banner}" }
+                }
+            }
+        }
+    };
+    let chip_text = if view.ack_needed {
+        "Reduced protection · review"
+    } else if reduced {
+        "Reduced protection · acknowledged"
+    } else {
+        "Full protection on this device"
+    };
+    let sheet_view = match sheet() {
+        Sheet::None => rsx! {},
+        Sheet::VaultMenu(..) => rsx! {
+            div { class: "layer",
+                button { class: "scrim clear", "aria-label": "Close menu", onclick: move |_| sheet.set(Sheet::None) }
+                div { class: "menu anchor-center", role: "menu",
+                    div { class: "label", "VAULT" }
+                    button { class: if picked.is_none() { "mi on" } else { "mi" }, onclick: { let c = controller.clone(); move |_| { sheet.set(Sheet::None); let mut empty = String::new(); c.input(epoch, InputField::Path, &mut empty); c.touch(); } },
+                        Svg { icon: Icon::Lock } "This device's vault"
+                        if picked.is_none() { span { class: "sub", Svg { icon: Icon::Check } } }
+                    }
+                    if can_pick { button { class: "mi", id: "menu-open-file", onclick: pick_vault.clone(), Svg { icon: Icon::Folder } "Open a vault file…" } }
+                    hr {}
+                    button { class: "mi", id: "menu-create", onclick: to_mode(Mode::Create), Svg { icon: Icon::Plus } "Create a new vault" }
+                    button { class: "mi", id: "menu-join", onclick: to_mode(Mode::Join), Svg { icon: Icon::Qr } "Join from another device" }
+                    button { class: "mi", id: "menu-recover", onclick: to_mode(Mode::Recover), Svg { icon: Icon::Key } "Recover with recovery phrase" }
+                }
+            }
+        },
+        Sheet::Protection => rsx! {
+            div { class: "layer",
+                button { class: "scrim", "aria-label": "Close", onclick: move |_| sheet.set(Sheet::None) }
+                div { class: "dialog", role: "dialog", "aria-modal": "true", "aria-label": "Device protection",
+                    h3 { "Device protection" }
+                    p { if reduced { "Some protections are missing on this device. Read what they are before using a vault here." } else { "QuickVault checked how this device protects data at rest." } }
+                    div { class: "card", id: "protection-status",
+                        ProtectionRow { label: "Disk encryption", evidence: os.storage }
+                        ProtectionRow { label: "Swap", evidence: os.swap }
+                        ProtectionRow { label: "Hibernation", evidence: os.hibernation }
+                        StatusRow { label: "Screen-lock and sleep detection", ok: os.lifecycle }
+                        StatusRow { label: "Clipboard clearing", ok: os.clipboard }
+                        StatusRow { label: "Process and memory protection", ok: !process_reduced }
+                    }
+                    p { class: "hint", "Clearing an input cannot guarantee erasure of framework or operating-system copies. Storage, swap and hibernation protection depend on the operating system." }
+                    p { class: "hint", if os.quick_unlock { "Hardware quick unlock requires explicit enrollment in Settings." } else { "Quick unlock is unavailable on this device." } }
+                    div { class: "actions",
+                        if view.ack_needed {
+                            button { class: "btn subtle", onclick: move |_| sheet.set(Sheet::None), "Not now" }
+                            button { class: "btn primary", id: "protection-ack", onclick: { let c = controller.clone(); move |_| { if let Err(e) = c.acknowledge_protection() { c.report(epoch, e); } c.touch(); sheet.set(Sheet::None); } }, "I understand, continue" }
+                        } else {
+                            button { class: "btn primary", onclick: move |_| sheet.set(Sheet::None), "Done" }
+                        }
+                    }
+                }
+            }
+        },
+    };
+    rsx! {
+        div { class: "locked",
+            if fixture && cfg!(target_os = "android") { p { class: "banner", "Synthetic validation build · isolated test vault only" } }
+            if preview { p { class: "banner", "Read-only preview · vault actions are disabled. Do not enter real credentials." } }
+            if view.reduced_lifecycle {
+                p { class: "banner", role: "status", Svg { icon: Icon::Warn } span { "Automatic locking on screen lock or sleep is unavailable. Manual lock and the 60-second inactivity lock remain active." } }
+            }
+            div { class: "locked-body", key: "locked-{epoch.0}", {body} }
+            div { class: "locked-foot",
+                button { class: if view.ack_needed { "status-chip warn" } else { "status-chip" }, id: "protection-chip", onclick: move |_| sheet.set(Sheet::Protection), Svg { icon: Icon::Shield } "{chip_text}" }
+            }
+            if fixture { input { id: "validation-result", oninput: fixture_report(&controller) } }
+        }
+        {sheet_view}
+    }
+}
+
+#[component]
+fn ProtectionRow(label: &'static str, evidence: qv_core::platform::Evidence) -> Element {
+    use qv_core::platform::Evidence;
+    let (class, text) = match evidence {
+        Evidence::Verified => ("r ok", "Protected"),
+        Evidence::KnownGap => ("r warn", "Not protected"),
+        Evidence::Unknown => ("r warn", "Unknown"),
+    };
+    rsx! { div { class: "set-row", span { class: "l", b { "{label}" } } span { class, "{text}" } } }
+}
+#[component]
+fn StatusRow(label: &'static str, ok: bool) -> Element {
+    rsx! { div { class: "set-row", span { class: "l", b { "{label}" } } span { class: if ok { "r ok" } else { "r warn" }, if ok { "Available" } else { "Unavailable" } } } }
+}
+
+/// The vault this form opens: this device's, or a chosen file.
+#[component]
+fn VaultLine(picked: Option<String>, can_pick: bool, onpick: EventHandler<MouseEvent>) -> Element {
+    rsx! {
+        div { class: "banner ok",
+            Svg { icon: Icon::Folder }
+            span { class: "sp", if let Some(file) = picked.as_ref() { "Vault file: {file}" } else { "This device's vault" } }
+            if can_pick { button { class: "link", onclick: move |e| onpick.call(e), "Use another file…" } }
+        }
+    }
+}
+
+/// One requested recovery word.
+#[component]
+fn WordInput(
+    controller: Controller,
+    epoch: FormEpoch,
+    field: InputField,
+    id: &'static str,
+    n: usize,
+    disabled: bool,
+) -> Element {
+    rsx! {
+        div { class: "field",
+            label { r#for: id, "Word {n}" }
+            input { id, r#type: "password", class: "mono", maxlength: 1024, disabled, autocomplete: "off", spellcheck: "false", autocapitalize: "off", autocorrect: "off",
+                oninput: move |event: FormEvent| { let mut value = event.value(); controller.input(epoch, field, &mut value); }
+            }
+        }
+    }
+}
+
+/// Numbered recovery words; the `.phrase` class lets cleanup clear them.
+#[component]
+fn PhraseGrid(words: Vec<(usize, Zeroizing<String>)>, hidden: bool) -> Element {
+    rsx! {
+        div { class: if hidden { "phrase mono blurred" } else { "phrase mono" }, "aria-hidden": if hidden { "true" } else { "false" },
+            for (n, w) in words { span { small { "{n}" } b { class: "w", "{w.as_str()}" } } }
         }
     }
 }

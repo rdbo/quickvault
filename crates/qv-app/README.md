@@ -9,25 +9,33 @@ The shared Android/Linux Dioxus UI provides the CLI's offline feature set:
 - settings, password change, phrase redisplay, key rotation (including
   finishing an interrupted one), verify and vault information.
 
-Layout (plan 0040, ["quiet native"](../../plans/0040-app-design/DESIGN.md)):
-one DOM for every platform, with the layout chosen by CSS width breakpoints.
-- From 1000 px: sidebar, entry list and entry detail side by side, with a
-  toolbar and a status bar.
-- 720–999 px: the sidebar shrinks to icons.
-- Below 720 px (phones and narrow windows): one pane at a time, an app bar with
-  Back, bottom tabs (Vault, Generator, Devices, More) and bottom sheets for
-  confirmations.
+Layout (plan 0040): one DOM for every platform, laid out by CSS container
+queries on the app's own width.
+- From 980 px: sidebar (all items, types, groups, tools), item list and item
+  detail, under the app's own title bar.
+- 640–980 px: an icon sidebar.
+- Below 640 px (phones): one pane at a time, with bottom tabs (Vault,
+  Generator, Devices, Settings), sheets and a floating New button.
 
 Other details:
-- Touch metrics follow `pointer: coarse`, and light/dark follows the OS.
-- The Android build patches the generated `AppTheme` to AppCompat DayNight so
-  the WebView reports the system scheme.
+- Linux windows have no OS decorations. The title bar drags, maximizes and
+  closes the window, and edge handles resize it.
+- The theme (dark by default) and the acknowledged reduced-protection status
+  are kept in the non-secret `preferences` file in the app's private
+  directory (`src/prefs.rs`).
+- The Android build patches the generated AppTheme to AppCompat DayNight, so
+  "system" follows the device.
+- Files come from the system picker: the xdg-desktop-portal on Linux
+  (`qv-platform` `linux::portal`) and the Storage Access Framework on Android.
+  A typed path appears only when no picker is available, and in validation
+  fixtures.
 - Icons are QuickVault's own stroke paths (`src/ui/icons.rs`); fonts are the
-  system's.
-- Desktop shortcuts trigger only existing actions: Ctrl F search, Ctrl N new
-  entry, Ctrl L lock, Ctrl S save, Esc cancel/back. Esc never confirms.
-- The validation preview and flow binaries accept `QV_UI_SIZE=WxH` for
-  layout screenshots ([examples](../../plans/0040-app-design/screenshots/)).
+  system's. The webview policy forbids inline styles, so all styling is in
+  `assets/app.css`.
+- Shortcuts trigger only existing actions: Ctrl K command bar, Ctrl N new
+  item, Ctrl L lock, Ctrl S save, Esc cancel or back. Esc never confirms.
+- Validation builds accept `QV_UI_SIZE=WxH` for layout screenshots
+  ([examples](../../plans/0040-app-design/screenshots/)).
 
 Validation: [2.4](../../plans/0030-app-foundation/VALIDATION.md),
 [2.5](../../plans/0031-app-vault-workflows/VALIDATION.md),

@@ -82,6 +82,34 @@ optional and remains disabled in ordinary packages until physical-device
 permission/lifecycle/cleanup validation passes (0012 §3); explicitly marked
 validation packages may exercise the implemented path.
 
+1.8. **App shell and preferences.**
+- **Window.** The desktop app draws its own title bar without OS decorations:
+  drag to move, double-click to maximize, minimize/maximize/close buttons and
+  edge resize handles. Android has no title bar.
+- **Preferences.** The app keeps one non-secret preferences file in its
+  private state directory:
+  - the theme (dark, light or follow the system);
+  - the protection status the user last acknowledged.
+
+  It is bounded (at most 256 bytes), parsed strictly, written to a mode-0600
+  temporary file and renamed into place, and never followed through a link.
+  Any failure falls back to the defaults. It holds no vault data, name or path.
+- **Reduced-protection acknowledgement.** 0008 §1.3–1.4's acknowledgement is
+  explicit and remembered per protection status:
+  - when protection is reduced, create/unlock/recover are refused until the
+    user acknowledges the shown status;
+  - a changed status asks again;
+  - complete protection asks nothing;
+  - the mode stays visible in security settings.
+- **Files without typed paths.** Vault files, attachments, archives and
+  snapshot-restore targets are chosen through the system picker: the Android
+  Storage Access Framework, or the Linux xdg-desktop-portal FileChooser.
+  - Only local `file:` results are accepted.
+  - 0011 §4's no-follow and ownership rules still apply to the chosen path.
+  - A path field appears only when no picker is available.
+- **Vault names.** No vault name is shown before unlock, since names are
+  encrypted metadata.
+
 ### 2. Platform priority
 
 Android is the primary mobile target and Linux is its initial desktop companion;
@@ -234,6 +262,10 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-05: Add §1.8, the owner-delegated app shell and preferences profile
+  (plan 0040): own title bar, non-secret preferences file, per-status
+  reduced-protection acknowledgement, system file pickers instead of typed
+  paths, no vault name before unlock.
 - 2026-11-03: Add §1.7, the owner-delegated Android LAN QR camera profile
   (plan 0039): binary QR display, bounded in-memory Camera2 capture, action-only
   permission, form-only scan acceptance, lifecycle cleanup and device gate.

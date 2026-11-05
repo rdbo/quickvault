@@ -842,9 +842,10 @@ release; it is not weakened.
 
 #### Phase 2.10a — App design
 
-- **Plan:** [0040](../0040-app-design/PLAN.md) (Implemented 2026-11-05; the
-  owner delegated the design-direction approval on 2026-11-04. Fresh-context
-  review, phone instrumentation and the owner's acceptance are pending.)
+- **Plan:** [0040](../0040-app-design/PLAN.md) (Implemented 2026-11-05: the
+  owner rejected the first restyle and approved a new prototype, and the app
+  UI was rebuilt from it; see 0040 Revisions. Fresh-context review, phone
+  instrumentation and the owner's acceptance are pending.)
 - [ ] **Do:** Make the shared app look and feel like an application on desktop
   and phone, not a website in a browser (owner direction, 2026-11-02). First a
   design brief and mockups covering app-style navigation and window chrome,
@@ -2204,3 +2205,23 @@ release; it is not weakened.
   2.10a stays unticked until the fresh-context review, the attended Android
   instrumentation run and the owner's acceptance on Linux and the phone. No
   commit, push, branch, install or dependency change.
+
+- 2026-11-05: The owner rejected the first 2.10a restyle and asked for a new,
+  app-like UI. A clickable prototype was approved, and plan 0040 was revised
+  (2026-11-05b, owner-delegated).
+  - **Spec:** 0009 §1.8, the app shell and preferences profile.
+  - **New platform and app pieces:** the Linux portal file picker (existing
+    zbus), a non-secret preferences file (theme, acknowledged protection
+    status), and the one-time reduced-protection acknowledgement.
+  - **New UI:** the shared UI rebuilt from the prototype: own title bar, dark
+    default with a theme switch, welcome and wizards, item list and detail
+    with click-to-copy, command bar, generator, devices, settings and a phone
+    layout.
+  - **Tests:** the real-engine and Android drivers were rewritten with the
+    same checks.
+  - **Gates:** 885 tests, 48 validation tests including 3 real-engine flows,
+    Clippy on host and Android arm64, fmt, SPDX and matrix all pass, and both
+    APKs build.
+
+  2.10a stays unticked until the fresh-context review, the phone run and the
+  owner's acceptance. No commit, push, branch, install or dependency change.

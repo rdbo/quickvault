@@ -16,7 +16,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 use std::time::{Duration, Instant};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 /// Protected values are visible for at most this long after a reveal (0008 §4.3).
 pub const REVEAL_FOR: Duration = Duration::from_secs(30);
@@ -79,6 +79,8 @@ pub enum Screen {
     Autofill,
     /// The narrow layout's list of sections that have no bottom tab.
     More,
+    /// Every entry of one type hint (lower-cased), as a list (plan 0040 R6).
+    Kind(Zeroizing<String>),
 }
 /// Desktop keyboard shortcuts; each runs an action the screens already offer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,7 +112,10 @@ impl Shortcut {
 impl Screen {
     /// A list the three-pane layout shows beside a detail screen.
     pub fn is_list(&self) -> bool {
-        matches!(self, Self::Browse(_) | Self::Search | Self::Recovered)
+        matches!(
+            self,
+            Self::Browse(_) | Self::Search | Self::Recovered | Self::Kind(_)
+        )
     }
     /// A vault screen shown in the detail pane, next to its list.
     pub fn is_vault_detail(&self) -> bool {
@@ -154,12 +159,15 @@ impl std::fmt::Debug for Screen {
             Self::Settings(_) => "Settings",
             Self::Autofill => "Autofill",
             Self::More => "More",
+            Self::Kind(_) => "Kind",
         })
     }
 }
 /// Settings panes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pane {
+    /// The settings home: grouped rows leading to the other panes.
+    Overview,
     /// Vault name, description and retention.
     General,
     /// Change the master password.
@@ -179,6 +187,8 @@ pub enum Pane {
 pub enum WsField {
     /// Search query.
     Query,
+    /// The command bar's query (plan 0040 R7); same bound as `Query`.
+    Command,
     /// Entry title.
     Title,
     /// Entry type hint.
@@ -237,7 +247,7 @@ pub enum WsField {
 impl WsField {
     fn limit(self, multiline: bool) -> usize {
         match self {
-            Self::Query => QUERY_MAX,
+            Self::Query | Self::Command => QUERY_MAX,
             Self::Path => PATH_MAX,
             Self::Notes | Self::Replacement(_) => MULTI_MAX,
             Self::FieldValue(_) if multiline => MULTI_MAX,
@@ -560,6 +570,8 @@ pub struct Workspace {
     pub(crate) notice: Option<&'static str>,
     pub(crate) error: Option<AppError>,
     pub(crate) report: Option<Report>,
+    /// The item just moved to the trash, until the next navigation (Undo).
+    pub(crate) undo: Option<qv_core::ItemHandle>,
     pub(crate) phrase: Option<PhraseView>,
     pub(crate) old_snapshots: Vec<String>,
     pub(crate) searched: bool,
@@ -580,6 +592,8 @@ impl Drop for Workspace {
 pub struct Live {
     /// A reveal is currently visible.
     pub reveal: bool,
+    /// Seconds before the visible reveal hides; 0 when none.
+    pub reveal_left: u64,
     /// Seconds before the clipboard hold ends; 0 when none.
     pub clipboard: u64,
     /// The generated value is still displayed.
@@ -614,6 +628,10 @@ pub(crate) fn live(s: &mut State) -> (u64, Live) {
                 .map_or(0, |c| c.remaining.load(Ordering::SeqCst));
             Live {
                 reveal: ws.reveal.is_some(),
+                reveal_left: ws.reveal.as_ref().map_or(0, |r| {
+                    let left = REVEAL_FOR.saturating_sub(r.2.elapsed());
+                    left.as_secs() + u64::from(left.subsec_nanos() > 0)
+                }),
                 clipboard,
                 generated: ws.generated.is_some(),
                 weak_seconds: ws.weak_until.map_or(0, |until| {
@@ -654,6 +672,7 @@ impl Workspace {
             notice: None,
             error: None,
             report: None,
+            undo: None,
             phrase: None,
             old_snapshots: Vec::new(),
             searched: false,
@@ -690,6 +709,7 @@ impl Workspace {
         self.report = None;
         self.error = None;
         self.searched = false;
+        self.undo = None;
     }
     pub(crate) fn go(&mut self, to: Screen) {
         if self.screen != to {
@@ -822,9 +842,9 @@ impl Controller {
         };
         Some(f(&session).map_err(AppError::from))
     }
-    /// Advance the revision for an outside change screens must show (an
-    /// Android document pick finishing).
-    #[cfg(target_os = "android")]
+    /// Advance the revision for an outside change screens must show (a
+    /// system file picker finishing).
+    #[cfg_attr(not(feature = "desktop"), allow(dead_code))]
     pub(crate) fn touch(&self) {
         let mut s = self.state();
         s.revision = s.revision.wrapping_add(1);

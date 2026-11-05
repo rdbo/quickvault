@@ -5,6 +5,9 @@ what they say, and behaviour changes start with a spec change.
 
 ## Index
 
+0009 §1.8 specifies the owner-delegated app shell and preferences profile
+(2026-11-05, plan 0040), approved for implementation.
+
 0009 §1.7 specifies the owner-delegated bounded Android LAN QR camera profile
 (2026-11-03, plan 0039), approved for implementation; its overall Draft status
 and actual-device release requirements are unchanged.

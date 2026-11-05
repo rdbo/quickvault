@@ -34,7 +34,7 @@ public final class QuickUnlockUiTest extends PlatformTest {
         return ((kotlin.Lazy<?>)field.get(activity)).getValue();
     }
     private boolean quickButton() throws Exception {
-        return "true".equals(js(os,view,"Array.from(document.querySelectorAll('button')).some(b=>b.textContent.startsWith('Quick unlock with'))"));
+        return "true".equals(js(os,view,"Array.from(document.querySelectorAll('button')).some(b=>b.textContent.startsWith('Unlock with fingerprint'))"));
     }
     private void launch(boolean fresh) throws Exception {
         os=getInstrumentation();
@@ -55,22 +55,22 @@ public final class QuickUnlockUiTest extends PlatformTest {
         awaitHeading(os,view,"Welcome back");
     }
     private void create() throws Exception {
-        js(os,view,"window.qvDeviceFixture.tab(1)");awaitJs(os,view,"!!document.getElementById('vault-name')","creation form");
+        awaitJs(os,view,"window.qvDeviceFixture.tab(1)","mode 1");awaitJs(os,view,"!!document.getElementById('vault-name')","creation form");
         js(os,view,"window.qvDeviceFixture.create(false)");submitFixture(os,view);
         awaitHeading(os,view,"Your recovery phrase");assertEquals("Synthetic phrase captured","true",js(os,view,"window.qvDeviceFixture.capture()"));
-        js(os,view,"window.qvDeviceFixture.confirm();window.qvDeviceFixture.submit()");awaitUnlocked(os,view);
+        awaitJs(os,view,"window.qvDeviceFixture.confirm()","phrase words");js(os,view,"window.qvDeviceFixture.submit()");awaitUnlocked(os,view);
     }
     private void enroll(int policy,String password) throws Exception {
-        js(os,view,"window.qvDeviceFixture.nav('Settings')");awaitHeading(os,view,"Settings");click(os,view,"Password");
+        js(os,view,"window.qvDeviceFixture.nav('Settings')");awaitHeading(os,view,"Settings");click(os,view,"Quick unlock and autofill");
         awaitJs(os,view,"!!document.getElementById('ws-password')","quick enrollment reauth");input("ws-password",password);
-        click(os,view,policy==1?"Enable Class 3 biometric":"Enable device credential");
+        click(os,view,policy==1?"Enable biometric quick unlock":"Device credential");
         if(policy==2)click(os,view,"Continue");
         // Human authenticates the real hardware operation.
         awaitHardware("(document.querySelector('.notice')?.textContent||'').startsWith('Quick unlock enabled')","hardware enrollment completed");
     }
     private void quickOpen() throws Exception {
-        js(os,view,"window.qvDeviceFixture.consent()");click(os,view,"Quick unlock with");
-        awaitHardware("!!document.querySelector('.ws') && !document.querySelector('.busy')","hardware unlock completed");
+        awaitJs(os,view,"window.qvDeviceFixture.consent()","protection acknowledged");click(os,view,"Unlock with fingerprint");
+        awaitHardware("!!document.querySelector('.shell') && !document.querySelector('.busy-toast')","hardware unlock completed");
     }
     private void passwordOpen(String password) throws Exception {
         input("password",password);submitFixture(os,view);awaitUnlocked(os,view);
@@ -101,8 +101,8 @@ public final class QuickUnlockUiTest extends PlatformTest {
     private void cancellations() throws Exception {
         for(int attempt=1;attempt<=3;attempt++) {
             js(os,view,"window.qvCancelledEpoch=document.querySelector('[data-qv-epoch]').getAttribute('data-qv-epoch');true");
-            js(os,view,"window.qvDeviceFixture.consent()");click(os,view,"Quick unlock with");cancelPrompt();
-            awaitJs(os,view,"document.querySelector('[data-qv-epoch]').getAttribute('data-qv-epoch')!==window.qvCancelledEpoch && document.querySelector('h2')?.textContent==='Welcome back' && !document.querySelector('#password').disabled && document.querySelector('.primary').textContent.startsWith('Unlock vault') && !document.querySelector('.ws')","cancelled attempt completed and remained locked");
+            awaitJs(os,view,"window.qvDeviceFixture.consent()","protection acknowledged");click(os,view,"Unlock with fingerprint");cancelPrompt();
+            awaitJs(os,view,"document.querySelector('[data-qv-epoch]').getAttribute('data-qv-epoch')!==window.qvCancelledEpoch && window.qvDeviceFixture.at('Welcome back') && !document.querySelector('#password').disabled && !document.querySelector('#unlock-submit').disabled && !document.querySelector('.shell')","cancelled attempt completed and remained locked");
             assertEquals("Three failed/cancelled attempts require password",attempt<3,quickButton());
             stage("cancelled attempt "+attempt+" counted; vault remains locked");
             Thread.sleep(1000);
@@ -120,7 +120,7 @@ public final class QuickUnlockUiTest extends PlatformTest {
             lockFixture(os,view);assertTrue("Enrolled quick action",quickButton());
             if(cancellationOnly) {cancellations();passwordOpen(PASSWORD);lockFixture(os,view);return;}
             quickOpen();stage("quick unlock passed");
-            js(os,view,"window.qvDeviceFixture.nav('Settings')");awaitHeading(os,view,"Settings");click(os,view,"Password");
+            js(os,view,"window.qvDeviceFixture.nav('Settings')");awaitHeading(os,view,"Settings");click(os,view,"Change master password");
             awaitJs(os,view,"!!document.getElementById('ws-new-password') && !!document.getElementById('ws-repeat')","password change form ready");
             input("ws-new-password",CHANGED);input("ws-repeat",CHANGED);click(os,view,"Change master password");
             awaitJs(os,view,"(document.querySelector('.notice')?.textContent||'').startsWith('Master password changed')","password changed");

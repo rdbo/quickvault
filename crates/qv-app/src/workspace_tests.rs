@@ -1394,3 +1394,38 @@ fn shortcuts_run_only_existing_actions_and_escape_never_confirms() {
     assert!(env.c.shortcut(env.epoch(), Shortcut::Lock));
     assert_eq!(env.c.snapshot().phase, Phase::Locked);
 }
+
+#[test]
+fn protection_acknowledgement_is_explicit_remembered_and_status_bound() {
+    use crate::prefs::{Prefs, Theme};
+    let env = Env::new();
+    // The fake platform cannot establish storage/swap/hibernation: reduced.
+    assert!(env.c.protection_ack_needed());
+    assert!(!env.c.consent());
+    // Unlocking without the acknowledgement is refused like the old checkbox.
+    env.fill(InputField::Password, PASSWORD);
+    env.fill(InputField::Repeat, PASSWORD);
+    assert_eq!(
+        env.c.submit(env.epoch(), Action::Create, env.c.consent()),
+        Err(AppError::Consent)
+    );
+    env.c.acknowledge_protection().unwrap();
+    assert!(env.c.consent());
+    // Remembered across controllers through the private preferences file.
+    let stored = Prefs::load(&env.dir);
+    assert!(stored.protection.is_some());
+    assert_eq!(stored.theme, Theme::Dark);
+    // A different stored status asks again.
+    Prefs {
+        theme: Theme::Light,
+        protection: Some("svwvhvl1c1p0".into()),
+    }
+    .save(&env.dir)
+    .unwrap();
+    let again = Controller::new(env.dir.clone(), Arc::new(Platform(env.os.clone()))).unwrap();
+    assert!(again.protection_ack_needed());
+    assert_eq!(again.theme(), Theme::Light);
+    again.set_theme(Theme::System).unwrap();
+    assert_eq!(Prefs::load(&env.dir).theme, Theme::System);
+    again.lock();
+}

@@ -48,19 +48,19 @@ public class PlatformTest extends InstrumentationTestCase {
         fail("Synthetic device stage: "+stage+"; "+js(instrumentation,view,"document.querySelector('.error')?.textContent || 'no app error'")+"; "+js(instrumentation,view,"window.qvDeviceFixture?.summary?.() || ''"));
     }
     protected void submitFixture(Instrumentation instrumentation,WebView view) throws Exception {
-        js(instrumentation,view,"window.qvDeviceFixture.consent()");
-        awaitJs(instrumentation,view,"!document.querySelector('.primary').disabled","consent enabled submission");
+        awaitJs(instrumentation,view,"window.qvDeviceFixture.consent()","protection acknowledged");
+        awaitJs(instrumentation,view,"window.qvDeviceFixture.ready()","consent enabled submission");
         js(instrumentation,view,"window.qvDeviceFixture.submit()");
     }
     protected void awaitHeading(Instrumentation instrumentation,WebView view,String heading) throws Exception {
-        awaitJs(instrumentation,view,"document.querySelector('h2')?.textContent === "+org.json.JSONObject.quote(heading),heading);
+        awaitJs(instrumentation,view,"window.qvDeviceFixture.at("+org.json.JSONObject.quote(heading)+")",heading);
     }
     protected void lockFixture(Instrumentation instrumentation,WebView view) throws Exception {
         js(instrumentation,view,"window.qvDeviceFixture.lock()");
         awaitHeading(instrumentation,view,"Welcome back");
     }
     protected void awaitUnlocked(Instrumentation instrumentation,WebView view) throws Exception {
-        awaitJs(instrumentation,view,"!!document.querySelector('.ws') && !document.querySelector('.busy')","unlocked workspace");
+        awaitJs(instrumentation,view,"!!document.querySelector('.shell') && !document.querySelector('.busy-toast')","unlocked workspace");
     }
     protected void click(Instrumentation instrumentation,WebView view,String text) throws Exception {
         awaitJs(instrumentation,view,"window.qvDeviceFixture.button("+org.json.JSONObject.quote(text)+")","button "+text);
@@ -84,20 +84,20 @@ public class PlatformTest extends InstrumentationTestCase {
         } finally { instrumentation.removeMonitor(monitor); }
     }
     private void workspaceFlows(Instrumentation instrumentation,MainActivity main,WebView view,java.io.File root) throws Exception {
-        click(instrumentation,view,"New entry");
+        click(instrumentation,view,"New item");
         awaitJs(instrumentation,view,"!!document.getElementById('ws-title')","entry form");
         js(instrumentation,view,"window.qvDeviceFixture.entryForm()");
         click(instrumentation,view,"Generate");
         click(instrumentation,view,"Save");
-        awaitJs(instrumentation,view,"document.querySelector('h2')?.textContent==='Synthetic phone entry' && !document.querySelector('.busy')","saved entry");
+        awaitJs(instrumentation,view,"window.qvDeviceFixture.at('Synthetic phone entry') && !document.querySelector('.busy-toast')","saved entry");
         assertEquals("Protected value masked","true",js(instrumentation,view,"Array.from(document.querySelectorAll('.field-value')).some(v=>v.textContent==='••••••••')"));
-        click(instrumentation,view,"Reveal 30 s");
+        click(instrumentation,view,"Reveal for 30 seconds");
         awaitJs(instrumentation,view,"(document.querySelector('.field-value.revealed')?.textContent||'').length>=8","reveal");
         click(instrumentation,view,"Hide");
         awaitJs(instrumentation,view,"!document.querySelector('.field-value.revealed')","hide");
         // Copy goes Rust → OS clipboard, marked sensitive, and expires when owned.
-        js(instrumentation,view,"Array.from(document.querySelectorAll('.field-line')).find(l=>l.textContent.includes('password')).querySelector('.field-actions button:last-child').click()");
-        awaitJs(instrumentation,view,"!!document.querySelector('.toast')","clipboard hold");
+        js(instrumentation,view,"Array.from(document.querySelectorAll('.fld')).find(l=>l.textContent.includes('password')).querySelector('.acts button:last-child').click()");
+        awaitJs(instrumentation,view,"Array.from(document.querySelectorAll('.toast')).some(t=>t.textContent.startsWith('Copied'))","clipboard hold");
         android.content.ClipData copied=clip(instrumentation);
         assertNotNull("Copied clip",copied);
         assertEquals("QuickVault",copied.getDescription().getLabel().toString());
@@ -107,11 +107,11 @@ public class PlatformTest extends InstrumentationTestCase {
         while(System.currentTimeMillis()<end && !clipEmpty(instrumentation)) Thread.sleep(250);
         assertTrue("Owned clip cleared at expiry",clipEmpty(instrumentation));
         // Background during a foreground hold defers only background expiry.
-        js(instrumentation,view,"Array.from(document.querySelectorAll('.field-line')).find(l=>l.textContent.includes('password')).querySelector('.field-actions button:last-child').click()");
-        awaitJs(instrumentation,view,"!!document.querySelector('.toast')","second clipboard hold");
+        js(instrumentation,view,"Array.from(document.querySelectorAll('.fld')).find(l=>l.textContent.includes('password')).querySelector('.acts button:last-child').click()");
+        awaitJs(instrumentation,view,"Array.from(document.querySelectorAll('.toast')).some(t=>t.textContent.startsWith('Copied'))","second clipboard hold");
         instrumentation.runOnMainSync(()->instrumentation.callActivityOnPause(main));
         Thread.sleep(1500);
-        assertEquals("Deferred while copying","true",js(instrumentation,view,"!!document.querySelector('.ws')"));
+        assertEquals("Deferred while copying","true",js(instrumentation,view,"!!document.querySelector('.shell')"));
         awaitHeading(instrumentation,view,"Welcome back");
         instrumentation.runOnMainSync(()->instrumentation.callActivityOnResume(main));
         js(instrumentation,view,"window.qvDeviceFixture.unlock(false)");
@@ -123,8 +123,8 @@ public class PlatformTest extends InstrumentationTestCase {
         js(instrumentation,view,"document.getElementById('ws-title').value='Edited phone entry';document.getElementById('ws-title').dispatchEvent(new Event('input',{bubbles:true}))");
         click(instrumentation,view,"Save");awaitHeading(instrumentation,view,"Edited phone entry");
         click(instrumentation,view,"History");awaitHeading(instrumentation,view,"History");
-        awaitJs(instrumentation,view,"!!document.querySelector('.detail-pane .row-button')","history retained");
-        js(instrumentation,view,"document.querySelector('.detail-pane .row-button').click()");
+        awaitJs(instrumentation,view,"!!document.querySelector('.history-row')","history retained");
+        js(instrumentation,view,"document.querySelector('.history-row').click()");
         click(instrumentation,view,"Restore this version");
         awaitJs(instrumentation,view,"(document.querySelector('.notice')?.textContent||'')==='Restored as a new version.'","history restored");
         awaitJs(instrumentation,view,"window.qvDeviceFixture.nav('Vault')","vault after restore");
@@ -132,7 +132,7 @@ public class PlatformTest extends InstrumentationTestCase {
         java.io.File input=new java.io.File(root,"input.bin");
         try(java.io.FileOutputStream out=new java.io.FileOutputStream(input)){out.write("phone-attachment-canary".getBytes(java.nio.charset.StandardCharsets.UTF_8));}
         click(instrumentation,view,"Synthetic phone entry");
-        click(instrumentation,view,"Attachments");
+        click(instrumentation,view,"More actions");click(instrumentation,view,"Attachments");
         pick(instrumentation,view,"Choose a file",input,"picked input");
         js(instrumentation,view,"window.qvDeviceFixture.attachmentFields()");
         click(instrumentation,view,"Add attachment");
@@ -142,7 +142,7 @@ public class PlatformTest extends InstrumentationTestCase {
         // Back and a late native result must not carry a destination to a new screen.
         click(instrumentation,view,"Back");awaitHeading(instrumentation,view,"Synthetic phone entry");
         assertNull("Back forgets the native document",main.qvPickedName());
-        click(instrumentation,view,"Attachments");
+        click(instrumentation,view,"More actions");click(instrumentation,view,"Attachments");
         awaitJs(instrumentation,view,"!Array.from(document.querySelectorAll('.hint')).some(h=>h.textContent.startsWith('Chosen:'))","Back cleared chosen hint");
         pick(instrumentation,view,"Choose where to save",output,"picked replacement output");
         click(instrumentation,view,"Save…");
@@ -177,13 +177,13 @@ public class PlatformTest extends InstrumentationTestCase {
             String script=new String(source.toByteArray(),java.nio.charset.StandardCharsets.UTF_8);
             js(instrumentation,view,"window.qvDeviceFixturePath="+org.json.JSONObject.quote(new java.io.File(root,"vault.qvault").getCanonicalPath())+";"+script);
             awaitHeading(instrumentation,view,"Welcome back");
-            js(instrumentation,view,"window.qvDeviceFixture.tab(1)");
+            awaitJs(instrumentation,view,"window.qvDeviceFixture.tab(1)","mode 1");
             awaitJs(instrumentation,view,"!!document.querySelector('#vault-name')","create form");
             js(instrumentation,view,"window.qvDeviceFixture.create(false)");
             submitFixture(instrumentation,view);
             awaitHeading(instrumentation,view,"Your recovery phrase");
             assertEquals("24 synthetic recovery words","true",js(instrumentation,view,"window.qvDeviceFixture.capture()"));
-            js(instrumentation,view,"window.qvDeviceFixture.confirm();window.qvDeviceFixture.submit()");
+            awaitJs(instrumentation,view,"window.qvDeviceFixture.confirm()","phrase words");js(instrumentation,view,"window.qvDeviceFixture.submit()");
             awaitUnlocked(instrumentation,view);
             workspaceFlows(instrumentation,main,view,root);
             lockFixture(instrumentation,view);
@@ -196,7 +196,7 @@ public class PlatformTest extends InstrumentationTestCase {
             submitFixture(instrumentation,view);
             awaitUnlocked(instrumentation,view);
             lockFixture(instrumentation,view);
-            js(instrumentation,view,"window.qvDeviceFixture.tab(2)");
+            awaitJs(instrumentation,view,"window.qvDeviceFixture.tab(2)","mode 2");
             awaitJs(instrumentation,view,"!!document.querySelector('#phrase')","recovery form");
             js(instrumentation,view,"window.qvDeviceFixture.recover()");
             submitFixture(instrumentation,view);
@@ -204,21 +204,21 @@ public class PlatformTest extends InstrumentationTestCase {
             lockFixture(instrumentation,view);
             js(instrumentation,view,"window.qvDeviceFixture.unlock(false)");
             submitFixture(instrumentation,view);
-            awaitJs(instrumentation,view,"document.querySelector('.primary').textContent.includes('Opening')","opening before pause");
+            awaitJs(instrumentation,view,"window.qvDeviceFixture.opening()","opening before pause");
             instrumentation.runOnMainSync(()->instrumentation.callActivityOnPause(main));
             Thread.sleep(500);
             instrumentation.runOnMainSync(()->instrumentation.callActivityOnResume(main));
             awaitHeading(instrumentation,view,"Welcome back");
-            awaitJs(instrumentation,view,"!document.querySelector('.primary').textContent.includes('Opening')","cancelled worker finished");
+            awaitJs(instrumentation,view,"!window.qvDeviceFixture.opening()","cancelled worker finished");
             Thread.sleep(5000);
-            assertEquals("Late success cannot reopen","true",js(instrumentation,view,"document.querySelector('h2').textContent==='Welcome back'"));
+            assertEquals("Late success cannot reopen","true",js(instrumentation,view,"window.qvDeviceFixture.at('Welcome back')"));
             assertEquals("Cancelled controls cleared","true",js(instrumentation,view,"Array.from(document.querySelectorAll('input')).every(i=>i.type==='checkbox'||i.type==='radio'?!i.checked:!i.value)"));
-            js(instrumentation,view,"window.qvDeviceFixture.tab(1)");
+            awaitJs(instrumentation,view,"window.qvDeviceFixture.tab(1)","mode 1");
             awaitJs(instrumentation,view,"!!document.querySelector('#vault-name')","second create form");
             js(instrumentation,view,"window.qvDeviceFixture.create(true)");
             submitFixture(instrumentation,view);
             awaitHeading(instrumentation,view,"Your recovery phrase");
-            js(instrumentation,view,"window.qvDeviceFixture.chooseSkip()");
+            awaitJs(instrumentation,view,"window.qvDeviceFixture.chooseSkip()","skip consent");
             awaitJs(instrumentation,view,"!document.querySelector('details button').disabled","explicit skip consent");
             js(instrumentation,view,"window.qvDeviceFixture.skip()");
             awaitUnlocked(instrumentation,view);

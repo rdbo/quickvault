@@ -17,7 +17,7 @@ pub use qv_platform::{
 pub use qv_platform::{
     clipboard::X11Clipboard,
     files,
-    linux::{InstanceLock, LinuxPlatform},
+    linux::{InstanceLock, LinuxPlatform, portal},
 };
 use std::sync::Arc;
 

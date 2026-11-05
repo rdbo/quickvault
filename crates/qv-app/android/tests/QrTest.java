@@ -41,9 +41,8 @@ public class QrTest extends InstrumentationTestCase {
         android.webkit.WebView[] found=new android.webkit.WebView[1];
         ins.runOnMainSync(()->found[0]=find(main.getWindow().getDecorView()));
         android.webkit.WebView view=found[0];assertNotNull("Shared app webview",view);
-        await(ins,view,"document.body.textContent.includes('Synthetic validation build') && document.querySelectorAll('.tabs button').length===4","isolated locked form");
-        js(ins,view,"Array.from(document.querySelectorAll('.tabs button')).find(b=>b.textContent.trim()==='Join').click()");
-        await(ins,view,"!!document.querySelector('#lan-join-code')","Join form");
+        await(ins,view,"document.body.textContent.includes('Synthetic validation build') && (!!document.getElementById('welcome-join') || !!document.getElementById('vault-menu'))","isolated locked form");
+        await(ins,view,"!!document.querySelector('#lan-join-code') || ((()=>{for(const id of ['welcome-join','menu-join']){const b=document.getElementById(id);if(b){b.click();return true}}document.getElementById('vault-menu')?.click();return false})() && false)","Join form");
         stage(ins,"aim at the known synthetic QR fixture; scan fills Join only");
         String click="(()=>{const b=Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='Scan pairing QR'&&!b.disabled);if(!b)return false;b.click();return true})()";
         assertEquals("Explicit Scan action","true",js(ins,view,click));
@@ -56,11 +55,10 @@ public class QrTest extends InstrumentationTestCase {
                 // A permission activity pause may cancel the initial Scan.
                 // Lock resets the form to Unlock, so select Join again before
                 // making the fresh explicit Scan action.
-                if(!retried && "true".equals(js(ins,view,"!document.querySelector('#lan-join-code') && !!Array.from(document.querySelectorAll('.tabs button')).find(b=>b.textContent.trim()==='Join'&&!b.disabled)"))) {
-                    js(ins,view,"Array.from(document.querySelectorAll('.tabs button')).find(b=>b.textContent.trim()==='Join').click()");
-                    await(ins,view,"!!document.querySelector('#lan-join-code')","Join after permission pause");
+                if(!retried && "true".equals(js(ins,view,"!document.querySelector('#lan-join-code') && (!!document.getElementById('welcome-join') || !!document.getElementById('vault-menu'))"))) {
+                    await(ins,view,"!!document.querySelector('#lan-join-code') || ((()=>{for(const id of ['welcome-join','menu-join']){const b=document.getElementById(id);if(b){b.click();return true}}document.getElementById('vault-menu')?.click();return false})() && false)","Join after permission pause");
                 }
-                if(!retried && "true".equals(js(ins,view,"!document.querySelector('.busy') && !!Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='Scan pairing QR'&&!b.disabled)"))) {
+                if(!retried && "true".equals(js(ins,view,"!document.querySelector('.busy-toast') && !!Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='Scan pairing QR'&&!b.disabled)"))) {
                     retried=true;assertEquals("Explicit retry after permission/cancel","true",js(ins,view,click));
                 }
             }
@@ -69,9 +67,9 @@ public class QrTest extends InstrumentationTestCase {
         assertTrue("Optical check needs camera permission granted on the phone",permissionObserved);
         assertTrue("Camera -> JNI -> Rust decode -> core -> current Join form",scanned);
         assertEquals("Pairing payload never prefills renderer controls","true",js(ins,view,"document.querySelector('#lan-join-code').value==='' && document.querySelector('#lan-join-endpoint').value===''"));
-        assertEquals("Scan has not submitted Join","true",js(ins,view,"!document.querySelector('.busy') && !!document.querySelector('#lan-join-label')"));
-        js(ins,view,"Array.from(document.querySelectorAll('.tabs button')).find(b=>b.textContent.trim()==='Unlock').click()");
-        await(ins,view,"!!document.querySelector('#password') && !document.querySelector('#lan-join-code')","navigation clears scanned form");
+        assertEquals("Scan has not submitted Join","true",js(ins,view,"!document.querySelector('.busy-toast') && !!document.querySelector('#lan-join-label')"));
+        js(ins,view,"Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='Back').click()");
+        await(ins,view,"(!!document.querySelector('#password') || !!document.getElementById('welcome-join')) && !document.querySelector('#lan-join-code')","navigation clears scanned form");
         stage(ins,"optical Join fill and navigation cleanup passed");
     }
     private void stage(Instrumentation ins,String text) {

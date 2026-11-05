@@ -218,6 +218,12 @@ pub struct View {
     pub lan_seconds: u64,
     /// A bounded native QR scan is using the worker.
     pub scanning: bool,
+    /// Seconds before the inactivity lock while unlocked; 0 when locked.
+    pub idle_left: u64,
+    /// The app theme preference.
+    pub theme: crate::prefs::Theme,
+    /// Reduced protection needs the user's acknowledgement first.
+    pub ack_needed: bool,
 }
 /// Core-backed foundation actions. None grants arbitrary IO or crypto access.
 #[derive(Clone, Copy)]
@@ -384,6 +390,11 @@ pub(crate) struct Inner {
     released: AtomicU64,
     monitoring: AtomicBool,
     watch: Mutex<Option<Box<dyn Watch>>>,
+    /// Non-secret app preferences (0009 §1.8).
+    prefs: Mutex<crate::prefs::Prefs>,
+    /// Display-only cache of `protection_ack_needed` for the polled snapshot;
+    /// the consent gate itself always checks the current status.
+    ack_cache: Mutex<Option<(Instant, bool)>>,
     #[cfg(feature = "validation")]
     preview: AtomicBool,
     #[cfg(feature = "validation")]
@@ -416,7 +427,7 @@ impl Controller {
     pub fn new(base: PathBuf, services: Arc<dyn PlatformServices>) -> Result<Self, AppError> {
         qv_core::harden();
         let inner = Arc::new(Inner {
-            base,
+            base: base.clone(),
             services,
             state: Mutex::new(State {
                 epoch: 0,
@@ -454,6 +465,8 @@ impl Controller {
             released: AtomicU64::new(0),
             monitoring: AtomicBool::new(false),
             watch: Mutex::new(None),
+            prefs: Mutex::new(crate::prefs::Prefs::load(&base)),
+            ack_cache: Mutex::new(None),
             #[cfg(feature = "validation")]
             preview: AtomicBool::new(false),
             #[cfg(feature = "validation")]
@@ -585,6 +598,8 @@ impl Controller {
         .map_err(|_| AppError::Unavailable)?;
         private_dir(&controller.0.base.join("exports"))?;
         controller.0.fixture.store(true, Ordering::SeqCst);
+        #[cfg(target_os = "linux")]
+        crate::documents::force_no_picker();
         Ok(controller)
     }
     #[cfg(feature = "validation")]
@@ -632,6 +647,84 @@ impl Controller {
         }
     }
     /// Current platform protection; configuration uncertainty is never hidden.
+    /// Show a data-free error on the current screen, if it is still current.
+    #[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+    pub(crate) fn report(&self, epoch: FormEpoch, error: AppError) {
+        let mut s = self.state();
+        if s.epoch != epoch.0 {
+            return;
+        }
+        if let Some(ws) = s.workspace.as_mut() {
+            ws.error = Some(error);
+        } else {
+            s.error = Some(error);
+        }
+        s.revision = s.revision.wrapping_add(1);
+    }
+    /// This device's app-managed vault exists (first run shows a welcome).
+    pub fn app_vault_exists(&self) -> bool {
+        std::fs::symlink_metadata(self.0.base.join("vaults/main.qvault"))
+            .is_ok_and(|m| m.file_type().is_file())
+    }
+    /// The file name the user picked for the locked screen, if any (display only).
+    pub fn picked_vault(&self, epoch: FormEpoch) -> Option<String> {
+        let s = self.state();
+        if s.epoch != epoch.0 {
+            return None;
+        }
+        let path = std::str::from_utf8(s.inputs[InputField::Path.index()].expose_secret()).ok()?;
+        std::path::Path::new(path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+    }
+    /// The app theme preference.
+    pub fn theme(&self) -> crate::prefs::Theme {
+        self.prefs().theme
+    }
+    /// Change and store the theme. A storage failure keeps it for this run.
+    pub fn set_theme(&self, theme: crate::prefs::Theme) -> Result<(), AppError> {
+        let mut prefs = self.prefs();
+        prefs.theme = theme;
+        prefs.save(&self.0.base).map_err(|_| AppError::Unavailable)
+    }
+    fn prefs(&self) -> MutexGuard<'_, crate::prefs::Prefs> {
+        self.0.prefs.lock().unwrap_or_else(|p| p.into_inner())
+    }
+    /// Reduced protection whose current status has not been acknowledged yet
+    /// (0008 §1.3, 0009 §1.8). Create, unlock and recover need it first.
+    pub fn protection_ack_needed(&self) -> bool {
+        let current = crate::prefs::fingerprint(&self.protection(), qv_core::harden().is_reduced());
+        current.is_some() && current != self.prefs().protection
+    }
+    /// Whether vault use is acknowledged for the current protection status.
+    pub fn consent(&self) -> bool {
+        !self.protection_ack_needed()
+    }
+    /// Record the user's explicit acknowledgement of the shown status.
+    pub fn acknowledge_protection(&self) -> Result<(), AppError> {
+        let current = crate::prefs::fingerprint(&self.protection(), qv_core::harden().is_reduced());
+        let saved = {
+            let mut prefs = self.prefs();
+            prefs.protection = current;
+            prefs.save(&self.0.base)
+        };
+        // Taken after the preferences lock is released (the snapshot path
+        // takes the cache lock first).
+        *self.0.ack_cache.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        saved.map_err(|_| AppError::Unavailable)
+    }
+    fn ack_needed_cached(&self) -> bool {
+        let mut cache = self.0.ack_cache.lock().unwrap_or_else(|p| p.into_inner());
+        match *cache {
+            Some((at, needed)) if at.elapsed() < Duration::from_secs(2) => needed,
+            _ => {
+                let needed = self.protection_ack_needed();
+                *cache = Some((Instant::now(), needed));
+                needed
+            }
+        }
+    }
+    /// The platform protection status, with lifecycle monitoring as observed.
     pub fn protection(&self) -> qv_core::platform::ProtectionStatus {
         let mut status = self.0.services.status();
         status.lifecycle &= self.0.monitoring.load(Ordering::SeqCst);
@@ -688,6 +781,17 @@ impl Controller {
             over_budget: s.over_budget,
             lan_seconds: s.lan.as_ref().map_or(0, crate::lan::LanRun::seconds),
             scanning: s.scan.is_some(),
+            idle_left: if s.phase == Phase::Unlocked {
+                if lan_running {
+                    idle.as_secs()
+                } else {
+                    idle.saturating_sub(s.active.elapsed()).as_secs()
+                }
+            } else {
+                0
+            },
+            theme: self.theme(),
+            ack_needed: self.ack_needed_cached(),
         }
     }
     /// Select a workflow, clearing the old form and invalidating late events.

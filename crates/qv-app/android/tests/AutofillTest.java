@@ -61,18 +61,18 @@ public final class AutofillTest extends PlatformTest {
         assertEquals("Foreground unlocked hardened test window",15,activity.qvStatus()&15);
     }
     private void create() throws Exception {
-        js(os,view,"window.qvDeviceFixture.tab(1)");awaitJs(os,view,"!!document.getElementById('vault-name')","creation form");
+        awaitJs(os,view,"window.qvDeviceFixture.tab(1)","mode 1");awaitJs(os,view,"!!document.getElementById('vault-name')","creation form");
         js(os,view,"window.qvDeviceFixture.create(false)");submitFixture(os,view);
         awaitHeading(os,view,"Your recovery phrase");assertEquals("Synthetic phrase captured","true",js(os,view,"window.qvDeviceFixture.capture()"));
-        js(os,view,"window.qvDeviceFixture.confirm();window.qvDeviceFixture.submit()");awaitUnlocked(os,view);
+        awaitJs(os,view,"window.qvDeviceFixture.confirm()","phrase words");js(os,view,"window.qvDeviceFixture.submit()");awaitUnlocked(os,view);
     }
     /** An entry whose title names the requester: titles must never match. */
     private void spoofTitledEntry() throws Exception {
-        click(os,view,"New entry");
+        click(os,view,"New item");
         awaitJs(os,view,"!!document.getElementById('ws-title')","entry form");
         js(os,view,"window.qvDeviceFixture.entryForm()");input("ws-title",REQUESTER+" Shell");
         click(os,view,"Generate");click(os,view,"Save");
-        awaitJs(os,view,"document.querySelector('h2')?.textContent==="+org.json.JSONObject.quote(REQUESTER+" Shell")+" && !document.querySelector('.busy')","saved entry");
+        awaitJs(os,view,"window.qvDeviceFixture.at("+org.json.JSONObject.quote(REQUESTER+" Shell")+") && !document.querySelector('.busy-toast')","saved entry");
     }
     private AutofillRegistry.Request offer() throws Exception {
         byte[] signers=AutofillIdentity.INSTANCE.signers(activity,REQUESTER);
@@ -142,7 +142,7 @@ public final class AutofillTest extends PlatformTest {
             awaitJs(os,view,"!!document.querySelector('[role=alertdialog]')","link confirmation required");
             assertTrue("Link alone fills nothing",claimed(r));
             click(os,view,"Continue");
-            awaitJs(os,view,"document.querySelectorAll('[data-qv-autofill=candidate]').length===1 && !document.querySelector('.busy')","linked candidate");
+            awaitJs(os,view,"document.querySelectorAll('[data-qv-autofill=candidate]').length===1 && !document.querySelector('.busy-toast')","linked candidate");
             assertTrue("Still waiting for an explicit choice",claimed(r));
             stage("verified link confirmed");
             js(os,view,"document.querySelector('[data-qv-autofill=candidate]').click();true");
@@ -158,8 +158,8 @@ public final class AutofillTest extends PlatformTest {
             // A bound request is cancelled by a lock and never completes later.
             // singleTask: the runner's next start re-enters this same instance.
             foreground();
-            awaitJs(os,view,"document.querySelector('h2')?.textContent==='Welcome back' || !!document.querySelector('.ws')","app foreground again");
-            if("true".equals(js(os,view,"!!document.querySelector('.ws')")))lockFixture(os,view);
+            awaitJs(os,view,"window.qvDeviceFixture.at('Welcome back') || !!document.querySelector('.shell')","app foreground again");
+            if("true".equals(js(os,view,"!!document.querySelector('.shell')")))lockFixture(os,view);
             AutofillRegistry.Request second=offer();
             input("password",PASSWORD);submitFixture(os,view);
             awaitHeading(os,view,"Fill a login");

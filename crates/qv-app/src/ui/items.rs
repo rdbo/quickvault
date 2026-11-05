@@ -1,0 +1,923 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Vault items: the list beside the detail, the entry card (click a field to
+//! copy, 30 s reveals), in-place editing, move, history and attachments.
+//! Protected values appear only through a reveal; forms never prefill them.
+use super::icons::{Icon, Svg, hue, initial, kind_icon};
+use super::shell::{ReportCard, Unreadable, act, go, kind_label};
+use crate::controller::{Controller, FormEpoch};
+use crate::views::{self, EntryView, FieldRow, ItemRow, kind_name};
+use crate::workspace::{CopyKey, Live, Report, RevealKey, Screen, WsAction, WsField};
+use dioxus::prelude::*;
+use qv_core::{FieldKind, ItemHandle};
+use zeroize::Zeroizing;
+
+const MASK: &str = "••••••••";
+/// A listed row and its lower-cased type hint.
+type Listed = (views::EntryRow, Zeroizing<String>);
+
+fn text(v: Option<qv_core::SecretBytes>) -> Zeroizing<String> {
+    Zeroizing::new(
+        v.map(|v| String::from_utf8_lossy(v.expose_secret()).into_owned())
+            .unwrap_or_default(),
+    )
+}
+fn pick(c: &Controller, e: FormEpoch, s: Screen) -> impl FnMut(MouseEvent) + 'static {
+    let c = c.clone();
+    move |_| c.select(e, s.clone())
+}
+fn back(c: &Controller, e: FormEpoch) -> impl FnMut(MouseEvent) + 'static {
+    let c = c.clone();
+    move |_| c.back(e)
+}
+
+/// Stable DOM id for an input (accessibility labels and the synthetic flows).
+pub(crate) fn dom_id(field: WsField) -> String {
+    match field {
+        WsField::Query => "ws-query".into(),
+        WsField::Command => "palette-input".into(),
+        WsField::Title => "ws-title".into(),
+        WsField::TypeHint => "ws-type".into(),
+        WsField::Notes => "ws-notes".into(),
+        WsField::FieldName(i) => format!("ws-field-name-{i}"),
+        WsField::FieldValue(i) => format!("ws-field-value-{i}"),
+        WsField::Replacement(i) => format!("ws-replacement-{i}"),
+        WsField::NewFieldName => "ws-new-field".into(),
+        WsField::GroupName => "ws-group-name".into(),
+        WsField::Path => "ws-path".into(),
+        WsField::Password => "ws-password".into(),
+        WsField::NewPassword => "ws-new-password".into(),
+        WsField::Repeat => "ws-repeat".into(),
+        WsField::Word(i) => format!("ws-word-{i}"),
+        WsField::GenLength => "ws-gen-length".into(),
+        WsField::GenWords => "ws-gen-words".into(),
+        WsField::GenSeparator => "ws-gen-separator".into(),
+        WsField::GenExclude => "ws-gen-exclude".into(),
+        WsField::VaultName => "ws-vault-name".into(),
+        WsField::Description => "ws-description".into(),
+        WsField::HistoryDepth => "ws-history-depth".into(),
+        WsField::TrashDays => "ws-trash-days".into(),
+        WsField::AttachMime => "ws-attach-mime".into(),
+        WsField::AttachName => "ws-attach-name".into(),
+        WsField::Confirmation => "ws-confirmation".into(),
+        WsField::LanCode => "ws-lan-code".into(),
+        WsField::LanEndpoint => "ws-lan-endpoint".into(),
+        WsField::LanLabel => "ws-lan-label".into(),
+    }
+}
+
+/// Input kinds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// Single-line text (controlled when a value is given).
+    Line,
+    /// Masked secret, never prefilled.
+    Secret,
+    /// Multi-line text.
+    Multi,
+}
+/// One bounded workspace input. Values move to protected Rust storage on
+/// every keystroke; secrets are never prefilled.
+#[component]
+pub(crate) fn Input(
+    controller: Controller,
+    epoch: FormEpoch,
+    field: WsField,
+    label: String,
+    kind: Kind,
+    value: Option<String>,
+    disabled: bool,
+    #[props(default)] autofocus: bool,
+    #[props(default)] bare: bool,
+    #[props(default)] class: &'static str,
+    #[props(default)] placeholder: String,
+) -> Element {
+    let limit = match field {
+        WsField::Query | WsField::Command => crate::workspace::QUERY_MAX,
+        WsField::Path => crate::workspace::PATH_MAX,
+        WsField::Notes | WsField::Replacement(_) => crate::workspace::MULTI_MAX,
+        _ if kind == Kind::Multi => crate::workspace::MULTI_MAX,
+        _ => crate::workspace::LINE_MAX,
+    };
+    let controlled = value.is_some();
+    let id = dom_id(field);
+    let c = controller.clone();
+    let oninput = move |event: FormEvent| {
+        let mut v = event.value();
+        c.ws_input(epoch, field, &mut v);
+    };
+    let control = if kind == Kind::Multi {
+        rsx! {
+            textarea { id: id.clone(), class, maxlength: limit, disabled, autofocus, placeholder: placeholder.clone(), spellcheck: "false", autocomplete: "off",
+                "aria-label": if bare { label.clone() } else { String::new() },
+                "data-qv-controlled": if controlled { "true" } else { "false" },
+                value: value.clone().unwrap_or_default(), oninput }
+        }
+    } else {
+        rsx! {
+            input { id: id.clone(), class, r#type: if kind == Kind::Secret { "password" } else { "text" }, maxlength: limit, disabled, autofocus,
+                placeholder: placeholder.clone(), autocomplete: "off", spellcheck: "false", autocapitalize: "off", autocorrect: "off",
+                "aria-label": if bare { label.clone() } else { String::new() },
+                "data-qv-controlled": if controlled { "true" } else { "false" },
+                value: value.clone().unwrap_or_default(), oninput }
+        }
+    };
+    if bare {
+        return control;
+    }
+    rsx! { div { class: "field", label { r#for: id.clone(), "{label}" } {control} } }
+}
+
+/// Run the system file picker into the screen's path input, then an action
+/// (Linux portal; elsewhere the caller uses the platform's own picker).
+#[cfg(target_os = "linux")]
+pub(crate) fn picker(
+    c: &Controller,
+    e: FormEpoch,
+    kind: qv_core::platform::portal::Pick,
+    title: &'static str,
+    then: Option<WsAction>,
+) -> impl FnMut(MouseEvent) + 'static {
+    let c = c.clone();
+    move |_| {
+        crate::documents::pick_path(
+            &c,
+            e,
+            crate::documents::PathFor::Workspace,
+            kind.clone(),
+            title,
+            then.clone(),
+        )
+    }
+}
+
+/// The list beside a vault detail: all items, a type, a group, recovered
+/// items or search results. Rows are disabled while a form is open.
+#[component]
+pub(crate) fn ListPane(
+    controller: Controller,
+    epoch: FormEpoch,
+    revision: u64,
+    list: Screen,
+    screen: Screen,
+    all: Vec<ItemRow>,
+    busy: bool,
+) -> Element {
+    let _ = revision;
+    let mut menu = use_signal(|| None::<(f64, f64)>);
+    let form = screen.is_form() || busy;
+    let current = match &screen {
+        Screen::Entry(e)
+        | Screen::History(e)
+        | Screen::HistoryVersion(e, _)
+        | Screen::Attachments(e) => Some(*e),
+        _ => None,
+    };
+    let query = controller
+        .peek(epoch, |ws| {
+            String::from_utf8_lossy(ws.input(WsField::Query)).into_owned()
+        })
+        .map(Zeroizing::new)
+        .unwrap_or_default();
+    let q = Zeroizing::new(query.to_lowercase());
+    let mut group_view = None;
+    let (title, rows): (String, Vec<(views::EntryRow, Zeroizing<String>)>) = match &list {
+        Screen::Browse(Some(g)) => {
+            let v = controller
+                .read(epoch, |s| views::browse(s, Some(*g)))
+                .and_then(Result::ok);
+            let name = v
+                .as_ref()
+                .and_then(|v| v.crumbs.last().map(|c| c.1.to_string()))
+                .unwrap_or_default();
+            group_view = v;
+            (
+                name,
+                all.iter()
+                    .filter(|i| i.path.contains(g))
+                    .map(|i| (i.row.clone(), i.kind.clone()))
+                    .collect(),
+            )
+        }
+        Screen::Kind(k) => (
+            kind_label(k),
+            all.iter()
+                .filter(|i| i.kind == *k)
+                .map(|i| (i.row.clone(), i.kind.clone()))
+                .collect(),
+        ),
+        Screen::Recovered => (
+            "Recovered items".into(),
+            controller
+                .read(epoch, views::recovered)
+                .and_then(Result::ok)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|r| (r, Zeroizing::new(String::new())))
+                .collect(),
+        ),
+        Screen::Search => (
+            "Search".into(),
+            controller
+                .read(epoch, |s| views::search(s, &query))
+                .and_then(Result::ok)
+                .map(|(_, e)| e)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|r| (r, Zeroizing::new(String::new())))
+                .collect(),
+        ),
+        _ => (
+            "All items".into(),
+            all.iter()
+                .map(|i| (i.row.clone(), i.kind.clone()))
+                .collect(),
+        ),
+    };
+    let shown: Vec<(views::EntryRow, Zeroizing<String>)> = if list == Screen::Search || q.is_empty()
+    {
+        rows
+    } else {
+        rows.into_iter()
+            .filter(|(r, _)| {
+                r.title.to_lowercase().contains(q.as_str())
+                    || r.subtitle.to_lowercase().contains(q.as_str())
+            })
+            .collect()
+    };
+    let new_in = match &list {
+        Screen::Browse(Some(g)) => Some(*g),
+        _ => controller.read(epoch, |s| s.root()).and_then(Result::ok),
+    };
+    let new_entry = {
+        let c = controller.clone();
+        move |_| {
+            if let Some(g) = new_in {
+                c.act(epoch, WsAction::NewEntry(g));
+            }
+        }
+    };
+    let quick = |e: qv_core::EntryHandle, secret: bool| {
+        let c = controller.clone();
+        move |ev: MouseEvent| {
+            ev.stop_propagation();
+            let handles = c
+                .read(epoch, |s| views::quick_fields(s, e))
+                .and_then(Result::ok);
+            if let Some(h) = handles.and_then(|(u, p)| if secret { p } else { u }) {
+                c.act(epoch, WsAction::Copy(CopyKey::Field(e, h)));
+            }
+        }
+    };
+    let mut sections: Vec<(String, Vec<Listed>)> = Vec::new();
+    for (row, kind) in shown {
+        let letter = initial(&row.title);
+        match sections.last_mut() {
+            Some((l, v)) if *l == letter => v.push((row, kind)),
+            _ => sections.push((letter, vec![(row, kind)])),
+        }
+    }
+    let count: usize = sections.iter().map(|s| s.1.len()).sum();
+    let group = match &list {
+        Screen::Browse(Some(g)) => Some(*g),
+        _ => None,
+    };
+    rsx! {
+        section { class: "list", "aria-label": "Items",
+            div { class: "phone-head", h2 { "{title}" } }
+            div { class: "list-head",
+                h2 { "{title}" } span { class: "count", "{count}" } span { class: "sp" }
+                if group.is_some() {
+                    button { class: "icon-btn", id: "group-menu", "aria-label": "Group actions", title: "Group actions", disabled: form,
+                        onclick: move |e: MouseEvent| { let p = e.client_coordinates(); menu.set(Some((p.x - 200.0, p.y + 12.0))); },
+                        Svg { icon: Icon::More, large: true }
+                    }
+                }
+                button { class: "icon-btn acc", id: "list-new", "aria-label": "New item", title: "New item (Ctrl N)", disabled: form, onclick: new_entry, Svg { icon: Icon::Plus } }
+            }
+            label { class: "filter", Svg { icon: Icon::Search }
+                Input { controller: controller.clone(), epoch, field: WsField::Query, label: if list == Screen::Search { "Search the vault".to_owned() } else { format!("Filter {}", title.to_lowercase()) },
+                    placeholder: if list == Screen::Search { "Search titles, usernames, websites".to_owned() } else { format!("Filter {}", title.to_lowercase()) },
+                    kind: super::items::Kind::Line, value: Some(query.to_string()), disabled: form, bare: true, autofocus: list == Screen::Search }
+            }
+            if let Some(v) = group_view.as_ref() {
+                if !v.groups.is_empty() {
+                    div { class: "subgroups",
+                        for g in v.groups.iter().cloned() {
+                            button { class: "chip", disabled: form, onclick: go(&controller, epoch, Screen::Browse(Some(g.handle))), Svg { icon: Icon::Folder } "{g.name.as_str()}" }
+                        }
+                    }
+                }
+            }
+            div { class: "rows", id: "rows",
+                if count == 0 {
+                    div { class: "empty", div {
+                        div { class: "big", Svg { icon: if q.is_empty() { Icon::Key } else { Icon::Search } } }
+                        if q.is_empty() && list != Screen::Search { "Nothing here yet. Create an item with the + button." } else { "No items match." }
+                    } }
+                }
+                for (letter, items) in sections {
+                    div { class: "sect", "{letter}" }
+                    for (row, kind) in items {
+                        div { class: if current == Some(row.handle) { "row on" } else { "row" }, key: "{row.title.as_str()}-{row.subtitle.as_str()}",
+                            button { class: "open item-open", "aria-label": "Open {row.title.as_str()}", disabled: form, onclick: pick(&controller, epoch, Screen::Entry(row.handle)) }
+                            span { class: "tile {hue(&row.title)}", "{initial(&row.title)}" }
+                            span { class: "t", b { class: "row-title", "{row.title.as_str()}" }
+                                span { if row.subtitle.is_empty() { "{kind_label(&kind)}" } else { "{row.subtitle.as_str()}" } }
+                            }
+                            if row.conflict { span { class: "cbadge", "conflict" } }
+                            span { class: "quick",
+                                if !row.subtitle.is_empty() { button { "aria-label": "Copy the first field", title: "Copy {row.subtitle.as_str()}", disabled: form, onclick: quick(row.handle, false), Svg { icon: Icon::User } } }
+                                button { "aria-label": "Copy the protected field", title: "Copy password", disabled: form, onclick: quick(row.handle, true), Svg { icon: Icon::Key } }
+                            }
+                        }
+                    }
+                }
+                if list == Screen::Browse(None) {
+                    RecoveredLink { controller: controller.clone(), epoch, revision }
+                }
+            }
+        }
+        if let (Some(_), Some(g)) = (menu(), group) {
+            div { class: "layer",
+                button { class: "scrim clear", "aria-label": "Close menu", onclick: move |_| menu.set(None) }
+                div { class: "menu anchor-list", role: "menu",
+                    button { class: "mi", onclick: { let mut f = act(&controller, epoch, WsAction::NewGroup(g)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Folder } "New subgroup" }
+                    button { class: "mi", onclick: { let mut f = act(&controller, epoch, WsAction::RenameGroup(g)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Edit } "Rename group" }
+                    button { class: "mi", onclick: { let mut f = go(&controller, epoch, Screen::Move(ItemHandle::Group(g), None)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Move } "Move group" }
+                    hr {}
+                    button { class: "mi danger", onclick: { let mut f = act(&controller, epoch, WsAction::Delete(ItemHandle::Group(g))); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Trash } "Delete group" }
+                }
+            }
+        }
+    }
+}
+#[component]
+fn RecoveredLink(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
+    let _ = revision;
+    let n = controller
+        .read(epoch, views::recovered)
+        .and_then(Result::ok)
+        .map_or(0, |r| r.len());
+    rsx! {
+        if n > 0 { button { class: "link m8", onclick: go(&controller, epoch, Screen::Recovered), "Recovered items whose group is missing ({n})" } }
+    }
+}
+
+/// The detail pane: the open entry, its form, history or attachments.
+#[component]
+pub(crate) fn Detail(
+    controller: Controller,
+    epoch: FormEpoch,
+    revision: u64,
+    screen: Screen,
+    live: Live,
+    busy: bool,
+    report: Option<Report>,
+) -> Element {
+    let closed = screen.is_list();
+    let inner = match screen.clone() {
+        Screen::Entry(e) => {
+            rsx! { EntryScreen { controller: controller.clone(), epoch, revision, entry: e, live } }
+        }
+        Screen::EditEntry => {
+            rsx! { EditEntry { controller: controller.clone(), epoch, revision, live } }
+        }
+        Screen::EditGroup => rsx! { EditGroup { controller: controller.clone(), epoch, revision } },
+        Screen::Move(item, at) => {
+            rsx! { MoveScreen { controller: controller.clone(), epoch, revision, item, at } }
+        }
+        Screen::History(e) => {
+            rsx! { History { controller: controller.clone(), epoch, revision, entry: e } }
+        }
+        Screen::HistoryVersion(e, v) => {
+            rsx! { HistoryVersion { controller: controller.clone(), epoch, revision, entry: e, version: v, live } }
+        }
+        Screen::Attachments(e) => {
+            rsx! { Attachments { controller: controller.clone(), epoch, revision, entry: e } }
+        }
+        _ => rsx! {
+            div { class: "empty", div {
+                div { class: "big", Svg { icon: Icon::Key } }
+                "Select an item to see it here."
+            } }
+        },
+    };
+    let _ = busy;
+    rsx! {
+        section { class: if closed { "detail closed" } else { "detail" }, "aria-label": "Item",
+            if let Some(r) = report { div { class: "detail-inner pb0", ReportCard { controller: controller.clone(), epoch, report: r } } }
+            {inner}
+        }
+    }
+}
+
+/// One field of an entry. A click copies it (current entries only); a
+/// protected value shows only through a 30 s reveal.
+#[component]
+fn FieldLine(
+    controller: Controller,
+    epoch: FormEpoch,
+    revision: u64,
+    entry: Option<qv_core::EntryHandle>,
+    field: FieldRow,
+    reveal: RevealKey,
+    copy: bool,
+    live: Live,
+) -> Element {
+    let _ = revision;
+    let shown = text(controller.revealed(epoch, &reveal));
+    let revealed = !shown.is_empty();
+    let totp = field.kind == FieldKind::Totp;
+    let code_key = RevealKey::Totp(field.handle);
+    let code = if totp {
+        text(controller.revealed(epoch, &code_key))
+    } else {
+        Zeroizing::new(String::new())
+    };
+    let left = live.reveal_left.min(30);
+    let offset = 56.5 - 56.5 * (left as f64) / 30.0;
+    let copy_key = entry.filter(|_| copy).map(|e| {
+        if totp {
+            CopyKey::Totp(e, field.handle)
+        } else {
+            CopyKey::Field(e, field.handle)
+        }
+    });
+    let ring = rsx! {
+        svg { class: "revealring", view_box: "0 0 22 22", "aria-hidden": "true",
+            circle { class: "track", cx: "11", cy: "11", r: "9" }
+            circle { class: "left", cx: "11", cy: "11", r: "9", stroke_dasharray: "56.5", stroke_dashoffset: "{offset:.1}" }
+        }
+    };
+    rsx! {
+        div { class: "fld",
+            if let Some(k) = copy_key.clone() {
+                button { class: "copy-hit", "aria-label": "Copy {field.name.as_str()}", title: "Click to copy", onclick: act(&controller, epoch, WsAction::Copy(k)) }
+            }
+            div { class: "body",
+                span { class: "k", "{field.name.as_str()}" small { "{kind_name(field.kind)}" } }
+                if totp {
+                    if code.is_empty() { span { class: "v masked", "One-time code" } }
+                    else { span { class: "totp", span { class: "code revealed", "{code.as_str()}" } } }
+                } else if let Some(v) = &field.value {
+                    pre { class: "v field-value", "{v.as_str()}" }
+                } else if revealed {
+                    pre { class: "v field-value revealed", "{shown.as_str()}" }
+                } else {
+                    span { class: "v masked field-value", "{MASK}" }
+                }
+            }
+            div { class: "acts",
+                if totp {
+                    if code.is_empty() {
+                        button { class: "btn subtle", id: "show-code", onclick: act(&controller, epoch, WsAction::Reveal(code_key.clone())), Svg { icon: Icon::Eye } "Show code" }
+                    } else {
+                        button { class: "icon-btn", "aria-label": "Hide code", title: "Hide · {left} s left", onclick: act(&controller, epoch, WsAction::Hide), {ring} }
+                    }
+                } else if field.protected {
+                    if revealed {
+                        button { class: "icon-btn", "aria-label": "Hide", title: "Hide · {left} s left", onclick: act(&controller, epoch, WsAction::Hide), {ring} }
+                    } else {
+                        button { class: "icon-btn", "aria-label": "Reveal for 30 seconds", title: "Reveal for 30 s", onclick: act(&controller, epoch, WsAction::Reveal(reveal.clone())), Svg { icon: Icon::Eye } }
+                    }
+                }
+                if let Some(k) = copy_key {
+                    button { class: "icon-btn", "aria-label": "Copy", title: "Copy", onclick: act(&controller, epoch, WsAction::Copy(k)), Svg { icon: Icon::Copy } }
+                }
+            }
+        }
+    }
+}
+
+/// An entry's fields and notes, current or historical (read-only).
+#[component]
+fn EntryBody(
+    controller: Controller,
+    epoch: FormEpoch,
+    revision: u64,
+    view: EntryView,
+    history: Option<String>,
+    live: Live,
+) -> Element {
+    let current = history.is_none();
+    let group = view.group.and_then(|g| {
+        controller
+            .read(epoch, |s| views::browse(s, Some(g)))
+            .and_then(Result::ok)
+            .and_then(|b| {
+                (!b.root)
+                    .then(|| b.crumbs.last().map(|c| c.1.to_string()))
+                    .flatten()
+            })
+    });
+    let url = view
+        .fields
+        .iter()
+        .find(|f| f.kind == FieldKind::Url)
+        .and_then(|f| f.value.clone());
+    let kind = Zeroizing::new(view.type_hint.to_lowercase());
+    rsx! {
+        div { class: "hero",
+            span { class: "tile {hue(&view.title)}", "{initial(&view.title)}" }
+            div { class: "min0",
+                h1 { "{view.title.as_str()}" }
+                div { class: "meta",
+                    if let Some(u) = url { span { class: "pill link", Svg { icon: Icon::Globe } "{u.as_str()}" } }
+                    if !view.type_hint.is_empty() { span { class: "pill", Svg { icon: kind_icon(&kind) } "{view.type_hint.as_str()}" } }
+                    if let Some(g) = group { span { class: "pill", span { class: "dot {hue(&g)}" } "{g}" } }
+                }
+            }
+        }
+        if view.versions > 1 {
+            div { class: "banner", Svg { icon: Icon::Conflicts } span { "This entry has {view.versions} conflicting versions; one is shown. Resolve the conflict before copying or editing." } }
+        }
+        if let Some(x) = &view.expires { div { class: "banner", Svg { icon: Icon::Clock } span { "Expires {x}" } } }
+        if !view.fields.is_empty() {
+            div { class: "card fields",
+                for f in view.fields.iter().cloned() {
+                    FieldLine {
+                        controller: controller.clone(), epoch, revision, live,
+                        entry: current.then_some(view.handle),
+                        reveal: match &history { Some(v) => RevealKey::History(v.clone(), f.id), None => RevealKey::Field(f.handle) },
+                        copy: current && view.versions == 1,
+                        field: f,
+                    }
+                }
+            }
+        }
+        if let Some(n) = &view.notes {
+            div { class: "card", div { class: "card-h", "NOTES" } pre { class: "notes", "{n.as_str()}" } }
+        }
+    }
+}
+
+#[component]
+fn EntryScreen(
+    controller: Controller,
+    epoch: FormEpoch,
+    revision: u64,
+    entry: qv_core::EntryHandle,
+    live: Live,
+) -> Element {
+    let _ = revision;
+    let mut menu = use_signal(|| None::<(f64, f64)>);
+    let view = match controller.read(epoch, |s| views::entry(s, entry)) {
+        Some(Ok(v)) => v,
+        other => return rsx! { Unreadable { error: other.and_then(Result::err) } },
+    };
+    let files = controller
+        .read(epoch, |s| views::attachments(s, entry))
+        .and_then(Result::ok)
+        .unwrap_or_default();
+    let item = ItemHandle::Entry(entry);
+    let editable = !view.deleted && view.versions == 1;
+    let open_menu = move |e: MouseEvent| {
+        let p = e.client_coordinates();
+        menu.set(Some((p.x - 210.0, p.y + 12.0)));
+    };
+    rsx! {
+        div { class: "phone-bar",
+            button { class: "icon-btn back", "aria-label": "Back", onclick: back(&controller, epoch), Svg { icon: Icon::Back, large: true } }
+            span { class: "sp" }
+            if editable { button { class: "icon-btn", "aria-label": "Edit", onclick: act(&controller, epoch, WsAction::EditEntry(entry)), Svg { icon: Icon::Edit, large: true } } }
+            button { class: "icon-btn", "aria-label": "More actions", onclick: open_menu, Svg { icon: Icon::More, large: true } }
+        }
+        div { class: "detail-inner fade-in",
+            if view.deleted {
+                div { class: "banner", Svg { icon: Icon::Trash } span { class: "sp", "This item is in the trash." }
+                    button { class: "btn", onclick: act(&controller, epoch, WsAction::Restore(item)), Svg { icon: Icon::Restore } "Restore" }
+                }
+            }
+            div { class: "toolbar desk-only tool-end",
+                if editable { button { class: "btn", id: "entry-edit", onclick: act(&controller, epoch, WsAction::EditEntry(entry)), Svg { icon: Icon::Edit } "Edit" } }
+                button { class: "icon-btn", id: "entry-menu", "aria-label": "More actions", title: "More", onclick: open_menu, Svg { icon: Icon::More, large: true } }
+            }
+            EntryBody { controller: controller.clone(), epoch, revision, view: view.clone(), history: None, live }
+            if !files.is_empty() {
+                div { class: "card",
+                    div { class: "card-h", "ATTACHMENTS" button { class: "link", onclick: go(&controller, epoch, Screen::Attachments(entry)), "Manage" } }
+                    div { class: "files", for a in files { span { class: "file", Svg { icon: Icon::File } b { "{a.name.as_str()}" } small { "{a.size} bytes" } } } }
+                }
+            }
+            div { class: "foot",
+                span { "Modified {view.modified} · created {view.created}" }
+                button { class: "link", id: "entry-history", onclick: go(&controller, epoch, Screen::History(entry)), "History" }
+            }
+        }
+        if menu().is_some() {
+            div { class: "layer",
+                button { class: "scrim clear", "aria-label": "Close menu", onclick: move |_| menu.set(None) }
+                div { class: "menu anchor-detail", role: "menu",
+                    button { class: "mi", id: "menu-history", onclick: { let mut f = go(&controller, epoch, Screen::History(entry)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::History } "History" }
+                    button { class: "mi", id: "menu-attachments", onclick: { let mut f = go(&controller, epoch, Screen::Attachments(entry)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Attach } "Attachments" span { class: "sub", "{view.attachments}" } }
+                    if !view.deleted {
+                        button { class: "mi", id: "menu-move", onclick: { let mut f = go(&controller, epoch, Screen::Move(item, None)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Move } "Move to group…" }
+                        hr {}
+                        button { class: "mi danger", id: "menu-delete", onclick: { let mut f = act(&controller, epoch, WsAction::Delete(item)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Trash } "Move to trash" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// In-place entry editing with the existing form rules: protected values are
+/// never shown and a blank replacement keeps the stored value.
+#[component]
+fn EditEntry(controller: Controller, epoch: FormEpoch, revision: u64, live: Live) -> Element {
+    let _ = live;
+    let Some(form) = controller.entry_form(epoch) else {
+        return rsx! { Unreadable { error: None } };
+    };
+    let kinds = [
+        (FieldKind::Text, "Text"),
+        (FieldKind::Secret, "Protected"),
+        (FieldKind::Url, "Website"),
+        (FieldKind::Email, "Email"),
+        (FieldKind::Multiline, "Multi-line"),
+        (FieldKind::Totp, "One-time code"),
+    ];
+    let types = ["login", "note", "card", "wifi"];
+    let set_type = |t: &'static str| {
+        let c = controller.clone();
+        move |_| {
+            let mut v = t.to_owned();
+            c.ws_input(epoch, WsField::TypeHint, &mut v);
+        }
+    };
+    let save = act(&controller, epoch, WsAction::SaveEntry);
+    rsx! {
+        div { class: "phone-bar",
+            button { class: "icon-btn back", "aria-label": "Cancel", "data-qv-clear": "true", onclick: back(&controller, epoch), Svg { icon: Icon::Close, large: true } }
+            span { class: "sp" }
+            button { class: "btn primary", "data-qv-clear": "true", onclick: act(&controller, epoch, WsAction::SaveEntry), "Save" }
+        }
+        div { class: "detail-inner fade-in",
+            div { class: "hero",
+                span { class: "tile {hue(&form.title)}", "{initial(&form.title)}" }
+                div { class: "grow0",
+                    Input { controller: controller.clone(), epoch, field: WsField::Title, label: "Title", kind: Kind::Line, value: Some(form.title.to_string()), disabled: false, bare: true, class: "title-in", placeholder: "Title", autofocus: form.new }
+                    div { class: "meta",
+                        for t in types { button { class: if form.type_hint.as_str() == t { "chip on" } else { "chip" }, onclick: set_type(t), Svg { icon: kind_icon(t) } "{kind_label(t).trim_end_matches('s')}" } }
+                        Input { controller: controller.clone(), epoch, field: WsField::TypeHint, label: "Type", kind: Kind::Line, value: Some(form.type_hint.to_string()), disabled: false, bare: true, class: "type-in", placeholder: "Other type" }
+                    }
+                }
+            }
+            div { class: "banner ok", Svg { icon: Icon::Shield } span { "Protected values are never shown here. Leave one blank to keep it unchanged." } }
+            div { class: "card",
+                for row in form.rows.iter().cloned() {
+                    div { class: "ed",
+                        div { class: "in",
+                            Input { controller: controller.clone(), epoch, field: WsField::FieldName(row.index), label: "Field name", kind: Kind::Line, value: Some(row.name.to_string()), disabled: false, bare: true, class: "name-in" }
+                            span { class: "pill", "{kind_name(row.kind)}" }
+                            if row.protected { span { class: "pill", Svg { icon: Icon::Lock } "protected" } }
+                        }
+                        if row.too_large {
+                            p { class: "hint", "{crate::controller::AppError::TooLargeForApp.message()}" }
+                        } else if row.protected {
+                            div { class: "in",
+                                Input { controller: controller.clone(), epoch, field: WsField::Replacement(row.index), label: format!("New {} value", kind_name(row.kind)), kind: if row.kind == FieldKind::Multiline { Kind::Multi } else { Kind::Secret }, value: None, disabled: false, bare: true, placeholder: "Unchanged" }
+                                button { class: "btn subtle", onclick: act(&controller, epoch, WsAction::GenerateInto(row.index)), Svg { icon: Icon::Generator } "Generate" }
+                                if row.replaced { RevealReplacement { controller: controller.clone(), epoch, revision, index: row.index } }
+                            }
+                            if row.generated { p { class: "hint generated", "A generated value is set (hidden)." } }
+                        } else {
+                            div { class: "in",
+                                Input { controller: controller.clone(), epoch, field: WsField::FieldValue(row.index), label: format!("{} value", kind_name(row.kind)), kind: if row.kind == FieldKind::Multiline { Kind::Multi } else { Kind::Line }, value: Some(row.value.as_deref().map(String::as_str).unwrap_or_default().to_owned()), disabled: false, bare: true, placeholder: "Empty" }
+                            }
+                        }
+                        div { class: "in",
+                            button { class: "chip", onclick: act(&controller, epoch, WsAction::ToggleProtect(row.index)), if row.protected { "Unprotect" } else { "Protect" } }
+                            button { class: "chip danger", onclick: act(&controller, epoch, WsAction::RemoveField(row.index)), "Remove field" }
+                        }
+                    }
+                }
+                div { class: "addf",
+                    Input { controller: controller.clone(), epoch, field: WsField::NewFieldName, label: "New field name", kind: Kind::Line, value: None, disabled: false, bare: true, placeholder: "New field name" }
+                    for (k, label) in kinds { button { class: "chip", onclick: act(&controller, epoch, WsAction::AddField(k)), "+ {label}" } }
+                }
+            }
+            div { class: "card",
+                div { class: "card-h", "NOTES" }
+                div { class: "ed",
+                    if form.notes_too_large {
+                        p { class: "hint", "{crate::controller::AppError::TooLargeForApp.message()}" }
+                    } else {
+                        Input { controller: controller.clone(), epoch, field: WsField::Notes, label: "Notes", kind: Kind::Multi, value: Some(form.notes.to_string()), disabled: false, bare: true, placeholder: "Add a note" }
+                    }
+                }
+            }
+            div { class: "savebar desk-only",
+                span { "Esc cancels · Ctrl S saves" }
+                button { class: "btn subtle", "data-qv-clear": "true", onclick: back(&controller, epoch), "Cancel" }
+                button { class: "btn primary", id: "entry-save", "data-qv-clear": "true", onclick: save, if form.new { "Create item" } else { "Save changes" } }
+            }
+        }
+    }
+}
+#[component]
+fn RevealReplacement(
+    controller: Controller,
+    epoch: FormEpoch,
+    revision: u64,
+    index: u16,
+) -> Element {
+    let _ = revision;
+    let key = RevealKey::Replacement(index);
+    let shown = text(controller.revealed(epoch, &key));
+    rsx! {
+        if shown.is_empty() {
+            button { class: "btn subtle", "aria-label": "Reveal for 30 seconds", onclick: act(&controller, epoch, WsAction::Reveal(key.clone())), Svg { icon: Icon::Eye } }
+        } else {
+            span { class: "pill revealed", "{shown.as_str()}" }
+            button { class: "btn subtle", "aria-label": "Hide", onclick: act(&controller, epoch, WsAction::Hide), Svg { icon: Icon::EyeOff } }
+        }
+    }
+}
+
+#[component]
+fn EditGroup(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
+    let _ = revision;
+    let Some(form) = controller.group_form(epoch) else {
+        return rsx! { Unreadable { error: None } };
+    };
+    rsx! {
+        div { class: "phone-bar", button { class: "icon-btn back", "aria-label": "Cancel", onclick: back(&controller, epoch), Svg { icon: Icon::Close, large: true } } }
+        div { class: "detail-inner fade-in",
+            div { class: "hero", span { class: "tile {hue(&form.name)}", Svg { icon: Icon::Folder, large: true } }
+                h1 { if form.new { "New group" } else { "Rename group" } }
+            }
+            div { class: "card", div { class: "ed",
+                label { r#for: "ws-group-name", "Name" }
+                Input { controller: controller.clone(), epoch, field: WsField::GroupName, label: "Name", kind: Kind::Line, value: Some(form.name.to_string()), disabled: false, bare: true, autofocus: true, placeholder: "Group name" }
+            } }
+            div { class: "actions",
+                button { class: "btn subtle", onclick: back(&controller, epoch), "Cancel" }
+                button { class: "btn primary", id: "group-save", onclick: act(&controller, epoch, WsAction::SaveGroup), "Save" }
+            }
+        }
+    }
+}
+
+#[component]
+fn MoveScreen(
+    controller: Controller,
+    epoch: FormEpoch,
+    revision: u64,
+    item: ItemHandle,
+    at: Option<qv_core::GroupHandle>,
+) -> Element {
+    let _ = revision;
+    let view = match controller.read(epoch, |s| views::browse(s, at)) {
+        Some(Ok(v)) => v,
+        other => return rsx! { Unreadable { error: other.and_then(Result::err) } },
+    };
+    let here = view.here;
+    rsx! {
+        div { class: "phone-bar", button { class: "icon-btn back", "aria-label": "Cancel", onclick: back(&controller, epoch), Svg { icon: Icon::Close, large: true } } }
+        div { class: "detail-inner fade-in",
+            h1 { class: "title-sm", "Move to a group" }
+            div { class: "toolbar mb",
+                for (g, name) in view.crumbs.iter().cloned() {
+                    button { class: "chip", onclick: go(&controller, epoch, Screen::Move(item, Some(g))), Svg { icon: Icon::Folder } "{name.as_str()}" }
+                }
+            }
+            div { class: "card",
+                if view.groups.iter().all(|g| ItemHandle::Group(g.handle) == item) { div { class: "set-row", span { class: "l", span { "No groups inside this one." } } } }
+                for g in view.groups.iter().filter(|&g| ItemHandle::Group(g.handle) != item).cloned() {
+                    button { class: "set-row", onclick: go(&controller, epoch, Screen::Move(item, Some(g.handle))),
+                        span { class: "si", Svg { icon: Icon::Folder } } span { class: "l", b { "{g.name.as_str()}" } } Svg { icon: Icon::Right }
+                    }
+                }
+            }
+            div { class: "actions",
+                button { class: "btn subtle", onclick: back(&controller, epoch), "Cancel" }
+                button { class: "btn primary", id: "move-here", onclick: act(&controller, epoch, WsAction::MoveTo(item, here)), "Move here" }
+            }
+        }
+    }
+}
+
+#[component]
+fn History(
+    controller: Controller,
+    epoch: FormEpoch,
+    revision: u64,
+    entry: qv_core::EntryHandle,
+) -> Element {
+    let _ = revision;
+    let rows = match controller.read(epoch, |s| views::history(s, entry)) {
+        Some(Ok(v)) => v,
+        other => return rsx! { Unreadable { error: other.and_then(Result::err) } },
+    };
+    rsx! {
+        div { class: "phone-bar", button { class: "icon-btn back", "aria-label": "Back", onclick: back(&controller, epoch), Svg { icon: Icon::Back, large: true } } }
+        div { class: "detail-inner fade-in",
+            div { class: "hero", span { class: "tile h6", Svg { icon: Icon::History, large: true } } div { h1 { "History" } p { class: "muted", "Earlier versions kept for this item. Restoring creates a new version." } } }
+            if rows.is_empty() { div { class: "empty", "No earlier versions are kept." } }
+            div { class: "timeline",
+                for r in rows {
+                    div { class: "tl-i",
+                        button { class: "history-row", onclick: go(&controller, epoch, Screen::HistoryVersion(entry, r.version.clone())),
+                            b { "{r.modified}" }
+                            span { "{r.changed.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(\", \")}" if r.conflict { " · concurrent" } }
+                        }
+                    }
+                }
+            }
+            div { class: "actions",
+                button { class: "btn subtle", onclick: back(&controller, epoch), "Back" }
+                button { class: "btn danger-text", onclick: act(&controller, epoch, WsAction::PurgeHistory(entry)), Svg { icon: Icon::Trash } "Purge history…" }
+            }
+        }
+    }
+}
+
+#[component]
+fn HistoryVersion(
+    controller: Controller,
+    epoch: FormEpoch,
+    revision: u64,
+    entry: qv_core::EntryHandle,
+    version: String,
+    live: Live,
+) -> Element {
+    let _ = revision;
+    let view = match controller.read(epoch, |s| views::history_version(s, entry, &version)) {
+        Some(Ok(v)) => v,
+        other => return rsx! { Unreadable { error: other.and_then(Result::err) } },
+    };
+    let conflicted = controller
+        .read(epoch, |s| Ok(s.entry_versions(entry)?.len() > 1))
+        .and_then(Result::ok)
+        .unwrap_or(false);
+    rsx! {
+        div { class: "phone-bar", button { class: "icon-btn back", "aria-label": "Back", onclick: back(&controller, epoch), Svg { icon: Icon::Back, large: true } } }
+        div { class: "detail-inner fade-in",
+            div { class: "banner", Svg { icon: Icon::History } span { "An earlier version. Restoring creates a new version; nothing is overwritten." } }
+            EntryBody { controller: controller.clone(), epoch, revision, view, history: Some(version.clone()), live }
+            div { class: "actions",
+                button { class: "btn subtle", onclick: back(&controller, epoch), "Back" }
+                if conflicted { button { class: "btn", onclick: act(&controller, epoch, WsAction::RestoreHistory(entry, version.clone(), true)), "Restore and resolve conflict" } }
+                button { class: "btn primary", id: "restore-version", onclick: act(&controller, epoch, WsAction::RestoreHistory(entry, version.clone(), false)), Svg { icon: Icon::Restore } "Restore this version" }
+            }
+        }
+    }
+}
+
+#[component]
+fn Attachments(
+    controller: Controller,
+    epoch: FormEpoch,
+    revision: u64,
+    entry: qv_core::EntryHandle,
+) -> Element {
+    let _ = revision;
+    let rows = match controller.read(epoch, |s| views::attachments(s, entry)) {
+        Some(Ok(v)) => v,
+        other => return rsx! { Unreadable { error: other.and_then(Result::err) } },
+    };
+    rsx! {
+        div { class: "phone-bar", button { class: "icon-btn back", "aria-label": "Back", onclick: back(&controller, epoch), Svg { icon: Icon::Back, large: true } } }
+        div { class: "detail-inner fade-in",
+            div { class: "hero", span { class: "tile h1", Svg { icon: Icon::Attach, large: true } } div { h1 { "Attachments" } p { class: "muted", "Up to 10 MiB each. Names and types are shown as text; files are never opened." } } }
+            div { class: "card",
+                if rows.is_empty() { div { class: "set-row", span { class: "l", span { "No attachments yet." } } } }
+                for a in rows {
+                    div { class: "dev",
+                        div { class: "di", Svg { icon: Icon::File, large: true } }
+                        div { class: "l", b { "{a.name.as_str()}" } span { "{a.mime.as_str()} · {a.size} bytes" if a.conflicted { " · conflict" } } }
+                        SaveAttachment { controller: controller.clone(), epoch, handle: a.handle, name: a.name.to_string(), disabled: a.conflicted }
+                        button { class: "btn subtle", "aria-label": "Remove {a.name.as_str()}", disabled: a.conflicted, onclick: act(&controller, epoch, WsAction::RemoveAttachment(a.handle)), Svg { icon: Icon::Trash } }
+                    }
+                }
+            }
+            super::pages::FilePicker { controller: controller.clone(), epoch, revision, purpose: super::pages::Purpose::AddAttachment(entry) }
+            details { class: "muted mt",
+                summary { "Name and type for the next attachment (optional)" }
+                Input { controller: controller.clone(), epoch, field: WsField::AttachName, label: "Name", kind: Kind::Line, value: None, disabled: false }
+                Input { controller: controller.clone(), epoch, field: WsField::AttachMime, label: "MIME type", kind: Kind::Line, value: None, disabled: false }
+            }
+        }
+    }
+}
+#[component]
+fn SaveAttachment(
+    controller: Controller,
+    epoch: FormEpoch,
+    handle: qv_core::AttachmentHandle,
+    name: String,
+    disabled: bool,
+) -> Element {
+    let _ = &name;
+    #[cfg(target_os = "linux")]
+    if !crate::documents::picker_missing() {
+        return rsx! {
+            button { class: "btn", disabled, onclick: picker(&controller, epoch, qv_core::platform::portal::Pick::Save(name.clone()), "Save the attachment", Some(WsAction::SaveAttachment(handle))), "Save…" }
+        };
+    }
+    rsx! {
+        button { class: "btn", disabled, onclick: act(&controller, epoch, WsAction::SaveAttachment(handle)), "Save…" }
+    }
+}

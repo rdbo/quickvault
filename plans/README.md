@@ -78,4 +78,4 @@ plan, or a new plan that names the one it supersedes.
 | [0037](0037-lan-pairing/PLAN.md) | LAN pairing, link storage and new-device initialization (roadmap 2.9) | Reviewed — reviewer added the creation guards to new-device join |
 | [0038](0038-lan-exchange/PLAN.md) | LAN sessions, exchange, CLI and app (roadmap 2.10) | Reviewed — repairs approved; remaining attended testing carried to 0039 step 6 |
 | [0039](0039-lan-qr/PLAN.md) | LAN QR display and Android camera scanning (roadmap 2.10b) | Reviewed — approved with two test-only fixes; native/optical phone checks pass; live peer/offline checks carried to 2.11 |
-| [0040](0040-app-design/PLAN.md) | App design: application look and feel (roadmap 2.10a) | Implemented — fresh review, phone instrumentation and owner acceptance pending |
+| [0040](0040-app-design/PLAN.md) | App design: application look and feel (roadmap 2.10a) | Implemented — new UI from the approved prototype; fresh review, phone run and owner acceptance pending |

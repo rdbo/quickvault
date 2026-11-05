@@ -10,6 +10,7 @@ pub mod lan;
 #[cfg(test)]
 mod lan_tests;
 mod ops;
+pub mod prefs;
 pub mod qr;
 #[cfg(feature = "desktop")]
 mod runtime;

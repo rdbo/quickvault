@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented — owner review and phone instrumentation pending | 2026-11-04 | 2026-11-04 (step 1: standing approval, roadmap 0002; steps 2–8: owner delegated D1) | 0009 §1.6; 0008 §4 (unchanged) |
+| Implemented — fresh review, phone instrumentation and owner acceptance pending | 2026-11-04 | 2026-11-04 (step 1: standing approval, roadmap 0002; steps 2–8: owner delegated D1) | 0009 §1.6; 0008 §4 (unchanged) |
 
 ## Intent
 
@@ -255,7 +255,176 @@ shows no field that the current screens hide.
 
 ## Revisions
 
-None.
+### 2026-11-05 — Owner rejected the "quiet native" result
+
+The owner reviewed the implemented direction and rejected it:
+- the GTK title bar is unwanted: the app needs its own title bar or none;
+- it still feels like filling in web forms rather than using an app;
+- there is no in-app dark/light toggle (the earlier look was dark);
+- several flows are poor UX, for example typing a full vault file path.
+
+The owner asked for a new, unbiased design and allows large breaking UI
+changes. The implemented restyle stays in the tree only until a replacement
+is approved. A new clickable prototype was published for feedback before any
+product code: https://claude.ai/artifact/GYYz8oLLeAo4nefahGccp6
+
+Its main parts:
+- a frameless window with its own title bar;
+- an app-managed vault switcher and system file pickers instead of path
+  fields;
+- click-to-copy fields, inline editing and a command bar;
+- a generator with sliders and switches;
+- grouped settings with a theme toggle;
+- step-by-step pairing and onboarding flows;
+- phone tabs and sheets from the same UI.
+
+A revised plan follows the owner's feedback on it. Spec-affecting choices it
+raises are recorded there before implementation:
+- a one-time reduced-protection acknowledgement (0008 §1.3);
+- a persisted app theme preference;
+- portal file pickers on Linux.
+
+### 2026-11-05b — Prototype approved; rebuild the app UI from it
+
+The owner approved the prototype at
+https://claude.ai/artifact/GYYz8oLLeAo4nefahGccp6 ("THATS what I'm talking
+about"). Under the standing delegation (2026-11-02), the shared app UI is
+rebuilt from it, replacing steps 2–7's restyle. Steps 1–8 above are history.
+Steps 9–16 below are the new contract. No vault, crypto, storage-format,
+protocol or sync behaviour changes.
+
+Decisions (owner-delegated, 2026-11-05):
+
+- **R1 Frameless desktop window.** On Linux the window has no OS decorations.
+  The app's title bar:
+  - drags the window (`DesktopService::drag`) and maximizes on double click;
+  - has minimize, maximize and close buttons;
+  - has 6 px edge and corner handles that use tao `drag_resize_window`.
+
+  Android draws no title bar. Rejected alternatives: keeping the GTK bar
+  (owner refused) and GTK client-side headerbars (not reachable through
+  tao/wry).
+- **R2 App preferences file** `preferences` in the app's private state
+  directory, holding non-secret data only:
+  - `theme=dark|light|system` (default `dark`);
+  - `protection=<status fingerprint>` (the acknowledged reduced-protection
+    status).
+
+  Format: UTF-8 `key=value` lines, at most 256 bytes. Unknown or malformed
+  keys are ignored. Writes go to a temporary file with mode 0600 and are
+  renamed into place; a read refuses a non-regular file. A parse or I/O
+  failure falls back to the defaults and is never fatal. This is app
+  configuration, not a vault format.
+- **R3 One-time reduced-protection acknowledgement** (0008 §1.3, 0009 §5).
+  - The app computes a fingerprint of the protection status:
+    - process/memory hardening reduced;
+    - storage, swap and hibernation evidence;
+    - lifecycle monitoring;
+    - clipboard.
+  - If protection is complete, no acknowledgement is needed.
+  - If it is reduced and the fingerprint differs from the stored one, the
+    locked screen shows the reduced protection. Create, unlock and recover
+    stay refused (`AppError::Consent`) until the user acknowledges it in an
+    explicit sheet; the sheet stores the fingerprint.
+  - Any change in status asks again. Settings → Security shows the mode.
+  - `Controller::submit`'s consent argument is replaced by this stored state.
+    Tests pass consent through the same path.
+- **R4 No typed paths.**
+  - The default vault lives in the app's own storage (no path).
+  - "Open a vault file…", attachments, archives and snapshot restore use the
+    system picker: the Android Storage Access Framework (existing), and on
+    Linux the xdg-desktop-portal FileChooser over the existing zbus (async
+    API, `futures_lite::future::block_on`, as logind already does).
+  - The portal returns `file://` URIs. Only absolute local paths are
+    accepted; non-`file` URIs are refused. The chosen path goes into the
+    existing protected path input, and the existing no-follow and ownership
+    rules still apply.
+  - If the portal is unavailable, an in-app fallback path field appears with
+    an explanation (0011 §4 path rules unchanged).
+  - No dependency or feature changes.
+- **R5 Vault choice.** The unlock screen shows this device's vault. Its menu
+  offers:
+  - "Open a vault file…" (picker, Linux);
+  - "Create a new vault";
+  - "Join from another device";
+  - "Recover with recovery phrase".
+
+  No vault name is shown before unlock: names are encrypted metadata
+  (0008 §1.2), so the screen says "Your vault · this device" or the file
+  name. With no app vault yet, a first-run welcome replaces the unlock card.
+- **R6 Items view.**
+  - "All items" and type filters (from the existing `type_hint`) are built
+    from existing core listings walked recursively by the app. Groups come
+    from top-level groups.
+  - The list shows a monogram tile, title and subtitle. Quick copy (first
+    non-protected field, first protected field) reuses the existing Copy
+    action with handles read at click time.
+  - Detail: click a field to copy; reveal keeps the existing 30 s rule with a
+    countdown ring; TOTP keeps "Show code"; notes; attachments; history.
+  - Editing happens in place in the detail pane, with the same form
+    semantics (protected values never prefilled).
+  - Delete offers Undo through the existing Restore action.
+- **R7 Command bar** (Ctrl K): items via the existing search plus commands for
+  existing actions only.
+- **R8 Idle ring.** The lock button shows the remaining time of the existing
+  60 s inactivity lock (`Live::idle`). The display only; the lock policy is
+  unchanged.
+- **R9 Spec.** 0009 (Draft, owner-approved for the app) gains §1.8, the app
+  shell and preferences profile (R1–R4), with a Changelog line.
+
+Kept invariants are as in Design → Secrets: cleanup hooks (`data-qv-*`,
+`.phrase`, `.revealed`), input bounds, reveal and clipboard timers, lock
+triggers, FLAG_SECURE, the webview policy, and no raw HTML.
+
+### Step 9 — Spec 0009 §1.8 and plan records
+- [x] Do: amend 0009 with R1–R4; Changelog; index note.
+- Done when: the text matches R1–R4. Verify: `git diff --check`.
+
+### Step 10 — Preferences, protection acknowledgement and idle display
+- [x] Do: `src/prefs.rs` (R2); `Controller::{theme, set_theme,
+  protection_ack_needed, acknowledge_protection}`; route `submit` through the
+  stored acknowledgement (R3); `Live::idle`. Tests: bounds, malformed input,
+  symlink refusal, fingerprint change asks again, refused unlock until
+  acknowledged.
+- Verify: `cargo test --locked -p qv-app prefs`, `... protection`.
+
+### Step 11 — File picking without typed paths
+- [x] Do: `qv-platform` `linux::portal::pick(kind, save)` (R4), and a
+  `documents::pick` that fills the protected path input for vault, attachment,
+  archive and restore targets; Android keeps SAF. Tests: URI decoding,
+  refusal of non-file URIs, unavailable portal maps to the fallback.
+- Verify: `cargo test --locked -p qv-platform portal`; `-p qv-app documents`.
+
+### Step 12 — Views and navigation support
+- [x] Do: `views::all_items` (type and group), quick-copy handle lookup, Undo
+  state for delete, and `Screen` filters for type/group lists. Tests for each.
+- Verify: `cargo test --locked -p qv-app workspace`.
+
+### Step 13 — Window and shell
+- [x] Do: frameless Linux window with title bar, drag, resize and controls
+  (R1); sidebar, list and detail, phone tabs, sheets, toasts, command bar;
+  theme applied from preferences; new CSS from the prototype tokens.
+- Verify: `cargo clippy -p qv-app --features validation --all-targets`;
+  validation flows.
+
+### Step 14 — Screens
+- [x] Do: rebuild unlock and first-run, onboarding (create, phrase,
+  confirm), recover, join, items (detail, inline edit, history, attachments,
+  move), generator, devices and pairing, trash, conflicts, settings (theme,
+  security, password, phrase, rotation, snapshots, archives, verify, about)
+  and autofill, from the prototype.
+- Verify: `cargo test --locked -p qv-app --features validation`.
+
+### Step 15 — Tests, screenshots and Android
+- [ ] Do: update `flow.js`, Android `flows.js` and the instrumentation tests
+  to the new UI, keeping every assertion. Take screenshots in light and dark
+  at desktop, mid and phone widths. Build the Android APKs. Run the phone
+  instrumentation when attended.
+- Verify: full gates; APK builds.
+
+### Step 16 — Documentation
+- [x] Do: CHANGELOG, qv-app README, ARCHITECTURE §3 if structure changed,
+  roadmap, index.
 
 ## Execution log
 
@@ -348,3 +517,68 @@ None.
     8 runs alone, and the idle full rerun above passes. Found, not fixed:
     those two tests assume an unloaded machine.
   - **Review:** this implementation still needs the fresh-context review.
+
+- 2026-11-05 (rebuild, partial): Steps 9–12 done, and the code for steps 13–14
+  is written and compiles (`cargo check -p qv-app --features validation
+  --all-targets` passes with 3 warnings to fix). Steps 13–16 are not ticked.
+  - **Spec:** 0009 §1.8 added.
+  - **Preferences and consent:** `prefs.rs` (theme, acknowledged protection
+    fingerprint), the controller's theme/consent/acknowledgement API,
+    `View::{idle_left, theme, ack_needed}` and `Live::reveal_left`.
+  - **File picker:** the Linux portal picker (`qv-platform`
+    `linux::portal`), re-exported through core, with
+    `documents::pick_path` and its follow-up action.
+  - **Views and navigation:** `views::{all_items, top_groups,
+    quick_fields}`, `Screen::Kind`, `Pane::Overview`, `WsField::Command`
+    and Undo after delete.
+  - **New UI** from the approved prototype: `ui/{mod,shell,items,pages,icons}.rs`
+    and a new `app.css`.
+
+  Not done yet:
+  - Clippy, fmt, and the full and validation test suites have not run on the
+    new UI.
+  - `flow.js`, Android `flows.js` and the instrumentation selectors still
+    target the old UI and must be rewritten. The real-engine flows will fail
+    until then.
+  - No screenshots, APK build or documentation (CHANGELOG, README) yet.
+  - Fix-ups to make: zeroize the phrase words passed to `PhraseGrid`, and a
+    `.busy-dot` style.
+
+- 2026-11-05 (rebuild complete): Steps 10–14 and 16 done. Step 15 is done
+  except the attended phone run.
+  - **Inline styles:** the webview policy (`style-src 'self'`) blocks them, so
+    hue, width, spacing and menu-anchor styles became CSS classes. The policy
+    is unchanged.
+  - **Event handling:** form-submit handlers did not reach Rust in this
+    webview, so Unlock and the command bar use a button and Enter instead.
+  - **File picker in fixtures:** validation fixtures force the typed-path
+    fallback (`documents::force_no_picker`), so no real desktop dialog can
+    block an automated run. They also show the vault path field, so Android
+    fixtures can keep their private vault path.
+  - **Real-engine driver:** `src/bin/flow.js` was rewritten with every stage
+    and check kept. It passes with both the synthetic and the real Linux
+    services.
+  - **Android drivers:** `android/tests/flows.js` maps the old screen names
+    onto the new screens, with idempotent steppers the Java side polls.
+    PlatformTest, QuickUnlockUiTest, AutofillTest and QrTest were updated to
+    use them and the new labels. They compile into the test APK but have not
+    run on a device: no phone is attached.
+  - **Screenshots:** under `screenshots/` (synthetic data only), replacing the
+    first redesign's.
+  - **Final gates on the final tree:**
+    - SPDX, matrix, `cargo fmt --check` and `git diff --check` pass.
+    - Workspace Clippy and validation Clippy pass, as does Android arm64
+      Clippy for mobile and mobile,validation (after marking the Linux-only
+      picker target and the desktop-only window icons as platform-specific).
+    - The full serialized suite has 885 passed, 0 failed and 2 pre-existing
+      ignored.
+    - `cargo test --locked -p qv-app --features validation` has 48 passed,
+      including the 3 real-engine flows.
+    - Both APKs build. SHA-256: product
+      `037c5fcc1698874050922f95933d09c871a7d6afe7dff06f3cf61920b47f084d`,
+      validation
+      `86848ec053fc65720f87245dfc58fb2631bf5fbff6342674581268ea70571b14`.
+    - No dependency changed (zbus features unchanged), so deny/vet were not
+      rerun.
+  - **Still pending:** Android instrumentation on the phone, the
+    fresh-context review, and the owner's acceptance on Linux and the phone.

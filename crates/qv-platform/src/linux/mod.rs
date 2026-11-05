@@ -4,6 +4,7 @@
 mod instance;
 mod logind;
 mod persistence;
+pub mod portal;
 use crate::clipboard::X11Clipboard;
 use crate::{
     Clipboard, Keystore, Lifecycle, PlatformServices, ProtectionStatus, SecureInput, Unavailable,
