@@ -9,6 +9,26 @@ The shared Android/Linux Dioxus UI provides the CLI's offline feature set:
 - settings, password change, phrase redisplay, key rotation (including
   finishing an interrupted one), verify and vault information.
 
+Layout (plan 0040, ["quiet native"](../../plans/0040-app-design/DESIGN.md)):
+one DOM for every platform, with the layout chosen by CSS width breakpoints.
+- From 1000 px: sidebar, entry list and entry detail side by side, with a
+  toolbar and a status bar.
+- 720–999 px: the sidebar shrinks to icons.
+- Below 720 px (phones and narrow windows): one pane at a time, an app bar with
+  Back, bottom tabs (Vault, Generator, Devices, More) and bottom sheets for
+  confirmations.
+
+Other details:
+- Touch metrics follow `pointer: coarse`, and light/dark follows the OS.
+- The Android build patches the generated `AppTheme` to AppCompat DayNight so
+  the WebView reports the system scheme.
+- Icons are QuickVault's own stroke paths (`src/ui/icons.rs`); fonts are the
+  system's.
+- Desktop shortcuts trigger only existing actions: Ctrl F search, Ctrl N new
+  entry, Ctrl L lock, Ctrl S save, Esc cancel/back. Esc never confirms.
+- The validation preview and flow binaries accept `QV_UI_SIZE=WxH` for
+  layout screenshots ([examples](../../plans/0040-app-design/screenshots/)).
+
 Validation: [2.4](../../plans/0030-app-foundation/VALIDATION.md),
 [2.5](../../plans/0031-app-vault-workflows/VALIDATION.md),
 [2.7](../../plans/0034-android-autofill/VALIDATION.md).

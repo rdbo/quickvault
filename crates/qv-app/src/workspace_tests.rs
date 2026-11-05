@@ -1285,3 +1285,112 @@ fn autofill_untrusted_origin_claim_lists_no_web_entries() {
     env.act(WsAction::AutofillFill(found[0].key()));
     assert_eq!(filled(n).unwrap().2.unwrap(), SECRET.as_bytes());
 }
+
+#[test]
+fn layout_list_context_select_and_more_keep_navigation_rules() {
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::unlocked();
+    let a = env.add_entry("Alpha", SECRET);
+    let b = env.add_entry("Beta", "other-canary");
+    assert_eq!(env.c.list_context(env.epoch()), Some(Screen::Browse(None)));
+    // A list selection replaces the open entry, so Back returns to the list.
+    env.c.navigate(env.epoch(), Screen::Browse(None));
+    env.c.navigate(env.epoch(), Screen::Entry(b));
+    env.c.select(env.epoch(), Screen::Entry(a));
+    assert_eq!(env.screen(), Screen::Entry(a));
+    env.c.back(env.epoch());
+    assert_eq!(env.screen(), Screen::Browse(None));
+    // From a list it is an ordinary navigation.
+    env.c.select(env.epoch(), Screen::Entry(a));
+    assert_eq!(env.screen(), Screen::Entry(a));
+    env.c.back(env.epoch());
+    assert_eq!(env.screen(), Screen::Browse(None));
+    // A detail screen keeps the list it was opened from, and a form keeps it too.
+    env.c.navigate(env.epoch(), Screen::Search);
+    env.c.select(env.epoch(), Screen::Entry(b));
+    assert_eq!(env.c.list_context(env.epoch()), Some(Screen::Search));
+    env.c.navigate(env.epoch(), Screen::History(b));
+    assert_eq!(env.c.list_context(env.epoch()), Some(Screen::Search));
+    env.act(WsAction::EditEntry(b));
+    assert_eq!(env.screen(), Screen::EditEntry);
+    assert!(env.screen().is_form());
+    assert_eq!(env.c.list_context(env.epoch()), Some(Screen::Search));
+    // A select during a form is an ordinary navigation (the UI disables the
+    // rows); the form is discarded like any navigation, never saved.
+    env.put(WsField::Title, "Unsaved title");
+    env.c.select(env.epoch(), Screen::Entry(a));
+    assert_eq!(env.screen(), Screen::Entry(a));
+    assert_eq!(env.read(|s| views::entry(s, b)).title.as_str(), "Beta");
+    // More is an ordinary screen; stale epochs and lock behave as everywhere.
+    let old = env.epoch();
+    env.c.navigate(old, Screen::More);
+    assert_eq!(env.screen(), Screen::More);
+    env.c.select(old, Screen::Trash);
+    assert_eq!(env.screen(), Screen::More);
+    env.c.lock();
+    assert!(env.c.screen(env.epoch()).is_none());
+    assert!(env.c.list_context(env.epoch()).is_none());
+}
+
+#[test]
+fn shortcuts_run_only_existing_actions_and_escape_never_confirms() {
+    use crate::workspace::Shortcut;
+    assert_eq!(Shortcut::from_key("Escape", false), Some(Shortcut::Escape));
+    assert_eq!(Shortcut::from_key("Escape", true), None);
+    assert_eq!(Shortcut::from_key("f", true), Some(Shortcut::Search));
+    assert_eq!(Shortcut::from_key("F", true), Some(Shortcut::Search));
+    assert_eq!(Shortcut::from_key("f", false), None);
+    assert_eq!(Shortcut::from_key("n", true), Some(Shortcut::NewEntry));
+    assert_eq!(Shortcut::from_key("l", true), Some(Shortcut::Lock));
+    assert_eq!(Shortcut::from_key("s", true), Some(Shortcut::Save));
+    assert_eq!(Shortcut::from_key("x", true), None);
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::unlocked();
+    // Locked: nothing is handled.
+    let locked = Env::new();
+    assert!(!locked.c.shortcut(locked.epoch(), Shortcut::Lock));
+    assert!(!locked.c.shortcut(locked.epoch(), Shortcut::Search));
+    // New entry in the listed group, Escape cancels the form, Save saves.
+    assert!(env.c.shortcut(env.epoch(), Shortcut::NewEntry));
+    env.wait();
+    assert_eq!(env.screen(), Screen::EditEntry);
+    assert!(env.c.shortcut(env.epoch(), Shortcut::Escape));
+    assert_eq!(env.screen(), Screen::Browse(None));
+    assert!(env.read(views::overview).entries == 0);
+    assert!(!env.c.shortcut(env.epoch(), Shortcut::Escape));
+    assert!(!env.c.shortcut(env.epoch(), Shortcut::Save));
+    assert!(env.c.shortcut(env.epoch(), Shortcut::NewEntry));
+    env.wait();
+    env.put(WsField::Title, "Keyboard");
+    assert!(env.c.shortcut(env.epoch(), Shortcut::Save));
+    env.wait();
+    let e = match env.screen() {
+        Screen::Entry(e) => e,
+        other => panic!("saved entry screen, got {other:?}"),
+    };
+    // Search, and stale epochs do nothing.
+    let old = env.epoch();
+    assert!(env.c.shortcut(old, Shortcut::Search));
+    assert_eq!(env.screen(), Screen::Search);
+    assert!(!env.c.shortcut(old, Shortcut::Escape));
+    assert_eq!(env.screen(), Screen::Search);
+    // Escape answers a pending question with "no".
+    env.c.navigate(env.epoch(), Screen::Entry(e));
+    env.act(WsAction::Delete(qv_core::ItemHandle::Entry(e)));
+    env.c.navigate(env.epoch(), Screen::Trash);
+    env.act(WsAction::EmptyTrash);
+    assert_eq!(env.c.pending(env.epoch()), Some(ConfirmKind::EmptyTrash));
+    assert!(env.c.shortcut(env.epoch(), Shortcut::Escape));
+    env.wait();
+    assert_eq!(env.c.pending(env.epoch()), None);
+    assert_eq!(env.screen(), Screen::Trash);
+    assert_eq!(env.read(views::trash).items.len(), 1);
+    // While a task runs only Lock applies.
+    env.c.0.working.store(true, Ordering::SeqCst);
+    assert!(!env.c.shortcut(env.epoch(), Shortcut::Search));
+    assert!(!env.c.shortcut(env.epoch(), Shortcut::Escape));
+    assert_eq!(env.screen(), Screen::Trash);
+    env.c.0.working.store(false, Ordering::SeqCst);
+    assert!(env.c.shortcut(env.epoch(), Shortcut::Lock));
+    assert_eq!(env.c.snapshot().phase, Phase::Locked);
+}

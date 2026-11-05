@@ -55,6 +55,22 @@ pub fn run_flow_fixture() -> ! {
     });
     launch("QuickVault synthetic flow", SCRIPT.as_bytes())
 }
+/// The initial window size. Validation builds accept `QV_UI_SIZE=WxH` so
+/// screenshots can cover the narrow and mid layouts (plan 0040).
+fn window_size() -> (f64, f64) {
+    #[cfg(feature = "validation")]
+    if let Some((w, h)) = std::env::var("QV_UI_SIZE")
+        .ok()
+        .and_then(|v| v.split_once('x').map(|(w, h)| (w.parse(), h.parse())))
+        .and_then(|(w, h)| Some((w.ok()?, h.ok()?)))
+        .filter(|&(w, h): &(f64, f64)| {
+            (360.0..=4096.0).contains(&w) && (480.0..=4096.0).contains(&h)
+        })
+    {
+        return (w, h);
+    }
+    (1200.0, 800.0)
+}
 fn launch(title: &'static str, script: &'static [u8]) -> ! {
     let mut policy = dioxus_desktop::hardened::HardenedWebview::default();
     policy.assets.insert(
@@ -62,11 +78,13 @@ fn launch(title: &'static str, script: &'static [u8]) -> ! {
         ("text/css", include_bytes!("../assets/app.css")),
     );
     policy.assets.insert("/app.js", ("text/javascript", script));
+    let (width, height) = window_size();
     let config = dioxus_desktop::Config::new()
         .with_window(
             dioxus_desktop::WindowBuilder::new()
                 .with_title(title)
-                .with_inner_size(dioxus_desktop::LogicalSize::new(1180.0, 900.0)),
+                .with_inner_size(dioxus_desktop::LogicalSize::new(width, height))
+                .with_min_inner_size(dioxus_desktop::LogicalSize::new(360.0, 480.0)),
         )
         .with_hardened_webview(policy)
         .with_custom_event_handler(|event, _| {

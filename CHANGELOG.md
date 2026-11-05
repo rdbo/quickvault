@@ -9,6 +9,35 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-04: App redesign (roadmap 2.10a, plan 0040; direction delegated by
+  the owner). The shared Dioxus app now looks and behaves like an application
+  on desktop and phone instead of a web page:
+  - native window title bar;
+  - no whole-page scrolling, landing-page intro or footer;
+  - system fonts, with light/dark following the OS (Android AppTheme is now
+    DayNight);
+  - its own stroke icons;
+  - from 1000 px: three panes (sidebar with groups, entry list, entry detail)
+    with a toolbar and status bar; 720–999 px: icon sidebar; below 720 px:
+    app bar with Back, bottom tabs, a More screen, a floating New button and
+    bottom-sheet confirmations;
+  - desktop shortcuts for existing actions.
+
+  No security behaviour or feature changed. The input cleanup hooks, reveal,
+  clipboard, lock and webview policy are untouched, and the test assertions
+  are unchanged; two history-row selectors were scoped to the detail pane.
+  Screenshots are in the plan. Android instrumentation and the owner's review
+  on Linux and the phone are pending.
+
+- 2026-11-04: Phase 2.10b (plan 0039) passed its fresh-context review, which
+  added a test that non-byte-mode QR codes are refused and fixed an
+  intermittent qv-sync LAN test-harness race (test-only). Its remaining attended
+  pairing/sync, offline and interruption checks move to the milestone-2
+  evidence phase 2.11. They have not passed, and the camera stays disabled in
+  ordinary packages until then. Phase 2.10a (plan 0040) has started: a design
+  brief and mockups for an application look on desktop and phone, waiting for
+  the owner's approval.
+
 - 2026-11-03: Android QR device validation uses a bounded MIUI-compatible
   activity launcher. Explicit validation-only modes exercise live camera
   frames/lifecycle/timeout and optical Join form filling. The native camera

@@ -49,6 +49,14 @@ s=re.sub(r'minSdk = (?:24|29)\b','minSdk = 29',s,count=1)
 s=s.replace('android {','android {\n    useLibrary("android.test.runner")\n    useLibrary("android.test.base")\n    useLibrary("android.test.mock")',1)
 s=s.replace('defaultConfig {','defaultConfig {\n        testInstrumentationRunner = "android.test.InstrumentationTestRunner"',1)
 p.write_text(s)
+# Plan 0040: the shared CSS follows the OS light/dark setting. A Light parent
+# theme makes the WebView report light always; DayNight follows the system.
+# No WebView force-dark (it would recolour the app's own dark palette).
+styles=destination/'app/src/main/res/values/styles.xml'
+s=styles.read_text()
+if s.count('Theme.AppCompat.Light.NoActionBar')!=1:
+    raise SystemExit('Unexpected upstream AppTheme template; review it before packaging')
+styles.write_text(s.replace('Theme.AppCompat.Light.NoActionBar','Theme.AppCompat.DayNight.NoActionBar'))
 tests=destination/'app/src/androidTest/java/org/quickvault/app'
 tests.mkdir(parents=True)
 shutil.copyfile(root/'android/tests/PlatformTest.java',tests/'PlatformTest.java')

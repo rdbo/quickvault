@@ -3,11 +3,12 @@
 //! Unlocked screens shared by Android and Linux. Vault text renders only as
 //! escaped text; protected values appear only through a 30 s reveal. Every
 //! handler sends a typed action with the current form epoch; Rust re-checks it.
+use super::icons::{Icon, Svg};
 use crate::controller::{AppError, Controller, FormEpoch};
 use crate::views::{self, EntryView, FieldRow, kind_name};
 use crate::workspace::{
-    ConfirmKind, CopyKey, GenFlag, GenMode, Live, Pane, Report, RevealKey, Screen, WsAction,
-    WsField,
+    ConfirmKind, CopyKey, GenFlag, GenMode, Live, Pane, Report, RevealKey, Screen, Shortcut,
+    WsAction, WsField,
 };
 use dioxus::prelude::*;
 use qv_core::{FieldKind, ItemHandle};
@@ -19,6 +20,17 @@ fn act(c: &Controller, e: FormEpoch, a: WsAction) -> impl FnMut(MouseEvent) + 's
 fn go(c: &Controller, e: FormEpoch, s: Screen) -> impl FnMut(MouseEvent) + 'static {
     let c = c.clone();
     move |_| c.navigate(e, s.clone())
+}
+fn pick(c: &Controller, e: FormEpoch, s: Screen) -> impl FnMut(MouseEvent) + 'static {
+    let c = c.clone();
+    move |_| c.select(e, s.clone())
+}
+/// A row tile's letter: the title's first character, as text.
+fn initial(title: &str) -> String {
+    title
+        .chars()
+        .find(|c| !c.is_whitespace())
+        .map_or_else(String::new, |c| c.to_uppercase().collect())
 }
 fn text(v: Option<qv_core::SecretBytes>) -> String {
     v.map(|v| String::from_utf8_lossy(v.expose_secret()).into_owned())
@@ -78,6 +90,7 @@ fn Input(
     kind: Kind,
     value: Option<String>,
     disabled: bool,
+    #[props(default)] autofocus: bool,
 ) -> Element {
     let limit = match field {
         WsField::Query => crate::workspace::QUERY_MAX,
@@ -110,6 +123,7 @@ fn Input(
             } else {
                 input {
                     id: id.clone(),
+                    autofocus,
                     r#type: if kind == Kind::Secret { "password" } else { "text" },
                     maxlength: limit,
                     disabled,
@@ -125,7 +139,8 @@ fn Input(
         }
     }
 }
-/// The unlocked application shell.
+/// The unlocked application shell: toolbar, sidebar, list and detail panes,
+/// status bar and (narrow layouts) bottom tabs. One DOM; CSS picks the layout.
 #[component]
 pub fn Shell(
     controller: Controller,
@@ -148,46 +163,113 @@ pub fn Shell(
         .map_or_else(String::new, |o| o.name.to_string());
     let trash = overview.as_ref().map_or(0, |o| o.trash);
     let conflicts = overview.as_ref().map_or(0, |o| o.conflicts);
+    let groups = controller
+        .read(epoch, |s| views::browse(s, None))
+        .and_then(Result::ok)
+        .map(|v| v.groups)
+        .unwrap_or_default();
     let (notice, error, report) = controller.status(epoch).unwrap_or((None, None, None));
     let pending = controller.pending(epoch);
+    let context = controller
+        .list_context(epoch)
+        .unwrap_or(Screen::Browse(None));
+    let lan = busy && controller.lan_view(epoch).is_some();
+    let three = !busy && !scanning && (screen.is_list() || screen.is_vault_detail());
+    let layout = match (three, screen.is_vault_detail()) {
+        (true, true) => "ws three has-detail",
+        (true, false) => "ws three",
+        _ => "ws two",
+    };
+    let root = matches!(
+        screen,
+        Screen::Browse(None) | Screen::Generator | Screen::Devices | Screen::More
+    );
+    let title = title(&screen);
     let lock = {
         let c = controller.clone();
         move |_| c.lock()
     };
+    let back = {
+        let c = controller.clone();
+        move |_| c.back(epoch)
+    };
+    let keys = {
+        let c = controller.clone();
+        move |event: KeyboardEvent| {
+            let ctrl = event.modifiers().ctrl();
+            if let Some(key) = Shortcut::from_key(&event.key().to_string(), ctrl)
+                && c.shortcut(epoch, key)
+            {
+                event.prevent_default();
+            }
+        }
+    };
+    let new_group = match &context {
+        Screen::Browse(Some(g)) => Some(*g),
+        _ => controller.read(epoch, |s| s.root()).and_then(Result::ok),
+    };
+    let new_entry = {
+        let c = controller.clone();
+        move |_| {
+            if let Some(g) = new_group {
+                c.act(epoch, WsAction::NewEntry(g));
+            }
+        }
+    };
     let nav = [
-        (Screen::Browse(None), "Vault", "▤"),
-        (Screen::Search, "Search", "⌕"),
-        (Screen::Generator, "Generator", "✱"),
-        (Screen::Trash, "Trash", "⌫"),
-        (Screen::Conflicts, "Conflicts", "⇄"),
-        (Screen::Snapshots, "Snapshots", "◷"),
-        (Screen::Archives, "Archives", "⇅"),
-        (Screen::Devices, "Devices", "⇆"),
-        (Screen::Settings(Pane::General), "Settings", "⚙"),
+        (Screen::Generator, "Generator", Icon::Generator),
+        (Screen::Trash, "Trash", Icon::Trash),
+        (Screen::Conflicts, "Conflicts", Icon::Conflicts),
+        (Screen::Snapshots, "Snapshots", Icon::Snapshots),
+        (Screen::Archives, "Archives", Icon::Archives),
+        (Screen::Devices, "Devices", Icon::Devices),
     ];
-    let current = |s: &Screen| match (s, &screen) {
-        (
-            Screen::Browse(_),
-            Screen::Browse(_)
-            | Screen::Entry(_)
-            | Screen::EditEntry
-            | Screen::EditGroup
-            | Screen::Move(..)
-            | Screen::History(_)
-            | Screen::HistoryVersion(..)
-            | Screen::Attachments(_)
-            | Screen::Recovered,
-        ) => true,
+    let tabs = [
+        (Screen::Browse(None), "Vault", Icon::Vault),
+        (Screen::Generator, "Generator", Icon::Generator),
+        (Screen::Devices, "Devices", Icon::Devices),
+        (Screen::More, "More", Icon::More),
+    ];
+    let vault_selected = (screen.is_list() || screen.is_vault_detail())
+        && !matches!(&context, Screen::Browse(Some(g)) if groups.iter().any(|t| t.handle == *g));
+    let section = |s: &Screen| match (s, &screen) {
+        (Screen::Browse(_), _) => screen.is_list() || screen.is_vault_detail(),
         (Screen::Settings(_), Screen::Settings(_)) => true,
         (Screen::Conflicts, Screen::ConflictRecord(_)) => true,
+        (Screen::More, other) => matches!(
+            other,
+            Screen::More
+                | Screen::Trash
+                | Screen::Conflicts
+                | Screen::ConflictRecord(_)
+                | Screen::Snapshots
+                | Screen::Archives
+                | Screen::Settings(_)
+                | Screen::Autofill
+        ),
         (a, b) => a == b,
     };
+    let selected = |on: bool| if on { "nav-item selected" } else { "nav-item" };
+    let modal = pending.is_some();
     rsx! {
-        main { class: "ws", "data-qv-epoch": "{epoch.0}",
+        main { class: "{layout}", "data-qv-epoch": "{epoch.0}", onkeydown: keys,
             if fixture && cfg!(target_os="android") {p {class:"warning","Synthetic validation build · isolated test vault only"}}
-            header { class: "ws-top",
+            header { class: if root { "ws-top" } else { "ws-top with-back" },
+                if !root {
+                    button { class: "icon-button back-button", "aria-label": "Back", disabled: busy, onclick: back, Svg { icon: Icon::Back } }
+                }
                 div { class: "brand", span { class: "brand-mark", "Q" } span { class: "ws-name", "{name.as_str()}" } }
-                button { class: "lock-button", "data-qv-clear": "true", onclick: lock, "Lock" }
+                span { class: "app-title", "{title}" }
+                button { class: "search-launch", "aria-label": "Search entries", disabled: busy || modal, onclick: go(&controller, epoch, Screen::Search),
+                    Svg { icon: Icon::Search } span { class: "label", "Search entries" } kbd { "Ctrl F" }
+                }
+                span { class: "spacer" }
+                if three || matches!(screen, Screen::Browse(_)) {
+                    button { class: "primary-small new-entry", "aria-label": "New entry", disabled: busy || modal || screen.is_form(), onclick: new_entry,
+                        Svg { icon: Icon::Plus } span { class: "label", "New entry" }
+                    }
+                }
+                button { class: "lock-button", "data-qv-clear": "true", "aria-label": "Lock", onclick: lock, Svg { icon: Icon::Lock } span { class: "label", "Lock" } }
             }
             if reduced_lifecycle {
                 p { class: "warning ws-banner", role: "status",
@@ -195,43 +277,87 @@ pub fn Shell(
                 }
             }
             div { class: "ws-body",
-                nav { class: "ws-nav", "aria-label": "Sections",
-                    for (target, label, icon) in nav {
+                nav { class: "ws-nav", "aria-label": "Sections", inert: modal,
+                    button { class: selected(vault_selected), disabled: busy, title: "Vault", onclick: go(&controller, epoch, Screen::Browse(None)),
+                        span { class: "nav-icon", Svg { icon: Icon::Vault } }
+                        span { class: "nav-label", "Vault" }
+                    }
+                    if !groups.is_empty() { div { class: "nav-heading", "Groups" } }
+                    for g in groups.iter().cloned() {
                         button {
-                            class: if current(&target) { "nav-item selected" } else { "nav-item" },
+                            class: if matches!(&context, Screen::Browse(Some(h)) if *h == g.handle) && (screen.is_list() || screen.is_vault_detail()) { "nav-item nav-group selected" } else { "nav-item nav-group" },
                             disabled: busy,
-                            onclick: go(&controller, epoch, target.clone()),
-                            span { class: "nav-icon", "{icon}" }
+                            onclick: go(&controller, epoch, Screen::Browse(Some(g.handle))),
+                            span { class: "nav-icon", Svg { icon: Icon::Folder } }
+                            span { class: "nav-label", "{g.name.as_str()}" }
+                        }
+                    }
+                    div { class: "nav-divider" }
+                    for (target, label, icon) in nav {
+                        button { class: selected(section(&target)), disabled: busy, title: label, onclick: go(&controller, epoch, target.clone()),
+                            span { class: "nav-icon", Svg { icon } }
                             span { class: "nav-label", "{label}" }
                             if label == "Trash" && trash > 0 { span { class: "badge", "{trash}" } }
                             if label == "Conflicts" && conflicts > 0 { span { class: "badge alert", "{conflicts}" } }
                         }
                     }
+                    div { class: "nav-fill" }
+                    button { class: selected(section(&Screen::Settings(Pane::General))), disabled: busy, title: "Settings", onclick: go(&controller, epoch, Screen::Settings(Pane::General)),
+                        span { class: "nav-icon", Svg { icon: Icon::Settings } }
+                        span { class: "nav-label", "Settings" }
+                    }
                 }
                 section { class: "ws-main",
-                    if scanning {
-                        ScanPanel { controller: controller.clone(), epoch }
-                    } else if busy && controller.lan_view(epoch).is_some() {
-                        LanPanel { controller: controller.clone(), epoch, revision }
-                    } else if busy {
-                        div { class: "busy", role: "status", "Working… The vault stays locked to other actions until this finishes." }
-                    } else {
-                        if let Some(kind) = pending {
-                            Confirm { controller: controller.clone(), epoch, kind, seconds: live.weak_seconds }
-                        }
-                        if screen != Screen::Autofill && controller.autofill_view().is_some() {
+                    div { class: "messages",
+                        if !busy && screen != Screen::Autofill && controller.autofill_view().is_some() {
                             p { class: "notice ws-banner", role: "status", "An autofill request is waiting. "
                                 button { class: "text-button", onclick: go(&controller, epoch, Screen::Autofill), "Choose a login" }
                             }
                         }
-                        if let Some(n) = notice { p { class: "notice", role: "status", "{n}" } }
-                        if let Some(e) = error { p { class: "error", role: "alert", "{e.message()}" } }
-                        if let Some(r) = report { ReportView { controller: controller.clone(), epoch, report: r } }
-                        for k in [epoch.0] {
-                            div { key: "{k}", class: "screen",
-                                Body { controller: controller.clone(), epoch, revision, live, screen: screen.clone() }
+                        if !busy {
+                            if let Some(n) = notice { p { class: "notice", role: "status", "{n}" } }
+                            if let Some(e) = error { p { class: "error", role: "alert", "{e.message()}" } }
+                            if let Some(r) = report { ReportView { controller: controller.clone(), epoch, report: r } }
+                        }
+                    }
+                    div { class: "panes", inert: modal,
+                        if three {
+                            div { class: "list-pane", role: "region", "aria-label": "Entries",
+                                ListPane { controller: controller.clone(), epoch, revision, list: context.clone(), screen: screen.clone() }
                             }
                         }
+                        div { class: "detail-pane",
+                            if scanning {
+                                ScanPanel { controller: controller.clone(), epoch }
+                            } else if lan {
+                                LanPanel { controller: controller.clone(), epoch, revision }
+                            } else if busy {
+                                div { class: "busy", role: "status", "Working… The vault stays locked to other actions until this finishes." }
+                            } else if screen.is_list() {
+                                div { class: "placeholder", p { "Select an entry to see it here." } }
+                            } else {
+                                for k in [epoch.0] {
+                                    div { key: "{k}", class: "screen",
+                                        Body { controller: controller.clone(), epoch, revision, live, screen: screen.clone() }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if let Some(kind) = pending.filter(|_| !busy) {
+                        Confirm { controller: controller.clone(), epoch, kind, seconds: live.weak_seconds }
+                    }
+                }
+            }
+            footer { class: "status-bar",
+                span { "Locks after 60 s without activity" }
+                span { "Nothing syncs until you choose" }
+            }
+            nav { class: "tabbar", "aria-label": "Main sections", inert: modal,
+                for (target, label, icon) in tabs {
+                    button { class: selected(section(&target)), disabled: busy, onclick: go(&controller, epoch, target.clone()),
+                        span { class: "nav-icon", Svg { icon } }
+                        span { class: "nav-label", "{label}" }
                     }
                 }
             }
@@ -239,6 +365,87 @@ pub fn Shell(
                 div { class: "toast", role: "status", "Copied · clears in {live.clipboard} s if unchanged" }
             }
             if fixture { input { id: "validation-result", "data-fixture-root": controller.0.base.to_string_lossy().as_ref(), oninput: move |e| on_fixture.call(e) } }
+        }
+    }
+}
+/// The narrow app bar's title for a screen.
+fn title(screen: &Screen) -> &'static str {
+    match screen {
+        Screen::Search => "Search",
+        Screen::Trash => "Trash",
+        Screen::Conflicts | Screen::ConflictRecord(_) => "Conflicts",
+        Screen::Generator => "Generator",
+        Screen::Snapshots => "Snapshots",
+        Screen::Archives => "Archives",
+        Screen::Devices => "Devices",
+        Screen::Settings(_) => "Settings",
+        Screen::Autofill => "Autofill",
+        Screen::More => "More",
+        Screen::EditEntry | Screen::EditGroup | Screen::Move(..) => "Edit",
+        _ => "Vault",
+    }
+}
+/// The list beside a vault screen. Rows replace the open detail screen; they
+/// are disabled while a form is open so a click cannot discard its input.
+#[component]
+fn ListPane(
+    controller: Controller,
+    epoch: FormEpoch,
+    revision: u64,
+    list: Screen,
+    screen: Screen,
+) -> Element {
+    let current = match &screen {
+        Screen::Entry(e)
+        | Screen::History(e)
+        | Screen::HistoryVersion(e, _)
+        | Screen::Attachments(e) => Some(*e),
+        _ => None,
+    };
+    let form = screen.is_form();
+    match list {
+        Screen::Search => rsx! { Search { controller, epoch, revision, current, form } },
+        Screen::Recovered => rsx! { Recovered { controller, epoch, revision, current, form } },
+        Screen::Browse(group) => {
+            rsx! { Browse { controller, epoch, revision, group, current, form } }
+        }
+        _ => rsx! {},
+    }
+}
+/// The narrow layout's list of sections without a bottom tab.
+#[component]
+fn More(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
+    let _ = revision;
+    let sections = [
+        (Screen::Trash, "Trash", Icon::Trash),
+        (Screen::Conflicts, "Conflicts", Icon::Conflicts),
+        (Screen::Snapshots, "Snapshots", Icon::Snapshots),
+        (Screen::Archives, "Archives", Icon::Archives),
+    ];
+    let settings = [
+        (Pane::General, "General"),
+        (Pane::Password, "Password, quick unlock and autofill"),
+        (Pane::Phrase, "Recovery phrase"),
+        (Pane::Rotation, "Key rotation"),
+        (Pane::Verify, "Verify"),
+        (Pane::About, "About"),
+    ];
+    rsx! {
+        h2 { "More" }
+        ul { class: "list",
+            for (target, label, icon) in sections {
+                li { button { class: "row-button", onclick: go(&controller, epoch, target.clone()),
+                    span { class: "row-icon", Svg { icon } } span { class: "row-title", "{label}" } Svg { icon: Icon::Chevron }
+                } }
+            }
+        }
+        h3 { "Settings" }
+        ul { class: "list",
+            for (pane, label) in settings {
+                li { button { class: "row-button", onclick: go(&controller, epoch, Screen::Settings(pane)),
+                    span { class: "row-icon", Svg { icon: Icon::Settings } } span { class: "row-title", "{label}" } Svg { icon: Icon::Chevron }
+                } }
+            }
         }
     }
 }
@@ -264,12 +471,14 @@ fn Confirm(controller: Controller, epoch: FormEpoch, kind: ConfirmKind, seconds:
         ConfirmKind::RemoveLink => "Remove this link? The other device is not notified and keeps its copy of the vault. Removal is not compromise recovery: rotate the vault key for that.".to_owned(),
     };
     rsx! {
-        div { class: "dialog", role: "alertdialog", "aria-label": "Confirmation",
+        div { class: "modal-backdrop",
+        div { class: "dialog", role: "alertdialog", "aria-modal": "true", "aria-label": "Confirmation",
             p { "{message}" }
             div { class: "row",
-                button { class: "secondary", autofocus: true, onclick: act(&controller, epoch, WsAction::Answer(false)), if kind == ConfirmKind::WeakPassword { "Choose a stronger password" } else { "Cancel" } }
+                button { class: "secondary-small", autofocus: true, onclick: act(&controller, epoch, WsAction::Answer(false)), if kind == ConfirmKind::WeakPassword { "Choose a stronger password" } else { "Cancel" } }
                 button { class: "danger", "data-qv-clear": "true", disabled: kind == ConfirmKind::WeakPassword && seconds > 0, onclick: act(&controller, epoch, WsAction::Answer(true)), if kind == ConfirmKind::WeakPassword { "Use anyway · {seconds}s" } else { "Continue" } }
             }
+        }
         }
     }
 }
@@ -369,9 +578,15 @@ fn Body(
     let _ = (revision, live);
     let c = controller;
     match screen {
-        Screen::Browse(g) => rsx! { Browse { controller: c, epoch, revision, group: g } },
-        Screen::Recovered => rsx! { Recovered { controller: c, epoch, revision } },
-        Screen::Search => rsx! { Search { controller: c, epoch, revision } },
+        Screen::Browse(g) => {
+            rsx! { Browse { controller: c, epoch, revision, group: g, current: None, form: false } }
+        }
+        Screen::Recovered => {
+            rsx! { Recovered { controller: c, epoch, revision, current: None, form: false } }
+        }
+        Screen::Search => {
+            rsx! { Search { controller: c, epoch, revision, current: None, form: false } }
+        }
         Screen::Entry(e) => rsx! { EntryScreen { controller: c, epoch, revision, entry: e } },
         Screen::EditEntry => rsx! { EditEntry { controller: c, epoch, revision } },
         Screen::EditGroup => rsx! { EditGroup { controller: c, epoch, revision } },
@@ -392,6 +607,7 @@ fn Body(
         Screen::Devices => rsx! { Devices { controller: c, epoch, revision } },
         Screen::Settings(p) => rsx! { Settings { controller: c, epoch, revision, pane: p } },
         Screen::Autofill => rsx! { AutofillScreen { controller: c, epoch, revision } },
+        Screen::More => rsx! { More { controller: c, epoch, revision } },
     }
 }
 #[component]
@@ -405,6 +621,8 @@ fn Browse(
     epoch: FormEpoch,
     revision: u64,
     group: Option<qv_core::GroupHandle>,
+    current: Option<qv_core::EntryHandle>,
+    form: bool,
 ) -> Element {
     let _ = revision;
     let view = match controller.read(epoch, |s| views::browse(s, group)) {
@@ -413,18 +631,19 @@ fn Browse(
     };
     let here = view.here;
     rsx! {
-        div { class: "crumbs",
-            for (g, name) in view.crumbs.iter().cloned() {
-                button { class: "crumb", onclick: go(&controller, epoch, Screen::Browse(Some(g))), "{name.as_str()}" }
+        div { class: "pane-head",
+            div { class: "crumbs",
+                for (g, name) in view.crumbs.iter().cloned() {
+                    button { class: "crumb", disabled: form, onclick: go(&controller, epoch, Screen::Browse(Some(g))), "{name.as_str()}" }
+                }
             }
-        }
-        div { class: "toolbar",
-            button { class: "primary-small", onclick: act(&controller, epoch, WsAction::NewEntry(here)), "New entry" }
-            button { class: "secondary-small", onclick: act(&controller, epoch, WsAction::NewGroup(here)), "New group" }
-            if !view.root {
-                button { class: "secondary-small", onclick: act(&controller, epoch, WsAction::RenameGroup(here)), "Rename" }
-                button { class: "secondary-small", onclick: go(&controller, epoch, Screen::Move(ItemHandle::Group(here), None)), "Move" }
-                button { class: "danger-small", onclick: act(&controller, epoch, WsAction::Delete(ItemHandle::Group(here))), "Delete" }
+            div { class: "pane-actions",
+                button { class: "chip", disabled: form, onclick: act(&controller, epoch, WsAction::NewGroup(here)), Svg { icon: Icon::Folder } "New group" }
+                if !view.root {
+                    button { class: "chip", disabled: form, onclick: act(&controller, epoch, WsAction::RenameGroup(here)), "Rename group" }
+                    button { class: "chip", disabled: form, onclick: go(&controller, epoch, Screen::Move(ItemHandle::Group(here), None)), "Move group" }
+                    button { class: "chip danger-chip", disabled: form, onclick: act(&controller, epoch, WsAction::Delete(ItemHandle::Group(here))), "Delete group" }
+                }
             }
         }
         if view.groups.is_empty() && view.entries.is_empty() {
@@ -432,38 +651,45 @@ fn Browse(
         }
         ul { class: "list",
             for g in view.groups.iter().cloned() {
-                li { button { class: "row-button", onclick: go(&controller, epoch, Screen::Browse(Some(g.handle))),
-                    span { class: "row-icon", "▸" }
+                li { button { class: "row-button", disabled: form, onclick: go(&controller, epoch, Screen::Browse(Some(g.handle))),
+                    span { class: "row-icon", Svg { icon: Icon::Folder } }
                     span { class: "row-title", "{g.name.as_str()}" }
                     if g.conflict { span { class: "badge alert", "conflict" } }
                 } }
             }
             for e in view.entries.iter().cloned() {
-                li { button { class: "row-button", onclick: go(&controller, epoch, Screen::Entry(e.handle)),
-                    span { class: "row-icon", "•" }
+                li { button { class: if current == Some(e.handle) { "row-button selected" } else { "row-button" }, disabled: form, onclick: pick(&controller, epoch, Screen::Entry(e.handle)),
+                    span { class: "row-icon", "{initial(e.title.as_str())}" }
                     span { class: "row-text", span { class: "row-title", "{e.title.as_str()}" } span { class: "row-sub", "{e.subtitle.as_str()}" } }
                     if e.conflict { span { class: "badge alert", "conflict" } }
                 } }
             }
         }
         if view.recovered > 0 {
-            button { class: "text-button", onclick: go(&controller, epoch, Screen::Recovered), "Recovered items ({view.recovered})" }
+            button { class: "text-button", disabled: form, onclick: go(&controller, epoch, Screen::Recovered), "Recovered items ({view.recovered})" }
         }
     }
 }
 #[component]
-fn Recovered(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
+fn Recovered(
+    controller: Controller,
+    epoch: FormEpoch,
+    revision: u64,
+    current: Option<qv_core::EntryHandle>,
+    form: bool,
+) -> Element {
     let _ = revision;
     let rows = match controller.read(epoch, views::recovered) {
         Some(Ok(v)) => v,
         other => return rsx! { Unreadable { error: other.and_then(Result::err) } },
     };
     rsx! {
-        h2 { "Recovered items" }
+        div { class: "pane-title", "Recovered items" }
         p { class: "muted", "These entries' groups are missing. Move them into a group to keep them organised." }
         ul { class: "list",
             for e in rows {
-                li { button { class: "row-button", onclick: go(&controller, epoch, Screen::Entry(e.handle)),
+                li { button { class: if current == Some(e.handle) { "row-button selected" } else { "row-button" }, disabled: form, onclick: pick(&controller, epoch, Screen::Entry(e.handle)),
+                    span { class: "row-icon", "{initial(e.title.as_str())}" }
                     span { class: "row-title", "{e.title.as_str()}" }
                 } }
             }
@@ -471,7 +697,13 @@ fn Recovered(controller: Controller, epoch: FormEpoch, revision: u64) -> Element
     }
 }
 #[component]
-fn Search(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
+fn Search(
+    controller: Controller,
+    epoch: FormEpoch,
+    revision: u64,
+    current: Option<qv_core::EntryHandle>,
+    form: bool,
+) -> Element {
     let _ = revision;
     let query = controller
         .peek(epoch, |ws| {
@@ -482,17 +714,17 @@ fn Search(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
         .read(epoch, |s| views::search(s, &query))
         .and_then(Result::ok);
     rsx! {
-        h2 { "Search" }
-        p { class: "muted", "Titles, usernames, URLs and group names. Protected values are never searched." }
-        Input { controller: controller.clone(), epoch, field: WsField::Query, label: "Search the vault", kind: Kind::Line, value: Some(query.clone()), disabled: false }
+        div { class: "pane-title", "Search" }
+        Input { controller: controller.clone(), epoch, field: WsField::Query, label: "Titles, usernames, URLs and group names. Protected values are never searched.", kind: Kind::Line, value: Some(query.clone()), disabled: form, autofocus: !form && current.is_none() }
         if let Some((groups, entries)) = results {
             if !query.is_empty() && groups.is_empty() && entries.is_empty() { p { class: "muted", "No matches." } }
             ul { class: "list",
                 for g in groups {
-                    li { button { class: "row-button", onclick: go(&controller, epoch, Screen::Browse(Some(g.handle))), span { class: "row-icon", "▸" } span { class: "row-title", "{g.name.as_str()}" } } }
+                    li { button { class: "row-button", disabled: form, onclick: go(&controller, epoch, Screen::Browse(Some(g.handle))), span { class: "row-icon", Svg { icon: Icon::Folder } } span { class: "row-title", "{g.name.as_str()}" } } }
                 }
                 for e in entries {
-                    li { button { class: "row-button", onclick: go(&controller, epoch, Screen::Entry(e.handle)),
+                    li { button { class: if current == Some(e.handle) { "row-button selected" } else { "row-button" }, disabled: form, onclick: pick(&controller, epoch, Screen::Entry(e.handle)),
+                        span { class: "row-icon", "{initial(e.title.as_str())}" }
                         span { class: "row-text", span { class: "row-title", "{e.title.as_str()}" } span { class: "row-sub", "{e.subtitle.as_str()}" } }
                     } }
                 }
@@ -538,9 +770,9 @@ fn FieldLine(
             div { class: "field-actions",
                 if field.protected {
                     if revealed {
-                        button { class: "chip", onclick: act(&controller, epoch, WsAction::Hide), "Hide" }
+                        button { class: "chip", onclick: act(&controller, epoch, WsAction::Hide), Svg { icon: Icon::EyeOff } "Hide" }
                     } else {
-                        button { class: "chip", onclick: act(&controller, epoch, WsAction::Reveal(reveal.clone())), "Reveal 30 s" }
+                        button { class: "chip", onclick: act(&controller, epoch, WsAction::Reveal(reveal.clone())), Svg { icon: Icon::Eye } "Reveal 30 s" }
                     }
                 }
                 if totp {
@@ -551,7 +783,7 @@ fn FieldLine(
                     }
                 }
                 if copy && let Some(e) = entry {
-                    button { class: "chip", onclick: act(&controller, epoch, WsAction::Copy(CopyKey::Field(e, field.handle))), "Copy" }
+                    button { class: "chip", onclick: act(&controller, epoch, WsAction::Copy(CopyKey::Field(e, field.handle))), Svg { icon: Icon::Copy } "Copy" }
                     if totp {
                         button { class: "chip", onclick: act(&controller, epoch, WsAction::Copy(CopyKey::Totp(e, field.handle))), "Copy code" }
                     }
@@ -570,8 +802,13 @@ fn EntryBody(
 ) -> Element {
     let current = history.is_none();
     rsx! {
-        h2 { "{view.title.as_str()}" }
-        p { class: "muted", "{view.type_hint.as_str()} · modified {view.modified} · created {view.created}" }
+        div { class: "entry-head",
+            span { class: "row-icon", "{initial(view.title.as_str())}" }
+            div {
+                h2 { "{view.title.as_str()}" }
+                p { class: "muted", "{view.type_hint.as_str()} · modified {view.modified} · created {view.created}" }
+            }
+        }
         if let Some(x) = &view.expires { p { class: "muted", "Expires {x}" } }
         if view.versions > 1 {
             p { class: "warning", "This entry has {view.versions} conflicting versions; one is shown. Resolve the conflict before copying or editing." }
@@ -614,13 +851,12 @@ fn EntryScreen(
             if view.deleted {
                 button { class: "primary-small", onclick: act(&controller, epoch, WsAction::Restore(item)), "Restore" }
             } else {
-                button { class: "primary-small", disabled: view.versions > 1, onclick: act(&controller, epoch, WsAction::EditEntry(entry)), "Edit" }
-                button { class: "secondary-small", onclick: go(&controller, epoch, Screen::Attachments(entry)), "Attachments ({view.attachments})" }
-                button { class: "secondary-small", onclick: go(&controller, epoch, Screen::History(entry)), "History" }
-                button { class: "secondary-small", onclick: go(&controller, epoch, Screen::Move(item, None)), "Move" }
-                button { class: "danger-small", onclick: act(&controller, epoch, WsAction::Delete(item)), "Delete" }
+                button { class: "primary-small", disabled: view.versions > 1, onclick: act(&controller, epoch, WsAction::EditEntry(entry)), Svg { icon: Icon::Edit } "Edit" }
+                button { class: "secondary-small", onclick: go(&controller, epoch, Screen::Attachments(entry)), Svg { icon: Icon::Attach } "Attachments ({view.attachments})" }
+                button { class: "secondary-small", onclick: go(&controller, epoch, Screen::History(entry)), Svg { icon: Icon::History } "History" }
+                button { class: "secondary-small", onclick: go(&controller, epoch, Screen::Move(item, None)), Svg { icon: Icon::Move } "Move" }
+                button { class: "danger-small", onclick: act(&controller, epoch, WsAction::Delete(item)), Svg { icon: Icon::Trash } "Delete" }
             }
-            button { class: "text-button", onclick: { let c = controller.clone(); move |_| c.back(epoch) }, "Back" }
         }
     }
 }
@@ -1132,7 +1368,8 @@ pub(crate) fn LanPanel(controller: Controller, epoch: FormEpoch, revision: u64) 
         }
     };
     rsx! {
-        div { class: "card lan", role: "region", "aria-label": "Local network",
+        div { class: "modal-backdrop",
+        div { class: "dialog-card lan", role: "region", "aria-label": "Local network",
             h2 { "{title}" }
             if let Some(symbol) = v.qr.as_ref() { { qr_image(symbol) } }
             if let Some(code) = code {
@@ -1202,6 +1439,7 @@ pub(crate) fn LanPanel(controller: Controller, epoch: FormEpoch, revision: u64) 
                 button { class: "secondary-small", id: "lan-cancel", onclick: cancel, "Cancel" }
             }
         }
+        }
     }
 }
 
@@ -1239,10 +1477,10 @@ pub(crate) fn ScanButton(
 
 #[component]
 pub(crate) fn ScanPanel(controller: Controller, epoch: FormEpoch) -> Element {
-    rsx! { section { class: "card", role: "status", h2 { "Scan a LAN QR code" }
+    rsx! { div { class: "modal-backdrop", section { class: "dialog-card", role: "status", h2 { "Scan a LAN QR code" }
         p { "Point the camera at the other device's code. Scanning fills this form; you choose when to connect." }
         button { class: "secondary", onclick: move |_| controller.cancel_qr(epoch), "Cancel scan" }
-    } }
+    } } }
 }
 
 #[component]

@@ -38,7 +38,7 @@ try{
  stage=6;click("Copy");
  if(clipboard)await until(()=>!!document.querySelector(".toast"));else await until(()=>!!document.querySelector(".error"));
  stage=61;click("Edit");await until(()=>heading("Edit entry"));input("ws-title","Edited engine entry");click("Save");await until(()=>heading("Edited engine entry"));await unlocked();
- click("History");await until(()=>heading("History"));await until(()=>!!document.querySelector(".row-button"));document.querySelector(".row-button").click();await until(()=>!!button("Restore this version"));click("Restore this version");await until(()=>(document.querySelector(".notice")?.textContent||"")==="Restored as a new version.");await until(()=>headingStarts("Synthetic <img"));await unlocked();
+ click("History");await until(()=>heading("History"));await until(()=>!!document.querySelector(".detail-pane .row-button"));document.querySelector(".detail-pane .row-button").click();await until(()=>!!button("Restore this version"));click("Restore this version");await until(()=>(document.querySelector(".notice")?.textContent||"")==="Restored as a new version.");await until(()=>headingStarts("Synthetic <img"));await unlocked();
  stage=62;const root=document.getElementById("validation-result").getAttribute("data-fixture-root");
  click("Attachments");await until(()=>heading("Attachments"));input("ws-path",root+"/source.bin");input("ws-attach-name","engine-canary.bin");click("Add attachment");await until(()=>!!document.querySelector(".notice")||!!document.querySelector(".error"));
  const filesSafe=!document.querySelector(".error");

@@ -77,6 +77,58 @@ pub enum Screen {
     Settings(Pane),
     /// Choose a login for the bound autofill request.
     Autofill,
+    /// The narrow layout's list of sections that have no bottom tab.
+    More,
+}
+/// Desktop keyboard shortcuts; each runs an action the screens already offer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shortcut {
+    /// Ctrl+F: open Search.
+    Search,
+    /// Ctrl+N: a new entry in the listed group.
+    NewEntry,
+    /// Ctrl+L: lock.
+    Lock,
+    /// Ctrl+S: save the open entry or group form.
+    Save,
+    /// Escape: cancel a pending question, else go back.
+    Escape,
+}
+impl Shortcut {
+    /// Map a key name (as the webview reports it) and the Ctrl state.
+    pub fn from_key(key: &str, ctrl: bool) -> Option<Self> {
+        match (key, ctrl) {
+            ("Escape", false) => Some(Self::Escape),
+            ("f" | "F", true) => Some(Self::Search),
+            ("n" | "N", true) => Some(Self::NewEntry),
+            ("l" | "L", true) => Some(Self::Lock),
+            ("s" | "S", true) => Some(Self::Save),
+            _ => None,
+        }
+    }
+}
+impl Screen {
+    /// A list the three-pane layout shows beside a detail screen.
+    pub fn is_list(&self) -> bool {
+        matches!(self, Self::Browse(_) | Self::Search | Self::Recovered)
+    }
+    /// A vault screen shown in the detail pane, next to its list.
+    pub fn is_vault_detail(&self) -> bool {
+        matches!(
+            self,
+            Self::Entry(_)
+                | Self::EditEntry
+                | Self::EditGroup
+                | Self::Move(..)
+                | Self::History(_)
+                | Self::HistoryVersion(..)
+                | Self::Attachments(_)
+        )
+    }
+    /// A form whose unsaved input a list selection must not discard.
+    pub fn is_form(&self) -> bool {
+        matches!(self, Self::EditEntry | Self::EditGroup | Self::Move(..))
+    }
 }
 // Variant names only: no handle, ID or vault text reaches debug output.
 impl std::fmt::Debug for Screen {
@@ -101,6 +153,7 @@ impl std::fmt::Debug for Screen {
             Self::Devices => "Devices",
             Self::Settings(_) => "Settings",
             Self::Autofill => "Autofill",
+            Self::More => "More",
         })
     }
 }
@@ -649,6 +702,26 @@ impl Workspace {
         self.clear_transient();
         self.notice = None;
     }
+    /// Replace the current vault detail screen with a sibling, so Back still
+    /// returns to the list. Anywhere else this is an ordinary navigation.
+    pub(crate) fn select(&mut self, to: Screen) {
+        if self.screen.is_vault_detail() && !self.screen.is_form() {
+            self.screen = to;
+            self.clear_transient();
+            self.notice = None;
+        } else {
+            self.go(to);
+        }
+    }
+    /// The list shown beside the current screen: the screen itself when it is
+    /// a list, else the nearest list in the back stack, else the root group.
+    pub(crate) fn list_context(&self) -> Screen {
+        std::iter::once(&self.screen)
+            .chain(self.back.iter().rev())
+            .find(|s| s.is_list())
+            .cloned()
+            .unwrap_or(Screen::Browse(None))
+    }
     pub(crate) fn input(&self, field: WsField) -> &[u8] {
         self.inputs
             .get(&field)
@@ -767,6 +840,17 @@ impl Controller {
     /// Navigate; forms, reveals and pending confirmations are discarded and the
     /// form epoch advances so late input for the old screen is ignored.
     pub fn navigate(&self, epoch: FormEpoch, to: Screen) {
+        self.navigate_with(epoch, to, false);
+    }
+    /// Open a sibling from the list pane (see [`Workspace::select`]).
+    pub fn select(&self, epoch: FormEpoch, to: Screen) {
+        self.navigate_with(epoch, to, true);
+    }
+    /// The list shown beside the current screen (see [`Workspace::list_context`]).
+    pub fn list_context(&self, epoch: FormEpoch) -> Option<Screen> {
+        self.peek(epoch, Workspace::list_context)
+    }
+    fn navigate_with(&self, epoch: FormEpoch, to: Screen, replace: bool) {
         let mut s = self.state();
         if s.epoch != epoch.0 || s.phase != Phase::Unlocked || self.0.working.load(Ordering::SeqCst)
         {
@@ -784,7 +868,11 @@ impl Controller {
         if matches!(to, Screen::EditEntry | Screen::EditGroup) {
             return;
         }
-        ws.go(to);
+        if replace {
+            ws.select(to);
+        } else {
+            ws.go(to);
+        }
         crate::ops::on_enter(ws, &session);
         s.epoch = s.epoch.wrapping_add(1);
         s.active = Instant::now();
@@ -814,6 +902,62 @@ impl Controller {
         s.epoch = s.epoch.wrapping_add(1);
         s.active = Instant::now();
         s.revision = s.revision.wrapping_add(1);
+    }
+    /// Run a desktop shortcut for an existing action on the current unlocked
+    /// screen. Lock always applies; everything else is ignored while a task
+    /// runs. Escape never confirms: it cancels a pending question first, then
+    /// goes back. Returns whether the key was used.
+    pub fn shortcut(&self, epoch: FormEpoch, key: Shortcut) -> bool {
+        let Some(screen) = self.screen(epoch) else {
+            return false;
+        };
+        if key == Shortcut::Lock {
+            self.lock();
+            return true;
+        }
+        if self.0.working.load(Ordering::SeqCst) {
+            return false;
+        }
+        match key {
+            Shortcut::Lock => false,
+            Shortcut::Search => {
+                self.navigate(epoch, Screen::Search);
+                true
+            }
+            Shortcut::NewEntry => {
+                let group = match self.list_context(epoch) {
+                    Some(Screen::Browse(Some(g))) => Some(g),
+                    _ => self.read(epoch, |s| s.root()).and_then(Result::ok),
+                };
+                let Some(group) = group else {
+                    return false;
+                };
+                self.act(epoch, WsAction::NewEntry(group));
+                true
+            }
+            Shortcut::Save => match screen {
+                Screen::EditEntry => {
+                    self.act(epoch, WsAction::SaveEntry);
+                    true
+                }
+                Screen::EditGroup => {
+                    self.act(epoch, WsAction::SaveGroup);
+                    true
+                }
+                _ => false,
+            },
+            Shortcut::Escape => {
+                if self.pending(epoch).is_some() {
+                    self.act(epoch, WsAction::Answer(false));
+                    true
+                } else if screen != Screen::Browse(None) {
+                    self.back(epoch);
+                    true
+                } else {
+                    false
+                }
+            }
+        }
     }
     /// Transfer one bounded framework value into protected state, clearing the
     /// framework string even when the input is stale or refused.

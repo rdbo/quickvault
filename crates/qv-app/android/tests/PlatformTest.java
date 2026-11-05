@@ -123,8 +123,8 @@ public class PlatformTest extends InstrumentationTestCase {
         js(instrumentation,view,"document.getElementById('ws-title').value='Edited phone entry';document.getElementById('ws-title').dispatchEvent(new Event('input',{bubbles:true}))");
         click(instrumentation,view,"Save");awaitHeading(instrumentation,view,"Edited phone entry");
         click(instrumentation,view,"History");awaitHeading(instrumentation,view,"History");
-        awaitJs(instrumentation,view,"!!document.querySelector('.row-button')","history retained");
-        js(instrumentation,view,"document.querySelector('.row-button').click()");
+        awaitJs(instrumentation,view,"!!document.querySelector('.detail-pane .row-button')","history retained");
+        js(instrumentation,view,"document.querySelector('.detail-pane .row-button').click()");
         click(instrumentation,view,"Restore this version");
         awaitJs(instrumentation,view,"(document.querySelector('.notice')?.textContent||'')==='Restored as a new version.'","history restored");
         awaitJs(instrumentation,view,"window.qvDeviceFixture.nav('Vault')","vault after restore");

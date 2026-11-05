@@ -810,13 +810,16 @@ release; it is not weakened.
 
 #### Phase 2.10b — QR codes: display and scanning
 
-- **Plan:** [0039](../0039-lan-qr/PLAN.md) (Implemented; automated gates pass;
-  fresh-context review and combined attended validation pending).
+- **Plan:** [0039](../0039-lan-qr/PLAN.md) (Reviewed 2026-11-04: approved with
+  two test-only fixes). Native-camera and optical Join checks passed on the phone.
+  The remaining attended peer pairing/sync, Internet-blocked and interruption
+  checks (0039 step 6, including 2.10's) are carried to 2.11; see Revisions
+  2026-11-04 (phase 2.10b). They have not passed.
 - **Owner continuation, 2026-11-03:** implement now on the current tree. The
   remaining attended 2.10 testing is the final step of 2.10b; lack of a phone
   does not block implementation. Preserve pending evidence and release gates.
 
-- [ ] **Do:** Render the pairing QR (0013 §4.2) and the address-only
+- [x] **Do:** Render the pairing QR (0013 §4.2) and the address-only
   receive-window QR (§8.5) in the app, and in the CLI where useful. Scan
   them with the phone camera, through a capture path and a decoder that the
   plan selects and justifies. Typing stays the fallback everywhere. Any
@@ -839,6 +842,9 @@ release; it is not weakened.
 
 #### Phase 2.10a — App design
 
+- **Plan:** [0040](../0040-app-design/PLAN.md) (Implemented 2026-11-05; the
+  owner delegated the design-direction approval on 2026-11-04. Fresh-context
+  review, phone instrumentation and the owner's acceptance are pending.)
 - [ ] **Do:** Make the shared app look and feel like an application on desktop
   and phone, not a website in a browser (owner direction, 2026-11-02). First a
   design brief and mockups covering app-style navigation and window chrome,
@@ -861,7 +867,13 @@ release; it is not weakened.
 #### Phase 2.11 — Milestone 2 release evidence
 
 - [ ] **Do:** Run the LAN gate and the per-platform GUI/mobile gates (0012 §3)
-  on Linux and Android. Extended LAN fuzzing. Packaging, signed artifacts,
+  on Linux and Android. This includes the attended checks carried from
+  0039 step 6: real Linux/phone pairing from QR and typed code, new-device
+  join and link, address-QR sync in both directions, Internet blocked with no
+  account, and interruption/retry at the transfer, commit and acknowledgement
+  boundaries. Then decide whether to open the ordinary-package camera gate
+  (enable it only after those pass), and record the permission-prompt lock
+  behaviour (0039 review finding 2). Extended LAN fuzzing. Packaging, signed artifacts,
   checksums, and the reproducible-build status. Fold in the D12 review findings.
 - **Specs:** 0012 §1 (milestone-2 rows), §3.
 - **Depends on:** 2.10a, 2.6/2.7 (or those features disabled), D12 review result.
@@ -1248,6 +1260,20 @@ release; it is not weakened.
   - **The app counts a running LAN window as activity** for the 60-second
     idle lock. The window's own limit (2 or 10 minutes, at most 15)
     bounds it, and lock or cancel still close it at once.
+
+- 2026-11-04 (phase 2.10b, plan 0039), under the owner's standing
+  delegation (2026-11-02) and the owner's 2026-11-04 wrap-up of device work:
+  - **2.10b is ticked for its reviewed implementation.** The remaining
+    attended 0039 step 6 checks move to 2.11, which already runs the LAN and
+    per-platform GUI/mobile gates on Linux and Android with the phone. Those
+    checks are real-peer pairing and sync, the Internet-blocked and
+    interruption rows, and the ordinary-package camera-gate decision. This
+    follows the 2026-11-03 handling of 2.10. None of these checks has passed.
+    The camera stays disabled in ordinary packages until they pass, and no
+    release gate is waived.
+  - **Why not wait in 2.10b:** the next phase, 2.10a, depends on 2.10b only
+    so that every Milestone 2 screen exists, and they all do. A device run
+    after the redesign also tests the final UI once instead of twice.
 
 ## Execution log
 
@@ -2144,3 +2170,37 @@ release; it is not weakened.
   unfinished test-driver prototype was removed. ADB disappeared before the
   ready ordinary-package rerun, so no further install/test or radio restoration
   was possible. No product change, release clearance or fresh review claimed.
+
+- 2026-11-04: Next-phase session on clean committed `531650d` ("phase 2.10,
+  2.10b"). Fresh-context review of plan 0039: **Approved with minor fixes**,
+  now Reviewed. The reviewer added a non-byte-mode QR refusal test and fixed an
+  intermittent qv-sync `with_window` race (1 failure in 5 runs before, none in
+  25 after; test-only, assertions unchanged). Two low UX findings are recorded:
+  the permission prompt locks the vault, and a foreign QR ends a scan.
+  Reviewer gates: SPDX, matrix, fmt, Clippy, the full suite (877 passed, 0
+  failed, 2 pre-existing ignored), validation app tests (42), deny (workspace
+  and fuzz), vet and a 60 s `lan_qr` fuzz smoke all pass. 2.10b is ticked for
+  its implementation; its attended device checks move to 2.11 (Revisions
+  2026-11-04) and have not passed.
+
+  Phase 2.10a planned as [0040](../0040-app-design/PLAN.md): design brief
+  DESIGN.md and a nine-board mockup canvas (desktop and phone, light/dark).
+  The phase entry reserves the owner's approval of the direction, so 0040 is
+  Blocked on its D1 and no product code changed for 2.10a. No commit, push,
+  branch, install or dependency change.
+
+- 2026-11-05: The owner delegated 0040 D1 ("Do whatever is the best thing")
+  and continued on the same tree. Phase 2.10a implemented (plan 0040):
+  - quiet-native redesign: three panes, icon sidebar at mid widths, phone app
+    bar with bottom tabs and sheets, OS light/dark (Android DayNight theme);
+  - own icons, desktop shortcuts and `Screen::More`;
+  - no security or feature change; assertions unchanged, two history
+    selectors scoped to the detail pane.
+
+  Final gates pass: 879 tests and 44 validation tests (including 3
+  real-engine flows), Clippy (host and Android arm64), fmt, SPDX and matrix.
+  Both APKs build. Screenshots are in the plan.
+
+  2.10a stays unticked until the fresh-context review, the attended Android
+  instrumentation run and the owner's acceptance on Linux and the phone. No
+  commit, push, branch, install or dependency change.

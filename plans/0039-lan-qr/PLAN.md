@@ -2,13 +2,13 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented | 2026-11-03 | 2026-11-03 | 0013 §1.4, §4.2, §8.2, §8.5; 0009 §1.6/§1.7; 0008 §1/§4; 0012 §1/§3 |
+| Reviewed | 2026-11-03 | 2026-11-03 | 0013 §1.4, §4.2, §8.2, §8.5; 0009 §1.6/§1.7; 0008 §1/§4; 0012 §1/§3 |
 
 Implementation and automated verification are complete (steps 1–5).
 Combined device validation has native-camera and optical Join passes; real-peer
-pairing/sync and remaining step 6 rows are pending;
-fresh-context production review is pending. This status does not close either
-requirement or enable the ordinary-package camera gate.
+pairing/sync and remaining step 6 rows are pending and carried to roadmap 2.11;
+the fresh-context review approved the implementation on 2026-11-04 (REVIEW.md).
+This status does not close step 6 or enable the ordinary-package camera gate.
 
 ## Intent
 
@@ -488,3 +488,12 @@ they do not block handoff of the implemented phase under the owner's direction.
   that did not happen. No further device waiting/retry under the owner's wrap-up
   direction. Keep implementation status Implemented, with review and remaining
   step 6 evidence explicit.
+
+
+- 2026-11-04: Fresh-context review (REVIEW.md): **Approved with minor fixes**,
+  status Reviewed. Reviewer added a non-byte-mode refusal test and fixed a
+  flaky 2.10 qv-sync test-harness race (test-only). Two low findings are
+  recorded: the permission prompt locks the vault, and a foreign
+  QR in view ends the scan. Step 6 attended checks are carried to roadmap 2.11
+  (owner-delegated, Revisions 2026-11-04) and have not passed. The camera gate
+  stays closed in ordinary packages.

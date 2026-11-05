@@ -248,4 +248,31 @@ mod tests {
         }
         assert!(decode(w * 2, w, &both).is_err());
     }
+    #[test]
+    fn qr_non_byte_mode_is_refused() {
+        // A numeric-mode symbol decodes cleanly but is not a binary payload.
+        let mut scratch = vec![0; Version::MAX.buffer_len()];
+        let mut output = vec![0; Version::MAX.buffer_len()];
+        let qr = QrCode::encode_text(
+            "0123456789",
+            &mut scratch,
+            &mut output,
+            QrCodeEcc::Medium,
+            Version::MIN,
+            Version::MAX,
+            None,
+            true,
+        )
+        .unwrap();
+        let size = usize::try_from(qr.size()).unwrap();
+        let mut modules = SecretBytes::zeroed(size * size);
+        for y in 0..size {
+            for x in 0..size {
+                modules.expose_secret_mut()[y * size + x] =
+                    u8::from(qr.get_module(x as i32, y as i32));
+            }
+        }
+        let (w, p) = image(&Symbol { size, modules }, 4, false);
+        assert!(decode(w, w, &p).is_err());
+    }
 }

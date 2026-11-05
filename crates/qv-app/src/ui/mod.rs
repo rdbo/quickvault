@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Shared responsive screens. Vault text is rendered as escaped text only.
+mod icons;
 mod workspace;
 use crate::controller::{Action, AppError, Controller, FormEpoch, InputField, Mode, Phase};
 use dioxus::prelude::*;
+use icons::{Icon, Svg};
 use std::sync::OnceLock;
 
 pub(crate) static ACTIVE: OnceLock<Result<Controller, crate::controller::AppError>> =
@@ -48,7 +50,7 @@ pub(crate) fn app() -> Element {
                 _ => "Protection unavailable",
             };
             let message = error.message();
-            rsx! {main {class:"shell", Header{} section {class:"card", h1{"{title}"} p{"{message}"} p{class:"muted","No vault has been opened by this window."}}}}
+            rsx! {main {class:"shell", div {class:"locked-body", section {class:"card", Brand{status:""} h1{"{title}"} p{"{message}"} p{class:"muted","No vault has been opened by this window."}}}}}
         }
     }
 }
@@ -76,10 +78,15 @@ fn fixture_report(controller: &Controller) -> impl FnMut(FormEvent) + 'static {
 fn fixture_report(_: &Controller) -> impl FnMut(FormEvent) + 'static {
     |_| {}
 }
+/// The locked panel's heading: the app mark, its name and the task status.
 #[component]
-fn Header() -> Element {
+fn Brand(status: &'static str) -> Element {
     rsx! {
-        header {class:"topbar",div {class:"brand",span {class:"brand-mark","Q"} "QuickVault"} span {class:"offline",span{class:"dot"} "Offline by default"}}
+        div {class:"card-heading",
+            span {class:"brand-mark", Svg{icon:Icon::Lock}}
+            span {class:"brand","QuickVault"}
+            if !status.is_empty() {span {class:"status-pill","{status}"}}
+        }
     }
 }
 #[component]
@@ -155,23 +162,12 @@ fn Screen(controller: Controller, revision: u64) -> Element {
     let over_budget = view.over_budget;
     let rotation_confirmed = view.rotation_confirmed;
     rsx! {
-        main {class:"shell", "data-qv-epoch":"{epoch.0}", Header{}
+        main {class:"shell", "data-qv-epoch":"{epoch.0}",
             if fixture && cfg!(target_os="android") {p {class:"warning","Synthetic validation build · isolated test vault only"}}
             if preview {p {class:"hint","Read-only preview · vault actions are disabled. Do not enter real credentials."}}
-            div {class:"layout",
-                aside {class:"intro",
-                    span {class:"eyebrow","YOUR SECRETS, YOUR DEVICE"}
-                    h1 {"A quieter place" br{} "for your passwords."}
-                    p {class:"lead","Your vault stays encrypted on this device. No account, server, or internet connection is needed."}
-                    div {class:"principles",
-                        div {span {class:"principle-icon","01"} div {strong {"Local first"} p {"Open your vault wherever you are."}}}
-                        div {span {class:"principle-icon","02"} div {strong {"Keys stay with you"} p {"Your password or recovery phrase opens your vault."}}}
-                        div {span {class:"principle-icon","03"} div {strong {"A clear lock boundary"} p {"Locking clears app state and cancels pending work."}}}
-                    }
-                    div {class:"security-note", "Framework and OS copies have best-effort cleanup. Device storage, swap, and hibernation protection depend on the OS."}
-                }
+            div {class:"locked-body",
                 section {class:"card",key:"screen-{epoch.0}",
-                    div {class:"card-heading",span{class:"eyebrow","YOUR PRIVATE VAULT"} span {class:"status-pill", "{status}"}}
+                    Brand{status}
                     if view.reduced_lifecycle {
                         p {class:"warning",role:"status","Automatic locking on screen lock or sleep is unavailable. Manual lock and the 60-second inactivity lock remain active."}
                     }
@@ -184,7 +180,7 @@ fn Screen(controller: Controller, revision: u64) -> Element {
                         if need.old {
                             SecretInput{controller:controller.clone(),epoch,field:InputField::Repeat,label:"Previous master password",id:"resume-old",secret:true,disabled:view.busy}
                         }
-                        button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::ResumeComplete),"Complete the rotation" span{"→"}}
+                        button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::ResumeComplete),"Complete the rotation"}
                         button {class:"secondary","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::ResumeRollback),"Roll back to the previous generation"}
                         button {class:"text-button","data-qv-clear":"true",onclick:{let c=controller.clone();move |_|c.lock()},"Cancel"}
                     }else if phase==Phase::Rotation{
@@ -193,7 +189,7 @@ fn Screen(controller: Controller, revision: u64) -> Element {
                         div {class:"phrase", "{phrase_text}"}
                         if rotation_confirmed {
                             p {class:"notice","The new recovery words are confirmed."}
-                            button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::InstallRotation),if view.busy{"Installing…"}else{"Install the key rotation"} span{"→"}}
+                            button {class:"primary","data-qv-clear":"true",disabled:view.busy,onclick:invoke(Action::InstallRotation),if view.busy{"Installing…"}else{"Install the key rotation"}}
                         }else{
                             p {"Confirm the requested words to continue."}
                             for (field,id,label) in [(InputField::Word0,"rot-word-0","First requested word"),(InputField::Word1,"rot-word-1","Second requested word"),(InputField::Word2,"rot-word-2","Third requested word")] {
@@ -244,14 +240,15 @@ fn Screen(controller: Controller, revision: u64) -> Element {
                         }
                         label {class:"check",input {r#type:"checkbox",checked:acknowledged,disabled:view.busy,onchange:move|event|consent.set((epoch,event.checked()))} span {"I understand these protection limits and acknowledge reduced protection where shown."}}
                         if phase==Phase::WeakPassword{
-                            div {class:"warning",role:"alertdialog","aria-label":"Weak password confirmation", p{"This password is weak and could be guessed by an attacker who obtains your vault file. Create the vault anyway?"}
-                                button {class:"secondary",onclick:{let c=controller.clone();move |_|c.select_mode(epoch,Mode::Create)},"Choose a stronger password"}
-                                button {disabled:view.weak_seconds>0,onclick:invoke(Action::ConfirmWeak),"Create anyway · {view.weak_seconds}s"}
+                            div {class:"weak warning",role:"alertdialog","aria-label":"Weak password confirmation", p{"This password is weak and could be guessed by an attacker who obtains your vault file. Create the vault anyway?"}
+                                div {class:"row",
+                                    button {class:"secondary-small",autofocus:true,onclick:{let c=controller.clone();move |_|c.select_mode(epoch,Mode::Create)},"Choose a stronger password"}
+                                    button {class:"danger-small",disabled:view.weak_seconds>0,onclick:invoke(Action::ConfirmWeak),"Create anyway · {view.weak_seconds}s"}
+                                }
                             }
                         }else{
                             button {class:"primary","data-qv-clear":"true",disabled:view.busy||!acknowledged||preview,onclick:invoke(if mode==Mode::Create{Action::Create}else if mode==Mode::Recover{Action::Recover}else if mode==Mode::Join{Action::JoinDevice}else{Action::Unlock}),
                                 if view.busy{"Opening…"}else if mode==Mode::Create{"Create vault"}else if mode==Mode::Recover{"Open with recovery phrase"}else if mode==Mode::Join{"Join"}else{"Unlock vault"}
-                                span {"→"}
                             }
                         }
                         if let Some(banner) = controller.autofill_banner() {
@@ -294,7 +291,7 @@ fn Screen(controller: Controller, revision: u64) -> Element {
                         }
                         button {class:"secondary",onclick:{let c=controller.clone();move |_|c.lock()},"Decline and lock"}
                     }else{
-                        div {class:"ready-mark","✓"}
+                        div {class:"ready-mark", Svg{icon:Icon::Check}}
                         h2 {"Your vault is open"}
                         p {class:"muted","Your vault is unlocked on this device. Lock it when you step away."}
                         p {class:"hint","The vault locks after 60 seconds of inactivity. Lock it whenever you step away."}
@@ -304,7 +301,6 @@ fn Screen(controller: Controller, revision: u64) -> Element {
                 }
             }
             if fixture {input {id:"validation-result",oninput:fixture_report(&controller)}}
-            footer {"QuickVault · encrypted locally · no account required"}
         }
     }
 }

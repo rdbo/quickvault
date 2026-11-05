@@ -104,16 +104,29 @@ fn with_window<T: Send>(
 ) -> (WindowEnd, Rounds, T) {
     let (w, addr) = receiver(stay);
     let done = AtomicBool::new(false);
+    let reported = AtomicBool::new(false);
     let cancel = || done.load(Ordering::SeqCst);
     std::thread::scope(|s| {
         let h = s.spawn(|| {
             let mut rounds = Vec::new();
             let end = w
-                .run(r, &fast(), &cancel, &mut |id, res| rounds.push((id, res)))
+                .run(r, &fast(), &cancel, &mut |id, res| {
+                    rounds.push((id, res));
+                    reported.store(true, Ordering::SeqCst);
+                })
                 .unwrap();
             (end, rounds)
         });
         let out = f(addr);
+        // The initiator can return before the responder reads its last frame
+        // (for example a Cancel). Closing the window at once would race that
+        // read, so a one-round window first gets a bounded chance to report.
+        if !stay {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            while !reported.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
         done.store(true, Ordering::SeqCst);
         let (end, rounds) = h.join().unwrap();
         (end, rounds, out)
