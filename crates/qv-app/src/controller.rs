@@ -754,6 +754,23 @@ impl Controller {
         }
         s.revision = s.revision.wrapping_add(1);
     }
+    /// Keep the lock screen's copy of the open vault's name current (after
+    /// unlock and rename; 0009 §1.8). Writes only when it changed.
+    pub(crate) fn note_vault_name(&self, session: &Session) {
+        let Some(path) = self.state().vault_path.clone() else {
+            return;
+        };
+        self.note_name_at(&path, session);
+    }
+    fn note_name_at(&self, path: &std::path::Path, session: &Session) {
+        let Ok(o) = session.overview() else {
+            return;
+        };
+        let mut list = self.vault_list();
+        if list.set_name(path, o.name.expose()) {
+            let _ = list.save(&self.0.base);
+        }
+    }
     /// Remember a vault first in the list (created, opened or imported).
     /// A failed write is not fatal: the vault stays usable this run.
     fn remember_vault(&self, path: &std::path::Path) -> bool {
@@ -1471,13 +1488,16 @@ impl Controller {
             return;
         }
         let opened = match &result {
-            Ok(Opened::Created(_, _, path) | Opened::Session(_, path, _, _)) => Some(path.clone()),
+            Ok(Opened::Created(c, _, path)) => Some((path.clone(), &c.session)),
+            Ok(Opened::Session(session, path, _, _)) => Some((path.clone(), session)),
             _ => None,
         };
-        if let Some(path) = opened {
-            // Remember and select it; a failed list write never blocks use.
+        if let Some((path, session)) = opened {
+            // Remember and select it with its stored name; a failed list
+            // write never blocks use.
             drop(s);
             self.remember_vault(&path);
+            self.note_name_at(&path, session);
             *self.0.selected.lock().unwrap_or_else(|p| p.into_inner()) = Some(path);
             s = self.state();
             if s.epoch != epoch || token.is_cancelled() {

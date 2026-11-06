@@ -830,7 +830,7 @@ fn Settings(controller: Controller, epoch: FormEpoch, revision: u64, pane: Pane)
                 div { class: "group-t", "VAULT" }
                 div { class: "card",
                     if let Some(v) = open_vault.as_ref() {
-                        div { class: "set-row", id: "settings-file", span { class: "si", Svg { icon: Icon::File } } span { class: "l", b { "Vault file" } span { "{v.name}.qvault in {v.place}" } } }
+                        div { class: "set-row", id: "settings-file", span { class: "si", Svg { icon: Icon::File } } span { class: "l", b { "Vault file" } span { "{v.file} in {v.place}" } } }
                     }
                     div { class: "set-row", id: "settings-folder", span { class: "si", Svg { icon: Icon::Folder } } span { class: "l", b { "Folder for new vaults" } span { "{folder_place}" } }
                         if cfg!(target_os = "linux") && !crate::documents::picker_missing() {

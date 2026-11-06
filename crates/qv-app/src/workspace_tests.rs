@@ -1564,3 +1564,39 @@ fn vaults_are_created_by_name_listed_selected_and_imported_in_place() {
         Some(outside.as_path())
     );
 }
+
+#[test]
+fn the_vault_name_is_the_stored_one_and_files_are_never_renamed() {
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::new();
+    create_named(&env, "Personal").unwrap();
+    let file = env.dir.join("vaults/Personal.qvault");
+    // Rename in Settings: the stored (synced) name changes, the file does not.
+    env.c.navigate(env.epoch(), Screen::Settings(Pane::General));
+    env.put(WsField::VaultName, "Home");
+    env.act(WsAction::SaveSettings);
+    assert_eq!(env.error(), None);
+    assert_eq!(env.read(views::overview).name.as_str(), "Home");
+    env.c.lock();
+    let v = env.c.selected_vault().unwrap();
+    assert_eq!(
+        (v.name.as_str(), v.file.as_str()),
+        ("Home", "Personal.qvault")
+    );
+    assert!(file.is_file());
+    assert!(!env.dir.join("vaults/Home.qvault").exists());
+    // The copy survives a restart; an imported vault shows its file name
+    // until it is opened here.
+    let again = Controller::new(env.dir.clone(), Arc::new(Platform(env.os.clone()))).unwrap();
+    assert_eq!(again.selected_vault().unwrap().name, "Home");
+    let outside = env.dir.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::copy(&file, outside.join("Spare.qvault")).unwrap();
+    env.c
+        .import_vault(env.epoch(), &outside.join("Spare.qvault"));
+    assert_eq!(env.c.selected_vault().unwrap().name, "Spare");
+    env.unlock(PASSWORD);
+    env.c.lock();
+    let v = env.c.selected_vault().unwrap();
+    assert_eq!((v.name.as_str(), v.file.as_str()), ("Home", "Spare.qvault"));
+}

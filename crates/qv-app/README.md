@@ -32,7 +32,8 @@ Other details:
 - Vaults (`src/vaults.rs`, plan 0041) are created by name in a default
   folder (`~/.local/share/quickvault/vaults` on Linux, changeable; the
   private folder on Android). The lock screen lists remembered vaults and
-  those in the folder, by file name. Imported vaults are used where they
+  those in the folder by their stored name (a private copy; files are never
+  renamed). Imported vaults are used where they
   are. The list is the private `vault-list` file.
 - The item editor (`src/ui/editor.rs`, rules in `src/editor.rs`) starts from
   one box that recognises sites, card numbers and Wi‑Fi names on the device.

@@ -19,10 +19,12 @@ Dates are ISO 8601. Newest first within each section.
   - "Open a vault file…" adds a vault where it is, without copying it.
   - A moved or deleted file is reported and can be removed from the list.
   - Settings shows the open vault's file and the folder for new vaults.
-  - Vault names are the file names and show before unlock (owner decision).
-    The list lives in a bounded private `vault-list` file.
-  - An existing vault in the old private folder stays listed in place (as
-    "main").
+  - A vault has one name, the one stored and synced inside it; renaming it
+    in Settings renames it everywhere. The lock screen shows a copy kept in
+    a bounded private `vault-list` file. Files are never renamed; a vault
+    not yet opened on this device shows its file name.
+  - An existing vault in the old private folder stays listed in place. It
+    shows as "main" until it is next unlocked, then by its name.
   - No vault, crypto, storage-format, protocol or sync change.
 
 - 2026-11-05: New app UI (roadmap 2.10a, plan 0040), built from the

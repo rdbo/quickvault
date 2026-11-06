@@ -238,7 +238,20 @@ store's `Exists` maps to `VaultExists` on create.
 
 ## Revisions
 
-None.
+### 2026-11-06 — One name: the stored one
+
+V1 is refined by the owner. Their reasons: the file name and the internal
+name were two sources of truth, a file-name identity does not sync, and
+renaming open files is unnecessary I/O.
+
+- A vault's name is the one stored (encrypted and synced) in its metadata.
+  It is shown everywhere.
+- The vault list keeps a plaintext copy per remembered vault: at most 256
+  bytes, one line, refreshed after unlock and after a rename in Settings.
+  The list file bound grows to 640 KiB. The lock screen uses the copy and
+  falls back to the file stem.
+- Files are never renamed. A new file still starts as `<name>.qvault`.
+  Settings shows the actual file name.
 
 ## Execution log
 
@@ -291,3 +304,16 @@ None.
     - Write failures of the list are not shown after open (the vault still
       opens).
     - A picker error can stay visible on the next create step.
+- 2026-11-06 (revision "One name"):
+  - `VaultList::names` with `set_name`, written as `name <path>\t<name>`
+    lines. Remembered paths may no longer contain a tab.
+  - `Listed::{name, file}`.
+  - `Controller::note_vault_name`, called after a successful create or
+    unlock, and in the `SaveSettings` operation.
+  - Tests: name lines in `vaults.rs`, and
+    `the_vault_name_is_the_stored_one_and_files_are_never_renamed` (rename
+    keeps the file, the copy survives a restart, an imported vault shows its
+    file name until opened).
+  - Spec 0009 §1.8, the CHANGELOG and the README were updated.
+  - Not covered: a rename arriving by sync updates the copy at the next
+    unlock, not immediately.

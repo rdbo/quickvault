@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The vault list (0009 §1.8, plan 0041): the default folder, remembered
-//! vault paths, and the vaults found in the default folder. A vault's
-//! visible name is its file name (owner decision, 2026-11-05).
+//! vault paths with a copy of each vault's name, and the vaults found in the
+//! default folder. A vault's name is the one stored (encrypted and synced)
+//! inside it; the copy here lets the lock screen show it. Files are never
+//! renamed; a vault not yet opened here shows its file name.
 //!
 //! The list file is private app state, separate from the preferences file:
 //! bounded, parsed strictly, never read through a link, and written
@@ -13,13 +15,15 @@ use crate::prefs::{read_private, write_private};
 use std::path::{Path, PathBuf};
 
 /// Largest vault-list file read or written.
-pub const MAX_LIST: usize = 64 * 1024;
+pub const MAX_LIST: usize = 640 * 1024;
 /// Most remembered vaults, and most vaults scanned in a folder.
 pub const MAX_VAULTS: usize = 64;
 /// Longest accepted path, in bytes.
 pub const MAX_PATH: usize = 4096;
-/// Longest vault name, in characters.
+/// Longest new vault name, in characters.
 pub const MAX_NAME: usize = 64;
+/// Longest remembered vault name, in bytes (longer names are cut).
+pub const MAX_SHOWN: usize = 256;
 const FILE: &str = "vault-list";
 const TEMP: &str = "vault-list.tmp";
 const EXTENSION: &str = "qvault";
@@ -31,12 +35,26 @@ pub struct VaultList {
     pub folder: Option<PathBuf>,
     /// Remembered vault files, most recently used first.
     pub recent: Vec<PathBuf>,
+    /// The name each remembered vault had when last opened here.
+    pub names: std::collections::BTreeMap<PathBuf, String>,
+}
+/// A name as remembered: one line, no control characters, bounded.
+fn shown_name(name: &str) -> Option<String> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().any(char::is_control) {
+        return None;
+    }
+    let mut end = name.len().min(MAX_SHOWN);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    Some(name[..end].to_owned())
 }
 fn valid_path(p: &str) -> Option<PathBuf> {
     let ok = !p.is_empty()
         && p.len() <= MAX_PATH
         && p.starts_with('/')
-        && !p.contains(['\0', '\n', '\r']);
+        && !p.contains(['\0', '\n', '\r', '\t']);
     ok.then(|| PathBuf::from(p))
 }
 fn is_vault(p: &Path) -> bool {
@@ -63,9 +81,19 @@ impl VaultList {
                         list.recent.push(p);
                     }
                 }
+                Some(("name", rest)) => {
+                    if let Some((p, n)) = rest.split_once('\t')
+                        && let (Some(p), Some(n)) = (valid_path(p), shown_name(n))
+                    {
+                        list.names.insert(p, n);
+                    }
+                }
                 _ => {}
             }
         }
+        // Names only for remembered vaults.
+        let recent = list.recent.clone();
+        list.names.retain(|p, _| recent.contains(p));
         list
     }
     /// The file contents.
@@ -84,6 +112,17 @@ impl VaultList {
         }
         for p in self.recent.iter().take(MAX_VAULTS) {
             line("vault", p);
+        }
+        for p in self.recent.iter().take(MAX_VAULTS) {
+            if let (Some(n), Some(ps)) = (self.names.get(p).and_then(|n| shown_name(n)), p.to_str())
+                && valid_path(ps).is_some()
+            {
+                out.push_str("name ");
+                out.push_str(ps);
+                out.push('\t');
+                out.push_str(&n);
+                out.push('\n');
+            }
         }
         out
     }
@@ -107,10 +146,21 @@ impl VaultList {
         self.recent.retain(|p| p != path);
         self.recent.insert(0, path.to_path_buf());
         self.recent.truncate(MAX_VAULTS);
+        let recent = self.recent.clone();
+        self.names.retain(|p, _| recent.contains(p));
+    }
+    /// Remember a vault's name; returns whether it changed. Only for a
+    /// remembered vault.
+    pub fn set_name(&mut self, path: &Path, name: &str) -> bool {
+        let Some(name) = shown_name(name).filter(|_| self.recent.iter().any(|p| p == path)) else {
+            return false;
+        };
+        self.names.insert(path.to_path_buf(), name.clone()) != Some(name)
     }
     /// Drop a remembered vault (the file is untouched).
     pub fn forget(&mut self, path: &Path) {
         self.recent.retain(|p| p != path);
+        self.names.remove(path);
     }
 }
 
@@ -173,8 +223,11 @@ pub fn shown_place(dir: &Path) -> String {
 pub struct Listed {
     /// Its file.
     pub path: PathBuf,
-    /// Its visible name: the file name without `.qvault`.
+    /// Its name: the one stored inside, as last seen here, else the file
+    /// name without `.qvault`.
     pub name: String,
+    /// Its file name.
+    pub file: String,
     /// Its folder, for display.
     pub place: String,
     /// The file is there (a regular file, not a link).
@@ -202,13 +255,19 @@ fn scan(dir: &Path) -> Vec<PathBuf> {
     }
     out
 }
-fn listed_one(path: PathBuf, folders: &[PathBuf]) -> Listed {
-    let name = path
+fn listed_one(path: PathBuf, folders: &[PathBuf], list: &VaultList) -> Listed {
+    let stem = path
         .file_stem()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let name = list.names.get(&path).cloned().unwrap_or(stem);
+    let file = path
+        .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
     Listed {
+        file,
         exists: regular(&path),
         in_folder: folders.contains(&parent),
         place: shown_place(&parent),
@@ -227,13 +286,13 @@ pub fn listed(base: &Path, folder: &Path, list: &VaultList) -> Vec<Listed> {
     let mut out: Vec<Listed> = list
         .recent
         .iter()
-        .map(|p| listed_one(p.clone(), &folders))
+        .map(|p| listed_one(p.clone(), &folders, list))
         .collect();
     let mut found: Vec<Listed> = folders
         .iter()
         .flat_map(|f| scan(f))
         .filter(|p| !list.recent.contains(p))
-        .map(|p| listed_one(p, &folders))
+        .map(|p| listed_one(p, &folders, list))
         .collect();
     found.sort_by_key(|l| l.name.to_lowercase());
     for l in found {
@@ -264,6 +323,19 @@ mod tests {
         assert_eq!(l.folder.as_deref(), Some(Path::new("/home/a/V")));
         assert_eq!(l.recent, [PathBuf::from("/home/a/V/Work.qvault")]);
         assert_eq!(VaultList::parse(l.encode().as_bytes()), l);
+        // Names: only for remembered vaults, one line, bounded.
+        let named = VaultList::parse(
+            "vault /v/A.qvault\nname /v/A.qvault\tFamily Vault\nname /v/B.qvault\tStray\nname /v/A.qvault\tbad\u{7}\n".as_bytes(),
+        );
+        assert_eq!(
+            named
+                .names
+                .get(Path::new("/v/A.qvault"))
+                .map(String::as_str),
+            Some("Family Vault")
+        );
+        assert_eq!(named.names.len(), 1);
+        assert_eq!(VaultList::parse(named.encode().as_bytes()), named);
         assert_eq!(
             VaultList::parse(&vec![b'a'; MAX_LIST + 1]),
             VaultList::default()
@@ -293,8 +365,16 @@ mod tests {
             l.recent.iter().filter(|p| p.ends_with("40.qvault")).count(),
             1
         );
+        assert!(l.set_name(Path::new("/v/40.qvault"), "Forty"));
+        assert!(!l.set_name(Path::new("/v/40.qvault"), "Forty"));
+        assert!(!l.set_name(Path::new("/v/unknown.qvault"), "X"));
+        assert!(!l.set_name(Path::new("/v/40.qvault"), "two\nlines"));
+        let long = "é".repeat(MAX_SHOWN);
+        assert!(l.set_name(Path::new("/v/40.qvault"), &long));
+        assert!(l.names[Path::new("/v/40.qvault")].len() <= MAX_SHOWN);
         l.forget(Path::new("/v/40.qvault"));
         assert!(!l.recent.contains(&PathBuf::from("/v/40.qvault")));
+        assert!(l.names.is_empty());
         // Not vault files, or not absolute: ignored.
         l.remember(Path::new("/v/notes.txt"));
         l.remember(Path::new("rel.qvault"));
@@ -370,9 +450,12 @@ mod tests {
         l.remember(&private.join("main.qvault"));
         l.remember(&outside.join("Work.qvault"));
         l.remember(&outside.join("Gone.qvault"));
+        // A vault opened here shows its stored name; its file is unchanged.
+        l.set_name(&private.join("main.qvault"), "Test");
         let shown = listed(&base, &private, &l);
         let names: Vec<&str> = shown.iter().map(|v| v.name.as_str()).collect();
-        assert_eq!(names, ["Gone", "Work", "main", "Banking"]);
+        assert_eq!(names, ["Gone", "Work", "Test", "Banking"]);
+        assert_eq!(shown[2].file, "main.qvault");
         assert!(!shown[0].exists && !shown[0].in_folder);
         assert!(shown[1].exists && !shown[1].in_folder);
         assert!(shown[2].in_folder && shown[3].in_folder);

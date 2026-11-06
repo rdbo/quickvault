@@ -8,7 +8,8 @@ what they say, and behaviour changes start with a spec change.
 0009 §1.8 specifies the owner-delegated app shell, preferences and item
 editor profile (2026-11-05, plan 0040), approved for implementation. 0003 §5.5
 adds the app colour token in the existing `icon` text. Its vault-list bullet (plan
-0041) makes file names the visible vault names.
+0041) covers name-only create, import in place and the lock screen's copy of
+vault names.
 
 0009 §1.7 specifies the owner-delegated bounded Android LAN QR camera profile
 (2026-11-03, plan 0039), approved for implementation; its overall Draft status

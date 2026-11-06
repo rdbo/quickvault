@@ -122,10 +122,15 @@ validation packages may exercise the implemented path.
   positions, because the webview bridge forwards only click, input, change,
   key and focus events.
 - **Vault list** (plan 0041).
-  - **Names (owner, 2026-11-05):** a vault's visible name is its file name
-    without `.qvault`. It may show before unlock; the vault's internal name
-    stays encrypted metadata.
-  - **Create:** a vault is created by name in a default folder.
+  - **Names (owner, 2026-11-06, refining 2026-11-05):** a vault has one
+    name, the one stored (encrypted and synced) in its metadata.
+    - Vault names are not secret: the app keeps a plaintext copy in its
+      private list, refreshed at each unlock and rename, so the lock screen
+      can show it.
+    - A vault never opened on this device shows its file name until then.
+    - Files are never renamed.
+  - **Create:** a vault is created by name in a default folder; its file
+    starts as `<name>.qvault`.
     - Linux: `$XDG_DATA_HOME/quickvault/vaults` (absolute only) or
       `~/.local/share/quickvault/vaults`, which the user may change.
     - Android and validation builds: the app's private `vaults/` directory.
@@ -135,8 +140,9 @@ validation packages may exercise the implemented path.
   - **Import (owner, 2026-11-05):** the system picker references a file
     where it is, without copying it.
   - **The list file:** a separate private file, never the preferences
-    file. It is bounded (64 KiB; at most 64 remembered absolute `.qvault`
-    paths of at most 4096 bytes, and one default folder), parsed strictly
+    file. It is bounded (640 KiB; at most 64 remembered absolute `.qvault`
+    paths of at most 4096 bytes, each with a copied name of at most 256
+    bytes, and one default folder), parsed strictly
     (malformed lines ignored), never read through a link, and written to a
     0600 temporary file and renamed into place.
   - **What is listed:** the remembered paths, plus regular `.qvault` files
@@ -313,6 +319,9 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-06: §1.8 vault names: the stored, synced vault name is the only
+  name; the lock screen shows a private copy, and files are never renamed
+  (owner, refining 2026-11-05).
 - 2026-11-06: §1.8 "Vault names" becomes "Vault list" (plan 0041): file names
   are the visible vault names (owner decision 2026-11-05), name-only create in
   a default folder, import in place, a bounded private vault-list file.

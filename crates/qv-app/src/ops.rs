@@ -846,8 +846,10 @@ pub(crate) fn run(
                 .with_ws(epoch, |ws, _| ws.settings.take())
                 .flatten()
                 .ok_or(AppError::InvalidInput)?;
-            c.run_op(epoch, None, move |s, _, _| {
+            c.run_op(epoch, None, move |s, _, c| {
                 s.save_settings(draft)?;
+                // The lock screen shows the vault's name (0009 §1.8).
+                c.note_vault_name(s);
                 let fresh = s.edit_settings().ok();
                 Ok(on_ws(move |ws| {
                     ws.settings = fresh;
