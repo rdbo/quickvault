@@ -10,7 +10,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use qv_crypto::lan::{
@@ -33,9 +33,47 @@ use super::*;
 
 const PASSWORD: &str = "correct horse battery staple";
 
-static KDF: Mutex<()> = Mutex::new(());
-fn kdf() -> MutexGuard<'static, ()> {
-    KDF.lock().unwrap_or_else(PoisonError::into_inner)
+/// Argon2id runs. At most `QV_TEST_KDF_JOBS` (default: half the CPUs, 1–4)
+/// Argon2id runs of 256 MiB at once in this test binary, which bounds memory
+/// without serializing every unlock.
+static KDF_SLOTS: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new());
+
+fn kdf_jobs() -> usize {
+    static JOBS: OnceLock<usize> = OnceLock::new();
+    *JOBS.get_or_init(|| {
+        std::env::var("QV_TEST_KDF_JOBS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism()
+                    .map_or(1, |n| n.get() / 2)
+                    .clamp(1, 4)
+            })
+    })
+}
+
+/// Holds one KDF slot until dropped.
+struct KdfSlot;
+
+impl Drop for KdfSlot {
+    fn drop(&mut self) {
+        let mut used = KDF_SLOTS.0.lock().unwrap_or_else(PoisonError::into_inner);
+        *used -= 1;
+        KDF_SLOTS.1.notify_one();
+    }
+}
+
+fn kdf() -> KdfSlot {
+    let mut used = KDF_SLOTS.0.lock().unwrap_or_else(PoisonError::into_inner);
+    while *used >= kdf_jobs() {
+        used = KDF_SLOTS
+            .1
+            .wait(used)
+            .unwrap_or_else(PoisonError::into_inner);
+    }
+    *used += 1;
+    KdfSlot
 }
 fn pw(s: &str) -> MasterPassword {
     MasterPassword::from_utf8(s.as_bytes()).unwrap()
@@ -828,10 +866,17 @@ fn lan_enroll_rejections_on_either_side() {
         (h.join().unwrap(), joined)
     });
     assert_eq!(joined.unwrap_err(), LanError::Cancelled);
-    // B cancels right after its reveal while A is still granting, so A sees
-    // either B's `cancelled` record or the closed connection. Either way the
-    // window fails and nothing is stored.
-    assert!(approved.is_err());
+    // B cancels right after its reveal while A's user confirms. If A had
+    // not granted yet, its window fails; if it had (A's user approved, which
+    // is what releases VK, §4.7), A reports that the new device did not
+    // finish. Nothing is stored either way.
+    match approved {
+        Err(_) => {}
+        Ok(served) => {
+            let (confirmed, failure) = super::tests::joined(served);
+            assert!(!confirmed && failure.is_some());
+        }
+    }
     assert_eq!(a.links(), 0);
 }
 

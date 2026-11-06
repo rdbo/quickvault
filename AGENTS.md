@@ -83,6 +83,10 @@ requests override the named intermediate commit/session boundary.
   `cargo test --locked`. Run focused checks while editing, then all gates on
   the final tree before handoff. Repeat affected checks after further edits;
   old logs are not current evidence. Do not weaken tests to save tokens.
+  Test binaries run at most `QV_TEST_KDF_JOBS` Argon2id unlocks (256 MiB
+  each) at once, default half the CPUs capped at 4; lower it on small
+  machines. Only the app's validation (real-window) tests need
+  `RUST_TEST_THREADS=1`.
 - Tests that cover a 0012 §1 offline row carry `// 0012 §1: <exact row>`
   above their attributes; `sh scripts/check-matrix.sh` (CI) checks the rows
   in `tests/matrix-offline.txt`; it includes untracked Rust sources and skips

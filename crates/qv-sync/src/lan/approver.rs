@@ -264,10 +264,12 @@ fn worker(
             .ok()
             .and_then(|()| check_hello(keys, &buf).ok());
         let Some(hello) = hello else {
-            // Close, send nothing, count it (§4.3).
-            conn.close();
+            // Count it, then close and send nothing (§4.3). Counting and going
+            // idle first means a client that reconnects at once is checked,
+            // not refused uncounted while this one is still `Checking`.
             shared.fail();
             shared.set(Phase::Idle, None);
+            conn.close();
             continue;
         };
         shared.set(Phase::Used, Some(&buf));

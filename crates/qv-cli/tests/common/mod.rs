@@ -15,7 +15,7 @@ use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use qv_core::{AnchorDir, Core, CoreConfig, MasterPassword, Session};
@@ -24,11 +24,47 @@ use rustix::pty::OpenptFlags;
 
 pub const PASSWORD: &str = "correct horse battery staple, but longer";
 
-static SERIAL: Mutex<()> = Mutex::new(());
+/// Bounds child processes and in-process unlocks. At most `QV_TEST_KDF_JOBS` (default: half the CPUs, 1–4)
+/// Argon2id runs of 256 MiB at once in this test binary, which bounds memory
+/// without serializing every unlock.
+static KDF_SLOTS: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new());
 
-/// Serializes child processes and in-process unlocks.
-pub fn serial() -> MutexGuard<'static, ()> {
-    SERIAL.lock().unwrap_or_else(|p| p.into_inner())
+fn kdf_jobs() -> usize {
+    static JOBS: OnceLock<usize> = OnceLock::new();
+    *JOBS.get_or_init(|| {
+        std::env::var("QV_TEST_KDF_JOBS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism()
+                    .map_or(1, |n| n.get() / 2)
+                    .clamp(1, 4)
+            })
+    })
+}
+
+/// Holds one KDF slot until dropped.
+pub struct Serial;
+
+impl Drop for Serial {
+    fn drop(&mut self) {
+        let mut used = KDF_SLOTS.0.lock().unwrap_or_else(PoisonError::into_inner);
+        *used -= 1;
+        KDF_SLOTS.1.notify_one();
+    }
+}
+
+pub fn serial() -> Serial {
+    let mut used = KDF_SLOTS.0.lock().unwrap_or_else(PoisonError::into_inner);
+    while *used >= kdf_jobs() {
+        used = KDF_SLOTS
+            .1
+            .wait(used)
+            .unwrap_or_else(PoisonError::into_inner);
+    }
+    *used += 1;
+    Serial
 }
 
 /// A private (0700) home directory with config and state directories,
@@ -166,7 +202,7 @@ pub struct Interactive {
     master: OwnedFd,
     /// Everything the terminal printed so far.
     pub seen: Vec<u8>,
-    _serial: MutexGuard<'static, ()>,
+    _serial: Serial,
 }
 
 const TIMEOUT: Duration = Duration::from_secs(60);

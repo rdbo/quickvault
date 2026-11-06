@@ -1058,7 +1058,7 @@ impl UnlockedVault {
 #[cfg(test)]
 pub(crate) mod tests {
     use std::os::unix::fs::PermissionsExt;
-    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
 
     use qv_crypto::{DerivationProfile, MacProfile};
     use qv_model::{Clock, Entry};
@@ -1066,11 +1066,47 @@ pub(crate) mod tests {
     use super::*;
     use crate::fs::test_dir::{TestDir, write_file};
 
-    /// Argon2id at 256 MiB: at most one run at a time in this test binary.
-    static KDF: Mutex<()> = Mutex::new(());
+    /// Argon2id runs. At most `QV_TEST_KDF_JOBS` (default: half the CPUs, 1–4)
+    /// Argon2id runs of 256 MiB at once in this test binary, which bounds memory
+    /// without serializing every unlock.
+    static KDF_SLOTS: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new());
 
-    pub(crate) fn kdf() -> MutexGuard<'static, ()> {
-        KDF.lock().unwrap_or_else(|p| p.into_inner())
+    fn kdf_jobs() -> usize {
+        static JOBS: OnceLock<usize> = OnceLock::new();
+        *JOBS.get_or_init(|| {
+            std::env::var("QV_TEST_KDF_JOBS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .filter(|n| *n > 0)
+                .unwrap_or_else(|| {
+                    std::thread::available_parallelism()
+                        .map_or(1, |n| n.get() / 2)
+                        .clamp(1, 4)
+                })
+        })
+    }
+
+    /// Holds one KDF slot until dropped.
+    pub(crate) struct KdfSlot;
+
+    impl Drop for KdfSlot {
+        fn drop(&mut self) {
+            let mut used = KDF_SLOTS.0.lock().unwrap_or_else(PoisonError::into_inner);
+            *used -= 1;
+            KDF_SLOTS.1.notify_one();
+        }
+    }
+
+    pub(crate) fn kdf() -> KdfSlot {
+        let mut used = KDF_SLOTS.0.lock().unwrap_or_else(PoisonError::into_inner);
+        while *used >= kdf_jobs() {
+            used = KDF_SLOTS
+                .1
+                .wait(used)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        *used += 1;
+        KdfSlot
     }
 
     pub(crate) const PASSWORD: &str = "correct horse battery staple";

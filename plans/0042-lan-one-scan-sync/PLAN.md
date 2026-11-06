@@ -569,4 +569,29 @@ None.
   status line. The app test checks both screens show the same code before
   approval. App `lan` tests 8 passed; clippy clean. Installed with
   `QV_APP_QR_CAMERA=1`.
+- 2026-11-06: Owner: the test suite takes too long (~30 min). Measured:
+  parallel threads did not help, because every test unlock took one
+  process-wide KDF mutex (256 MiB Argon2id each), so all KDF work ran one
+  at a time. Replaced the mutex in the qv-cli, qv-core, qv-store and qv-sync
+  test helpers with a bounded slot count, `QV_TEST_KDF_JOBS` (default half
+  the CPUs, 1–4): `qv-cli --test edit` 25 s → 11 s. The qv-app lock is kept,
+  because its LAN tests also use it to guard the shared `TEST_LOOPBACK`
+  switch. The local gate script no longer forces `RUST_TEST_THREADS=1`
+  except for the app's validation (Xvfb) run; the whole-workspace `cargo
+  test --locked` took 352 s instead of ~25–30 min. AGENTS.md notes the
+  setting.
+  - The faster runs exposed a real ordering bug: the sync window closed a
+    refused hello's connection before counting it and going idle, so a
+    client reconnecting at once could be refused uncounted and 16 bad
+    hellos did not always close the window (0013 §8.3). It now counts and
+    goes idle first.
+  - Two tests assumed one timing: the sync-window attempt-limit test now
+    keeps connecting until the window closes, and the new-device rejection
+    test accepts both valid outcomes (window error, or "did not finish"
+    after the user's approval released VK). qv-sync suite: 8 of 8 runs pass.
+- 2026-11-06: Final gates on this tree (479 s in total): fmt, SPDX, matrix,
+  diff check, clippy (host, validation, Android `mobile` and
+  `mobile,validation`) pass; app validation tests (Xvfb) 74 passed; `cargo
+  test --locked --no-fail-fast` 906 passed, 0 failed, 2 ignored;
+  `crosscheck_lan.py` 29 values OK.
 
