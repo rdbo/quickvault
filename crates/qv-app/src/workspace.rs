@@ -897,6 +897,16 @@ impl Controller {
         let mut s = self.state();
         s.revision = s.revision.wrapping_add(1);
     }
+    /// Pointer or keyboard activity in the window (moving the mouse,
+    /// scrolling, clicking anywhere) postpones the inactivity lock, as typing
+    /// and actions already do. It never unlocks, never redraws and is ignored
+    /// for a stale epoch.
+    pub fn activity(&self, epoch: FormEpoch) {
+        let mut s = self.state();
+        if s.epoch == epoch.0 {
+            s.active = Instant::now();
+        }
+    }
     /// Read the workspace without changing the revision.
     pub(crate) fn peek<T>(&self, epoch: FormEpoch, f: impl FnOnce(&Workspace) -> T) -> Option<T> {
         let s = self.state();

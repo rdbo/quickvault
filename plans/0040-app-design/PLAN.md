@@ -957,3 +957,37 @@ separate until save; 0008 §4 reveal and clipboard timers; input bounds;
     fix (checked by reverting it) and passes with it.
   - **Also fixed:** sidebar group dots and command-bar results still used the
     automatic colour (missed in step 19); they now show chosen colours.
+- 2026-11-06 (owner: entry ⋯ menu too far away; card number unintuitive
+  while typing; locked out while moving the mouse):
+  - **Menus:** the entry menu (`anchor-detail`) and the group menu
+    (`anchor-list`) used fixed positions. Both now open under their button
+    with the editor's popover (`pop-anchor`, `menu pop end`, `pop-scrim`;
+    renamed from `ie-…` as they are shared), and become bottom sheets on
+    phones.
+  - **Card number:**
+    - The input is plain text, grouped while typing by `app.js`
+      (`data-qv-format="card"`, numeric keyboard, caret kept). Rust ignores
+      the spaces, and the value is still a protected replacement.
+    - `CardInfo::valid` waits for the brand's full length (Amex 15, else 16).
+      The start box still checks a pasted number at any length.
+    - The digits now really render monospace (a broader input rule overrode
+      `.mono`).
+  - **Inactivity:**
+    - Root handlers for mousemove and wheel never fired: the hardened bridge
+      (`third-party/dioxus-desktop/src/hardened.rs`) forwards only click,
+      input, change, keydown, keyup, focus and blur, by design.
+    - Rather than widen it, `app.js` reports pointermove, wheel, scroll and
+      touchstart as an empty input event on the hidden `#qv-activity`, at
+      most once a second and without positions. It calls
+      `Controller::activity`, which updates the idle clock only for the
+      current epoch. Clicks and keys anywhere count too.
+    - Real input under Xvfb: 75 s of mouse movement alone stayed unlocked,
+      and 65 s idle then locked.
+    - Test: `moving_the_pointer_postpones_the_inactivity_lock`. Spec 0009
+      §1.8 gains the Inactivity bullet.
+  - **Found, not fixed (same allowlist):**
+    - The title bar's drag (`onmousedown`) and double-click maximize
+      (`ondoubleclick`) and the editor's rename-on-focus-out (`onfocusout`)
+      use events the bridge drops. Drag and maximize cannot be checked
+      without a window manager.
+    - Rename still closes on Enter/Esc.

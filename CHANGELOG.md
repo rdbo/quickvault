@@ -69,6 +69,12 @@ Dates are ISO 8601. Newest first within each section.
     and list to an earlier group. Forms now record where they were opened,
     so Cancel and Save return there. Sidebar dots and command-bar results now
     show chosen colours.
+  - An item's ⋯ menu and a group's actions menu open under their button
+    instead of at a fixed spot.
+  - The card number is visible while typed, grouped in fours (Amex 4-6-5).
+    It is only called invalid once it is long enough to be complete.
+  - Moving the mouse, scrolling or touching the window now counts as
+    activity, so the 60-second lock no longer fires while you look around.
 
   No vault, crypto, storage-format, protocol or sync change (the colour is a
   value convention in an existing field). The webview policy is

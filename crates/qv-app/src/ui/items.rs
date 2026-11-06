@@ -131,6 +131,9 @@ pub(crate) fn Input(
     #[props(default)] bare: bool,
     #[props(default)] class: &'static str,
     #[props(default)] placeholder: String,
+    /// `card`: digits only, grouped as typed (app.js), numeric keyboard.
+    #[props(default)]
+    format: &'static str,
 ) -> Element {
     let limit = match field {
         WsField::Query | WsField::Command => crate::workspace::QUERY_MAX,
@@ -168,6 +171,7 @@ pub(crate) fn Input(
         rsx! {
             for g in [generation] {
                 input { key: "{g}", id: id.clone(), class, r#type: if kind == Kind::Secret { "password" } else { "text" }, maxlength: limit, disabled, autofocus,
+                    "data-qv-format": format, inputmode: if format.is_empty() { "text" } else { "numeric" },
                     placeholder: placeholder.clone(), autocomplete: "off", spellcheck: "false", autocapitalize: "off", autocorrect: "off",
                     "aria-label": if bare { label.clone() } else { String::new() },
                     "data-qv-controlled": if controlled { "true" } else { "false" },
@@ -217,7 +221,7 @@ pub(crate) fn ListPane(
     busy: bool,
 ) -> Element {
     let _ = revision;
-    let mut menu = use_signal(|| None::<(f64, f64)>);
+    let mut menu = use_signal(|| false);
     let form = screen.is_form() || busy;
     let current = match &screen {
         Screen::Entry(e)
@@ -340,10 +344,22 @@ pub(crate) fn ListPane(
             div { class: "phone-head", h2 { "{title}" } }
             div { class: "list-head",
                 h2 { "{title}" } span { class: "count", "{count}" } span { class: "sp" }
-                if group.is_some() {
-                    button { class: "icon-btn", id: "group-menu", "aria-label": "Group actions", title: "Group actions", disabled: form,
-                        onclick: move |e: MouseEvent| { let p = e.client_coordinates(); menu.set(Some((p.x - 200.0, p.y + 12.0))); },
-                        Svg { icon: Icon::More, large: true }
+                if let Some(g) = group {
+                    div { class: "pop-anchor",
+                        button { class: "icon-btn", id: "group-menu", "aria-label": "Group actions", title: "Group actions", disabled: form,
+                            onclick: move |_| menu.set(!menu()),
+                            Svg { icon: Icon::More, large: true }
+                        }
+                        if menu() {
+                            button { class: "pop-scrim", "aria-label": "Close menu", tabindex: "-1", onclick: move |_| menu.set(false) }
+                            div { class: "menu pop end", role: "menu",
+                                button { class: "mi", onclick: { let mut f = act(&controller, epoch, WsAction::NewGroup(g)); move |e| { menu.set(false); f(e) } }, Svg { icon: Icon::Folder } "New subgroup" }
+                                button { class: "mi", onclick: { let mut f = act(&controller, epoch, WsAction::RenameGroup(g)); move |e| { menu.set(false); f(e) } }, Svg { icon: Icon::Edit } "Rename group" }
+                                button { class: "mi", onclick: { let mut f = go(&controller, epoch, Screen::Move(ItemHandle::Group(g), None)); move |e| { menu.set(false); f(e) } }, Svg { icon: Icon::Move } "Move group" }
+                                hr {}
+                                button { class: "mi danger", onclick: { let mut f = act(&controller, epoch, WsAction::Delete(ItemHandle::Group(g))); move |e| { menu.set(false); f(e) } }, Svg { icon: Icon::Trash } "Delete group" }
+                            }
+                        }
                     }
                 }
                 button { class: "icon-btn acc", id: "list-new", "aria-label": "New item", title: "New item (Ctrl N)", disabled: form, onclick: new_entry, Svg { icon: Icon::Plus } }
@@ -388,18 +404,6 @@ pub(crate) fn ListPane(
                 }
                 if list == Screen::Browse(None) {
                     RecoveredLink { controller: controller.clone(), epoch, revision }
-                }
-            }
-        }
-        if let (Some(_), Some(g)) = (menu(), group) {
-            div { class: "layer",
-                button { class: "scrim clear", "aria-label": "Close menu", onclick: move |_| menu.set(None) }
-                div { class: "menu anchor-list", role: "menu",
-                    button { class: "mi", onclick: { let mut f = act(&controller, epoch, WsAction::NewGroup(g)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Folder } "New subgroup" }
-                    button { class: "mi", onclick: { let mut f = act(&controller, epoch, WsAction::RenameGroup(g)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Edit } "Rename group" }
-                    button { class: "mi", onclick: { let mut f = go(&controller, epoch, Screen::Move(ItemHandle::Group(g), None)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Move } "Move group" }
-                    hr {}
-                    button { class: "mi danger", onclick: { let mut f = act(&controller, epoch, WsAction::Delete(ItemHandle::Group(g))); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Trash } "Delete group" }
                 }
             }
         }
@@ -691,7 +695,9 @@ fn EntryScreen(
     live: Live,
 ) -> Element {
     let _ = revision;
-    let mut menu = use_signal(|| None::<(f64, f64)>);
+    // Which ⋯ opened the menu (0 phone bar, 1 desktop toolbar); it opens
+    // under that button (a bottom sheet on phones).
+    let mut menu = use_signal(|| None::<u8>);
     let view = match controller.read(epoch, |s| views::entry(s, entry)) {
         Some(Ok(v)) => v,
         other => return rsx! { Unreadable { error: other.and_then(Result::err) } },
@@ -702,16 +708,29 @@ fn EntryScreen(
         .unwrap_or_default();
     let item = ItemHandle::Entry(entry);
     let editable = !view.deleted && view.versions == 1;
-    let open_menu = move |e: MouseEvent| {
-        let p = e.client_coordinates();
-        menu.set(Some((p.x - 210.0, p.y + 12.0)));
+    let open_menu =
+        move |at: u8| move |_| menu.set(if menu() == Some(at) { None } else { Some(at) });
+    let entry_menu = rsx! {
+        button { class: "pop-scrim", "aria-label": "Close menu", tabindex: "-1", onclick: move |_| menu.set(None) }
+        div { class: "menu pop end", role: "menu",
+            button { class: "mi", id: "menu-history", onclick: { let mut f = go(&controller, epoch, Screen::History(entry)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::History } "History" }
+            button { class: "mi", id: "menu-attachments", onclick: { let mut f = go(&controller, epoch, Screen::Attachments(entry)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Attach } "Attachments" span { class: "sub", "{view.attachments}" } }
+            if !view.deleted {
+                button { class: "mi", id: "menu-move", onclick: { let mut f = go(&controller, epoch, Screen::Move(item, None)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Move } "Move to group…" }
+                hr {}
+                button { class: "mi danger", id: "menu-delete", onclick: { let mut f = act(&controller, epoch, WsAction::Delete(item)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Trash } "Move to trash" }
+            }
+        }
     };
     rsx! {
         div { class: "phone-bar",
             button { class: "icon-btn back", "aria-label": "Back", onclick: back(&controller, epoch), Svg { icon: Icon::Back, large: true } }
             span { class: "sp" }
             if editable { button { class: "icon-btn", "aria-label": "Edit", onclick: act(&controller, epoch, WsAction::EditEntry(entry)), Svg { icon: Icon::Edit, large: true } } }
-            button { class: "icon-btn", "aria-label": "More actions", onclick: open_menu, Svg { icon: Icon::More, large: true } }
+            div { class: "pop-anchor",
+                button { class: "icon-btn", "aria-label": "More actions", onclick: open_menu(0), Svg { icon: Icon::More, large: true } }
+                if menu() == Some(0) { {entry_menu.clone()} }
+            }
         }
         div { class: "detail-inner fade-in",
             if view.deleted {
@@ -721,7 +740,10 @@ fn EntryScreen(
             }
             div { class: "toolbar desk-only tool-end",
                 if editable { button { class: "btn", id: "entry-edit", onclick: act(&controller, epoch, WsAction::EditEntry(entry)), Svg { icon: Icon::Edit } "Edit" } }
-                button { class: "icon-btn", id: "entry-menu", "aria-label": "More actions", title: "More", onclick: open_menu, Svg { icon: Icon::More, large: true } }
+                div { class: "pop-anchor",
+                    button { class: "icon-btn", id: "entry-menu", "aria-label": "More actions", title: "More", onclick: open_menu(1), Svg { icon: Icon::More, large: true } }
+                    if menu() == Some(1) { {entry_menu} }
+                }
             }
             EntryBody { controller: controller.clone(), epoch, revision, view: view.clone(), history: None, live }
             if !files.is_empty() {
@@ -733,20 +755,6 @@ fn EntryScreen(
             div { class: "foot",
                 span { "Modified {view.modified} · created {view.created}" }
                 button { class: "link", id: "entry-history", onclick: go(&controller, epoch, Screen::History(entry)), "History" }
-            }
-        }
-        if menu().is_some() {
-            div { class: "layer",
-                button { class: "scrim clear", "aria-label": "Close menu", onclick: move |_| menu.set(None) }
-                div { class: "menu anchor-detail", role: "menu",
-                    button { class: "mi", id: "menu-history", onclick: { let mut f = go(&controller, epoch, Screen::History(entry)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::History } "History" }
-                    button { class: "mi", id: "menu-attachments", onclick: { let mut f = go(&controller, epoch, Screen::Attachments(entry)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Attach } "Attachments" span { class: "sub", "{view.attachments}" } }
-                    if !view.deleted {
-                        button { class: "mi", id: "menu-move", onclick: { let mut f = go(&controller, epoch, Screen::Move(item, None)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Move } "Move to group…" }
-                        hr {}
-                        button { class: "mi danger", id: "menu-delete", onclick: { let mut f = act(&controller, epoch, WsAction::Delete(item)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Trash } "Move to trash" }
-                    }
-                }
             }
         }
     }

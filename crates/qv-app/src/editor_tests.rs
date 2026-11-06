@@ -450,3 +450,22 @@ fn forms_keep_the_list_they_were_opened_from() {
     env.c.back(env.epoch());
     assert_ne!(env.screen(), Screen::Browse(Some(one)));
 }
+
+#[test]
+fn moving_the_pointer_postpones_the_inactivity_lock() {
+    use crate::controller::{FormEpoch, Phase};
+    use std::time::{Duration, Instant};
+    let _k = lock();
+    let env = Env::unlocked();
+    let idle = |env: &Env| env.c.state().active = Instant::now() - Duration::from_secs(61);
+    // (Read the epoch first: a snapshot applies the idle lock.)
+    let epoch = env.epoch();
+    // Activity reported after a minute without actions keeps it unlocked.
+    idle(&env);
+    env.c.activity(epoch);
+    assert_eq!(env.c.snapshot().phase, Phase::Unlocked);
+    // A stale epoch's activity does not count.
+    idle(&env);
+    env.c.activity(FormEpoch(epoch.0.wrapping_sub(1)));
+    assert_eq!(env.c.snapshot().phase, Phase::Locked);
+}

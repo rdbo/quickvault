@@ -200,7 +200,8 @@ pub struct CardInfo {
     pub brand: Option<&'static str>,
     /// The last four digits, once there are at least four.
     pub last4: Option<String>,
-    /// The Luhn check, once there are at least twelve digits.
+    /// The Luhn check, once the number is as long as a full number of its
+    /// brand (15 for Amex, else 16), so typing is not called invalid.
     pub valid: Option<bool>,
 }
 impl CardInfo {
@@ -210,10 +211,12 @@ impl CardInfo {
             return Self::default();
         };
         let last4 = (d.len() >= 4).then(|| String::from_utf8_lossy(&d[d.len() - 4..]).into_owned());
+        let brand = brand(&d);
+        let full = if brand == Some("Amex") { 15 } else { 16 };
         Self {
-            brand: brand(&d),
+            brand,
             last4,
-            valid: (d.len() >= 12).then(|| luhn(&d)),
+            valid: (d.len() >= full).then(|| luhn(&d)),
         }
     }
     /// The automatic title, like "Visa ••4242".
@@ -298,7 +301,8 @@ pub fn guess(input: &[u8]) -> Option<Guess> {
     if let Some(d) = card_digits(text.as_bytes()).filter(|d| (12..=19).contains(&d.len())) {
         let info = CardInfo::of(&d);
         let last4 = info.last4.clone().unwrap_or_default();
-        let sub = if info.valid == Some(true) {
+        // A pasted number is complete: check it whatever its length.
+        let sub = if luhn(&d) {
             "The number checks out"
         } else {
             "This number does not check out; you can still save it"
@@ -812,6 +816,11 @@ mod tests {
             Some("Card ••1234")
         );
         assert_eq!(CardInfo::of(b"not a number"), CardInfo::default());
+        // Part-typed numbers are neither valid nor invalid yet.
+        assert_eq!(CardInfo::of(b"4242 4242 4242 4").valid, None);
+        assert_eq!(CardInfo::of(b"3782 822463 1000").valid, None);
+        assert_eq!(CardInfo::of(b"3782 822463 10005").valid, Some(true));
+        assert_eq!(CardInfo::of(b"4242 4242 4242 4241").valid, Some(false));
     }
 
     #[test]

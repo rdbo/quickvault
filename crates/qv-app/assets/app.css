@@ -74,6 +74,7 @@ h1,h2,h3{margin:0;letter-spacing:-.01em}
 kbd{font:11px system-ui,sans-serif;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 5px;color:var(--text3)}
 .tb-btn{width:32px;height:30px;display:grid;place-items:center;border:0;border-radius:7px;background:none;color:var(--text2);position:relative}
 .tb-btn:hover{background:var(--raised);color:var(--text)}
+.qv-activity{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;left:-10px;top:-10px}
 .lock-mark{position:absolute;top:3px;right:4px;width:7px;height:7px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 2px var(--bg)}
 .ring{position:absolute;inset:3px;width:26px;height:24px;transform:rotate(-90deg);pointer-events:none}
 .ring circle{fill:none;stroke-width:2}
@@ -451,9 +452,6 @@ button.set-row:hover:enabled{background:var(--raised)}
 .head-bar{padding:0 0 4px!important;margin-left:-8px}.empty-tall{min-height:240px}.danger-text{color:var(--danger)}.narrow{width:42px;flex:none}
 .fixed{flex:none}.title-sm{font-size:20px;margin-bottom:10px}.grow0{flex:1;min-width:0}.min0{min-width:0}.tool-end{justify-content:flex-end;margin-bottom:-8px}
 .menu.anchor-center{left:50%;top:calc(50% + 36px);transform:translateX(-50%)}
-.menu.anchor-detail{right:24px;top:100px}
-.menu.anchor-list{left:250px;top:100px}
-@container app (max-width: 980px){.menu.anchor-list{left:90px}}
 @container app (max-width: 640px){.menu.anchor-center{transform:none}}
 
 /* Item editor (plan 0040 E1–E11). `ie-` names avoid the shared short ones. */
@@ -483,7 +481,7 @@ button.set-row:hover:enabled{background:var(--raised)}
 
 .ie{padding-top:30px}
 .ie-head{display:flex;gap:16px;align-items:flex-start}
-.ie-anchor{position:relative;display:inline-flex}
+.pop-anchor{position:relative;display:inline-flex}
 .ie-tile{width:60px;height:60px;border-radius:18px;border:0;padding:0;transition:box-shadow .15s}
 .ie-tile:hover{box-shadow:0 0 0 3px var(--line)}
 .ie-tile .ico{width:26px;height:26px}
@@ -497,9 +495,9 @@ button.set-row:hover:enabled{background:var(--raised)}
 .ie-chip .ico:last-child{width:11px;height:11px;opacity:.7}
 .ie-dot{width:8px;height:8px;border-radius:50%;background:hsl(var(--h),55%,55%);flex:none}
 .ie-auto{color:var(--text3);font-size:12px}
-.ie-scrim{position:fixed;inset:0;z-index:30;border:0;padding:0;background:transparent;width:100%;height:100%}
-.menu.ie-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:31;min-width:200px}
-.menu.ie-pop.end{left:auto;right:0}
+.pop-scrim{position:fixed;inset:0;z-index:30;border:0;padding:0;background:transparent;width:100%;height:100%}
+.menu.pop{position:absolute;top:calc(100% + 6px);left:0;z-index:31;min-width:200px}
+.menu.pop.end{left:auto;right:0}
 .ie-swatches{display:grid;grid-template-columns:repeat(6,26px);gap:8px;padding:8px 10px 10px}
 .ie-swatches button{width:26px;height:26px;border-radius:8px;padding:0;border:2px solid transparent;background:hsl(var(--h),60%,52%)}
 .ie-swatches button.on{border-color:var(--text)}
@@ -536,6 +534,7 @@ button.set-row:hover:enabled{background:var(--raised)}
 .ie-box.dashed{border-style:dashed;border-color:var(--accent)}
 .ie-box input,.ie-box textarea{flex:1;min-width:0;border:0;background:none;height:40px;font-size:14px}
 .ie-box textarea{height:auto;min-height:64px;padding:10px 0;resize:vertical;line-height:1.5}
+.qv .ie-box input.mono{font-family:ui-monospace,"JetBrains Mono","DejaVu Sans Mono","Noto Sans Mono",monospace;letter-spacing:.04em}
 .ie-box input::placeholder,.ie-box textarea::placeholder{color:var(--text3)}
 .ie-box>.hint{margin:8px 0}
 .ie-ib{width:30px;height:30px;border:0;background:none;border-radius:8px;display:grid;place-items:center;color:var(--text3);flex:none;padding:0}
@@ -595,8 +594,8 @@ button.set-row:hover:enabled{background:var(--raised)}
   .ie-notelink,.ie-undo{margin-left:0}
   .ie-tile{width:52px;height:52px;border-radius:16px}
   .qv .ie-title{font-size:22px}
-  .ie-scrim{background:var(--scrim);animation:fadeIn .15s}
+  .pop-scrim{background:var(--scrim);animation:fadeIn .15s}
   /* Bottom sheets sit above the tab bar (72 px). */
-  .menu.ie-pop,.menu.ie-pop.end{position:fixed;left:12px!important;right:12px!important;top:auto!important;bottom:calc(84px + env(safe-area-inset-bottom))!important;width:auto;min-width:0;max-height:calc(100% - 200px);overflow:auto;z-index:31}
+  .menu.pop,.menu.pop.end{position:fixed;left:12px!important;right:12px!important;top:auto!important;bottom:calc(84px + env(safe-area-inset-bottom))!important;width:auto;min-width:0;max-height:calc(100% - 200px);overflow:auto;z-index:31}
   .ie-join{flex-wrap:wrap}
 }

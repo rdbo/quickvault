@@ -141,6 +141,20 @@ fn Root(controller: Controller, revision: u64) -> Element {
     let redraw = use_context::<Redraw>();
     let view = controller.snapshot();
     let epoch = view.epoch;
+    // Clicks anywhere count as activity for the inactivity lock (reported at
+    // most twice a second). Pointer movement and scrolling arrive from app.js
+    // through `#qv-activity`, because the webview bridge forwards only click,
+    // input, change, key and focus events.
+    let last_seen = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(std::time::Instant::now())));
+    let seen = {
+        let c = controller.clone();
+        move || {
+            if last_seen.get().elapsed() >= std::time::Duration::from_millis(500) {
+                last_seen.set(std::time::Instant::now());
+                c.activity(epoch);
+            }
+        }
+    };
     let palette = use_signal(|| false);
     let unlocked = view.phase == Phase::Unlocked;
     let keys = {
@@ -149,6 +163,7 @@ fn Root(controller: Controller, revision: u64) -> Element {
         move |event: KeyboardEvent| {
             // Bubbled after the target's own handler: show its result now.
             redraw.now();
+            c.activity(epoch);
             let key = event.key().to_string();
             let ctrl = event.modifiers().ctrl() || event.modifiers().meta();
             if unlocked && ctrl && matches!(key.as_str(), "k" | "K" | "f" | "F") {
@@ -179,7 +194,8 @@ fn Root(controller: Controller, revision: u64) -> Element {
     };
     rsx! {
         div { class: "qv", "data-mode": view.theme.name(), "data-qv-epoch": "{epoch.0}", tabindex: "-1", onkeydown: keys,
-            onclick: move |_| redraw.now(), oninput: move |_| redraw.now(),
+            onclick: { let seen = seen.clone(); move |_| { seen(); redraw.now() } },
+            oninput: move |_| redraw.now(),
             shell::TitleBar {
                 controller: Some(controller.clone()), epoch, unlocked, idle_left: view.idle_left, busy: view.busy,
                 palette: unlocked.then_some(palette), vault: name, idle_only: view.reduced_lifecycle,
@@ -191,6 +207,8 @@ fn Root(controller: Controller, revision: u64) -> Element {
                 Locked { controller: controller.clone(), revision }
             }
             shell::ResizeHandles {}
+            input { id: "qv-activity", class: "qv-activity", r#type: "text", tabindex: "-1", "aria-hidden": "true", maxlength: 0,
+                oninput: { let c = controller.clone(); move |e: FormEvent| { e.stop_propagation(); c.activity(epoch); } } }
         }
     }
 }

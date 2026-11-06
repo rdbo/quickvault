@@ -38,5 +38,37 @@ document.addEventListener("click",event=>{
 document.addEventListener("visibilitychange",()=>{
     if(document.hidden){clearControls();clearRevealed();}
 });
+// A card number groups as it is typed (4-4-4-4, Amex 4-6-5), keeping the
+// caret after the same digit. It runs before Rust reads the input; Rust
+// ignores the spaces. Formatting only; nothing is kept here.
+function groupCard(digits){
+    const sizes=/^3[47]/.test(digits)?[4,6,5]:[4,4,4,4,3];
+    const parts=[];let at=0;
+    for(const n of sizes){if(at>=digits.length)break;parts.push(digits.slice(at,at+n));at+=n;}
+    return parts.join(" ");
+}
+document.addEventListener("input",event=>{
+    const el=event.target;
+    if(!(el instanceof HTMLInputElement)||el.getAttribute("data-qv-format")!=="card")return;
+    const before=el.value.slice(0,el.selectionStart??el.value.length).replace(/\D/g,"").length;
+    const formatted=groupCard(el.value.replace(/\D/g,"").slice(0,19));
+    if(formatted===el.value)return;
+    el.value=formatted;
+    let caret=0,seen=0;
+    while(caret<formatted.length&&seen<before){if(/\d/.test(formatted[caret]))seen++;caret++;}
+    el.setSelectionRange(caret,caret);
+},true);
+// Pointer movement and scrolling count as activity for the inactivity lock.
+// The webview bridge forwards only click, input, change, key and focus
+// events, so report them as an empty input event on a hidden control, at
+// most once a second. Nothing about the pointer (no position) is sent.
+let lastActivity=0;
+function activity(){
+    const now=Date.now();
+    if(now-lastActivity<1000)return;
+    lastActivity=now;
+    document.getElementById("qv-activity")?.dispatchEvent(new Event("input",{bubbles:true}));
+}
+for(const name of ["pointermove","wheel","scroll","touchstart"])document.addEventListener(name,activity,{capture:true,passive:true});
 // Clipboard commands must go from Rust to the OS with bounded ownership.
 for(const name of ["copy","cut"])document.addEventListener(name,event=>event.preventDefault());

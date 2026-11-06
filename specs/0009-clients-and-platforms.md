@@ -116,6 +116,11 @@ validation packages may exercise the implemented path.
   - Only local `file:` results are accepted.
   - 0011 §4's no-follow and ownership rules still apply to the chosen path.
   - A path field appears only when no picker is available.
+- **Inactivity.** The 60-second inactivity lock counts any use of the window
+  as activity: keys, clicks, typing, pointer movement, scrolling and touch.
+  Pointer movement and scrolling are reported at most once a second, without
+  positions, because the webview bridge forwards only click, input, change,
+  key and focus events.
 - **Vault names.** No vault name is shown before unlock, since names are
   encrypted metadata.
 - **Item editor.** A new item starts from one box, "What are you saving?".
@@ -123,6 +128,9 @@ validation packages may exercise the implemented path.
   - The box is a protected input, since people paste card numbers into it.
     For a card, only its brand, last four digits and checksum validity are
     shown, and the number moves into the protected card-number field.
+  - The card-number input shows what the user types, grouped like the card,
+    so it can be checked. The value is still stored protected, and a saved
+    or start-box number shows only its last four digits.
   - Values derived from protected fields are limited to:
     - a card number's brand, last four digits and validity;
     - whether a protected field has a saved value.
@@ -285,6 +293,9 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-06: §1.8: pointer movement, scrolling and touch count as activity
+  for the inactivity lock; the card-number input shows typed digits grouped
+  (owner feedback; owner-delegated details).
 - 2026-11-06: §1.8: present the missing Linux lock detection as a mark on
   the lock button and an "Idle only" settings row, not a permanent banner
   (owner: the banner "never goes away"; presentation owner-delegated).

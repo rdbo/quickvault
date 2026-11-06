@@ -64,7 +64,7 @@ fn type_name(form: &EntryFormView) -> String {
 
 /// A transparent full-window layer under an open popover; a click closes it.
 fn scrim(mut pop: Signal<Option<Pop>>) -> Element {
-    rsx! { button { class: "ie-scrim", "aria-label": "Close", tabindex: "-1", onclick: move |_| pop.set(None) } }
+    rsx! { button { class: "pop-scrim", "aria-label": "Close", tabindex: "-1", onclick: move |_| pop.set(None) } }
 }
 
 #[component]
@@ -248,27 +248,27 @@ fn Editor(controller: Controller, epoch: FormEpoch, revision: u64, form: EntryFo
         }
         div { class: if is_note { "detail-inner ie isnote fade-in" } else { "detail-inner ie fade-in" }, onkeydown: keys,
             div { class: "ie-head",
-                div { class: "ie-anchor",
+                div { class: "pop-anchor",
                     button { class: "tile ie-tile {hue}", id: "item-colour", "aria-label": "Choose a colour", title: "Colour",
                         onclick: move |_| pop.set(if pop() == Some(Pop::Colour) { None } else { Some(Pop::Colour) }),
                         Svg { icon: kind_icon(kind.hint()), large: true }
                     }
                     if pop() == Some(Pop::Colour) {
                         {scrim(pop)}
-                        {swatches(&controller, epoch, form.colour, pop, "menu ie-pop")}
+                        {swatches(&controller, epoch, form.colour, pop, "menu pop")}
                     }
                 }
                 div { class: "ie-grow",
                     Input { controller: controller.clone(), epoch, field: WsField::Title, label: "Title", kind: Kind::Line, value: Some(form.title.to_string()), disabled: false, bare: true, class: "ie-title", placeholder, autofocus: form.new && form.title.is_empty() && form.auto_title.is_none() }
                     div { class: "ie-chips",
-                        div { class: "ie-anchor",
+                        div { class: "pop-anchor",
                             button { class: "ie-chip", id: "type-chip", "aria-haspopup": "menu",
                                 onclick: move |_| pop.set(if pop() == Some(Pop::Type) { None } else { Some(Pop::Type) }),
                                 Svg { icon: kind_icon(kind.hint()) } "{type_name(&form)}" Svg { icon: Icon::ChevronDown }
                             }
                             if pop() == Some(Pop::Type) {
                                 {scrim(pop)}
-                                div { class: "menu ie-pop", role: "menu",
+                                div { class: "menu pop", role: "menu",
                                     div { class: "label", "WHAT IT IS" }
                                     for t in ItemType::ALL {
                                         button { class: "mi", role: "menuitem", id: "type-{t.hint()}",
@@ -280,7 +280,7 @@ fn Editor(controller: Controller, epoch: FormEpoch, revision: u64, form: EntryFo
                                 }
                             }
                         }
-                        div { class: "ie-anchor",
+                        div { class: "pop-anchor",
                             button { class: "ie-chip", id: "group-chip", "aria-haspopup": "menu",
                                 onclick: move |_| pop.set(if pop() == Some(Pop::Group) { None } else { Some(Pop::Group) }),
                                 if let Some((_, name, h)) = group.clone() { span { class: "ie-dot {h}" } "{name}" } else { "Group" }
@@ -288,7 +288,7 @@ fn Editor(controller: Controller, epoch: FormEpoch, revision: u64, form: EntryFo
                             }
                             if pop() == Some(Pop::Group) {
                                 {scrim(pop)}
-                                div { class: "menu ie-pop", role: "menu",
+                                div { class: "menu pop", role: "menu",
                                     div { class: "label", "SAVE IN" }
                                     for (g, name, h) in groups.clone() {
                                         button { class: "mi", role: "menuitem",
@@ -415,6 +415,8 @@ fn field_row(
     let open = pop() == Some(Pop::Field(i));
     let showing = form.showing == Some(i);
     let protected_role = matches!(row.role, Role::Password | Role::Hidden | Role::CardNumber);
+    let card_number = row.role == Role::CardNumber;
+    let card_format: &'static str = if card_number { "card" } else { "" };
     let label = if renaming() == Some(i) {
         let done = move |e: KeyboardEvent| {
             if e.key() == Key::Enter || e.key() == Key::Escape {
@@ -478,7 +480,7 @@ fn field_row(
     };
     let gen_button = rsx! {
         if row.role == Role::Password {
-            div { class: "ie-anchor",
+            div { class: "pop-anchor",
                 button { class: "ie-ib", id: "gen-{i}", "aria-label": "Generate a password", title: "Generate", onclick: open_gen, Svg { icon: Icon::Generator } }
                 if gen_open { {scrim(pop)} {generator(controller, epoch, i, pop)} }
             }
@@ -520,9 +522,12 @@ fn field_row(
     } else if protected_role || (row.protected && row.kind != FieldKind::Multiline) {
         rsx! {
             div { class: "ie-box",
-                Input { controller: controller.clone(), epoch, field: WsField::Replacement(i), label: row.name.to_string(), kind: if showing { Kind::Line } else { Kind::Secret }, value: None, disabled: false, bare: true, class: "mono", placeholder: placeholder(&row), autofocus: changing().contains(&i) }
+                // A card number shows what is typed (grouped in fours, like the
+                // card), so the user can check it; it is still stored protected.
+                Input { controller: controller.clone(), epoch, field: WsField::Replacement(i), label: row.name.to_string(), kind: if showing || card_number { Kind::Line } else { Kind::Secret }, value: None, disabled: false, bare: true, class: "mono", placeholder: placeholder(&row), autofocus: changing().contains(&i), format: card_format }
                 if let Some((t, class)) = check.clone() { span { class, "{t}" } }
-                if showing {
+                if card_number {
+                } else if showing {
                     button { class: "ie-ib", "aria-label": "Hide", title: "Hide", onclick: act(controller, epoch, WsAction::Hide), Svg { icon: Icon::EyeOff } }
                 } else {
                     button { class: "ie-ib", "aria-label": "Show for 30 seconds", title: "Show for 30 s", disabled: !row.replaced, onclick: act(controller, epoch, WsAction::Reveal(reveal_key.clone())), Svg { icon: Icon::Eye } }
@@ -577,14 +582,14 @@ fn field_row(
         div { class: if open { "ie-row open" } else { "ie-row" },
             {label}
             {value}
-            div { class: "ie-anchor",
+            div { class: "pop-anchor",
                 button { class: "ie-ib ie-more", id: "field-more-{i}", "aria-label": "Options for {row.name.as_str()}", "aria-haspopup": "menu", "aria-expanded": if open { "true" } else { "false" },
                     onclick: move |_| pop.set(if open { None } else { Some(Pop::Field(i)) }),
                     Svg { icon: Icon::More }
                 }
                 if open {
                     {scrim(pop)}
-                    div { class: "menu ie-pop end", role: "menu",
+                    div { class: "menu pop end", role: "menu",
                         button { class: "mi", role: "menuitem", onclick: move |_| { pop.set(None); renaming.set(Some(i)); }, Svg { icon: Icon::Edit } "Rename" }
                         if can_hide {
                             button { class: "mi", role: "menuitem", id: "field-protect-{i}", onclick: menu_item(WsAction::ToggleProtect(i)),
@@ -648,7 +653,7 @@ fn generator(
         }
     };
     rsx! {
-        div { class: "menu ie-pop end ie-gen", role: "dialog", "aria-label": "Generate a password",
+        div { class: "menu pop end ie-gen", role: "dialog", "aria-label": "Generate a password",
             div { class: "out mono revealed", id: "gen-value", if value.is_empty() { "…" } else { "{value.as_str()}" } }
             label { span { if words { "Words" } else { "Length" } } b { "{n}" } }
             input { r#type: "range", id: "gen-range", min: "{min}", max: "{max}", initial_value: "{n}", "aria-label": if words { "Words" } else { "Length" }, oninput: slide }
@@ -716,13 +721,13 @@ fn adder(
             div { class: "ie-adder",
                 div { class: "ie-box dashed", onkeydown: keys,
                     Input { controller: controller.clone(), epoch, field: WsField::NewFieldName, label: "Field name", kind: Kind::Line, value: None, disabled: false, bare: true, autofocus: true, placeholder: "Name the field, like PIN or Email" }
-                    div { class: "ie-anchor",
+                    div { class: "pop-anchor",
                         button { class: "ie-kindpill", id: "add-kind", "aria-label": "Kind of field", onclick: move |_| pop.set(if kind_open { None } else { Some(Pop::Kind) }),
                             "{kind_label(shown)}" Svg { icon: Icon::ChevronDown }
                         }
                         if kind_open {
                             {scrim(pop)}
-                            div { class: "menu ie-pop end", role: "menu",
+                            div { class: "menu pop end", role: "menu",
                                 div { class: "label", "KIND OF FIELD" }
                                 for k in ADD_KINDS {
                                     button { class: "mi", role: "menuitem", onclick: move |_| { add_kind.set(Some(k)); pop.set(None); },
