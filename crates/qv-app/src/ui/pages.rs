@@ -78,7 +78,7 @@ fn Head(
     }
 }
 
-fn strength_label(bits: f64) -> &'static str {
+pub(crate) fn strength_label(bits: f64) -> &'static str {
     if bits < 50.0 {
         "Weak"
     } else if bits < 70.0 {

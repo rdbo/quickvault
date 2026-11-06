@@ -5,6 +5,7 @@
 //! the mandatory recovery snapshot before permanent deletion (0007 §3), and
 //! explicit consent before that snapshot exceeds its budget.
 use crate::controller::{AppError, Controller, FormEpoch, State};
+use crate::editor::ItemType;
 use crate::workspace::{
     Apply, CopyKey, EntryForm, GenFlag, GenMode, GroupForm, LINE_MAX, MULTI_MAX, Pane, PhraseView,
     Report, RevealKey, Screen, Workspace, WsAction, WsField, on_ws, protect,
@@ -100,6 +101,20 @@ pub(crate) fn restore_target(base: &Path, ws: &Workspace) -> Result<PathBuf, App
 fn field_value(text: &str) -> Result<FieldValue, AppError> {
     FieldValue::text(text).map_err(|_| AppError::InvalidInput)
 }
+/// Append an empty field with this protection to the open entry form.
+fn add_field(
+    ws: &mut Workspace,
+    name: &str,
+    kind: FieldKind,
+    protected: bool,
+) -> Result<(), AppError> {
+    let form = ws.entry_form.as_mut().ok_or(AppError::InvalidInput)?;
+    form.draft.add_field(name, kind, field_value("")?)?;
+    if let Some(f) = form.draft.entry_mut().fields.last_mut() {
+        f.protected = protected;
+    }
+    Ok(())
+}
 /// Size bound for a value shown in an editable input.
 fn editable(kind: FieldKind, value: &[u8]) -> bool {
     let limit = if kind == FieldKind::Multiline {
@@ -128,9 +143,46 @@ fn entry_form(draft: qv_core::EntryDraft, new: bool) -> EntryForm {
         new,
         replacements: Default::default(),
         generated: Vec::new(),
+        filled: Vec::new(),
         too_large,
         notes_too_large,
+        start: false,
+        removed: None,
     }
+}
+/// Fill a new item from what its start box held (plan 0040 E1). A card
+/// number goes only into a card's protected number; it never becomes a title.
+fn apply_start(
+    form: &mut EntryForm,
+    kind: ItemType,
+    start: crate::editor::Start,
+) -> Result<(), AppError> {
+    use crate::editor::{CARD_NUMBER, NETWORK, Start, find};
+    let text = |v: &str| qv_core::Text::new(v).map_err(|_| AppError::InvalidInput);
+    let entry = form.draft.entry_mut();
+    match start {
+        Start::Card(digits) => {
+            if kind == ItemType::Card
+                && let Some(i) = find(&entry.fields, CARD_NUMBER)
+            {
+                let i = u16::try_from(i).map_err(|_| AppError::InvalidInput)?;
+                form.replacements.insert(i, protect(&digits)?);
+                form.filled.push(i);
+            }
+        }
+        Start::Site(domain) => match (
+            kind,
+            entry.fields.iter_mut().find(|f| f.kind == FieldKind::Url),
+        ) {
+            (ItemType::Login, Some(f)) => f.value = field_value(&domain)?,
+            _ => entry.title = text(&domain)?,
+        },
+        Start::Name(name) => match (kind, find(&entry.fields, NETWORK)) {
+            (ItemType::Wifi, Some(i)) => entry.fields[i].value = field_value(&name)?,
+            _ => entry.title = text(&name)?,
+        },
+    }
+    Ok(())
 }
 fn set_screen(ws: &mut Workspace, screen: Screen) {
     ws.screen = screen;
@@ -278,11 +330,12 @@ pub(crate) fn run(
         }
         WsAction::NewEntry(group) => c
             .with_ws(epoch, |ws, session| -> Result<(), AppError> {
-                let mut draft = session.new_entry(group, "login", "")?;
-                draft.add_field("username", FieldKind::Text, field_value("")?)?;
-                draft.add_field("password", FieldKind::Secret, field_value("")?)?;
-                draft.add_field("url", FieldKind::Url, field_value("")?)?;
-                ws.entry_form = Some(entry_form(draft, true));
+                // The type and its fields are chosen in the start step.
+                let draft = session.new_entry(group, ItemType::Login.hint(), "")?;
+                let mut form = entry_form(draft, true);
+                form.start = true;
+                ws.inputs.remove(&WsField::Start);
+                ws.entry_form = Some(form);
                 set_screen(ws, Screen::EditEntry);
                 Ok(())
             })
@@ -298,36 +351,131 @@ pub(crate) fn run(
                 Ok(())
             })
             .ok_or(AppError::InvalidInput)?,
+        WsAction::StartAs(kind) => c
+            .with_ws(epoch, |ws, _| -> Result<(), AppError> {
+                let start = ws.inputs.remove(&WsField::Start);
+                let form = ws
+                    .entry_form
+                    .as_mut()
+                    .filter(|f| f.start)
+                    .ok_or(AppError::InvalidInput)?;
+                let guess = start
+                    .as_ref()
+                    .and_then(|s| crate::editor::guess(s.expose_secret()));
+                let kind = kind
+                    .or(guess.as_ref().map(|g| g.kind))
+                    .unwrap_or(ItemType::Login);
+                crate::editor::set_type(form, kind)?;
+                form.start = false;
+                if let Some(g) = guess {
+                    apply_start(form, kind, g.start)?;
+                }
+                Ok(())
+            })
+            .ok_or(AppError::InvalidInput)?,
+        WsAction::SetType(kind) => c
+            .with_ws(epoch, |ws, _| -> Result<(), AppError> {
+                let form = ws.entry_form.as_mut().ok_or(AppError::InvalidInput)?;
+                if crate::editor::set_type(form, kind)? {
+                    ws.notice = Some("Changed the type. Fields you had filled in were kept.");
+                }
+                Controller::hide(ws);
+                Ok(())
+            })
+            .ok_or(AppError::InvalidInput)?,
+        WsAction::SetGroup(group) => c
+            .with_ws(epoch, |ws, _| -> Result<(), AppError> {
+                let form = ws.entry_form.as_mut().ok_or(AppError::InvalidInput)?;
+                Ok(form.draft.set_group(group)?)
+            })
+            .ok_or(AppError::InvalidInput)?,
+        WsAction::SetHue(pick) => c
+            .with_ws(epoch, |ws, _| -> Result<(), AppError> {
+                let token = |icon: Option<&qv_core::Text>| -> Result<Option<qv_core::Text>, AppError> {
+                    crate::editor::pick_colour(icon.map(qv_core::Text::expose), pick)?
+                        .map(|t| qv_core::Text::new(&t).map_err(|_| AppError::InvalidInput))
+                        .transpose()
+                };
+                if ws.screen == Screen::EditGroup {
+                    let g = ws.group_form.as_mut().ok_or(AppError::InvalidInput)?;
+                    let icon = token(g.draft.group().icon.as_ref())?;
+                    g.draft.group_mut().icon = icon;
+                } else {
+                    let f = ws.entry_form.as_mut().ok_or(AppError::InvalidInput)?;
+                    let icon = token(f.draft.entry().icon.as_ref())?;
+                    f.draft.entry_mut().icon = icon;
+                }
+                Ok(())
+            })
+            .ok_or(AppError::InvalidInput)?,
         WsAction::AddField(kind) => c
             .with_ws(epoch, |ws, _| -> Result<(), AppError> {
-                let name = ws.text(WsField::NewFieldName)?.to_owned();
-                let mut name = zeroize::Zeroizing::new(name);
-                if name.is_empty() {
-                    // The "+ Kind" buttons work without a typed name.
-                    *name = crate::views::kind_name(kind).to_lowercase();
-                }
-                let form = ws.entry_form.as_mut().ok_or(AppError::InvalidInput)?;
-                form.draft.add_field(&name, kind, field_value("")?)?;
+                let typed = zeroize::Zeroizing::new(ws.text(WsField::NewFieldName)?.trim().to_owned());
+                let (kind, protected) = match kind {
+                    Some(k) => (k, k.protected_by_default()),
+                    None => crate::editor::kind_for(&typed),
+                };
+                let name = if typed.is_empty() {
+                    // Adding without a name names the field after its kind.
+                    zeroize::Zeroizing::new(crate::editor::kind_label(kind).to_owned())
+                } else {
+                    typed
+                };
+                add_field(ws, &name, kind, protected)?;
                 ws.inputs.remove(&WsField::NewFieldName);
+                Ok(())
+            })
+            .ok_or(AppError::InvalidInput)?,
+        WsAction::AddNamedField(name) => c
+            .with_ws(epoch, |ws, _| -> Result<(), AppError> {
+                let (kind, protected) = crate::editor::kind_for(name);
+                add_field(ws, name, kind, protected)?;
+                ws.inputs.remove(&WsField::NewFieldName);
+                Ok(())
+            })
+            .ok_or(AppError::InvalidInput)?,
+        WsAction::MoveField(i, up) => c
+            .with_ws(epoch, |ws, _| -> Result<(), AppError> {
+                let form = ws.entry_form.as_mut().ok_or(AppError::InvalidInput)?;
+                crate::editor::move_field(form, i, up)?;
+                Controller::hide(ws);
                 Ok(())
             })
             .ok_or(AppError::InvalidInput)?,
         WsAction::RemoveField(i) => c
             .with_ws(epoch, |ws, _| -> Result<(), AppError> {
                 let form = ws.entry_form.as_mut().ok_or(AppError::InvalidInput)?;
-                let index = usize::from(i);
-                if index >= form.draft.entry().fields.len() {
+                crate::editor::remove_field(form, i)?;
+                Controller::hide(ws);
+                Ok(())
+            })
+            .ok_or(AppError::InvalidInput)?,
+        WsAction::UndoRemoveField => c
+            .with_ws(epoch, |ws, _| -> Result<(), AppError> {
+                let form = ws.entry_form.as_mut().ok_or(AppError::InvalidInput)?;
+                crate::editor::undo_remove(form)?;
+                Controller::hide(ws);
+                Ok(())
+            })
+            .ok_or(AppError::InvalidInput)?,
+        WsAction::UseGenerated(i) => c
+            .with_ws(epoch, |ws, _| -> Result<(), AppError> {
+                let form = ws.entry_form.as_mut().ok_or(AppError::InvalidInput)?;
+                let protected = form
+                    .draft
+                    .entry()
+                    .fields
+                    .get(usize::from(i))
+                    .is_some_and(|f| f.protected);
+                if !protected {
                     return Err(AppError::InvalidInput);
                 }
-                form.draft.entry_mut().fields.remove(index);
-                let shift = |k: u16| if k > i { k - 1 } else { k };
-                form.replacements = std::mem::take(&mut form.replacements)
-                    .into_iter()
-                    .filter(|(k, _)| *k != i)
-                    .map(|(k, v)| (shift(k), v))
-                    .collect();
-                form.generated = form.generated.iter().filter(|k| **k != i).map(|k| shift(*k)).collect();
-                form.too_large = form.too_large.iter().filter(|k| **k != i).map(|k| shift(*k)).collect();
+                let (generated, _) = ws.generated.take().ok_or(AppError::InvalidInput)?;
+                form.replacements
+                    .insert(i, protect(generated.expose_secret().as_bytes())?);
+                if !form.generated.contains(&i) {
+                    form.generated.push(i);
+                }
                 Controller::hide(ws);
                 Ok(())
             })
@@ -351,6 +499,7 @@ pub(crate) fn run(
                 field.protected = !field.protected;
                 let large = !field.protected && !editable(field.kind, field.value.expose_secret());
                 form.generated.retain(|g| *g != i);
+                form.filled.retain(|g| *g != i);
                 form.too_large.retain(|g| *g != i);
                 if large {
                     form.too_large.push(i);
@@ -378,7 +527,16 @@ pub(crate) fn run(
         WsAction::SaveEntry => {
             let form = c
                 .with_ws(epoch, |ws, _| -> Result<EntryForm, AppError> {
-                    let form = ws.entry_form.as_ref().ok_or(AppError::InvalidInput)?;
+                    let form = ws.entry_form.as_mut().ok_or(AppError::InvalidInput)?;
+                    if form.start {
+                        return Err(AppError::NameRequired);
+                    }
+                    if form.draft.entry().title.expose().is_empty()
+                        && let Some((title, _)) = crate::editor::auto_title(form)
+                    {
+                        form.draft.entry_mut().title =
+                            qv_core::Text::new(&title).map_err(|_| AppError::InvalidInput)?;
+                    }
                     let entry = form.draft.entry();
                     if entry.title.expose().is_empty()
                         || entry.fields.iter().any(|f| f.name.expose().is_empty())
@@ -846,6 +1004,33 @@ fn reveal_value(
             protect(value.expose_secret())?
         }
         RevealKey::Totp(field) => protect(session.totp(*field)?.code.expose_secret().as_bytes())?,
+        RevealKey::WifiJoin(entry) => {
+            if session.entry_versions(*entry)?.len() > 1 {
+                return Err(AppError::Conflict);
+            }
+            let d = session.entry(*entry)?;
+            let named = |name: &str| {
+                d.fields
+                    .iter()
+                    .find(|f| crate::editor::same_slot(f.name.expose(), name))
+            };
+            let value = |f: Option<&qv_core::FieldDetail>| -> Result<Option<qv_core::SecretBytes>, AppError> {
+                f.map(|f| protect(session.reveal(f.handle)?.expose_secret()))
+                    .transpose()
+            };
+            let ssid = value(named(crate::editor::NETWORK))?.ok_or(AppError::InvalidInput)?;
+            let password = value(named("Password"))?;
+            let security = value(named(crate::editor::SECURITY))?;
+            let security = security
+                .as_ref()
+                .and_then(|s| std::str::from_utf8(s.expose_secret()).ok())
+                .unwrap_or("WPA2");
+            crate::editor::wifi_payload(
+                ssid.expose_secret(),
+                password.as_ref().map(|p| p.expose_secret()),
+                security,
+            )?
+        }
         RevealKey::Generated => return Err(AppError::InvalidInput),
     };
     Ok(bytes)

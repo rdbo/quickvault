@@ -40,10 +40,12 @@ try{
  positions.forEach((position,index)=>input(`word-${index}`,words[position-1]));await tap("phrase-confirm");
  stage=4;await unlocked();
  // New entry with a generated protected password and hostile title text.
- await tap("list-new");await until(()=>!!$("#ws-title"));
+ await tap("list-new");await until(()=>!!$("#start-login"));await tap("start-login");await until(()=>!!$("#ws-title"));
  input("ws-title",hostile);input("ws-field-value-0","alice@example.test");input("ws-field-value-2","https://example.invalid/login");
- await click("Generate");await until(()=>Array.from(document.querySelectorAll(".hint")).some(h=>h.textContent.startsWith("A generated value")));
- if(byId("ws-replacement-1").value)throw new Error("synthetic generated value prefilled");
+ await tap("gen-1");await until(()=>($("#gen-value")?.textContent||"").length>=8&&!byId("gen-use").disabled);
+ const generated=byId("gen-value").textContent;await tap("gen-use");await until(()=>!!$(".ie-saved.generated")&&!$("#gen-value"));
+ if($("#ws-replacement-1")?.value||Array.from(document.querySelectorAll("input,textarea")).some(i=>i.value.includes(generated)))throw new Error("synthetic generated value prefilled");
+ if(document.body.textContent.includes(generated))throw new Error("synthetic generated value shown");
  await tap("entry-save");stage=5;await until(()=>title().startsWith("Synthetic <img"));await unlocked();
  stage=51;if($(".shell img")||window.flowBad)throw new Error("synthetic markup executed");
  stage=52;if(!Array.from(document.querySelectorAll(".fld .masked")).some(v=>v.textContent==="••••••••"))throw new Error("synthetic protected value shown");
@@ -101,7 +103,7 @@ try{
  stage=8;await tap("nav-generator");await until(()=>title()==="Generator");await tap("generate");
  await until(()=>($("#generated")?.textContent||"").length>=8);
  // A save racing a lock never leaves revealed or phrase text behind.
- stage=81;await openItem("Synthetic <img");await tap("entry-edit");await until(()=>!!$("#ws-notes"));input("ws-notes","synthetic save-lock race");await tap("entry-save");await tap("lock");
+ stage=81;await openItem("Synthetic <img");await tap("entry-edit");await until(()=>!!$("#add-note")||!!$("#ws-notes"));if(!$("#ws-notes"))await tap("add-note");await until(()=>!!$("#ws-notes"));input("ws-notes","synthetic save-lock race");await tap("entry-save");await tap("lock");
  stage=9;await until(()=>!!$("#password"));
  if($(".phrase")||$(".revealed"))throw new Error("synthetic reveal remained");
  await until(()=>!byId("unlock-submit").disabled&&!byId("password").disabled);

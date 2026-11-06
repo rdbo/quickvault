@@ -3,7 +3,7 @@
 //! Vault items: the list beside the detail, the entry card (click a field to
 //! copy, 30 s reveals), in-place editing, move, history and attachments.
 //! Protected values appear only through a reveal; forms never prefill them.
-use super::icons::{Icon, Svg, id_hue, initial, kind_icon};
+use super::icons::{Icon, Svg, initial, item_hue, kind_icon};
 use super::shell::{ReportCard, Unreadable, act, go, kind_label};
 use crate::controller::{Controller, FormEpoch};
 use crate::views::{self, EntryView, FieldRow, ItemRow, kind_name};
@@ -43,6 +43,7 @@ pub(crate) fn dom_id(field: WsField) -> String {
         WsField::FieldValue(i) => format!("ws-field-value-{i}"),
         WsField::Replacement(i) => format!("ws-replacement-{i}"),
         WsField::NewFieldName => "ws-new-field".into(),
+        WsField::Start => "ws-start".into(),
         WsField::GroupName => "ws-group-name".into(),
         WsField::Path => "ws-path".into(),
         WsField::Password => "ws-password".into(),
@@ -373,7 +374,7 @@ pub(crate) fn ListPane(
                     for (row, kind) in items {
                         div { class: if current == Some(row.handle) { "row on" } else { "row" }, key: "{row.title.as_str()}-{row.subtitle.as_str()}",
                             button { class: "open item-open", "aria-label": "Open {row.title.as_str()}", disabled: form, onclick: pick(&controller, epoch, Screen::Entry(row.handle)) }
-                            span { class: "tile {id_hue(&row.handle.id_hex())}", "{initial(&row.title)}" }
+                            span { class: "tile {item_hue(row.colour, &row.handle.id_hex())}", "{initial(&row.title)}" }
                             span { class: "t", b { class: "row-title", "{row.title.as_str()}" }
                                 span { if row.subtitle.is_empty() { "{kind_label(&kind)}" } else { "{row.subtitle.as_str()}" } }
                             }
@@ -433,9 +434,11 @@ pub(crate) fn Detail(
             rsx! { EntryScreen { controller: controller.clone(), epoch, revision, entry: e, live } }
         }
         Screen::EditEntry => {
-            rsx! { EditEntry { controller: controller.clone(), epoch, revision, live } }
+            rsx! { super::editor::EditEntry { controller: controller.clone(), epoch, revision } }
         }
-        Screen::EditGroup => rsx! { EditGroup { controller: controller.clone(), epoch, revision } },
+        Screen::EditGroup => {
+            rsx! { super::editor::EditGroup { controller: controller.clone(), epoch, revision } }
+        }
         Screen::Move(item, at) => {
             rsx! { MoveScreen { controller: controller.clone(), epoch, revision, item, at } }
         }
@@ -569,15 +572,40 @@ fn EntryBody(
         .find(|f| f.kind == FieldKind::Url)
         .and_then(|f| f.value.clone());
     let kind = Zeroizing::new(view.type_hint.to_lowercase());
+    let group_hue = view.group.map(|h| {
+        let colour = controller
+            .read(epoch, views::top_groups)
+            .and_then(Result::ok)
+            .and_then(|g| g.into_iter().find(|g| g.handle == h))
+            .and_then(|g| g.colour);
+        item_hue(colour, &h.id_hex())
+    });
+    let tile = item_hue(view.colour, &view.handle.id_hex());
+    let card = if current {
+        controller
+            .read(epoch, |s| Ok(views::card_face(s, &view)))
+            .and_then(Result::ok)
+            .flatten()
+    } else {
+        None
+    };
+    let wifi = current
+        && view.versions == 1
+        && crate::editor::ItemType::from_hint(&view.type_hint)
+            == Some(crate::editor::ItemType::Wifi)
+        && view
+            .fields
+            .iter()
+            .any(|f| crate::editor::same_slot(&f.name, crate::editor::NETWORK));
     rsx! {
         div { class: "hero",
-            span { class: "tile {id_hue(&view.handle.id_hex())}", "{initial(&view.title)}" }
+            span { class: "tile {tile}", "{initial(&view.title)}" }
             div { class: "min0",
                 h1 { "{view.title.as_str()}" }
                 div { class: "meta",
                     if let Some(u) = url { span { class: "pill link", Svg { icon: Icon::Globe } "{u.as_str()}" } }
                     if !view.type_hint.is_empty() { span { class: "pill", Svg { icon: kind_icon(&kind) } "{view.type_hint.as_str()}" } }
-                    if let (Some(g), Some(h)) = (group, view.group) { span { class: "pill", span { class: "dot {id_hue(&h.id_hex())}" } "{g}" } }
+                    if let (Some(g), Some(h)) = (group, group_hue) { span { class: "pill", span { class: "dot {h}" } "{g}" } }
                 }
             }
         }
@@ -585,6 +613,8 @@ fn EntryBody(
             div { class: "banner", Svg { icon: Icon::Conflicts } span { "This entry has {view.versions} conflicting versions; one is shown. Resolve the conflict before copying or editing." } }
         }
         if let Some(x) = &view.expires { div { class: "banner", Svg { icon: Icon::Clock } span { "Expires {x}" } } }
+        if let Some(c) = card { div { class: "ie-face", {super::editor::card_face(&c, tile)} } }
+        if wifi { WifiJoin { controller: controller.clone(), epoch, revision, entry: view.handle, live } }
         if !view.fields.is_empty() {
             div { class: "card fields",
                 for f in view.fields.iter().cloned() {
@@ -600,6 +630,54 @@ fn EntryBody(
         }
         if let Some(n) = &view.notes {
             div { class: "card", div { class: "card-h", "NOTES" } pre { class: "notes", "{n.as_str()}" } }
+        }
+    }
+}
+
+/// "Show join code": a Wi‑Fi `WIFI:` QR for 30 s. It carries the password,
+/// so it is an explicit reveal (0008 §4, 0009 §1.8).
+#[component]
+fn WifiJoin(
+    controller: Controller,
+    epoch: FormEpoch,
+    revision: u64,
+    entry: qv_core::EntryHandle,
+    live: Live,
+) -> Element {
+    let _ = revision;
+    let key = RevealKey::WifiJoin(entry);
+    let symbol = controller
+        .revealed(epoch, &key)
+        .and_then(|p| crate::qr::encode(p.expose_secret()).ok());
+    let left = live.reveal_left.min(30);
+    rsx! {
+        div { class: "card ie-join",
+            if let Some(symbol) = symbol {
+                {join_qr(&symbol)}
+                div { class: "min0",
+                    b { "Scan to join" }
+                    span { "Point the phone's camera at the code. It hides in {left} s." }
+                    button { class: "btn subtle", id: "wifi-join-hide", onclick: act(&controller, epoch, WsAction::Hide), Svg { icon: Icon::EyeOff } "Hide" }
+                }
+            } else {
+                span { class: "ie-qr", Svg { icon: Icon::Qr, large: true } }
+                div { class: "min0",
+                    b { "Join code" }
+                    span { "Phones scan it to join this network. It contains the password and shows for 30 seconds." }
+                    button { class: "btn", id: "wifi-join", onclick: act(&controller, epoch, WsAction::Reveal(key.clone())), Svg { icon: Icon::Qr } "Show join code" }
+                }
+            }
+        }
+    }
+}
+fn join_qr(symbol: &crate::qr::Symbol) -> Element {
+    let side = symbol.size() + 8;
+    let path = symbol.path();
+    rsx! {
+        svg { class: "ie-qrcode revealed", xmlns: "http://www.w3.org/2000/svg", view_box: "0 0 {side} {side}",
+            width: "168", height: "168", shape_rendering: "crispEdges", role: "img", "aria-label": "Wi‑Fi join QR code",
+            rect { width: "100%", height: "100%", fill: "white" }
+            path { d: path.as_str(), fill: "black" }
         }
     }
 }
@@ -669,144 +747,6 @@ fn EntryScreen(
                         button { class: "mi danger", id: "menu-delete", onclick: { let mut f = act(&controller, epoch, WsAction::Delete(item)); move |e| { menu.set(None); f(e) } }, Svg { icon: Icon::Trash } "Move to trash" }
                     }
                 }
-            }
-        }
-    }
-}
-
-/// In-place entry editing with the existing form rules: protected values are
-/// never shown and a blank replacement keeps the stored value.
-#[component]
-fn EditEntry(controller: Controller, epoch: FormEpoch, revision: u64, live: Live) -> Element {
-    let _ = live;
-    let Some(form) = controller.entry_form(epoch) else {
-        return rsx! { Unreadable { error: None } };
-    };
-    let kinds = [
-        (FieldKind::Text, "Text"),
-        (FieldKind::Secret, "Protected"),
-        (FieldKind::Url, "Website"),
-        (FieldKind::Email, "Email"),
-        (FieldKind::Multiline, "Multi-line"),
-        (FieldKind::Totp, "One-time code"),
-    ];
-    let types = ["login", "note", "card", "wifi"];
-    let set_type = |t: &'static str| {
-        let c = controller.clone();
-        move |_| {
-            let mut v = t.to_owned();
-            c.ws_input(epoch, WsField::TypeHint, &mut v);
-        }
-    };
-    let save = act(&controller, epoch, WsAction::SaveEntry);
-    rsx! {
-        div { class: "phone-bar",
-            button { class: "icon-btn back", "aria-label": "Cancel", "data-qv-clear": "true", onclick: back(&controller, epoch), Svg { icon: Icon::Close, large: true } }
-            span { class: "sp" }
-            button { class: "btn primary", "data-qv-clear": "true", onclick: act(&controller, epoch, WsAction::SaveEntry), "Save" }
-        }
-        div { class: "detail-inner fade-in",
-            div { class: "hero",
-                span { class: "tile {id_hue(&form.id)}", "{initial(&form.title)}" }
-                div { class: "grow0",
-                    Input { controller: controller.clone(), epoch, field: WsField::Title, label: "Title", kind: Kind::Line, value: Some(form.title.to_string()), disabled: false, bare: true, class: "title-in", placeholder: "Title", autofocus: form.new }
-                    div { class: "meta",
-                        for t in types { button { class: if form.type_hint.as_str() == t { "chip on" } else { "chip" }, onclick: set_type(t), Svg { icon: kind_icon(t) } "{kind_label(t).trim_end_matches('s')}" } }
-                        Input { controller: controller.clone(), epoch, field: WsField::TypeHint, label: "Type", kind: Kind::Line, value: Some(form.type_hint.to_string()), disabled: false, bare: true, class: "type-in", placeholder: "Other type" }
-                    }
-                }
-            }
-            div { class: "banner ok", Svg { icon: Icon::Shield } span { "Protected values are never shown here. Leave one blank to keep it unchanged." } }
-            div { class: "card",
-                for row in form.rows.iter().cloned() {
-                    div { class: "ed",
-                        div { class: "in",
-                            Input { controller: controller.clone(), epoch, field: WsField::FieldName(row.index), label: "Field name", kind: Kind::Line, value: Some(row.name.to_string()), disabled: false, bare: true, class: "name-in" }
-                            span { class: "pill", "{kind_name(row.kind)}" }
-                            if row.protected { span { class: "pill", Svg { icon: Icon::Lock } "protected" } }
-                        }
-                        if row.too_large {
-                            p { class: "hint", "{crate::controller::AppError::TooLargeForApp.message()}" }
-                        } else if row.protected {
-                            div { class: "in",
-                                Input { controller: controller.clone(), epoch, field: WsField::Replacement(row.index), label: format!("New {} value", kind_name(row.kind)), kind: if row.kind == FieldKind::Multiline { Kind::Multi } else { Kind::Secret }, value: None, disabled: false, bare: true, placeholder: "Unchanged" }
-                                button { class: "btn subtle", onclick: act(&controller, epoch, WsAction::GenerateInto(row.index)), Svg { icon: Icon::Generator } "Generate" }
-                                if row.replaced { RevealReplacement { controller: controller.clone(), epoch, revision, index: row.index } }
-                            }
-                            if row.generated { p { class: "hint generated", "A generated value is set (hidden)." } }
-                        } else {
-                            div { class: "in",
-                                Input { controller: controller.clone(), epoch, field: WsField::FieldValue(row.index), label: format!("{} value", kind_name(row.kind)), kind: if row.kind == FieldKind::Multiline { Kind::Multi } else { Kind::Line }, value: Some(row.value.as_deref().map(String::as_str).unwrap_or_default().to_owned()), disabled: false, bare: true, placeholder: "Empty" }
-                            }
-                        }
-                        div { class: "in",
-                            button { class: "chip", onclick: act(&controller, epoch, WsAction::ToggleProtect(row.index)), if row.protected { "Unprotect" } else { "Protect" } }
-                            button { class: "chip danger", onclick: act(&controller, epoch, WsAction::RemoveField(row.index)), "Remove field" }
-                        }
-                    }
-                }
-                div { class: "addf",
-                    Input { controller: controller.clone(), epoch, field: WsField::NewFieldName, label: "New field name", kind: Kind::Line, value: None, disabled: false, bare: true, placeholder: "New field name" }
-                    for (k, label) in kinds { button { class: "chip", onclick: act(&controller, epoch, WsAction::AddField(k)), "+ {label}" } }
-                }
-            }
-            div { class: "card",
-                div { class: "card-h", "NOTES" }
-                div { class: "ed",
-                    if form.notes_too_large {
-                        p { class: "hint", "{crate::controller::AppError::TooLargeForApp.message()}" }
-                    } else {
-                        Input { controller: controller.clone(), epoch, field: WsField::Notes, label: "Notes", kind: Kind::Multi, value: Some(form.notes.to_string()), disabled: false, bare: true, placeholder: "Add a note" }
-                    }
-                }
-            }
-            div { class: "savebar desk-only",
-                span { "Esc cancels · Ctrl S saves" }
-                button { class: "btn subtle", "data-qv-clear": "true", onclick: back(&controller, epoch), "Cancel" }
-                button { class: "btn primary", id: "entry-save", "data-qv-clear": "true", onclick: save, if form.new { "Create item" } else { "Save changes" } }
-            }
-        }
-    }
-}
-#[component]
-fn RevealReplacement(
-    controller: Controller,
-    epoch: FormEpoch,
-    revision: u64,
-    index: u16,
-) -> Element {
-    let _ = revision;
-    let key = RevealKey::Replacement(index);
-    let shown = text(controller.revealed(epoch, &key));
-    rsx! {
-        if shown.is_empty() {
-            button { class: "btn subtle", "aria-label": "Reveal for 30 seconds", onclick: act(&controller, epoch, WsAction::Reveal(key.clone())), Svg { icon: Icon::Eye } }
-        } else {
-            span { class: "pill revealed", "{shown.as_str()}" }
-            button { class: "btn subtle", "aria-label": "Hide", onclick: act(&controller, epoch, WsAction::Hide), Svg { icon: Icon::EyeOff } }
-        }
-    }
-}
-
-#[component]
-fn EditGroup(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
-    let _ = revision;
-    let Some(form) = controller.group_form(epoch) else {
-        return rsx! { Unreadable { error: None } };
-    };
-    rsx! {
-        div { class: "phone-bar", button { class: "icon-btn back", "aria-label": "Cancel", onclick: back(&controller, epoch), Svg { icon: Icon::Close, large: true } } }
-        div { class: "detail-inner fade-in",
-            div { class: "hero", span { class: "tile {id_hue(&form.id)}", Svg { icon: Icon::Folder, large: true } }
-                h1 { if form.new { "New group" } else { "Rename group" } }
-            }
-            div { class: "card", div { class: "ed",
-                label { r#for: "ws-group-name", "Name" }
-                Input { controller: controller.clone(), epoch, field: WsField::GroupName, label: "Name", kind: Kind::Line, value: Some(form.name.to_string()), disabled: false, bare: true, autofocus: true, placeholder: "Group name" }
-            } }
-            div { class: "actions",
-                button { class: "btn subtle", onclick: back(&controller, epoch), "Cancel" }
-                button { class: "btn primary", id: "group-save", onclick: act(&controller, epoch, WsAction::SaveGroup), "Save" }
             }
         }
     }

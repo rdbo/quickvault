@@ -187,6 +187,25 @@ impl EntryDraft {
         &mut self.entry
     }
 
+    /// The entry's group as a handle of this session.
+    pub fn group(&self) -> GroupHandle {
+        GroupHandle {
+            session: self.session,
+            record: self.entry.group,
+        }
+    }
+
+    /// Places the entry in `group` on save (a move for a saved entry; save
+    /// checks that the group is live). A handle from another session is
+    /// refused with [`CoreError::StaleHandle`].
+    pub fn set_group(&mut self, group: GroupHandle) -> Result<(), CoreError> {
+        if group.session != self.session {
+            return Err(CoreError::StaleHandle);
+        }
+        self.entry.group = group.record;
+        Ok(())
+    }
+
     /// Appends a field with a new ID, protected by default for `secret`
     /// and `totp` fields (0003 §5.3).
     pub fn add_field(
@@ -910,6 +929,38 @@ mod tests {
             ),
             _ => panic!("not an entry"),
         }
+    }
+
+    #[test]
+    fn draft_group_moves_on_save_and_refuses_foreign_handles() {
+        let env = Env::new();
+        let s = env.unlock();
+        let root = s.root().unwrap();
+        let a = add_group(&s, root, "A");
+        let b = add_group(&s, root, "B");
+        let e = add_entry(&s, a, "Mail");
+        let mut d = s.edit_entry(e).unwrap();
+        assert_eq!(d.group(), a);
+        let other = Env::new();
+        let foreign = other.unlock().root().unwrap();
+        assert_eq!(d.set_group(foreign), Err(CoreError::StaleHandle));
+        assert_eq!(d.group(), a);
+        d.set_group(b).unwrap();
+        s.save_entry(d).unwrap();
+        assert_eq!(names(&s, a), (vec![], vec![]));
+        assert_eq!(names(&s, b), (vec![], vec!["Mail".into()]));
+
+        // A new entry is created in the chosen group; a deleted one is refused.
+        let mut n = s.new_entry(a, "login", "Bank").unwrap();
+        n.set_group(b).unwrap();
+        s.save_entry(n).unwrap();
+        assert_eq!(names(&s, b).1, vec!["Bank".to_owned(), "Mail".to_owned()]);
+        s.delete(ItemHandle::Group(a), false).unwrap();
+        let before = seq(&s);
+        let mut n = s.new_entry(b, "login", "Lost").unwrap();
+        n.set_group(a).unwrap();
+        assert_eq!(err(s.save_entry(n)), CoreError::NotAllowed);
+        assert_eq!(seq(&s), before);
     }
 
     #[test]

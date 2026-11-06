@@ -3,6 +3,7 @@
 //! Shared app UI (plan 0040): one DOM for desktop and phone. Vault text is
 //! rendered as escaped text only; every handler sends a typed action with the
 //! current form epoch and Rust re-checks it.
+mod editor;
 mod icons;
 mod items;
 mod pages;

@@ -85,10 +85,11 @@ public class PlatformTest extends InstrumentationTestCase {
     }
     private void workspaceFlows(Instrumentation instrumentation,MainActivity main,WebView view,java.io.File root) throws Exception {
         click(instrumentation,view,"New item");
-        awaitJs(instrumentation,view,"!!document.getElementById('ws-title')","entry form");
+        awaitJs(instrumentation,view,"window.qvDeviceFixture.startLogin()","entry form");
         js(instrumentation,view,"window.qvDeviceFixture.entryForm()");
-        click(instrumentation,view,"Generate");
-        click(instrumentation,view,"Save");
+        click(instrumentation,view,"Generate a password");
+        click(instrumentation,view,"Use it");
+        click(instrumentation,view,"Create");
         awaitJs(instrumentation,view,"window.qvDeviceFixture.at('Synthetic phone entry') && !document.querySelector('.busy-toast')","saved entry");
         assertEquals("Protected value masked","true",js(instrumentation,view,"Array.from(document.querySelectorAll('.field-value')).some(v=>v.textContent==='••••••••')"));
         click(instrumentation,view,"Reveal for 30 seconds");
@@ -96,7 +97,7 @@ public class PlatformTest extends InstrumentationTestCase {
         click(instrumentation,view,"Hide");
         awaitJs(instrumentation,view,"!document.querySelector('.field-value.revealed')","hide");
         // Copy goes Rust → OS clipboard, marked sensitive, and expires when owned.
-        js(instrumentation,view,"Array.from(document.querySelectorAll('.fld')).find(l=>l.textContent.includes('password')).querySelector('.acts button:last-child').click()");
+        js(instrumentation,view,"Array.from(document.querySelectorAll('.fld')).find(l=>l.textContent.toLowerCase().includes('password')).querySelector('.acts button:last-child').click()");
         awaitJs(instrumentation,view,"Array.from(document.querySelectorAll('.toast')).some(t=>t.textContent.startsWith('Copied'))","clipboard hold");
         android.content.ClipData copied=clip(instrumentation);
         assertNotNull("Copied clip",copied);
@@ -107,7 +108,7 @@ public class PlatformTest extends InstrumentationTestCase {
         while(System.currentTimeMillis()<end && !clipEmpty(instrumentation)) Thread.sleep(250);
         assertTrue("Owned clip cleared at expiry",clipEmpty(instrumentation));
         // Background during a foreground hold defers only background expiry.
-        js(instrumentation,view,"Array.from(document.querySelectorAll('.fld')).find(l=>l.textContent.includes('password')).querySelector('.acts button:last-child').click()");
+        js(instrumentation,view,"Array.from(document.querySelectorAll('.fld')).find(l=>l.textContent.toLowerCase().includes('password')).querySelector('.acts button:last-child').click()");
         awaitJs(instrumentation,view,"Array.from(document.querySelectorAll('.toast')).some(t=>t.textContent.startsWith('Copied'))","second clipboard hold");
         instrumentation.runOnMainSync(()->instrumentation.callActivityOnPause(main));
         Thread.sleep(1500);

@@ -426,6 +426,155 @@ triggers, FLAG_SECURE, the webview policy, and no raw HTML.
 - [x] Do: CHANGELOG, qv-app README, ARCHITECTURE §3 if structure changed,
   roadmap, index.
 
+### 2026-11-05c — Item editor rebuilt from its prototype; item colours
+
+The owner approved the item-editor prototype at
+https://claude.ai/artifact/4Zxts5aHzHwLgXkFWp7T5s ("Yeah this is way better.
+Let's go with that"). It replaces the entry form of step 14. The owner's
+earlier request for user-chosen colours ("can i not change the group
+color?") is part of it: the prototype's tile opens a colour picker. The
+vault-list redesign (memory: name-only create, remembered vaults) is still
+queued and is not part of this revision. Decisions below are
+owner-delegated (2026-11-02 standing delegation; "be innovative") unless
+marked otherwise.
+
+- **E1 Start step.** A new item opens "What are you saving?" with one input
+  and type tiles (Login, Card, Wi‑Fi, Note, Something else).
+  - The input is a protected workspace input (`WsField::Start`,
+    uncontrolled, `LINE_MAX`), because people paste card numbers into it.
+  - The guess runs in Rust on the device (`views::guess`): 12–19 digits
+    (spaces and dashes allowed) are a card; a host name or URL is a login
+    for that site; Wi‑Fi words (wi-fi, wifi, wlan, ssid, router, network)
+    are a Wi‑Fi network; anything else is a login with that title.
+  - For a card, the screen shows only the brand, the last four digits and
+    whether the Luhn check passes, never the whole number. Accepting moves
+    the number into the protected "Card number" replacement.
+  - Enter or a click accepts the guess; "Or save it as …" and the tiles
+    choose explicitly. Nothing is looked up online.
+- **E2 Types and templates.** Type hints stay the existing strings
+  (`login`, `card`, `wifi`, `note`; "Something else" is `custom`, the
+  0003 §5.1 name for unknown hints). Templates:
+  - login: Username (text), Password (secret), Website (url);
+  - card: Name on card (text), Card number (secret), Expires (text,
+    MM/YY), Security code (secret);
+  - wifi: Network name (text), Password (secret), Security (text, "WPA2");
+  - note and custom: no fields; a note opens its notes as the page.
+
+  Changing the type on the type chip keeps every field with a value (or a
+  saved or replaced protected value). A template field reuses a kept field
+  with the same name (case-insensitive). Empty fields that the new template
+  does not have are dropped. The notice says how many filled fields were kept.
+  An unknown existing hint is shown as is and changes only when the user picks.
+- **E3 Title.** The title is the big input. If it is empty on save, the
+  title comes from the website's host name (login), the network name
+  (Wi‑Fi), or the card's brand and last four digits (card). It is shown as the
+  placeholder with "Title from …". Otherwise saving still says
+  `NameRequired`.
+- **E4 Derived displays of protected values.** Only these leave Rust,
+  computed from the protected value in place:
+  - a card number's brand, last four digits and Luhn validity;
+  - whether a protected field has a saved value (one bit), for "Saved · Change".
+
+  The last four digits are also in the automatic card title; the user can
+  change it. This matches common card practice ("ending 4242").
+- **E5 Field rows.**
+  - Each field has a label column and a real input box. The name changes only
+    through ⋯ → Rename.
+  - The ⋯ menu also has "Hide the value" / "Show the value normally"
+    (`ToggleProtect`; not for one-time codes), Move up/down and Remove (Undo
+    shown in place).
+  - A saved protected value shows "•••••••• Saved · Change". Change opens the
+    replacement input, and × keeps the saved value (clears the replacement).
+  - The eye in a protected input uses the existing 30 s replacement reveal and
+    switches the control to plain text. Its value is already in that control,
+    and no value is sent to the DOM.
+  - A generated replacement shows "•••••••• Generated" with the same eye (a
+    30 s reveal pill) and Change.
+- **E6 Generator popover.** The dice on a password row opens a popover over
+  the workspace generator form. It has:
+  - the value, shown as on the Generator page;
+  - length (characters) or word count;
+  - a words switch and a symbols switch;
+  - Again and "Use it".
+
+  "Use it" moves the generated value into that row's replacement in Rust
+  (`UseGenerated`), never through the DOM. The strength line shows the
+  exact entropy of the generator settings (`qv_core::estimate`).
+  Typed values get no meter. Rejected: zxcvbn per keystroke (it leaves
+  unzeroized copies, `strength.rs`) and a hand-made estimator (it misleads).
+  *Deviation from the prototype*, recorded here.
+- **E7 Add a field.** One "Add a field" button opens a name box. The kind is
+  inferred from the name (`views::kind_for`: OTP/2FA/authenticator → one-time
+  code; password/PIN/CVV/secret/token/API key/private/seed → hidden;
+  recovery/backup codes → multi-line hidden; mail → email;
+  url/site/web/link/domain → website; address/notes/memo → multi-line;
+  otherwise text). A kind pill shows and overrides it, and each type has a
+  few common names. Protection follows the kind default (0003 §5.3).
+- **E8 Wi‑Fi.**
+  - A Wi‑Fi item's "Security" field is chosen with WPA3 / WPA2 / WEP / Open
+    network buttons; the stored values are `WPA3`, `WPA2`, `WEP` and `None`.
+  - The editor shows a join card with the network name and security.
+  - The item page has "Show join code": a 30 s reveal (`RevealKey::WifiJoin`)
+    of a `WIFI:T:…;S:…;P:…;;` QR built in Rust (escaping `\ ; , : "`) with
+    the existing encoder. The QR carries the password, like any reveal, and
+    is refused (`TooLargeForApp`) above `qr::MAX_PAYLOAD`.
+- **E9 Card visual.**
+  - The editor and the item page show a card face with the brand,
+    `•••• •••• •••• 4242`, the name on the card and the expiry.
+  - The expiry shows "N yr/mo left", "Expired" or "Month 01–12", from the
+    device clock.
+- **E10 Colours** (0003 §4, §5 amendment). The `icon` text of an entry or
+  group may hold `hue:<n>`, n 0–11, the app's colour token.
+  - Any other value (absent, a built-in icon name, or unknown) shows the
+    automatic colour from the record ID. It is kept unchanged unless the
+    user picks a colour.
+  - "Automatic" clears only a `hue:` value. The colour syncs as part of the
+    record.
+  - The swatches open from the tile in the entry and group editors.
+- **E11 Group chip.**
+  - The entry editor's group chip lists the vault root ("No group") and
+    the top-level groups. If the entry is in a nested group, that group is
+    listed too.
+  - Choosing one sets the draft's group, which is a move on save (core
+    already checks the group is live).
+  - `qv-core` gains `EntryDraft::{group, set_group}` (handle-checked).
+- **E12 Spec.** 0009 §1.8 gains the item-editor bullet (E1, E4, E6, E8),
+  and 0003 §4/§5 the icon note (E10), each with a Changelog line.
+
+Kept invariants: protected values are never prefilled; replacements stay
+separate until save; 0008 §4 reveal and clipboard timers; input bounds;
+`data-qv-*` hooks; no inline styles (the CSP); no raw HTML.
+
+### Step 17 — Specs and plan records
+- [x] Do: 0009 §1.8 item-editor bullet; 0003 §4/§5 icon note (§5.5); Changelogs.
+- Verify: `git diff --check`.
+
+### Step 18 — Core and workspace support
+- [x] Do: `EntryDraft::{group, set_group}` with tests (foreign session
+  refused). Workspace: `WsField::Start`; `EntryForm::{start, removed}`;
+  actions `StartAs`, `SetType`, `SetGroup`, `SetHue`, `AddField(Option<_>)`,
+  `AddNamedField`, `MoveField`, `UndoRemoveField`, `UseGenerated`,
+  `RevealKey::WifiJoin`. Views: `guess`, `kind_for`, `auto_title`, the card,
+  expiry and Wi‑Fi views, `colour` on rows. Tests: guess cases including a
+  bad Luhn and no full number in the view; type change keeping filled fields
+  and remapping replacements; move/remove/undo index remapping; auto title on
+  save; `hue:` parsing and Automatic keeping foreign icons; UseGenerated
+  never prefilled; Wi‑Fi payload escaping and bound.
+- Verify: `cargo test --locked -p qv-core edit`, `-p qv-app`.
+
+### Step 19 — Editor UI and CSS
+- [x] Do: rebuild `EditEntry` (start step, head, rows, menus, adder, notes,
+  card and Wi‑Fi visuals, generator popover, save bar) and `EditGroup`
+  swatches; colours on every tile and dot; card face and join code on the
+  item page; phone menus as bottom sheets (CSS).
+- Verify: validation Clippy; real-input check under Xvfb.
+
+### Step 20 — Flows, gates and docs
+- [x] Do: update `flow.js` and Android `flows.js` to the start step, the
+  generator popover and the collapsed notes, keeping every assertion;
+  CHANGELOG; log.
+- Verify: all `AGENTS.md` gates plus Android Clippy.
+
 ## Execution log
 
 - 2026-11-04: Architect plan in the next-phase session after the 0039 review.
@@ -676,3 +825,87 @@ triggers, FLAG_SECURE, the webview policy, and no raw HTML.
   over its title; it is now `ico lg`. The GROUPS "+" button's hover was a
   cramped 20 px square; it now matches the other icon buttons (26 px,
   radius 8, 14 px glyph, aligned with the counts). Both checked under Xvfb.
+  Also: the command bar label sat about 1.5 px above the magnifier's visual
+  centre (dump2); it is lowered 1 px (CSS only).
+- 2026-11-05 (owner request: "this form smells", be innovative): a new item
+  editor was prototyped before any app change, at
+  https://claude.ai/artifact/4Zxts5aHzHwLgXkFWp7T5s. It has a one-box start
+  that recognises sites, card numbers and names on the device; forms shaped by
+  type (live payment card, Wi‑Fi join card, note page); field tools only on
+  hover; one "Add a field" that infers the kind from the name; saved
+  protected values shown as "Saved · Change"; and a tile colour picker. It
+  awaits the owner's review and joins the batched follow-up.
+- 2026-11-05 (owner approved the item-editor prototype: "Yeah this is way
+  better. Let's go with that"). Revision 2026-11-05c, steps 17–20:
+  - **Specs:**
+    - 0009 §1.8 gains the item-editor bullet: on-device guess, protected start
+      box, the limited derived displays, generated-only strength, and the
+      Wi‑Fi join QR as a timed reveal.
+    - 0003 gains §5.5 and the icon-row notes: the `hue:<0–11>` colour token in
+      the existing `icon` text.
+  - **Core:** `EntryDraft::{group, set_group}`. Handles from another session
+    are refused (`StaleHandle`), and save still checks the group is live.
+    Test: `draft_group_moves_on_save_and_refuses_foreign_handles`.
+  - **App:**
+    - `src/editor.rs` holds the rules: types and templates, guess, kind
+      inference, card info, expiry, Wi‑Fi payload, colour token, and the
+      type-change, move, remove and undo index remapping.
+    - `src/ui/editor.rs` holds the screen.
+    - New workspace input `Start`; actions `StartAs`, `SetType`, `SetGroup`,
+      `SetHue`, `AddField(Option<_>)`, `AddNamedField`, `MoveField`,
+      `UndoRemoveField`, `UseGenerated`; `RevealKey::WifiJoin`.
+    - A typed-replacement reveal now follows further typing for its 30 s
+      instead of being cleared.
+    - The card number from the start box is marked `filled` and shown as
+      dots, because it is not in the control.
+  - **Deviations from the prototype:**
+    - No strength meter for typed passwords (E6). Generated values show the
+      generator's exact entropy.
+    - The editor's Wi‑Fi card has no QR code. The real code is on the item
+      page behind "Show join code" (30 s), because it carries the password.
+    - The card number is masked while typing: it is a protected field.
+    - The automatic colour stays derived from the record ID, as before, not
+      from the type.
+  - **Tests:**
+    - 7 unit tests in `editor.rs`;
+    - 7 controller tests in `editor_tests.rs` covering: the card number never
+      reaching the view; sites and networks; type change with replacements;
+      move, remove and undo; kind inference; `UseGenerated` never in the form,
+      and the stored bit; colours and groups;
+    - one icon colour test.
+    - Existing tests changed only for the new start step and the capitalised
+      template names (case-insensitive matching); no assertion was dropped.
+  - **Flows:** `flow.js` chooses Login in the start step, uses the generator
+    popover and opens the collapsed notes. It now also asserts that the
+    generated value is in no input and not in the page text. Android
+    `flows.js` and `PlatformTest`/`AutofillTest` were updated the same way;
+    not run, no phone.
+  - **Found while testing with real input under Xvfb, fixed:**
+    - The popover's `row` class matched the list's global `.row` rule (which
+      turns off pointer events for children), so "Use it" was dead. Editor
+      classes are now `ie-`-prefixed; `.brand` was renamed too.
+    - The title lost its size to `.qv input`.
+    - Inner focus outlines showed.
+    - Nothing was focused after the start step: the first empty field now
+      takes focus.
+    - `MMYY` typed without a slash was not read.
+    - Phone sheets sat under the tab bar.
+
+    Checked by real pointer and keyboard: card (start guess, face, expiry
+    hint, item page), login (title from site, generator popover in both
+    modes, "Generated" state), Wi‑Fi (security buttons, join QR shown with
+    its countdown), field menu, colour picker, phone layout and sheets.
+  - **Found, not fixed:**
+    - Trash rows and autofill candidates keep the automatic colour (their core
+      summaries carry no `icon`).
+    - Under bare Xvfb a frameless window does not relayout when shrunk, so
+      phone checks use `QV_UI_SIZE`.
+    - Editor errors persist until the next input or Dismiss (existing
+      behaviour).
+  - **Gates on the final tree:** fmt, SPDX, matrix and `git diff --check`
+    pass. Clippy passes for the workspace, for `qv-app --features validation`
+    and on Android arm64 (`mobile`, `mobile,validation`). Tests:
+    `-p qv-app --features validation` 65 passed (the 3 real-engine flows
+    included); full suite 901 passed, 0 failed, 2 ignored. Android
+    instrumentation not run (no phone).
+  - **Docs:** CHANGELOG, `crates/qv-app/README.md`, specs and index.

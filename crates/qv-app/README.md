@@ -29,6 +29,11 @@ Other details:
   (`qv-platform` `linux::portal`) and the Storage Access Framework on Android.
   A typed path appears only when no picker is available, and in validation
   fixtures.
+- The item editor (`src/ui/editor.rs`, rules in `src/editor.rs`) starts from
+  one box that recognises sites, card numbers and Wi‑Fi names on the device.
+  The form follows the item type. Field tools sit behind ⋯, and one "Add a
+  field" infers the kind. Colours are stored as `hue:<0–11>` in the record's
+  `icon` text (0003 §5.5).
 - Icons are QuickVault's own stroke paths (`src/ui/icons.rs`); fonts are the
   system's. The webview policy forbids inline styles, so all styling is in
   `assets/app.css`.

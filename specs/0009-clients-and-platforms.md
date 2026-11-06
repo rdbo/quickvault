@@ -109,6 +109,20 @@ validation packages may exercise the implemented path.
   - A path field appears only when no picker is available.
 - **Vault names.** No vault name is shown before unlock, since names are
   encrypted metadata.
+- **Item editor.** A new item starts from one box, "What are you saving?".
+  - The guess runs on the device. Nothing is looked up online.
+  - The box is a protected input, since people paste card numbers into it.
+    For a card, only its brand, last four digits and checksum validity are
+    shown, and the number moves into the protected card-number field.
+  - Values derived from protected fields are limited to:
+    - a card number's brand, last four digits and validity;
+    - whether a protected field has a saved value.
+  - Typed passwords get no strength meter in the item editor. Generated ones
+    show the generator's exact entropy, and "Use it" moves the value into
+    the field in Rust.
+  - A Wi‑Fi item's page can show a `WIFI:` join QR code. It contains the
+    password, so it is an explicit 30-second reveal under 0008 §4.
+  - Tiles show the colour token of 0003 §5.5.
 
 ### 2. Platform priority
 
@@ -262,6 +276,10 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-05: §1.8 item editor: on-device start guess with a protected
+  start box, limited derived displays of protected values, generated-only
+  strength, a Wi‑Fi join QR as a timed reveal, colour tokens (plan 0040,
+  owner-approved prototype; details owner-delegated).
 - 2026-11-05: Add §1.8, the owner-delegated app shell and preferences profile
   (plan 0040): own title bar, non-secret preferences file, per-status
   reduced-protection acknowledgement, system file pickers instead of typed

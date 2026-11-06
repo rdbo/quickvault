@@ -69,9 +69,9 @@ public final class AutofillTest extends PlatformTest {
     /** An entry whose title names the requester: titles must never match. */
     private void spoofTitledEntry() throws Exception {
         click(os,view,"New item");
-        awaitJs(os,view,"!!document.getElementById('ws-title')","entry form");
+        awaitJs(os,view,"window.qvDeviceFixture.startLogin()","entry form");
         js(os,view,"window.qvDeviceFixture.entryForm()");input("ws-title",REQUESTER+" Shell");
-        click(os,view,"Generate");click(os,view,"Save");
+        click(os,view,"Generate a password");click(os,view,"Use it");click(os,view,"Create");
         awaitJs(os,view,"window.qvDeviceFixture.at("+org.json.JSONObject.quote(REQUESTER+" Shell")+") && !document.querySelector('.busy-toast')","saved entry");
     }
     private AutofillRegistry.Request offer() throws Exception {

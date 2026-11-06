@@ -55,7 +55,7 @@ reject invalid control transitions rather than guessing replacements.
 | parent | ID? | `null` only for the root group |
 | name | text | |
 | notes | text? | |
-| icon | text? | built-in icon name |
+| icon | text? | built-in icon name, or the app colour token `hue:<0–11>` (see 5.5) |
 | order | text | fractional index for stable manual ordering under concurrent edits |
 | deleted_at | timestamp? | soft delete → trash (0007) |
 
@@ -80,7 +80,7 @@ UI limits collapse presentation rather than dropping groups.
 | title | text | |
 | fields | list<Field> | ordered |
 | notes | text? | multi-line |
-| icon | text? | |
+| icon | text? | as for groups (see 5.5) |
 | expires_at | timestamp? | |
 | created_at / modified_at | timestamp | |
 | deleted_at | timestamp? | soft delete → trash |
@@ -108,6 +108,14 @@ and other fields are not. The user can toggle `protected` per field.
 
 5.4. **TOTP:** a `totp` field stores an `otpauth://` URI (RFC 6238 parameters).
 Clients generate codes locally.
+
+5.5. An `icon` value of the form `hue:<n>`, with `n` a decimal integer from 0
+to 11, is a colour the user chose for the group or entry; the app shows it on
+the item's tile. Any other value (absent, a built-in icon name, or unknown)
+is shown with the automatic colour derived from the record ID. Clients keep it
+unchanged unless the user picks a colour, and choosing "Automatic" removes only
+a `hue:` value. The value is ordinary confidential metadata and changes nothing
+about encryption or storage.
 
 ### 6. Attachments
 
@@ -150,3 +158,5 @@ Not in v1. Nested groups cover organization. The CBOR model leaves room to add
 - 2026-10-15: Amendment: causal atomic records, keyslot control kind, canonical
   CBOR, deterministic nonmutating tree projection and exact attachment references.
 - 2026-10-15: Security review: unlinkable object envelopes; padded final chunk.
+- 2026-11-05: §4/§5 icon note and 5.5: the app colour token `hue:<0–11>`
+  (plan 0040, owner request for chosen colours; owner-delegated format).

@@ -69,6 +69,8 @@ window.qvDeviceFixture=(()=>{
    return false;
   },
   lock:()=>click('lock'),
+  // The new-item start step: choose Login, then the form appears.
+  startLogin:()=>{if(q('#ws-title'))return true;click('start-login');return false},
   entryForm:()=>{input('ws-title','Synthetic phone entry');input('ws-field-value-0','phone@example.test')},
   // Bounded failure context: headings, flags and button labels only, never
   // field values or the recovery phrase.

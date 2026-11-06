@@ -203,6 +203,8 @@ pub enum WsField {
     Replacement(u16),
     /// Name for a new field.
     NewFieldName,
+    /// The new item's start box (protected: people paste card numbers).
+    Start,
     /// Group name.
     GroupName,
     /// Local path (Linux) or file name (Android private vaults).
@@ -270,6 +272,8 @@ pub enum RevealKey {
     Generated,
     /// The current code of a TOTP field (never its seed).
     Totp(FieldHandle),
+    /// A Wi‑Fi entry's join QR payload; it carries the password (0009 §1.8).
+    WifiJoin(EntryHandle),
 }
 /// What a copy sends to the OS clipboard.
 #[derive(Clone)]
@@ -326,8 +330,25 @@ pub enum WsAction {
     NewEntry(GroupHandle),
     /// Edit an existing entry.
     EditEntry(EntryHandle),
-    /// Add a field to the entry form.
-    AddField(FieldKind),
+    /// Leave the start step as this type, or as the guessed one.
+    StartAs(Option<crate::editor::ItemType>),
+    /// Change the item's type (templates; filled fields are kept).
+    SetType(crate::editor::ItemType),
+    /// Place the entry in a group on save.
+    SetGroup(GroupHandle),
+    /// Pick the open entry's or group's colour (`None`: automatic).
+    SetHue(Option<u8>),
+    /// Add a field named by the new-field input, of this kind or the kind
+    /// its name suggests.
+    AddField(Option<FieldKind>),
+    /// Add a field with a suggested name and the kind it suggests.
+    AddNamedField(&'static str),
+    /// Move a form field up (`true`) or down.
+    MoveField(u16, bool),
+    /// Put back the last removed form field.
+    UndoRemoveField,
+    /// Move the generator's displayed value into a protected replacement.
+    UseGenerated(u16),
     /// Remove a form field.
     RemoveField(u16),
     /// Toggle a form field's protection.
@@ -470,8 +491,14 @@ pub(crate) struct EntryForm {
     pub(crate) new: bool,
     pub(crate) replacements: BTreeMap<u16, SecretBytes>,
     pub(crate) generated: Vec<u16>,
+    /// Replacements filled in Rust from the start box (never typed here).
+    pub(crate) filled: Vec<u16>,
     pub(crate) too_large: Vec<u16>,
     pub(crate) notes_too_large: bool,
+    /// The "What are you saving?" step of a new item.
+    pub(crate) start: bool,
+    /// The last removed field, for Undo.
+    pub(crate) removed: Option<crate::editor::Removed>,
 }
 /// The group form.
 pub(crate) struct GroupForm {
@@ -1394,18 +1421,26 @@ fn apply_input(ws: &mut Workspace, field: WsField, value: &str) -> Result<(), Ap
                 return Err(AppError::InvalidInput);
             }
             form.generated.retain(|g| *g != i);
-            if value.is_empty() {
-                form.replacements.remove(&i);
-            } else {
-                form.replacements.insert(i, protect(value.as_bytes())?);
-            }
-            if ws
+            form.filled.retain(|g| *g != i);
+            let replacement = (!value.is_empty())
+                .then(|| protect(value.as_bytes()))
+                .transpose()?;
+            // A "show" of this input stays on for its 30 s while typing: the
+            // revealed copy follows the input instead of going stale.
+            if let Some(r) = ws
                 .reveal
-                .as_ref()
-                .is_some_and(|r| r.0 == RevealKey::Replacement(i))
+                .as_mut()
+                .filter(|r| r.0 == RevealKey::Replacement(i))
             {
-                ws.reveal = None;
+                match &replacement {
+                    Some(v) => r.1 = protect(v.expose_secret())?,
+                    None => ws.reveal = None,
+                }
             }
+            match replacement {
+                Some(v) => form.replacements.insert(i, v),
+                None => form.replacements.remove(&i),
+            };
             Ok(())
         }
         WsField::GroupName => {

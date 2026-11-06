@@ -6,7 +6,7 @@
 //! No type here derives `Debug` or `Display`.
 use qv_core::{
     AttachmentHandle, ConflictDetails, CoreError, Deletion, EntryHandle, FieldHandle, FieldId,
-    FieldKind, GroupHandle, ItemHandle, RecordKind, Session, Timestamp,
+    FieldKind, GroupHandle, ItemHandle, RecordKind, Session, Text, Timestamp,
 };
 use zeroize::Zeroizing;
 
@@ -55,6 +55,8 @@ pub struct GroupRow {
     pub handle: GroupHandle,
     /// Its name.
     pub name: Z,
+    /// The colour the user chose (0003 §5.5), else automatic.
+    pub colour: Option<u8>,
     /// It has conflicting versions.
     pub conflict: bool,
 }
@@ -67,6 +69,8 @@ pub struct EntryRow {
     pub title: Z,
     /// First non-protected text/URL/email value.
     pub subtitle: Z,
+    /// The colour the user chose (0003 §5.5), else automatic.
+    pub colour: Option<u8>,
     /// It has conflicting versions.
     pub conflict: bool,
 }
@@ -78,6 +82,7 @@ fn entry_row(e: &qv_core::EntrySummary) -> EntryRow {
             .fields
             .first()
             .map_or_else(|| z(""), |f| z(f.value.expose())),
+        colour: crate::editor::colour(e.icon.as_ref().map(Text::expose)),
         conflict: e.conflict,
     }
 }
@@ -85,6 +90,7 @@ fn group_row(g: &qv_core::GroupSummary) -> GroupRow {
     GroupRow {
         handle: g.handle,
         name: z(g.name.expose()),
+        colour: crate::editor::colour(g.icon.as_ref().map(Text::expose)),
         conflict: g.conflict,
     }
 }
@@ -318,6 +324,8 @@ pub struct EntryView {
     pub deleted: bool,
     /// Current attachments.
     pub attachments: usize,
+    /// The colour the user chose (0003 §5.5), else automatic.
+    pub colour: Option<u8>,
 }
 fn entry_view(d: &qv_core::EntryDetail, versions: usize, attachments: usize) -> EntryView {
     EntryView {
@@ -333,6 +341,7 @@ fn entry_view(d: &qv_core::EntryDetail, versions: usize, attachments: usize) -> 
         expires: d.expires_at.map(date),
         deleted: d.deleted_at.is_some(),
         attachments,
+        colour: crate::editor::colour(d.icon.as_ref().map(Text::expose)),
     }
 }
 /// Read one entry.
@@ -341,6 +350,31 @@ pub fn entry(s: &Session, e: EntryHandle) -> Result<EntryView, CoreError> {
     let versions = s.entry_versions(e)?.len();
     let attachments = s.attachments(e).map(|a| a.len()).unwrap_or(0);
     Ok(entry_view(&d, versions, attachments))
+}
+/// A saved card's face for its page: the number is read in place for its
+/// brand, last four digits and validity only (0009 §1.8).
+pub fn card_face(s: &Session, v: &EntryView) -> Option<CardFace> {
+    use crate::editor::{self, CARD_NUMBER, EXPIRES, ItemType, same_slot};
+    if ItemType::from_hint(&v.type_hint) != Some(ItemType::Card) {
+        return None;
+    }
+    let named = |name: &str| v.fields.iter().find(|f| same_slot(&f.name, name));
+    let info = named(CARD_NUMBER)
+        .and_then(|f| s.reveal(f.handle).ok())
+        .map(|n| editor::CardInfo::of(n.expose_secret()))
+        .unwrap_or_default();
+    let plain = |name: &str| {
+        named(name)
+            .and_then(|f| f.value.clone())
+            .unwrap_or_else(|| z(""))
+    };
+    let expiry = plain(EXPIRES);
+    Some(CardFace {
+        info,
+        name: plain("Name on card"),
+        left: editor::expiry(&expiry, editor::this_month()),
+        expiry: Zeroizing::new(editor::expiry_shown(&expiry)),
+    })
 }
 /// A trash row.
 #[derive(Clone, PartialEq)]
@@ -666,8 +700,60 @@ pub struct FormRow {
     pub replaced: bool,
     /// The replacement was generated.
     pub generated: bool,
+    /// The replacement was filled from the start box.
+    pub filled: bool,
     /// Too large to edit in the app.
     pub too_large: bool,
+    /// A protected value is saved (one bit; never the value).
+    pub stored: bool,
+    /// How the editor presents it.
+    pub role: Role,
+}
+/// How the item editor presents a field (plan 0040 E5, E8, E9).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    /// An ordinary input.
+    Plain,
+    /// A protected value with the generator.
+    Password,
+    /// A protected value without the generator.
+    Hidden,
+    /// A card's number (protected; brand, last four and validity shown).
+    CardNumber,
+    /// A card's `MM/YY` expiry.
+    Expiry,
+    /// A Wi‑Fi network's security choice.
+    Security,
+}
+/// The start step's guess, without any card number (0009 §1.8).
+#[derive(Clone, PartialEq)]
+pub struct GuessView {
+    /// The suggested type.
+    pub kind: crate::editor::ItemType,
+    /// Headline.
+    pub line: Z,
+    /// Second line.
+    pub sub: Z,
+}
+/// A card's face: never the number, only what 0009 §1.8 allows.
+#[derive(Clone, PartialEq)]
+pub struct CardFace {
+    /// Brand, last four and validity.
+    pub info: crate::editor::CardInfo,
+    /// Name on the card.
+    pub name: Z,
+    /// Expiry as typed.
+    pub expiry: Z,
+    /// Time left on the expiry and whether that is comfortable.
+    pub left: Option<(String, bool)>,
+}
+/// A Wi‑Fi network's join card.
+#[derive(Clone, PartialEq)]
+pub struct WifiCard {
+    /// Network name.
+    pub name: Z,
+    /// Security as stored (`WPA2`, `None`, …).
+    pub security: Z,
 }
 /// The entry form.
 #[derive(Clone, PartialEq)]
@@ -686,11 +772,139 @@ pub struct EntryFormView {
     pub notes_too_large: bool,
     /// Fields.
     pub rows: Vec<FormRow>,
+    /// The "What are you saving?" step.
+    pub start: bool,
+    /// The start step's guess.
+    pub guess: Option<GuessView>,
+    /// The item type, when the hint is a known one.
+    pub kind: Option<crate::editor::ItemType>,
+    /// The chosen colour, else automatic.
+    pub colour: Option<u8>,
+    /// The entry's group.
+    pub group: GroupHandle,
+    /// The title used if the title stays empty, and where it comes from.
+    pub auto_title: Option<(Z, &'static str)>,
+    /// A card's face.
+    pub card: Option<CardFace>,
+    /// A Wi‑Fi network's join card.
+    pub wifi: Option<WifiCard>,
+    /// The kind (and protection) the typed new-field name suggests.
+    pub new_kind: (FieldKind, bool),
+    /// The last removed field's name, for Undo.
+    pub removed: Option<Z>,
+    /// The replacement whose eye is on (its control shows the typed text).
+    pub showing: Option<u16>,
+}
+fn text_of(f: &qv_core::Field) -> Z {
+    Zeroizing::new(String::from_utf8_lossy(f.value.expose_secret()).into_owned())
+}
+fn role(kind: Option<crate::editor::ItemType>, f: &qv_core::Field) -> Role {
+    use crate::editor::{CARD_NUMBER, EXPIRES, ItemType, SECURITY, same_slot};
+    let name = f.name.expose();
+    match kind {
+        Some(ItemType::Card) if f.protected && same_slot(name, CARD_NUMBER) => {
+            return Role::CardNumber;
+        }
+        Some(ItemType::Card) if !f.protected && same_slot(name, EXPIRES) => return Role::Expiry,
+        Some(ItemType::Wifi) if !f.protected && same_slot(name, SECURITY) => return Role::Security,
+        _ => {}
+    }
+    if !f.protected {
+        return Role::Plain;
+    }
+    let lower = name.to_lowercase();
+    let short = ["pin", "cvv", "cvc", "security code"]
+        .iter()
+        .any(|w| lower.contains(w));
+    if f.kind == FieldKind::Secret && !short {
+        Role::Password
+    } else {
+        Role::Hidden
+    }
+}
+/// Build the entry form view, with the workspace's start box, new-field
+/// name and reveal state.
+pub(crate) fn entry_form_in(
+    ws: &crate::workspace::Workspace,
+    f: &crate::workspace::EntryForm,
+) -> EntryFormView {
+    use crate::editor::{self, ItemType};
+    let mut v = entry_form(f);
+    let e = f.draft.entry();
+    let kind = ItemType::from_hint(e.type_hint.expose());
+    v.kind = kind;
+    for (row, field) in v.rows.iter_mut().zip(&e.fields) {
+        row.role = role(kind, field);
+    }
+    v.guess = f
+        .start
+        .then(|| editor::guess(ws.input(crate::workspace::WsField::Start)))
+        .flatten()
+        .map(|g| GuessView {
+            kind: g.kind,
+            line: g.line,
+            sub: g.sub,
+        });
+    let typed = ws
+        .text(crate::workspace::WsField::NewFieldName)
+        .unwrap_or_default();
+    v.new_kind = editor::kind_for(typed);
+    v.showing = v.rows.iter().map(|r| r.index).find(|i| {
+        ws.revealed(&crate::workspace::RevealKey::Replacement(*i))
+            .is_some()
+    });
+    let named = |name: &str| editor::find(&e.fields, name).map(|i| &e.fields[i]);
+    v.card = (kind == Some(ItemType::Card)).then(|| {
+        let number = editor::find(&e.fields, editor::CARD_NUMBER).map(|i| {
+            let replaced = u16::try_from(i).ok().and_then(|k| f.replacements.get(&k));
+            editor::CardInfo::of(match replaced {
+                Some(r) => r.expose_secret(),
+                None => e.fields[i].value.expose_secret(),
+            })
+        });
+        let plain = |name: &str| {
+            named(name)
+                .filter(|x| !x.protected)
+                .map(text_of)
+                .unwrap_or_else(|| z(""))
+        };
+        let expiry = plain(editor::EXPIRES);
+        CardFace {
+            info: number.unwrap_or_default(),
+            name: plain("Name on card"),
+            left: editor::expiry(&expiry, editor::this_month()),
+            expiry: Zeroizing::new(editor::expiry_shown(&expiry)),
+        }
+    });
+    v.wifi = (kind == Some(ItemType::Wifi)).then(|| {
+        let plain = |name: &str| {
+            named(name)
+                .filter(|x| !x.protected)
+                .map(text_of)
+                .unwrap_or_else(|| z(""))
+        };
+        WifiCard {
+            name: plain(editor::NETWORK),
+            security: plain(editor::SECURITY),
+        }
+    });
+    v
 }
 /// Build the entry form view.
 pub(crate) fn entry_form(f: &crate::workspace::EntryForm) -> EntryFormView {
     let e = f.draft.entry();
     EntryFormView {
+        start: f.start,
+        guess: None,
+        kind: None,
+        colour: crate::editor::colour(e.icon.as_ref().map(Text::expose)),
+        group: f.draft.group(),
+        auto_title: crate::editor::auto_title(f).map(|(t, from)| (Zeroizing::new(t), from)),
+        card: None,
+        wifi: None,
+        new_kind: (FieldKind::Text, false),
+        removed: f.removed.as_ref().map(|r| z(r.field.name.expose())),
+        showing: None,
         new: f.new,
         id: f.draft.id_hex(),
         title: z(e.title.expose()),
@@ -720,7 +934,10 @@ pub(crate) fn entry_form(f: &crate::workspace::EntryForm) -> EntryFormView {
                     }),
                     replaced: f.replacements.contains_key(&index),
                     generated: f.generated.contains(&index),
+                    filled: f.filled.contains(&index),
                     too_large,
+                    stored: x.protected && !x.value.expose_secret().is_empty(),
+                    role: Role::Plain,
                 })
             })
             .collect(),
@@ -735,6 +952,8 @@ pub struct GroupFormView {
     pub id: String,
     /// Name.
     pub name: Z,
+    /// The chosen colour, else automatic.
+    pub colour: Option<u8>,
 }
 /// General settings form.
 #[derive(Clone, PartialEq)]
@@ -781,8 +1000,10 @@ pub struct PhraseScreen {
 impl crate::controller::Controller {
     /// The entry form for the current epoch.
     pub fn entry_form(&self, epoch: crate::controller::FormEpoch) -> Option<EntryFormView> {
-        self.peek(epoch, |ws| ws.entry_form.as_ref().map(entry_form))
-            .flatten()
+        self.peek(epoch, |ws| {
+            ws.entry_form.as_ref().map(|f| entry_form_in(ws, f))
+        })
+        .flatten()
     }
     /// The group form for the current epoch.
     pub fn group_form(&self, epoch: crate::controller::FormEpoch) -> Option<GroupFormView> {
@@ -791,6 +1012,7 @@ impl crate::controller::Controller {
                 new: f.new,
                 id: f.draft.id_hex(),
                 name: z(f.draft.group().name.expose()),
+                colour: crate::editor::colour(f.draft.group().icon.as_ref().map(Text::expose)),
             })
         })
         .flatten()

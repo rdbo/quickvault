@@ -6,6 +6,9 @@ mod android;
 pub mod autofill;
 pub mod controller;
 mod documents;
+pub mod editor;
+#[cfg(test)]
+mod editor_tests;
 pub mod lan;
 #[cfg(test)]
 mod lan_tests;

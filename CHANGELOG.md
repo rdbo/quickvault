@@ -41,7 +41,23 @@ Dates are ISO 8601. Newest first within each section.
   record ID). The real-engine test driver now clicks only controls a real
   pointer could reach.
 
-  No vault, crypto, storage, protocol or sync change. The webview policy is
+  New item editor, from a prototype the owner approved:
+  - A new item starts from one box, "What are you saving?". It recognises a
+    website, a card number or a Wi‑Fi name on the device. A pasted card number
+    goes straight into the protected card-number field.
+  - Forms follow the type: a live card face for cards, a join card and
+    security buttons for Wi‑Fi, and a plain page for notes. Untitled items
+    take their title from the website, network name or card.
+  - Field tools sit behind ⋯ (rename, hide or show the value, move, remove
+    with Undo). One "Add a field" infers the kind from the name.
+  - Saved protected values show "Saved · Change". The generator popover moves
+    its value into the field without passing it through the page.
+  - Wi‑Fi items can show a join QR code for 30 seconds.
+  - Items and groups can be given a colour, stored as `hue:<0–11>` in the
+    existing `icon` text (0003 §5.5).
+
+  No vault, crypto, storage-format, protocol or sync change (the colour is a
+  value convention in an existing field). The webview policy is
   unchanged: the UI uses no inline styles. The real-engine and Android test
   drivers were rewritten for the new screens with the same checks.
 

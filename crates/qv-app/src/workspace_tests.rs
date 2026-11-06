@@ -201,13 +201,14 @@ impl Env {
         let root = self.read(|s| s.root());
         self.act(WsAction::NewEntry(root));
         assert_eq!(self.screen(), Screen::EditEntry);
+        self.act(WsAction::StartAs(Some(crate::editor::ItemType::Login)));
         self.put(WsField::Title, title);
         let form = self.c.entry_form(self.epoch()).unwrap();
         let pw = form.rows.iter().find(|r| r.protected).unwrap().index;
         let user = form
             .rows
             .iter()
-            .find(|r| *r.name == "username")
+            .find(|r| crate::editor::same_slot(&r.name, "username"))
             .unwrap()
             .index;
         self.put(WsField::FieldValue(user), "alice@example.test");
@@ -221,7 +222,12 @@ impl Env {
     }
 }
 fn field(v: &views::EntryView, name: &str) -> views::FieldRow {
-    v.fields.iter().find(|f| *f.name == name).unwrap().clone()
+    // Template names are capitalised ("Username", "Website" for "url").
+    v.fields
+        .iter()
+        .find(|f| crate::editor::same_slot(&f.name, name))
+        .unwrap()
+        .clone()
 }
 
 // 0012 §1: Ambiguous trust boundary
@@ -414,14 +420,14 @@ fn edit_bounds_blank_replacement_protection_fields_and_groups() {
     env.put(WsField::Replacement(pw), "");
     env.put(WsField::Notes, "multi\nline");
     env.put(WsField::NewFieldName, "pin");
-    env.act(WsAction::AddField(FieldKind::Secret));
+    env.act(WsAction::AddField(Some(FieldKind::Secret)));
     env.put(WsField::NewFieldName, "note2");
-    env.act(WsAction::AddField(FieldKind::Text));
-    // A "+ Kind" button without a typed name names the field after its kind.
-    env.act(WsAction::AddField(FieldKind::Email));
+    env.act(WsAction::AddField(Some(FieldKind::Text)));
+    // Adding without a typed name names the field after its kind.
+    env.act(WsAction::AddField(Some(FieldKind::Email)));
     assert_eq!(env.error(), None);
     let form = env.c.entry_form(env.epoch()).unwrap();
-    assert!(form.rows.iter().any(|r| *r.name == "email"));
+    assert!(form.rows.iter().any(|r| *r.name == "Email"));
     let pin = form.rows.iter().find(|r| *r.name == "pin").unwrap();
     assert!(pin.protected);
     let pin = pin.index;
@@ -429,7 +435,12 @@ fn edit_bounds_blank_replacement_protection_fields_and_groups() {
     assert!(env.c.entry_form(env.epoch()).unwrap().rows[usize::from(pin)].generated);
     let note2 = form.rows.iter().find(|r| *r.name == "note2").unwrap().index;
     env.act(WsAction::RemoveField(note2));
-    let url = form.rows.iter().find(|r| *r.name == "url").unwrap().index;
+    let url = form
+        .rows
+        .iter()
+        .find(|r| crate::editor::same_slot(&r.name, "url"))
+        .unwrap()
+        .index;
     env.act(WsAction::ToggleProtect(url));
     env.act(WsAction::SaveEntry);
     assert_eq!(env.error(), None);
@@ -1365,6 +1376,12 @@ fn shortcuts_run_only_existing_actions_and_escape_never_confirms() {
     assert!(!env.c.shortcut(env.epoch(), Shortcut::Save));
     assert!(env.c.shortcut(env.epoch(), Shortcut::NewEntry));
     env.wait();
+    // Save does nothing in the start step; the type is chosen first.
+    assert!(env.c.shortcut(env.epoch(), Shortcut::Save));
+    env.wait();
+    assert_eq!(env.error(), Some(AppError::NameRequired));
+    assert_eq!(env.screen(), Screen::EditEntry);
+    env.act(WsAction::StartAs(Some(crate::editor::ItemType::Note)));
     env.put(WsField::Title, "Keyboard");
     assert!(env.c.shortcut(env.epoch(), Shortcut::Save));
     env.wait();

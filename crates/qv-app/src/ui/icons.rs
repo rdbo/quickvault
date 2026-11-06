@@ -13,6 +13,7 @@ pub(crate) enum Icon {
     Search,
     Plus,
     ChevronDown,
+    Up,
     Right,
     Back,
     All,
@@ -62,6 +63,7 @@ impl Icon {
             Self::Search => "M11.5 7a4.5 4.5 0 1 1-9 0a4.5 4.5 0 1 1 9 0zM10.5 10.5L14 14",
             Self::Plus => "M8 3v10M3 8h10",
             Self::ChevronDown => "M4 6l4 4 4-4",
+            Self::Up => "M4 10l4-4 4 4",
             Self::Right => "M6 4l4 4-4 4",
             Self::Back => "M13 8H3M7 4L3 8l4 4",
             Self::All => "M2.5 4.5h11M2.5 8h11M2.5 11.5h11",
@@ -172,10 +174,30 @@ pub(crate) fn hue(text: &str) -> &'static str {
 
 /// A stable colour for a vault item, from its random record ID (hex), so
 /// renaming keeps it and synced devices agree.
+const HUES: [&str; 12] = [
+    "h0", "h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8", "h9", "h10", "h11",
+];
+/// The tile class of a colour token's number (0–11).
+pub(crate) fn hue_class(n: u8) -> &'static str {
+    HUES[usize::from(n) % HUES.len()]
+}
+/// An item's tile colour: the one the user chose (0003 §5.5), else the
+/// automatic colour from its record ID.
+pub(crate) fn item_hue(colour: Option<u8>, id_hex: &str) -> &'static str {
+    colour.map_or_else(|| id_hue(id_hex), hue_class)
+}
+/// The colour of an item type's start tile.
+pub(crate) fn type_hue(kind: crate::editor::ItemType) -> &'static str {
+    use crate::editor::ItemType;
+    match kind {
+        ItemType::Login => "h6",
+        ItemType::Card => "h7",
+        ItemType::Wifi => "h5",
+        ItemType::Note => "h2",
+        ItemType::Other => "h11",
+    }
+}
 pub(crate) fn id_hue(id_hex: &str) -> &'static str {
-    const HUES: [&str; 12] = [
-        "h0", "h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8", "h9", "h10", "h11",
-    ];
     let byte = id_hex
         .get(..4)
         .and_then(|h| u16::from_str_radix(h, 16).ok())
@@ -193,7 +215,7 @@ pub(crate) fn initial(title: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::id_hue;
+    use super::{id_hue, item_hue};
 
     #[test]
     fn id_hue_depends_only_on_the_record_id() {
@@ -205,5 +227,13 @@ mod tests {
         // Malformed or short IDs fall back instead of panicking.
         assert_eq!(id_hue(""), "h0");
         assert_eq!(id_hue("zz"), "h0");
+    }
+
+    #[test]
+    fn a_chosen_colour_wins_over_the_automatic_one() {
+        let id = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+        assert_eq!(item_hue(None, id), "h6");
+        assert_eq!(item_hue(Some(3), id), "h3");
+        assert_eq!(item_hue(Some(11), ""), "h11");
     }
 }
