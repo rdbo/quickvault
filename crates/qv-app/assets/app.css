@@ -48,8 +48,9 @@ html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none;backgrou
 .hint{color:var(--text3);font-size:12.5px;line-height:1.55}
 p{margin:6px 0}
 h1,h2,h3{margin:0;letter-spacing:-.01em}
-.fade-in{animation:fadeIn .26s ease-out}
-@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}}
+/* Short: a long fade reads as a slow switch. */
+.fade-in{animation:fadeIn .12s ease-out}
+@keyframes fadeIn{from{opacity:0;transform:translateY(3px)}}
 @keyframes pop{from{opacity:0;transform:scale(.96)}}
 @keyframes rise{from{opacity:0;transform:translateY(18px)}}
 @keyframes slideIn{from{transform:translateX(100%)}}
@@ -73,6 +74,7 @@ h1,h2,h3{margin:0;letter-spacing:-.01em}
 kbd{font:11px system-ui,sans-serif;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 5px;color:var(--text3)}
 .tb-btn{width:32px;height:30px;display:grid;place-items:center;border:0;border-radius:7px;background:none;color:var(--text2);position:relative}
 .tb-btn:hover{background:var(--raised);color:var(--text)}
+.lock-mark{position:absolute;top:3px;right:4px;width:7px;height:7px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 2px var(--bg)}
 .ring{position:absolute;inset:3px;width:26px;height:24px;transform:rotate(-90deg);pointer-events:none}
 .ring circle{fill:none;stroke-width:2}
 .ring .track,.revealring .track{stroke:var(--line)}

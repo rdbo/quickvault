@@ -101,6 +101,15 @@ validation packages may exercise the implemented path.
   - a changed status asks again;
   - complete protection asks nothing;
   - the mode stays visible in security settings.
+  - On Linux without screen-lock/sleep detection, 0008 §1.4's notice:
+    - before use: it is in that acknowledgement and the locked screen's
+      protection chip;
+    - while unlocked: a lasting mark on the lock button, whose label says
+      screen lock and sleep do not lock QuickVault, and an "Idle only"
+      auto-lock row in security settings.
+
+    It is not a permanent banner. Nothing claims OS-triggered locking while
+    it is unavailable.
 - **Files without typed paths.** Vault files, attachments, archives and
   snapshot-restore targets are chosen through the system picker: the Android
   Storage Access Framework, or the Linux xdg-desktop-portal FileChooser.
@@ -276,6 +285,9 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-06: §1.8: present the missing Linux lock detection as a mark on
+  the lock button and an "Idle only" settings row, not a permanent banner
+  (owner: the banner "never goes away"; presentation owner-delegated).
 - 2026-11-05: §1.8 item editor: on-device start guess with a protected
   start box, limited derived displays of protected values, generated-only
   strength, a Wi‑Fi join QR as a timed reveal, colour tokens (plan 0040,

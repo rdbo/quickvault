@@ -102,6 +102,11 @@ try{
  await until(()=>!!Array.from(document.querySelectorAll(".muted")).find(m=>m.textContent==="The trash is empty."));
  stage=8;await tap("nav-generator");await until(()=>title()==="Generator");await tap("generate");
  await until(()=>($("#generated")?.textContent||"").length>=8);
+ // The lock control and Settings agree on screen-lock detection; neither
+ // advertises it when unavailable (0008 §1.4), and there is no banner.
+ stage=82;await tap("nav-settings");await until(()=>!!$("#settings-autolock"));
+ {const idle=!!$("#lock.idle-only"),row=byId("settings-autolock").textContent;
+  if(idle!==row.includes("Idle only")||(idle&&row.includes("when the screen locks"))||Array.from(document.querySelectorAll(".banner")).some(b=>b.textContent.includes("Automatic locking")))throw new Error("synthetic lock capability misreported")}
  // A save racing a lock never leaves revealed or phrase text behind.
  stage=81;await openItem("Synthetic <img");await tap("entry-edit");await until(()=>!!$("#add-note")||!!$("#ws-notes"));if(!$("#ws-notes"))await tap("add-note");await until(()=>!!$("#ws-notes"));input("ws-notes","synthetic save-lock race");await tap("entry-save");await tap("lock");
  stage=9;await until(()=>!!$("#password"));

@@ -18,8 +18,22 @@ use zeroize::Zeroizing;
 pub(crate) static ACTIVE: OnceLock<Result<Controller, crate::controller::AppError>> =
     OnceLock::new();
 
+/// Redraws the app now. Handlers change the controller synchronously, so a
+/// redraw right after the event shows the result without waiting for the
+/// poll below (which still catches background work and timers).
+#[derive(Clone, Copy)]
+struct Redraw(Signal<u64, SyncStorage>);
+impl Redraw {
+    fn now(mut self) {
+        if let Ok(mut value) = self.0.try_write() {
+            *value = value.wrapping_add(1);
+        }
+    }
+}
+
 pub(crate) fn app() -> Element {
     let mut changed = use_signal_sync(|| 0u64);
+    use_context_provider(|| Redraw(changed));
     use_hook(move || {
         std::thread::spawn(move || {
             let mut previous = None;
@@ -124,6 +138,7 @@ fn is_preview(controller: &Controller) -> bool {
 #[component]
 fn Root(controller: Controller, revision: u64) -> Element {
     let _ = revision;
+    let redraw = use_context::<Redraw>();
     let view = controller.snapshot();
     let epoch = view.epoch;
     let palette = use_signal(|| false);
@@ -132,6 +147,8 @@ fn Root(controller: Controller, revision: u64) -> Element {
         let c = controller.clone();
         let mut palette = palette;
         move |event: KeyboardEvent| {
+            // Bubbled after the target's own handler: show its result now.
+            redraw.now();
             let key = event.key().to_string();
             let ctrl = event.modifiers().ctrl() || event.modifiers().meta();
             if unlocked && ctrl && matches!(key.as_str(), "k" | "K" | "f" | "F") {
@@ -162,9 +179,10 @@ fn Root(controller: Controller, revision: u64) -> Element {
     };
     rsx! {
         div { class: "qv", "data-mode": view.theme.name(), "data-qv-epoch": "{epoch.0}", tabindex: "-1", onkeydown: keys,
+            onclick: move |_| redraw.now(), oninput: move |_| redraw.now(),
             shell::TitleBar {
                 controller: Some(controller.clone()), epoch, unlocked, idle_left: view.idle_left, busy: view.busy,
-                palette: unlocked.then_some(palette), vault: name,
+                palette: unlocked.then_some(palette), vault: name, idle_only: view.reduced_lifecycle,
             }
             if unlocked {
                 shell::Shell { controller: controller.clone(), view: ShellView::from(&view), palette }
@@ -695,9 +713,6 @@ fn Locked(controller: Controller, revision: u64) -> Element {
         div { class: "locked",
             if fixture && cfg!(target_os = "android") { p { class: "banner", "Synthetic validation build · isolated test vault only" } }
             if preview { p { class: "banner", "Read-only preview · vault actions are disabled. Do not enter real credentials." } }
-            if view.reduced_lifecycle {
-                p { class: "banner", role: "status", Svg { icon: Icon::Warn } span { "Automatic locking on screen lock or sleep is unavailable. Manual lock and the 60-second inactivity lock remain active." } }
-            }
             div { class: "locked-body", key: "locked-{epoch.0}", {body} }
             div { class: "locked-foot",
                 button { class: if view.ack_needed { "status-chip warn" } else { "status-chip" }, id: "protection-chip", onclick: move |_| { after_ack.set(None); sheet.set(Sheet::Protection); }, Svg { icon: Icon::Shield } "{chip_text}" }

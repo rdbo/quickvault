@@ -4,7 +4,7 @@
 //! no OS decorations, 0009 §1.8), sidebar, phone tabs, command bar, toasts
 //! and confirmations. Layout comes from CSS container queries over one DOM.
 use super::ShellView;
-use super::icons::{Icon, Svg, id_hue, initial, kind_icon};
+use super::icons::{Icon, Svg, initial, item_hue, kind_icon};
 use super::{items, pages};
 use crate::controller::{AppError, Controller, FormEpoch};
 use crate::prefs::Theme;
@@ -33,10 +33,13 @@ pub(crate) fn TitleBar(
     busy: bool,
     palette: Option<Signal<bool>>,
     vault: Option<String>,
+    #[props(default)] idle_only: bool,
 ) -> Element {
     #[cfg(target_os = "android")]
     {
-        let _ = (controller, epoch, unlocked, idle_left, busy, palette, vault);
+        let _ = (
+            controller, epoch, unlocked, idle_left, busy, palette, vault, idle_only,
+        );
         rsx! {}
     }
     #[cfg(not(target_os = "android"))]
@@ -86,9 +89,14 @@ pub(crate) fn TitleBar(
                     }
                 }
                 if unlocked && let Some(c) = controller.clone() {
-                    button { class: "tb-btn lock-button", id: "lock", title: "Lock now (Ctrl L). Locks after 60 s without activity.", "aria-label": "Lock",
+                    // Without screen-lock/sleep detection (0008 §1.4) the lock
+                    // carries a lasting mark and says so, instead of a banner.
+                    button { class: if idle_only { "tb-btn lock-button idle-only" } else { "tb-btn lock-button" }, id: "lock",
+                        title: if idle_only { "Lock now (Ctrl L). Locks after 60 s without activity. This system does not report screen lock or sleep, so they do not lock QuickVault." } else { "Lock now (Ctrl L). Locks after 60 s without activity, and when the screen locks or the device sleeps." },
+                        "aria-label": if idle_only { "Lock. Screen lock and sleep do not lock QuickVault on this system." } else { "Lock" },
                         "data-qv-clear": "true", onmousedown: |e| e.stop_propagation(), onclick: move |_| c.lock(),
                         Svg { icon: Icon::Lock }
+                        if idle_only { span { class: "lock-mark", "aria-hidden": "true" } }
                         svg { class: "ring", view_box: "0 0 26 24", "aria-hidden": "true",
                             circle { class: "track", cx: "13", cy: "12", r: "10.5" }
                             circle { class: "left", cx: "13", cy: "12", r: "10.5", stroke_dasharray: "66", stroke_dashoffset: "{offset:.1}" }
@@ -262,11 +270,6 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
     ];
     let all_on = vault_screen && context == Screen::Browse(None);
     rsx! {
-        if view.reduced_lifecycle {
-            div { class: "banner inset", role: "status", Svg { icon: Icon::Warn }
-                span { "Automatic locking on screen lock or sleep is unavailable. Manual lock and the 60-second inactivity lock remain active." }
-            }
-        }
         if fixture && cfg!(target_os = "android") { p { class: "banner inset", "Synthetic validation build · isolated test vault only" } }
         // `inert` is not a Dioxus boolean attribute: a false value would still
         // render `inert="false"` and block the pointer, so omit it instead.
@@ -290,7 +293,7 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
                 for g in groups.iter().cloned() {
                     button { class: nav_class(vault_screen && context == Screen::Browse(Some(g.handle))), title: "{g.name.as_str()}", disabled: busy,
                         onclick: go(&controller, epoch, Screen::Browse(Some(g.handle))),
-                        span { class: "dot {id_hue(&g.handle.id_hex())}" } span { class: "t", "{g.name.as_str()}" } span { class: "n", "{in_group(g.handle)}" }
+                        span { class: "dot {item_hue(g.colour, &g.handle.id_hex())}" } span { class: "t", "{g.name.as_str()}" } span { class: "n", "{in_group(g.handle)}" }
                     }
                 }
                 if recovered > 0 {
@@ -541,7 +544,7 @@ fn Palette(
                     if !hits.is_empty() { div { class: "grp", "ITEMS" } }
                     for e in hits.iter().cloned() {
                         button { class: "it", onclick: { let mut run = run.clone(); let h = e.handle; move |_| run(Command::Open(Screen::Entry(h))) },
-                            span { class: "tile {id_hue(&e.handle.id_hex())}", "{initial(&e.title)}" }
+                            span { class: "tile {item_hue(e.colour, &e.handle.id_hex())}", "{initial(&e.title)}" }
                             span { "{e.title.as_str()}" } small { "{e.subtitle.as_str()}" }
                         }
                     }

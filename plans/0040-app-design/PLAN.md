@@ -909,3 +909,51 @@ separate until save; 0008 §4 reveal and clipboard timers; input bounds;
     included); full suite 901 passed, 0 failed, 2 ignored. Android
     instrumentation not run (no phone).
   - **Docs:** CHANGELOG, `crates/qv-app/README.md`, specs and index.
+- 2026-11-06 (owner: the automatic-locking banner "never goes away"; tool
+  switches feel ~500 ms slow):
+  - **Lag:** the UI redrew only when a background thread polled the
+    controller every 200 ms. Each switch waited 0–200 ms, then faded in over
+    260 ms.
+    - The root now redraws right after any bubbled click, input or key event
+      (`Redraw` context; handlers change the controller synchronously). The
+      poll still covers background work and timers.
+    - The fade is 120 ms.
+    - Measured with an `import`-based probe whose own floor is about 120 ms.
+      Before: the first change appeared 120–250 ms after the click, settling
+      at about 460 ms. After: it was there at the first sample on every
+      switch.
+  - **Banner:** 0008 §1.4 requires the limitation "before persistent use and
+    while unlocked", not a banner. The presentation is owner-delegated and
+    recorded in 0009 §1.8:
+    - the acknowledgement and the locked-screen protection chip;
+    - while unlocked, a lasting amber mark on the lock button and its label;
+    - Settings → Auto-lock "Idle only".
+
+    Both banners were removed.
+  - **Fixed:** Settings → Auto-lock claimed screen-lock/sleep locking even
+    when unavailable (contrary to 0008 §1.4). The flow now checks that the
+    lock mark and the Settings row agree and that no banner is shown
+    (stage 82).
+  - **Found, not fixed (needs the owner's system):** logind detection fails
+    when `GetSessionByPID` finds no session for the app's process. That is
+    common when desktop apps run in systemd user scopes. A possible fallback
+    is `GetSession("auto")` (the user's display session). It is a
+    lifecycle-security change, so it waits for the owner's diagnostic output
+    and its own review.
+  - Narrow Linux windows hide the title bar, so there the mark is missing;
+    Settings still shows it.
+- 2026-11-06 (owner bug: in group 1, + highlighted group 2, but the item was
+  saved in group 1):
+  - **Cause:** opening a form (`NewEntry`, `EditEntry`, `NewGroup`,
+    `RenameGroup`) replaced the current screen without pushing it onto the
+    back stack. The sidebar and the list beside the form use
+    `list_context()`, the nearest list in that stack, so they showed an
+    earlier list. The draft was always in the right group; Cancel also
+    returned to the wrong list.
+  - **Fix:** `Workspace::open_form` pushes the current screen. Saves go
+    through `Workspace::land`, so editing from an entry or renaming from a
+    group does not stack that screen twice.
+  - **Test:** `forms_keep_the_list_they_were_opened_from` fails without the
+    fix (checked by reverting it) and passes with it.
+  - **Also fixed:** sidebar group dots and command-bar results still used the
+    automatic colour (missed in step 19); they now show chosen colours.

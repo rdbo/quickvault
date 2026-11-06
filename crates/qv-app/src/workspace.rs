@@ -749,6 +749,27 @@ impl Workspace {
         self.clear_transient();
         self.notice = None;
     }
+    /// Open a form (entry or group editor) over the current screen. The
+    /// current screen goes on the back stack, so the list beside the form and
+    /// Cancel stay where the form was opened.
+    pub(crate) fn open_form(&mut self, to: Screen) {
+        if self.screen != to {
+            let from = std::mem::replace(&mut self.screen, to);
+            if self.back.len() == BACK_MAX {
+                self.back.remove(0);
+            }
+            self.back.push(from);
+        }
+    }
+    /// Leave a saved form for `to`, without stacking `to` twice when the
+    /// form was opened from it (editing from the entry, renaming from the
+    /// group).
+    pub(crate) fn land(&mut self, to: Screen) {
+        if self.back.last() == Some(&to) {
+            self.back.pop();
+        }
+        self.screen = to;
+    }
     /// Replace the current vault detail screen with a sibling, so Back still
     /// returns to the list. Anywhere else this is an ordinary navigation.
     pub(crate) fn select(&mut self, to: Screen) {

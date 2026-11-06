@@ -766,6 +766,7 @@ fn Settings(controller: Controller, epoch: FormEpoch, revision: u64, pane: Pane)
             let theme = controller.theme();
             let os = controller.protection();
             let reduced = os.is_reduced() || qv_core::harden().is_reduced();
+            let idle_only = controller.snapshot().reduced_lifecycle;
             let set = |t: Theme| {
                 let c = controller.clone();
                 move |_| {
@@ -789,7 +790,13 @@ fn Settings(controller: Controller, epoch: FormEpoch, revision: u64, pane: Pane)
                 }
                 div { class: "group-t", "SECURITY" }
                 div { class: "card",
-                    div { class: "set-row", span { class: "si", Svg { icon: Icon::Clock } } span { class: "l", b { "Auto-lock" } span { "After 1 minute without activity, and when the screen locks or the device sleeps" } } }
+                    if idle_only {
+                        div { class: "set-row", id: "settings-autolock", span { class: "si", Svg { icon: Icon::Clock } } span { class: "l", b { "Auto-lock" } span { "After 1 minute without activity. This system does not report screen lock or sleep, so they do not lock QuickVault; lock it yourself before leaving." } }
+                            span { class: "r warn", "Idle only" }
+                        }
+                    } else {
+                        div { class: "set-row", id: "settings-autolock", span { class: "si", Svg { icon: Icon::Clock } } span { class: "l", b { "Auto-lock" } span { "After 1 minute without activity, and when the screen locks or the device sleeps" } } }
+                    }
                     div { class: "set-row", span { class: "si", Svg { icon: Icon::Shield } } span { class: "l", b { "Device protection" }
                         span { if reduced { "Reduced protection, acknowledged on this device. Storage, swap or hibernation protection could not be established." } else { "Full: encrypted storage, swap and hibernation, with screen-lock detection" } } }
                         span { class: if reduced { "r warn" } else { "r ok" }, if reduced { "Reduced" } else { "Full" } }

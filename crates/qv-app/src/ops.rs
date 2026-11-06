@@ -185,7 +185,7 @@ fn apply_start(
     Ok(())
 }
 fn set_screen(ws: &mut Workspace, screen: Screen) {
-    ws.screen = screen;
+    ws.open_form(screen);
 }
 pub(crate) fn settings_from(g: &crate::workspace::GenForm) -> qv_core::GeneratorSettings {
     match g.mode {
@@ -563,7 +563,7 @@ pub(crate) fn run(
             c.run_op(epoch, None, move |s, _, _| {
                 let entry = s.save_entry(form.draft)?;
                 Ok(on_ws(move |ws| {
-                    ws.screen = Screen::Entry(entry);
+                    ws.land(Screen::Entry(entry));
                     ws.notice = Some("Saved.");
                 }))
             })
@@ -592,7 +592,7 @@ pub(crate) fn run(
             c.run_op(epoch, None, move |s, _, _| {
                 let group = s.save_group(form.draft)?;
                 Ok(on_ws(move |ws| {
-                    ws.screen = Screen::Browse(Some(group));
+                    ws.land(Screen::Browse(Some(group)));
                     ws.notice = Some("Saved.");
                 }))
             })

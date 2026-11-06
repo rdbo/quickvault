@@ -400,3 +400,53 @@ fn colours_and_groups_are_saved_with_the_item() {
     saved(&env);
     assert_eq!(env.read(|s| views::entry(s, e)).colour, None);
 }
+
+#[test]
+fn forms_keep_the_list_they_were_opened_from() {
+    let _k = lock();
+    let env = Env::unlocked();
+    let root = env.read(|s| s.root());
+    let group = |name: &str| {
+        env.act(WsAction::NewGroup(root));
+        env.put(WsField::GroupName, name);
+        env.act(WsAction::SaveGroup);
+        match env.screen() {
+            Screen::Browse(Some(g)) => g,
+            other => panic!("group screen, got {other:?}"),
+        }
+    };
+    let (one, two) = (group("One"), group("Two"));
+    let list = |env: &Env| env.c.list_context(env.epoch()).unwrap();
+    // Visit Two, then One, then open a new item in One: the list beside the
+    // form and Cancel stay on One (the owner saw Two highlighted).
+    env.c.navigate(env.epoch(), Screen::Browse(Some(two)));
+    env.c.navigate(env.epoch(), Screen::Browse(Some(one)));
+    env.act(WsAction::NewEntry(one));
+    assert_eq!(env.screen(), Screen::EditEntry);
+    assert_eq!(list(&env), Screen::Browse(Some(one)));
+    env.c.back(env.epoch());
+    assert_eq!(env.screen(), Screen::Browse(Some(one)));
+
+    env.act(WsAction::NewEntry(one));
+    env.act(WsAction::StartAs(Some(ItemType::Note)));
+    env.put(WsField::Title, "In one");
+    let e = saved(&env);
+    assert_eq!(list(&env), Screen::Browse(Some(one)));
+    assert_eq!(env.read(|s| views::browse(s, Some(one))).entries.len(), 1);
+    // Editing from the entry: Cancel returns to it, Save lands on it once.
+    env.act(WsAction::EditEntry(e));
+    assert_eq!(list(&env), Screen::Browse(Some(one)));
+    env.c.back(env.epoch());
+    assert_eq!(env.screen(), Screen::Entry(e));
+    env.act(WsAction::EditEntry(e));
+    saved(&env);
+    env.c.back(env.epoch());
+    assert_eq!(env.screen(), Screen::Browse(Some(one)));
+    // Renaming a group lands on it without stacking it twice.
+    env.act(WsAction::RenameGroup(one));
+    assert_eq!(list(&env), Screen::Browse(Some(one)));
+    env.act(WsAction::SaveGroup);
+    assert_eq!(env.screen(), Screen::Browse(Some(one)));
+    env.c.back(env.epoch());
+    assert_ne!(env.screen(), Screen::Browse(Some(one)));
+}

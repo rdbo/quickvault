@@ -56,6 +56,20 @@ Dates are ISO 8601. Newest first within each section.
   - Items and groups can be given a colour, stored as `hue:<0–11>` in the
     existing `icon` text (0003 §5.5).
 
+  Also from owner testing:
+  - Screens switch without the earlier ~0.5 s lag: the UI redraws right
+    after each click, input or key press instead of on a 200 ms poll, and
+    the fade-in is shorter.
+  - The permanent "Automatic locking … unavailable" banner is gone. Where
+    screen lock and sleep are not detected, the lock button carries a mark
+    and Settings shows "Auto-lock: Idle only" (0009 §1.8).
+  - Settings no longer claims that screen lock or sleep lock the vault when
+    they don't.
+  - Opening a new item, an edit or a group form no longer jumps the sidebar
+    and list to an earlier group. Forms now record where they were opened,
+    so Cancel and Save return there. Sidebar dots and command-bar results now
+    show chosen colours.
+
   No vault, crypto, storage-format, protocol or sync change (the colour is a
   value convention in an existing field). The webview policy is
   unchanged: the UI uses no inline styles. The real-engine and Android test
