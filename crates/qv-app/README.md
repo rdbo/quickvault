@@ -29,6 +29,11 @@ Other details:
   (`qv-platform` `linux::portal`) and the Storage Access Framework on Android.
   A typed path appears only when no picker is available, and in validation
   fixtures.
+- Vaults (`src/vaults.rs`, plan 0041) are created by name in a default
+  folder (`~/.local/share/quickvault/vaults` on Linux, changeable; the
+  private folder on Android). The lock screen lists remembered vaults and
+  those in the folder, by file name. Imported vaults are used where they
+  are. The list is the private `vault-list` file.
 - The item editor (`src/ui/editor.rs`, rules in `src/editor.rs`) starts from
   one box that recognises sites, card numbers and Wi‑Fi names on the device.
   The form follows the item type. Field tools sit behind ⋯, and one "Add a

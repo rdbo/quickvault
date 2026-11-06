@@ -1450,3 +1450,117 @@ fn protection_acknowledgement_is_explicit_remembered_and_status_bound() {
     assert_eq!(Prefs::load(&env.dir).theme, Theme::System);
     again.lock();
 }
+
+/// Create a vault by name only and land in its workspace (plan 0041).
+fn create_named(env: &Env, name: &str) -> Result<(), AppError> {
+    env.c
+        .select_mode(env.epoch(), crate::controller::Mode::Create);
+    env.fill(InputField::Name, name);
+    env.fill(InputField::Password, PASSWORD);
+    env.fill(InputField::Repeat, PASSWORD);
+    env.c.submit(env.epoch(), Action::Create, true).unwrap();
+    env.wait();
+    if let Some(e) = env.c.snapshot().error {
+        return Err(e);
+    }
+    assert_eq!(env.c.snapshot().phase, Phase::Phrase);
+    env.c.submit(env.epoch(), Action::SkipPhrase, true).unwrap();
+    env.wait();
+    assert_eq!(env.c.snapshot().phase, Phase::Unlocked);
+    Ok(())
+}
+
+#[test]
+fn vaults_are_created_by_name_listed_selected_and_imported_in_place() {
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::new();
+    assert!(!env.c.app_vault_exists());
+    create_named(&env, " Personal ").unwrap();
+    let folder = env.dir.join("vaults");
+    assert!(folder.join("Personal.qvault").is_file());
+    env.c.lock();
+    create_named(&env, "Work").unwrap();
+    env.c.lock();
+    let names = |env: &Env| {
+        env.c
+            .vaults()
+            .into_iter()
+            .map(|v| v.name)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(&env), ["Work", "Personal"]);
+    assert_eq!(env.c.selected_vault().unwrap().name, "Work");
+    assert!(env.c.vaults().iter().all(|v| v.exists && v.in_folder));
+
+    // A duplicate or unusable name is refused and the file is untouched.
+    let before = std::fs::read(folder.join("Work.qvault")).unwrap();
+    assert_eq!(create_named(&env, "Work"), Err(AppError::VaultExists));
+    assert_eq!(std::fs::read(folder.join("Work.qvault")).unwrap(), before);
+    assert_eq!(create_named(&env, "a/b"), Err(AppError::VaultName));
+    assert_eq!(create_named(&env, ".hidden"), Err(AppError::VaultName));
+
+    // Unlock the other vault through the selection, which survives a lock.
+    env.c
+        .select_mode(env.epoch(), crate::controller::Mode::Unlock);
+    env.c
+        .select_vault(env.epoch(), &folder.join("Personal.qvault"));
+    env.c.lock();
+    assert_eq!(env.c.selected_vault().unwrap().name, "Personal");
+    // An unlisted path cannot be selected.
+    env.c
+        .select_vault(env.epoch(), &env.dir.join("elsewhere.qvault"));
+    assert_eq!(env.c.selected_vault().unwrap().name, "Personal");
+    env.unlock(PASSWORD);
+    assert_eq!(env.c.snapshot().phase, Phase::Unlocked);
+    assert_eq!(env.c.open_vault().unwrap().name, "Personal");
+    env.c.lock();
+
+    // Import references a file where it is.
+    let outside = env.dir.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::copy(folder.join("Work.qvault"), outside.join("Copy.qvault")).unwrap();
+    env.c
+        .import_vault(env.epoch(), &outside.join("Copy.qvault"));
+    assert_eq!(env.c.snapshot().error, None);
+    let copy = env.c.selected_vault().unwrap();
+    assert_eq!((copy.name.as_str(), copy.in_folder), ("Copy", false));
+    assert_eq!(names(&env), ["Copy", "Personal", "Work"]);
+    // A vault that moved away is reported, never recreated, and can be removed.
+    std::fs::remove_file(outside.join("Copy.qvault")).unwrap();
+    assert!(!env.c.selected_vault().unwrap().exists);
+    env.fill(InputField::Password, PASSWORD);
+    env.c.submit(env.epoch(), Action::Unlock, true).unwrap();
+    env.wait();
+    assert_eq!(env.c.snapshot().error, Some(AppError::VaultMissing));
+    assert!(!outside.join("Copy.qvault").exists());
+    env.c
+        .forget_vault(env.epoch(), &outside.join("Copy.qvault"));
+    assert_eq!(names(&env), ["Personal", "Work"]);
+    // Not a vault file, or not there: refused, nothing listed.
+    std::fs::write(outside.join("notes.txt"), b"x").unwrap();
+    env.c.import_vault(env.epoch(), &outside.join("notes.txt"));
+    assert_eq!(env.c.snapshot().error, Some(AppError::InvalidInput));
+    env.c
+        .import_vault(env.epoch(), &outside.join("none.qvault"));
+    assert_eq!(env.c.snapshot().error, Some(AppError::VaultMissing));
+    assert_eq!(names(&env).len(), 2);
+
+    // The list file survives a restart of the app.
+    let again = Controller::new(env.dir.clone(), Arc::new(Platform(env.os.clone()))).unwrap();
+    let listed: Vec<String> = again.vaults().into_iter().map(|v| v.name).collect();
+    assert_eq!(listed, ["Personal", "Work"]);
+    // A default folder must be an existing absolute directory.
+    assert_eq!(
+        again.set_default_folder(std::path::Path::new("rel")),
+        Err(AppError::InvalidInput)
+    );
+    assert_eq!(
+        again.set_default_folder(&outside.join("notes.txt")),
+        Err(AppError::InvalidInput)
+    );
+    again.set_default_folder(&outside).unwrap();
+    assert_eq!(
+        crate::vaults::VaultList::load(&env.dir).folder.as_deref(),
+        Some(outside.as_path())
+    );
+}

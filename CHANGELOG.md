@@ -9,6 +9,22 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-06: Vault list (plan 0041, owner follow-up to 2.10a):
+  - Create a vault with just a name. It is saved as `<name>.qvault` in a
+    default folder: `~/.local/share/quickvault/vaults` on Linux (changeable),
+    or the app's private folder on Android.
+  - The lock screen lists every vault by name, with its folder: the ones
+    remembered and the ones found in the default folder. The most recent is
+    selected.
+  - "Open a vault file…" adds a vault where it is, without copying it.
+  - A moved or deleted file is reported and can be removed from the list.
+  - Settings shows the open vault's file and the folder for new vaults.
+  - Vault names are the file names and show before unlock (owner decision).
+    The list lives in a bounded private `vault-list` file.
+  - An existing vault in the old private folder stays listed in place (as
+    "main").
+  - No vault, crypto, storage-format, protocol or sync change.
+
 - 2026-11-05: New app UI (roadmap 2.10a, plan 0040), built from the
   prototype the owner approved after rejecting the 2026-11-04 restyle. One
   shared UI for desktop and phone:

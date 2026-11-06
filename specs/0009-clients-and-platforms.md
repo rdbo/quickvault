@@ -121,8 +121,28 @@ validation packages may exercise the implemented path.
   Pointer movement and scrolling are reported at most once a second, without
   positions, because the webview bridge forwards only click, input, change,
   key and focus events.
-- **Vault names.** No vault name is shown before unlock, since names are
-  encrypted metadata.
+- **Vault list** (plan 0041).
+  - **Names (owner, 2026-11-05):** a vault's visible name is its file name
+    without `.qvault`. It may show before unlock; the vault's internal name
+    stays encrypted metadata.
+  - **Create:** a vault is created by name in a default folder.
+    - Linux: `$XDG_DATA_HOME/quickvault/vaults` (absolute only) or
+      `~/.local/share/quickvault/vaults`, which the user may change.
+    - Android and validation builds: the app's private `vaults/` directory.
+
+    A name is 1–64 characters, without `/`, `\` or control characters, and
+    does not start with a dot. An existing file is never replaced.
+  - **Import (owner, 2026-11-05):** the system picker references a file
+    where it is, without copying it.
+  - **The list file:** a separate private file, never the preferences
+    file. It is bounded (64 KiB; at most 64 remembered absolute `.qvault`
+    paths of at most 4096 bytes, and one default folder), parsed strictly
+    (malformed lines ignored), never read through a link, and written to a
+    0600 temporary file and renamed into place.
+  - **What is listed:** the remembered paths, plus regular `.qvault` files
+    directly in the default folder (at most 64, links skipped).
+  - **Opening:** every listed path still passes 0011 §4's checks when opened.
+    The list only removes paths when the user asks, and never deletes files.
 - **Item editor.** A new item starts from one box, "What are you saving?".
   - The guess runs on the device. Nothing is looked up online.
   - The box is a protected input, since people paste card numbers into it.
@@ -293,6 +313,9 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-06: §1.8 "Vault names" becomes "Vault list" (plan 0041): file names
+  are the visible vault names (owner decision 2026-11-05), name-only create in
+  a default folder, import in place, a bounded private vault-list file.
 - 2026-11-06: §1.8: pointer movement, scrolling and touch count as activity
   for the inactivity lock; the card-number input shows typed digits grouped
   (owner feedback; owner-delegated details).

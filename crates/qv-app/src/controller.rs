@@ -83,6 +83,12 @@ pub enum AppError {
     NoFilePicker,
     /// An item needs a title and every field a name before it is saved.
     NameRequired,
+    /// A vault name that cannot be a file name (0009 §1.8).
+    VaultName,
+    /// A vault with this file name is already in the folder.
+    VaultExists,
+    /// The listed vault file is not there.
+    VaultMissing,
 }
 impl AppError {
     /// Fixed user-facing text.
@@ -140,6 +146,13 @@ impl AppError {
                 "The autofill request expired or was cancelled. Start it again from the other app."
             }
             Self::NameRequired => "Give the item a title, and every field a name, before saving.",
+            Self::VaultName => {
+                "Use a name of 1 to 64 characters, without / or \\, that does not start with a dot."
+            }
+            Self::VaultExists => "A vault with this name is already there. Choose another name.",
+            Self::VaultMissing => {
+                "This vault file is not where it was. Open it from its new place, or remove it from the list."
+            }
             Self::NoFilePicker => {
                 "No file dialog is available on this desktop. Type the full path of the file instead."
             }
@@ -400,6 +413,10 @@ pub(crate) struct Inner {
     watch: Mutex<Option<Box<dyn Watch>>>,
     /// Non-secret app preferences (0009 §1.8).
     prefs: Mutex<crate::prefs::Prefs>,
+    /// Remembered vaults and the default folder (0009 §1.8, plan 0041).
+    vaults: Mutex<crate::vaults::VaultList>,
+    /// The vault the locked screen opens; survives form resets and lock.
+    selected: Mutex<Option<PathBuf>>,
     /// Display-only cache of `protection_ack_needed` for the polled snapshot;
     /// the consent gate itself always checks the current status.
     ack_cache: Mutex<Option<(Instant, bool)>>,
@@ -474,6 +491,8 @@ impl Controller {
             monitoring: AtomicBool::new(false),
             watch: Mutex::new(None),
             prefs: Mutex::new(crate::prefs::Prefs::load(&base)),
+            vaults: Mutex::new(crate::vaults::VaultList::load(&base)),
+            selected: Mutex::new(None),
             ack_cache: Mutex::new(None),
             #[cfg(feature = "validation")]
             preview: AtomicBool::new(false),
@@ -669,10 +688,127 @@ impl Controller {
         }
         s.revision = s.revision.wrapping_add(1);
     }
-    /// This device's app-managed vault exists (first run shows a welcome).
+    /// Some vault is listed and there (first run shows a welcome).
     pub fn app_vault_exists(&self) -> bool {
-        std::fs::symlink_metadata(self.0.base.join("vaults/main.qvault"))
-            .is_ok_and(|m| m.file_type().is_file())
+        self.vaults().iter().any(|v| v.exists)
+    }
+    fn vault_list(&self) -> MutexGuard<'_, crate::vaults::VaultList> {
+        self.0.vaults.lock().unwrap_or_else(|p| p.into_inner())
+    }
+    /// The folder new vaults go to (0009 §1.8).
+    pub fn default_folder(&self) -> PathBuf {
+        crate::vaults::default_folder(&self.0.base, self.vault_list().folder.as_deref())
+    }
+    /// Every vault to offer: remembered ones, then those in the folders.
+    pub fn vaults(&self) -> Vec<crate::vaults::Listed> {
+        let folder = self.default_folder();
+        crate::vaults::listed(&self.0.base, &folder, &self.vault_list())
+    }
+    /// The vault the locked screen opens: the one chosen, else the most
+    /// recent one that is there, else the first listed.
+    pub fn selected_vault(&self) -> Option<crate::vaults::Listed> {
+        let all = self.vaults();
+        let chosen = self
+            .0
+            .selected
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        chosen
+            .and_then(|p| all.iter().find(|v| v.path == p).cloned())
+            .or_else(|| all.iter().find(|v| v.exists).cloned())
+            .or_else(|| all.first().cloned())
+    }
+    /// Choose a listed vault for the locked screen. Only listed paths are
+    /// accepted, and a stale or busy screen changes nothing.
+    pub fn select_vault(&self, epoch: FormEpoch, path: &std::path::Path) {
+        let current = {
+            let s = self.state();
+            s.epoch == epoch.0 && s.phase == Phase::Locked && !self.0.working.load(Ordering::SeqCst)
+        };
+        if current && self.vaults().iter().any(|v| v.path == path) {
+            *self.0.selected.lock().unwrap_or_else(|p| p.into_inner()) = Some(path.to_path_buf());
+            let mut s = self.state();
+            s.error = None;
+            s.revision = s.revision.wrapping_add(1);
+        }
+    }
+    /// Remove a remembered vault from the list; the file is never touched.
+    pub fn forget_vault(&self, epoch: FormEpoch, path: &std::path::Path) {
+        if self.state().epoch != epoch.0 {
+            return;
+        }
+        let saved = {
+            let mut list = self.vault_list();
+            list.forget(path);
+            list.save(&self.0.base)
+        };
+        let mut selected = self.0.selected.lock().unwrap_or_else(|p| p.into_inner());
+        if selected.as_deref() == Some(path) {
+            *selected = None;
+        }
+        drop(selected);
+        let mut s = self.state();
+        if saved.is_err() {
+            s.error = Some(AppError::Unavailable);
+        }
+        s.revision = s.revision.wrapping_add(1);
+    }
+    /// Remember a vault first in the list (created, opened or imported).
+    /// A failed write is not fatal: the vault stays usable this run.
+    fn remember_vault(&self, path: &std::path::Path) -> bool {
+        let mut list = self.vault_list();
+        list.remember(path);
+        list.save(&self.0.base).is_ok()
+    }
+    /// Import a vault file where it is (0009 §1.8): list and select it.
+    pub fn import_vault(&self, epoch: FormEpoch, path: &std::path::Path) {
+        if self.state().epoch != epoch.0 {
+            return;
+        }
+        let file = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_file());
+        let error = if !path.is_absolute() || !file {
+            Some(AppError::VaultMissing)
+        } else if path.extension().is_none_or(|e| e != "qvault") {
+            Some(AppError::InvalidInput)
+        } else {
+            let saved = self.remember_vault(path);
+            *self.0.selected.lock().unwrap_or_else(|p| p.into_inner()) = Some(path.to_path_buf());
+            (!saved).then_some(AppError::Unavailable)
+        };
+        let mut s = self.state();
+        if s.epoch == epoch.0 {
+            s.clear_inputs();
+            s.mode = Mode::Unlock;
+            s.error = error;
+            s.revision = s.revision.wrapping_add(1);
+        }
+    }
+    /// Choose the folder new vaults go to (Linux). Existing vaults stay
+    /// where they are and stay listed.
+    pub fn set_default_folder(&self, path: &std::path::Path) -> Result<(), AppError> {
+        let dir = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_dir());
+        if !path.is_absolute() || !dir || cfg!(target_os = "android") {
+            return Err(AppError::InvalidInput);
+        }
+        let saved = {
+            let mut list = self.vault_list();
+            list.folder = Some(path.to_path_buf());
+            list.save(&self.0.base)
+        };
+        let mut s = self.state();
+        s.revision = s.revision.wrapping_add(1);
+        saved.map_err(|_| AppError::Unavailable)
+    }
+    /// The file of the open vault, for Settings (display only).
+    pub fn open_vault(&self) -> Option<crate::vaults::Listed> {
+        let path = self.state().vault_path.clone()?;
+        let folder = self.default_folder();
+        let mut list = crate::vaults::VaultList::default();
+        list.remember(&path);
+        crate::vaults::listed(&self.0.base, &folder, &list)
+            .into_iter()
+            .find(|v| v.path == path)
     }
     /// The file name the user picked for the locked screen, if any (display only).
     pub fn picked_vault(&self, epoch: FormEpoch) -> Option<String> {
@@ -1206,16 +1342,50 @@ impl Controller {
             std::str::from_utf8(values[field.index()].expose_secret())
                 .map_err(|_| AppError::InvalidInput)
         };
-        let path = if text(InputField::Path)?.is_empty() {
-            self.0.base.join("vaults/main.qvault")
+        // A typed or picked file wins; else a new vault goes to the default
+        // folder under its name, a joined one under a free "Joined vault"
+        // name, and everything else opens the selected vault (plan 0041).
+        let typed = text(InputField::Path)?;
+        let creating = matches!(action, Action::Create | Action::ConfirmWeak);
+        let path = if !typed.is_empty() {
+            PathBuf::from(typed)
+        } else if creating || matches!(action, Action::JoinDevice) {
+            let folder = self.default_folder();
+            private_dir(&folder)?;
+            if creating {
+                let name = text(InputField::Name)?.trim();
+                folder.join(crate::vaults::file_name(if name.is_empty() {
+                    "My vault"
+                } else {
+                    name
+                })?)
+            } else {
+                (1..=99)
+                    .map(|n| {
+                        folder.join(if n == 1 {
+                            "Joined vault.qvault".to_owned()
+                        } else {
+                            format!("Joined vault {n}.qvault")
+                        })
+                    })
+                    .find(|p| std::fs::symlink_metadata(p).is_err())
+                    .ok_or(AppError::VaultExists)?
+            }
         } else {
-            PathBuf::from(text(InputField::Path)?)
+            let selected = self.selected_vault().ok_or(AppError::VaultMissing)?;
+            if !selected.exists {
+                return Err(AppError::VaultMissing);
+            }
+            selected.path
         };
         if !path.is_absolute() {
             return Err(AppError::InvalidInput);
         }
+        if creating && std::fs::symlink_metadata(&path).is_ok() {
+            return Err(AppError::VaultExists);
+        }
         #[cfg(all(feature = "validation", target_os = "android"))]
-        if self.is_fixture() && path != self.0.base.join("vaults/main.qvault") {
+        if self.is_fixture() && path.parent() != Some(self.0.base.join("vaults").as_path()) {
             return Err(AppError::InvalidInput);
         }
         let core = self.core()?;
@@ -1250,17 +1420,19 @@ impl Controller {
                 let password =
                     MasterPassword::from_utf8(values[InputField::Password.index()].expose_secret())
                         .map_err(|_| AppError::InvalidInput)?;
-                let name = text(InputField::Name)?;
+                let name = text(InputField::Name)?.trim();
                 let positions = qv_core::confirmation_positions()?;
-                Ok(Opened::Created(
-                    core.create(
+                let created = core
+                    .create(
                         &path,
                         &password,
                         if name.is_empty() { "My vault" } else { name },
-                    )?,
-                    positions,
-                    path,
-                ))
+                    )
+                    .map_err(|e| match e {
+                        CoreError::Store(qv_core::StoreError::Exists) => AppError::VaultExists,
+                        e => e.into(),
+                    })?;
+                Ok(Opened::Created(created, positions, path))
             }
             Action::QuickUnlock => Ok(Opened::Session(
                 core.unlock_quick(&path, Some(token))?,
@@ -1297,6 +1469,21 @@ impl Controller {
         if s.epoch != epoch || token.is_cancelled() {
             drop(result);
             return;
+        }
+        let opened = match &result {
+            Ok(Opened::Created(_, _, path) | Opened::Session(_, path, _, _)) => Some(path.clone()),
+            _ => None,
+        };
+        if let Some(path) = opened {
+            // Remember and select it; a failed list write never blocks use.
+            drop(s);
+            self.remember_vault(&path);
+            *self.0.selected.lock().unwrap_or_else(|p| p.into_inner()) = Some(path);
+            s = self.state();
+            if s.epoch != epoch || token.is_cancelled() {
+                drop(result);
+                return;
+            }
         }
         match result {
             Ok(Opened::Created(created, positions, path)) => {

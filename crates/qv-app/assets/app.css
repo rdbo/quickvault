@@ -496,8 +496,13 @@ button.set-row:hover:enabled{background:var(--raised)}
 .ie-dot{width:8px;height:8px;border-radius:50%;background:hsl(var(--h),55%,55%);flex:none}
 .ie-auto{color:var(--text3);font-size:12px}
 .pop-scrim{position:fixed;inset:0;z-index:30;border:0;padding:0;background:transparent;width:100%;height:100%}
-.menu.pop{position:absolute;top:calc(100% + 6px);left:0;z-index:31;min-width:200px}
+.menu.pop{position:absolute;top:calc(100% + 6px);left:0;z-index:31;min-width:240px}
+.menu.pop .mi{white-space:nowrap}
 .menu.pop.end{left:auto;right:0}
+.menu.pop.mid{left:50%;right:auto;transform:translateX(-50%);min-width:280px;text-align:left}
+.vault-mi{display:flex;flex-direction:column;align-items:flex-start;min-width:0;flex:1}
+.vault-mi b{font-weight:560;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vault-mi small{color:var(--text3);font-size:11.5px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ie-swatches{display:grid;grid-template-columns:repeat(6,26px);gap:8px;padding:8px 10px 10px}
 .ie-swatches button{width:26px;height:26px;border-radius:8px;padding:0;border:2px solid transparent;background:hsl(var(--h),60%,52%)}
 .ie-swatches button.on{border-color:var(--text)}
@@ -596,6 +601,6 @@ button.set-row:hover:enabled{background:var(--raised)}
   .qv .ie-title{font-size:22px}
   .pop-scrim{background:var(--scrim);animation:fadeIn .15s}
   /* Bottom sheets sit above the tab bar (72 px). */
-  .menu.pop,.menu.pop.end{position:fixed;left:12px!important;right:12px!important;top:auto!important;bottom:calc(84px + env(safe-area-inset-bottom))!important;width:auto;min-width:0;max-height:calc(100% - 200px);overflow:auto;z-index:31}
+  .menu.pop,.menu.pop.end,.menu.pop.mid{transform:none;position:fixed;left:12px!important;right:12px!important;top:auto!important;bottom:calc(84px + env(safe-area-inset-bottom))!important;width:auto;min-width:0;max-height:calc(100% - 200px);overflow:auto;z-index:31}
   .ie-join{flex-wrap:wrap}
 }

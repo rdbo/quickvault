@@ -767,6 +767,24 @@ fn Settings(controller: Controller, epoch: FormEpoch, revision: u64, pane: Pane)
             let os = controller.protection();
             let reduced = os.is_reduced() || qv_core::harden().is_reduced();
             let idle_only = controller.snapshot().reduced_lifecycle;
+            let open_vault = controller.open_vault();
+            let folder_place = crate::vaults::shown_place(&controller.default_folder());
+            let pick_folder = {
+                let c = controller.clone();
+                move |_: MouseEvent| {
+                    #[cfg(target_os = "linux")]
+                    crate::documents::pick_path(
+                        &c,
+                        epoch,
+                        crate::documents::PathFor::Folder,
+                        qv_core::platform::portal::Pick::Folder,
+                        "Choose where new vaults are saved",
+                        None,
+                    );
+                    #[cfg(not(target_os = "linux"))]
+                    let _ = &c;
+                }
+            };
             let set = |t: Theme| {
                 let c = controller.clone();
                 move |_| {
@@ -811,6 +829,14 @@ fn Settings(controller: Controller, epoch: FormEpoch, revision: u64, pane: Pane)
                 }
                 div { class: "group-t", "VAULT" }
                 div { class: "card",
+                    if let Some(v) = open_vault.as_ref() {
+                        div { class: "set-row", id: "settings-file", span { class: "si", Svg { icon: Icon::File } } span { class: "l", b { "Vault file" } span { "{v.name}.qvault in {v.place}" } } }
+                    }
+                    div { class: "set-row", id: "settings-folder", span { class: "si", Svg { icon: Icon::Folder } } span { class: "l", b { "Folder for new vaults" } span { "{folder_place}" } }
+                        if cfg!(target_os = "linux") && !crate::documents::picker_missing() {
+                            button { class: "btn", id: "settings-folder-change", onclick: pick_folder, "Change…" }
+                        }
+                    }
                     {row(Icon::Edit, "Name and retention", "Vault name, description, history and trash", Screen::Settings(Pane::General), "settings-general")}
                     {row(Icon::Clock, "Snapshots", "Restore an earlier copy into a new vault", Screen::Snapshots, "settings-snapshots")}
                     {row(Icon::Archive, "Archives", "Export or merge changes as an encrypted file", Screen::Archives, "settings-archives")}

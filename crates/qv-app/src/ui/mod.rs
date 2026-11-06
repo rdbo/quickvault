@@ -290,7 +290,9 @@ fn Safe(opening: bool) -> Element {
 #[derive(Clone, Copy, PartialEq)]
 enum Sheet {
     None,
-    VaultMenu(f64, f64),
+    VaultMenu,
+    /// Where a new vault is saved: the default folder, or one file.
+    SaveMenu,
     Protection,
 }
 
@@ -331,6 +333,10 @@ fn Locked(controller: Controller, revision: u64) -> Element {
     let picked = controller.picked_vault(epoch);
     let app_vault = controller.app_vault_exists();
     let first_run = !app_vault && picked.is_none();
+    // The vault list (plan 0041): names are file names, shown before unlock.
+    let vaults = controller.vaults();
+    let selected = controller.selected_vault();
+    let folder_place = crate::vaults::shown_place(&controller.default_folder());
     let phrase = controller.phrase(epoch);
     let words: Vec<(usize, Zeroizing<String>)> = phrase
         .as_ref()
@@ -367,9 +373,26 @@ fn Locked(controller: Controller, revision: u64) -> Element {
             crate::documents::pick_path(
                 &c,
                 epoch,
-                crate::documents::PathFor::Locked,
+                crate::documents::PathFor::Import,
                 qv_core::platform::portal::Pick::Open,
                 "Open a QuickVault vault",
+                None,
+            );
+            #[cfg(not(target_os = "linux"))]
+            let _ = &c;
+        }
+    };
+    let pick_folder = {
+        let c = controller.clone();
+        move |_: MouseEvent| {
+            sheet.set(Sheet::None);
+            #[cfg(target_os = "linux")]
+            crate::documents::pick_path(
+                &c,
+                epoch,
+                crate::documents::PathFor::Folder,
+                qv_core::platform::portal::Pick::Folder,
+                "Choose where new vaults are saved",
                 None,
             );
             #[cfg(not(target_os = "linux"))]
@@ -379,6 +402,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
     let pick_new = {
         let c = controller.clone();
         move |_: MouseEvent| {
+            sheet.set(Sheet::None);
             #[cfg(target_os = "linux")]
             crate::documents::pick_path(
                 &c,
@@ -401,6 +425,25 @@ fn Locked(controller: Controller, revision: u64) -> Element {
     let reduced = os.is_reduced() || process_reduced;
     let err_view = rsx! {
         if let Some(e) = error { div { class: "err", role: "alert", Svg { icon: Icon::Warn } span { "{e.message()}" } } }
+    };
+    let vault_menu = rsx! {
+        button { class: "pop-scrim", "aria-label": "Close menu", tabindex: "-1", onclick: move |_| sheet.set(Sheet::None) }
+        div { class: "menu pop mid", role: "menu",
+            if !vaults.is_empty() { div { class: "label", "VAULTS" } }
+            for v in vaults.iter().cloned() {
+                button { class: if selected.as_ref().is_some_and(|s| s.path == v.path) && picked.is_none() { "mi on" } else { "mi" }, role: "menuitemradio",
+                    onclick: { let c = controller.clone(); let p = v.path.clone(); move |_| { sheet.set(Sheet::None); let mut empty = String::new(); c.input(epoch, InputField::Path, &mut empty); c.select_vault(epoch, &p); } },
+                    Svg { icon: Icon::Lock }
+                    span { class: "vault-mi", b { "{v.name}" } small { if v.exists { "{v.place}" } else { "Not found · {v.place}" } } }
+                    if selected.as_ref().is_some_and(|s| s.path == v.path) && picked.is_none() { span { class: "sub", Svg { icon: Icon::Check } } }
+                }
+            }
+            if !vaults.is_empty() { hr {} }
+            if can_pick { button { class: "mi", id: "menu-open-file", onclick: pick_vault.clone(), Svg { icon: Icon::Folder } "Open a vault file…" } }
+            button { class: "mi", id: "menu-create", onclick: to_mode(Mode::Create), Svg { icon: Icon::Plus } "Create a new vault" }
+            button { class: "mi", id: "menu-join", onclick: to_mode(Mode::Join), Svg { icon: Icon::Qr } "Join from another device" }
+            button { class: "mi", id: "menu-recover", onclick: to_mode(Mode::Recover), Svg { icon: Icon::Key } "Recover with recovery phrase" }
+        }
     };
     let perform = |action: Action, consent: bool| {
         let c = controller.clone();
@@ -514,36 +557,36 @@ fn Locked(controller: Controller, revision: u64) -> Element {
     } else if mode == Mode::Create {
         let mut g1 = gate.clone();
         let mut g2 = gate.clone();
-        // The device vault exists: the new one needs its own file first.
-        let needs_file = app_vault && picked.is_none();
         let mismatch = controller.repeat_mismatch(epoch);
-        let pick_first = pick_new.clone();
         rsx! {
             div { class: "wizard fade-in",
                 div { class: "steps", i { class: "on" } i { class: if wizard_step >= 1 { "on" } else { "" } } i {} }
                 div { hidden: wizard_step != 0,
                     h2 { "Name your vault" }
-                    p { class: "muted", "Only you see this name, after unlocking." }
                     SecretInput { controller: controller.clone(), epoch, field: InputField::Name, label: "Vault name", id: "vault-name", secret: false, disabled: busy, autofocus: true, placeholder: "Personal" }
                     div { class: "banner ok",
                         Svg { icon: Icon::Folder }
-                        span { class: "sp",
-                            if let Some(file) = picked.as_ref() { "Saves to {file}" }
-                            else if app_vault && (can_pick || fallback) { "This device already has a vault. Choose where to save the new one." }
-                            else if app_vault { "This device already has a vault. Open it, or recover it with your recovery phrase." }
-                            else { "Saved privately on this device" }
+                        span { class: "sp", id: "create-place",
+                            if let Some(file) = picked.as_ref() { "Saves as {file}" } else { "Saves in {folder_place}" }
                         }
-                        if can_pick && !fallback && picked.is_some() { button { class: "link", onclick: pick_new, "Change…" } }
+                        if can_pick && !fallback {
+                            div { class: "pop-anchor",
+                                button { class: "link", id: "create-change", onclick: move |_| sheet.set(if sheet() == Sheet::SaveMenu { Sheet::None } else { Sheet::SaveMenu }), "Change" }
+                                if sheet() == Sheet::SaveMenu {
+                                    button { class: "pop-scrim", "aria-label": "Close menu", tabindex: "-1", onclick: move |_| sheet.set(Sheet::None) }
+                                    div { class: "menu pop end", role: "menu",
+                                        button { class: "mi", id: "create-folder", onclick: pick_folder.clone(), Svg { icon: Icon::Folder } "Change the folder…" }
+                                        button { class: "mi", id: "create-save-as", onclick: pick_new.clone(), Svg { icon: Icon::File } "Save just this one elsewhere…" }
+                                    }
+                                }
+                            }
+                        }
                     }
                     if fallback { SecretInput { controller: controller.clone(), epoch, field: InputField::Path, label: "Vault file (full path)", id: "vault-path", secret: false, disabled: busy } }
                     if wizard_step == 0 { {err_view.clone()} }
                     div { class: "actions",
                         button { class: "btn subtle", onclick: to_mode(Mode::Unlock), "Cancel" }
-                        if needs_file && can_pick && !fallback {
-                            button { class: "btn primary", id: "create-choose", disabled: busy, onclick: pick_first, "Choose where to save…" }
-                        } else {
-                            button { class: "btn primary", id: "create-next", disabled: needs_file, onclick: move |_| step.set((epoch, 1)), "Continue" }
-                        }
+                        button { class: "btn primary", id: "create-next", disabled: busy, onclick: move |_| step.set((epoch, 1)), "Continue" }
                     }
                 }
                 div { hidden: wizard_step != 1,
@@ -648,11 +691,24 @@ fn Locked(controller: Controller, revision: u64) -> Element {
         rsx! {
             div { class: "unlock-card fade-in",
                 Safe { opening: busy }
-                button { class: "vault-switch", id: "vault-menu", "aria-haspopup": "menu", onclick: move |e: MouseEvent| { let p = e.client_coordinates(); sheet.set(Sheet::VaultMenu(p.x - 120.0, p.y + 14.0)); },
-                    if let Some(file) = picked.as_ref() { "{file}" } else { "Your vault" }
-                    Svg { icon: Icon::ChevronDown }
+                div { class: "pop-anchor",
+                    button { class: "vault-switch", id: "vault-menu", "aria-haspopup": "menu", onclick: move |_| sheet.set(if sheet() == Sheet::VaultMenu { Sheet::None } else { Sheet::VaultMenu }),
+                        if let Some(file) = picked.as_ref() { "{file}" } else if let Some(v) = selected.as_ref() { "{v.name}" } else { "Your vault" }
+                        Svg { icon: Icon::ChevronDown }
+                    }
+                    if sheet() == Sheet::VaultMenu { {vault_menu} }
                 }
-                div { class: "vault-meta", if picked.is_some() { "Vault file" } else { "On this device" } }
+                div { class: "vault-meta", id: "vault-place",
+                    if picked.is_some() { "Vault file" } else if let Some(v) = selected.as_ref() { "{v.place}" } else { "" }
+                }
+                if let (None, Some(v)) = (picked.as_ref(), selected.as_ref().filter(|v| !v.exists)) {
+                    div { class: "banner bad", role: "status", Svg { icon: Icon::Warn }
+                        span { class: "sp", "This vault file is not where it was." }
+                        if !v.in_folder {
+                            button { class: "btn subtle", id: "vault-forget", onclick: { let c = controller.clone(); let p = v.path.clone(); move |_| c.forget_vault(epoch, &p) }, "Remove from list" }
+                        }
+                    }
+                }
                 div { class: if error.is_some() { "pw bad" } else { "pw" },
                     input { id: "password", r#type: "password", placeholder: "Master password", "aria-label": "Master password", maxlength: 1024, autofocus: true, disabled: busy,
                         autocomplete: "off", spellcheck: "false", autocapitalize: "off", autocorrect: "off",
@@ -682,23 +738,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
     };
     let sheet_view = match sheet() {
         Sheet::None => rsx! {},
-        Sheet::VaultMenu(..) => rsx! {
-            div { class: "layer",
-                button { class: "scrim clear", "aria-label": "Close menu", onclick: move |_| sheet.set(Sheet::None) }
-                div { class: "menu anchor-center", role: "menu",
-                    div { class: "label", "VAULT" }
-                    button { class: if picked.is_none() { "mi on" } else { "mi" }, onclick: { let c = controller.clone(); move |_| { sheet.set(Sheet::None); let mut empty = String::new(); c.input(epoch, InputField::Path, &mut empty); c.touch(); } },
-                        Svg { icon: Icon::Lock } "This device's vault"
-                        if picked.is_none() { span { class: "sub", Svg { icon: Icon::Check } } }
-                    }
-                    if can_pick { button { class: "mi", id: "menu-open-file", onclick: pick_vault.clone(), Svg { icon: Icon::Folder } "Open a vault file…" } }
-                    hr {}
-                    button { class: "mi", id: "menu-create", onclick: to_mode(Mode::Create), Svg { icon: Icon::Plus } "Create a new vault" }
-                    button { class: "mi", id: "menu-join", onclick: to_mode(Mode::Join), Svg { icon: Icon::Qr } "Join from another device" }
-                    button { class: "mi", id: "menu-recover", onclick: to_mode(Mode::Recover), Svg { icon: Icon::Key } "Recover with recovery phrase" }
-                }
-            }
-        },
+        Sheet::VaultMenu | Sheet::SaveMenu => rsx! {},
         Sheet::Protection => rsx! {
             div { class: "layer",
                 button { class: "scrim", "aria-label": "Close", onclick: move |_| sheet.set(Sheet::None) }
@@ -729,6 +769,14 @@ fn Locked(controller: Controller, revision: u64) -> Element {
     };
     rsx! {
         div { class: "locked",
+            // Esc closes an open menu or sheet before anything else.
+            onkeydown: move |e: KeyboardEvent| {
+                if e.key() == Key::Escape && sheet() != Sheet::None {
+                    e.stop_propagation();
+                    e.prevent_default();
+                    sheet.set(Sheet::None);
+                }
+            },
             if fixture && cfg!(target_os = "android") { p { class: "banner", "Synthetic validation build · isolated test vault only" } }
             if preview { p { class: "banner", "Read-only preview · vault actions are disabled. Do not enter real credentials." } }
             div { class: "locked-body", key: "locked-{epoch.0}", {body} }

@@ -90,23 +90,7 @@ impl Prefs {
     }
     /// Load from the private app directory; any problem gives the defaults.
     pub fn load(base: &Path) -> Self {
-        let path = base.join(FILE);
-        match std::fs::symlink_metadata(&path) {
-            Ok(m) if m.file_type().is_file() && m.len() <= MAX_PREFS as u64 => {}
-            _ => return Self::default(),
-        }
-        let Ok(file) = std::fs::File::open(&path) else {
-            return Self::default();
-        };
-        let mut bytes = Vec::with_capacity(MAX_PREFS);
-        if file
-            .take(MAX_PREFS as u64 + 1)
-            .read_to_end(&mut bytes)
-            .is_err()
-        {
-            return Self::default();
-        }
-        Self::parse(&bytes)
+        read_private(&base.join(FILE), MAX_PREFS).map_or_else(Self::default, |b| Self::parse(&b))
     }
     /// Save atomically: a fresh 0600 temporary file renamed into place.
     pub fn save(&self, base: &Path) -> std::io::Result<()> {
@@ -114,22 +98,44 @@ impl Prefs {
         if text.len() > MAX_PREFS {
             return Err(std::io::ErrorKind::InvalidInput.into());
         }
-        let temp = base.join(TEMP);
-        match std::fs::symlink_metadata(&temp) {
-            Ok(m) if m.file_type().is_file() => std::fs::remove_file(&temp)?,
-            Ok(_) => return Err(std::io::ErrorKind::AlreadyExists.into()),
-            Err(_) => {}
-        }
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        let mut file = options.open(&temp)?;
-        file.write_all(text.as_bytes())?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&temp, base.join(FILE))
+        write_private(base, FILE, TEMP, text.as_bytes())
     }
+}
+/// Read a small private file: a regular file (never through a link) of at
+/// most `max` bytes, else `None`.
+pub(crate) fn read_private(path: &Path, max: usize) -> Option<Vec<u8>> {
+    match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_file() && m.len() <= max as u64 => {}
+        _ => return None,
+    }
+    let file = std::fs::File::open(path).ok()?;
+    let mut bytes = Vec::with_capacity(max.min(4096));
+    file.take(max as u64 + 1).read_to_end(&mut bytes).ok()?;
+    (bytes.len() <= max).then_some(bytes)
+}
+/// Write a small private file atomically: a fresh 0600 temporary file in
+/// `base`, synced and renamed into place. A non-file temporary path refuses.
+pub(crate) fn write_private(
+    base: &Path,
+    file: &str,
+    temp: &str,
+    bytes: &[u8],
+) -> std::io::Result<()> {
+    let temp = base.join(temp);
+    match std::fs::symlink_metadata(&temp) {
+        Ok(m) if m.file_type().is_file() => std::fs::remove_file(&temp)?,
+        Ok(_) => return Err(std::io::ErrorKind::AlreadyExists.into()),
+        Err(_) => {}
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut out = options.open(&temp)?;
+    out.write_all(bytes)?;
+    out.sync_all()?;
+    drop(out);
+    std::fs::rename(&temp, base.join(file))
 }
 fn valid_fingerprint(v: &str) -> bool {
     !v.is_empty() && v.len() <= MAX_FINGERPRINT && v.bytes().all(|b| b.is_ascii_alphanumeric())

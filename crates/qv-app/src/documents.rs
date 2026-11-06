@@ -36,6 +36,10 @@ pub enum PathFor {
     Workspace,
     /// The locked screen's vault file.
     Locked,
+    /// A vault file to list and select where it is (0009 §1.8).
+    Import,
+    /// The folder new vaults go to.
+    Folder,
 }
 #[cfg(all(feature = "desktop", target_os = "linux"))]
 static NO_PICKER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -80,6 +84,12 @@ pub(crate) fn pick_path(
                             PathFor::Workspace => c.ws_input(epoch, WsField::Path, &mut text),
                             PathFor::Locked => {
                                 c.input(epoch, crate::controller::InputField::Path, &mut text)
+                            }
+                            PathFor::Import => c.import_vault(epoch, std::path::Path::new(&text)),
+                            PathFor::Folder => {
+                                if let Err(e) = c.set_default_folder(std::path::Path::new(&text)) {
+                                    c.report(epoch, e);
+                                }
                             }
                         }
                         zeroize::Zeroize::zeroize(&mut text);

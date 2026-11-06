@@ -19,6 +19,7 @@ pub mod qr;
 mod runtime;
 #[cfg(feature = "desktop")]
 mod ui;
+pub mod vaults;
 pub mod views;
 pub mod workspace;
 #[cfg(test)]
