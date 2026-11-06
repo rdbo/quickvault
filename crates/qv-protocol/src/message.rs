@@ -60,19 +60,11 @@ labels! {
     /// §4.5 reveal of `nonce_B`.
     PairReveal = "qv/lan-pair-reveal/v1", 2;
     /// §4.7 new-device grant.
-    PairGrant = "qv/lan-pair-grant/v1", 5;
-    /// §4.8 link-mode proof by B.
+    PairGrant = "qv/lan-pair-grant/v1", 4;
+    /// §4.8 sync-mode proof by B.
     PairProve = "qv/lan-pair-prove/v1", 4;
-    /// §4.8 link-mode proof by A.
-    PairProved = "qv/lan-pair-proved/v1", 3;
-    /// §4.8 B's durable commit.
-    PairDone = "qv/lan-pair-done/v1", 1;
-    /// §5.1 SyncHello: body (4) + MAC.
-    Hello = "qv/lan-hello/v1", 5;
-    /// §5.2 SyncAccept: body (3) + MAC.
-    Accept = "qv/lan-accept/v1", 4;
-    /// §5.3 key confirmation.
-    Confirm = "qv/lan-confirm/v1", 2;
+    /// §4.8 sync-mode proof by A.
+    PairProved = "qv/lan-pair-proved/v1", 2;
     /// §7.2 state.
     State = "qv/lan-state/v1", 6;
     /// §7.3 manifest part.
@@ -295,10 +287,9 @@ mod tests {
         .unwrap()
         .to_vec()
     }
-    fn hello_body(a: &mut Encoder) {
-        a.uint(1);
+    fn accept_body(a: &mut Encoder) {
         a.bytes(&[1; 32]);
-        a.bytes(&[2; 1216]);
+        a.bytes(&[2; 1120]);
     }
 
     #[test]
@@ -311,13 +302,9 @@ mod tests {
                 ("qv/lan-pair-hello/v1", 7),
                 ("qv/lan-pair-accept/v1", 4),
                 ("qv/lan-pair-reveal/v1", 2),
-                ("qv/lan-pair-grant/v1", 5),
+                ("qv/lan-pair-grant/v1", 4),
                 ("qv/lan-pair-prove/v1", 4),
-                ("qv/lan-pair-proved/v1", 3),
-                ("qv/lan-pair-done/v1", 1),
-                ("qv/lan-hello/v1", 5),
-                ("qv/lan-accept/v1", 4),
-                ("qv/lan-confirm/v1", 2),
+                ("qv/lan-pair-proved/v1", 2),
                 ("qv/lan-state/v1", 6),
                 ("qv/lan-manifest/v1", 3),
                 ("qv/lan-want/v1", 3),
@@ -330,8 +317,14 @@ mod tests {
             assert_eq!(Label::parse(l.as_str()), Some(*l));
         }
         for bad in [
-            "qv/lan-hello/v2",
-            "QV/LAN-HELLO/V1",
+            "qv/lan-pair-hello/v2",
+            "QV/LAN-PAIR-HELLO/V1",
+            // Retired by 0014 (0013 §5, §8.5).
+            "qv/lan-hello/v1",
+            "qv/lan-accept/v1",
+            "qv/lan-confirm/v1",
+            "qv/lan-pair-done/v1",
+            "qv/lan-addr-qr/v1",
             "qv/lan-record/v1",
             "qv/lan-pair-qr/v1",
             "",
@@ -342,19 +335,18 @@ mod tests {
 
     #[test]
     fn reader_accepts_the_exact_shape() {
-        let bytes = msg("qv/lan-hello/v1", |a| {
-            hello_body(a);
+        let bytes = msg("qv/lan-pair-accept/v1", |a| {
+            accept_body(a);
             a.bytes(&[3; 32]);
         });
-        let mut r = MessageReader::open(&bytes, Label::Hello).unwrap();
-        assert_eq!(r.label(), Label::Hello);
-        assert_eq!(r.uint().unwrap(), 1);
+        let mut r = MessageReader::open(&bytes, Label::PairAccept).unwrap();
+        assert_eq!(r.label(), Label::PairAccept);
         assert_eq!(r.bytes_exact::<32>().unwrap(), [1; 32]);
-        assert_eq!(r.bytes_exact::<1216>().unwrap(), [2; 1216]);
+        assert_eq!(r.bytes_exact::<1120>().unwrap(), [2; 1120]);
         assert_eq!(r.bytes_exact::<32>().unwrap(), [3; 32]);
         r.finish().unwrap();
         // The MAC'd body equals the independently encoded body.
-        let body = msg("qv/lan-hello/v1", hello_body);
+        let body = msg("qv/lan-pair-accept/v1", accept_body);
         assert_eq!(
             body_without_last(&bytes).unwrap().as_slice(),
             body.as_slice()
@@ -394,23 +386,27 @@ mod tests {
 
     #[test]
     fn reader_refuses_wrong_labels_and_shapes() {
-        let confirm = msg("qv/lan-confirm/v1", |a| a.bytes(&[0; 32]));
+        let confirm = msg("qv/lan-pair-reveal/v1", |a| a.bytes(&[0; 32]));
         assert_eq!(
-            MessageReader::open(&confirm, Label::Hello).err(),
+            MessageReader::open(&confirm, Label::PairAccept).err(),
             Some(ProtocolError::UnexpectedLabel)
         );
-        for label in ["qv/lan-confirm/v2", "QV/LAN-CONFIRM/V1", "qv/lan-record/v1"] {
+        for label in [
+            "qv/lan-pair-reveal/v2",
+            "QV/LAN-PAIR-REVEAL/V1",
+            "qv/lan-record/v1",
+        ] {
             let m = msg(label, |a| a.bytes(&[0; 32]));
             assert_eq!(
-                MessageReader::open(&m, Label::Confirm).err(),
+                MessageReader::open(&m, Label::PairReveal).err(),
                 Some(ProtocolError::UnknownLabel),
                 "{label}"
             );
         }
         let malformed: Vec<Vec<u8>> = vec![
             // Missing and extra elements.
-            msg("qv/lan-confirm/v1", |_| {}),
-            msg("qv/lan-confirm/v1", |a| {
+            msg("qv/lan-pair-reveal/v1", |_| {}),
+            msg("qv/lan-pair-reveal/v1", |a| {
                 a.bytes(&[0; 32]);
                 a.uint(0);
             }),
@@ -431,34 +427,34 @@ mod tests {
         ];
         for (i, m) in malformed.iter().enumerate() {
             assert_eq!(
-                MessageReader::open(m, Label::Confirm).err(),
+                MessageReader::open(m, Label::PairReveal).err(),
                 Some(ProtocolError::Malformed),
                 "case {i}"
             );
         }
         // Field kinds and sizes.
-        let neg = msg("qv/lan-confirm/v1", |a| a.int(-1));
-        let null = msg("qv/lan-confirm/v1", |a| a.null());
-        let map = msg("qv/lan-confirm/v1", |a| a.map(|_| Ok(())).unwrap());
+        let neg = msg("qv/lan-pair-reveal/v1", |a| a.int(-1));
+        let null = msg("qv/lan-pair-reveal/v1", |a| a.null());
+        let map = msg("qv/lan-pair-reveal/v1", |a| a.map(|_| Ok(())).unwrap());
         for m in [&neg, &null, &map] {
-            let mut r = MessageReader::open(m, Label::Confirm).unwrap();
+            let mut r = MessageReader::open(m, Label::PairReveal).unwrap();
             assert_eq!(r.bytes_exact::<32>(), Err(ProtocolError::Malformed));
         }
         for len in [31, 33] {
-            let m = msg("qv/lan-confirm/v1", |a| a.bytes(&vec![0; len]));
-            let mut r = MessageReader::open(&m, Label::Confirm).unwrap();
+            let m = msg("qv/lan-pair-reveal/v1", |a| a.bytes(&vec![0; len]));
+            let mut r = MessageReader::open(&m, Label::PairReveal).unwrap();
             assert_eq!(r.bytes_exact::<32>(), Err(ProtocolError::Malformed));
         }
-        let mut r = MessageReader::open(&confirm, Label::Confirm).unwrap();
+        let mut r = MessageReader::open(&confirm, Label::PairReveal).unwrap();
         assert_eq!(r.bytes_max(31), Err(ProtocolError::Malformed));
-        let text = msg("qv/lan-confirm/v1", |a| a.text("abc"));
-        let mut r = MessageReader::open(&text, Label::Confirm).unwrap();
+        let text = msg("qv/lan-pair-reveal/v1", |a| a.text("abc"));
+        let mut r = MessageReader::open(&text, Label::PairReveal).unwrap();
         assert_eq!(r.text_max(2), Err(ProtocolError::Malformed));
         // Reading past the arity or finishing early.
-        let mut r = MessageReader::open(&confirm, Label::Confirm).unwrap();
+        let mut r = MessageReader::open(&confirm, Label::PairReveal).unwrap();
         r.bytes_exact::<32>().unwrap();
         assert_eq!(r.uint(), Err(ProtocolError::Malformed));
-        let r = MessageReader::open(&confirm, Label::Confirm).unwrap();
+        let r = MessageReader::open(&confirm, Label::PairReveal).unwrap();
         assert_eq!(r.finish(), Err(ProtocolError::Malformed));
         assert_eq!(
             body_without_last(&[0x81, 0x00]).err(),
@@ -468,31 +464,25 @@ mod tests {
 
     #[test]
     fn writer_enforces_arity_and_size() {
-        let m = write_message(Label::Confirm, 64, |a| {
+        let m = write_message(Label::PairReveal, 64, |a| {
             a.bytes(&[5; 32]);
             Ok(())
         })
         .unwrap();
-        let mut r = MessageReader::open(&m, Label::Confirm).unwrap();
+        let mut r = MessageReader::open(&m, Label::PairReveal).unwrap();
         assert_eq!(r.bytes_exact::<32>().unwrap(), [5; 32]);
         r.finish().unwrap();
         assert_eq!(
-            write_message(Label::Confirm, 64, |_| Ok(())).err(),
+            write_message(Label::PairReveal, 64, |_| Ok(())).err(),
             Some(ProtocolError::Malformed)
         );
         assert_eq!(
-            write_message(Label::Confirm, 16, |a| {
+            write_message(Label::PairReveal, 16, |a| {
                 a.bytes(&[5; 32]);
                 Ok(())
             })
             .err(),
             Some(ProtocolError::FrameTooLarge)
-        );
-        assert_eq!(
-            write_message(Label::PairDone, 64, |_| Ok(()))
-                .unwrap()
-                .len(),
-            21
         );
     }
 

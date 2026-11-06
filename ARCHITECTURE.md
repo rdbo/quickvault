@@ -86,14 +86,14 @@ rather than creating unused workspace scaffolding.
 | Component | Responsibility |
 |-----------|----------------|
 | qv-encoding | Bounded deterministic CBOR (0004 §3.1): validates hostile input before typed reads, encodes only canonical items, builds AAD/info/transcript arrays; depends on no other qv crate |
-| qv-crypto | Profiles, key hierarchy, encryption, protected memory, X-Wing draft-11 (libcrux-kem), the LAN record layer (0013 §6), pairing key schedule (`lan-link` root, link keys, proofs, comparison code, sealed link rows; 0013 §4, §9) and session keys (`K_i`/`K_r`, `k_i2r`/`k_r2i`; 0013 §5); hybrid signature verification from roadmap 3.3 |
+| qv-crypto | Profiles, key hierarchy, encryption, protected memory, X-Wing draft-11 (libcrux-kem), the LAN record layer (0013 §6) and the one-use code key schedule (pairing keys, the `lan-proof` key and its transcript-bound proofs, the comparison code; 0013 §4); hybrid signature verification from roadmap 3.3 |
 | qv-model | Canonical payloads, atomic records, deterministic tree projection |
-| qv-store | Hardened SQLite, immutable objects, manifests, transactions, authenticated archives (header, writer, role-verifying reader), new-path restore and the full `verify` pass; head-bound `lan_link` peer state (no remembered peer endpoints), LAN serving reads, peer staging (new device, or merge with local copies of held objects) and receipt-free LAN acceptance through the archive acceptance transaction (0013 §7, §9–10) |
-| qv-protocol | Key-free hostile-input wire layer: bounded LAN frames, wire labels with exact arity, exact-shape message reader/writer, `lan / 1` profile, feature and error-code registry (roadmap 2.8); typed pairing/session/exchange/error messages, the out-of-band pairing QR/manual code, the address-only receive-window code and endpoint text (roadmap 2.9–2.10); server wire types later; depends only on qv-encoding |
-| qv-sync | Shared causal merge candidates; LAN over TCP: pairing window and joiner (roadmap 2.9), session handshake, the two-way exchange, receive windows and the initiator (roadmap 2.10); remote candidate state and publication orchestration (planned) |
-| qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets, the `verify` report, and LAN pairing, link management, receive windows and sync rounds for frontends; strict scanned QR kind/profile/address inspection without network I/O |
+| qv-store | Hardened SQLite, immutable objects, manifests, transactions, authenticated archives (header, writer, role-verifying reader), new-path restore and the full `verify` pass; no LAN peer state (the retired `lan_link` rows stay head-bound and clear at the next commit; 0013 §9.1), LAN serving reads, peer staging (new device, or merge with local copies of held objects) and receipt-free LAN acceptance through the archive acceptance transaction (0013 §7, §9–10) |
+| qv-protocol | Key-free hostile-input wire layer: bounded LAN frames, wire labels with exact arity, exact-shape message reader/writer, `lan / 1` profile, feature and error-code registry (roadmap 2.8); typed pairing/exchange/error messages, the one-use code's QR/manual form and endpoint text (roadmap 2.9–2.10, plan 0042); server wire types later; depends only on qv-encoding |
+| qv-sync | Shared causal merge candidates; LAN over TCP: the one-use sync window and the joiner in sync or new-device mode, and the two-way exchange (roadmap 2.9–2.10, plan 0042); remote candidate state and publication orchestration (planned) |
+| qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets, the `verify` report, and LAN sync windows, sync from a code and new-device join for frontends; strict scanned QR kind/profile/address inspection without network I/O |
 | qv-platform | Injected OS traits; local unicast addresses for LAN endpoints from route probes (std only); Linux logind lifecycle, xdg-desktop-portal file picker (zbus, local `file:` results only), X11 clipboard ownership, single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; gated Android keystore quick unlock with process-local policy; gated exact-identity autofill matching; native input unavailable |
-| qv-cli / qv-app | Explicit user actions and views, including `qvault lan …` and the app's Devices screen and Join mode; qv-app's shared UI (own title bar, one DOM for desktop and phone, 0009 §1.8), its non-secret preferences file (theme, acknowledged protection status), QR rendering/decoding and bounded native Android Camera2 glue (camera gated pending device validation); no unrestricted crypto/file/SQL bridge |
+| qv-cli / qv-app | Explicit user actions and views, including `qvault lan open|sync|join` and the app's Devices screen and Join mode; qv-app's shared UI (own title bar, one DOM for desktop and phone, 0009 §1.8), its non-secret preferences file (theme, acknowledged protection status), QR rendering/decoding and bounded native Android Camera2 glue (camera gated pending device validation); no unrestricted crypto/file/SQL bridge |
 | qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
 
 Implemented so far: `qv-encoding` (canonical CBOR codec, fuzzed in CI) and
@@ -171,12 +171,21 @@ Roadmap 2.10 (plan 0038) makes LAN sync usable (0013 §5, §7, §8):
   acceptance metadata is captured before releasing the session so reporting
   survives lock; completion errors remain visible alongside committed results.
 
+Plan 0042 (spec 0014, owner direction 2026-11-06) replaces the links,
+session handshake and receive windows above with one-use sync windows:
+sync mode proves VK possession bound to the pairing transcript and runs one
+exchange; new-device mode keeps the comparison code; nothing about a peer is
+stored (the `lan_link` rows and digest stay in the format, always empty
+after a commit). The CLI is `qvault lan open|sync|join`, and in the app a
+scanned code that names its address starts the sync or join at once.
+
 DNS-SD discovery stays deferred (owner decision 2026-11-03). Roadmap 2.10b
 (plan 0039) adds protected binary pairing/address QR display in the shared app,
 with bounded grayscale decoding and strict core inspection. Android Camera2
 runs an in-memory preview in the existing activity, with action-only permission
-and cancellation on lock/pause/expiry. Scanning fills a current form and never
-starts a round. Manual input remains available; endpoints are action-local.
+and cancellation on lock/pause/expiry. Since plan 0042 a scanned code that
+names its address starts its sync or join (the scan is the explicit action),
+and one without an address fills the form; there is one QR kind. Manual input remains available; endpoints are action-local.
 The camera remains disabled in ordinary packages until actual-device validation;
 explicit validation packages can exercise it. Step 6 of plan 0039 carries both
 2.10's outstanding offline-LAN run and the QR/device checks at the owner's request.
@@ -483,12 +492,15 @@ transaction/anchor path. Each device retains its local edits and deletion
 knowledge; interrupted exchange is safe to retry. No server checkpoint is
 advanced by a LAN exchange. The proposed protocol is
 [0013](specs/0013-lan-sync-protocol.md) (Accepted 2026-10-30; release still needs the 0012 §3 LAN gate):
-- the user opens an explicit, time-boxed pairing or receive window;
-- out-of-band pairing (QR or a 26-character code, committed comparison
-  code) creates a pairwise link key bound to one key generation;
-- each session authenticates with that key and uses a fresh X-Wing
-  exchange;
-- removal is local, and rotation drops every link.
+- the user opens an explicit, time-boxed, one-use sync window that shows a
+  code (QR or a 26-character code);
+- the other device scans or types it. A copy of the same vault proves this
+  generation's VK with transcript-bound MACs and syncs once; a new device
+  confirms a committed comparison code before VK is transferred;
+- each session uses a fresh X-Wing exchange mixed with the code's secret;
+- nothing about the other device is stored, and rotation stops
+  old-generation copies (amended by
+  [0014](specs/0014-lan-one-scan-sync.md), 2026-11-06).
 
 **Remote sync:** stage and verify the remote state against the remembered remote
 base (no lower sequence; every remembered head, tombstone and floor still
@@ -537,7 +549,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Application signatures | Ed25519 + ML-DSA-65, both required |
 | Remote transport | TLS 1.3, X25519MLKEM768, pinned application server identity |
 | Remote account authentication | Pinned RFC 9807 OPAQUE application profile |
-| Direct LAN discovery / enrollment / transport | Specified in 0013 (Accepted): DNS-SD only during explicit windows (`_qvault._tcp`, random instance), QR/manual pairing into pairwise link keys, X-Wing draft-11 + HKDF-SHA-512 + MAC/1 handshake, XChaCha20-Poly1305 counter-nonce records over TCP. X-Wing is `libcrux-kem` 0.0.10 (Cryspen; its draft-06 API matches the draft-11 vectors byte for byte); framing and records in qv-protocol/qv-crypto (roadmap 2.8); pairing and sessions over `std::net` TCP and endpoint addresses from `std` route probes, with no new dependency (2.9–2.10); DNS-SD discovery deferred (owner decision 2026-11-03); QR rendering/scanning in 2.10b |
+| Direct LAN discovery / enrollment / transport | Specified in 0013 (Accepted): DNS-SD only during explicit windows (`_qvault._tcp`, random instance), one-use QR/manual codes with transcript-bound VK proofs (0014; no stored links), X-Wing draft-11 + HKDF-SHA-512 + MAC/1 handshake, XChaCha20-Poly1305 counter-nonce records over TCP. X-Wing is `libcrux-kem` 0.0.10 (Cryspen; its draft-06 API matches the draft-11 vectors byte for byte); framing and records in qv-protocol/qv-crypto (roadmap 2.8); pairing and sessions over `std::net` TCP and endpoint addresses from `std` route probes, with no new dependency (2.9–2.10); DNS-SD discovery deferred (owner decision 2026-11-03); QR rendering/scanning in 2.10b |
 | LAN QR graphics / decoding | qrcodegen-no-heap 1.8.1 (caller-owned protected scratch) and quircs 0.10.3 (bounded grayscale/binary adapter); shared SVG display; native Android Camera2/ImageReader, no image files or Play Services; exact dependency audit debt in plan 0039 |
 | Linux OS adapters | Optional logind lifecycle monitoring via zbus 6.2.0 over the fixed system-bus Unix socket; existing rustix file locks/configuration probes; shared maintained X11 clipboard; quick unlock unavailable |
 | CLI / license | clap (builder API), rustix termios/poll for bounded no-echo prompts, signal-hook atomic flags for cancellation, own escaping and JSON writer, shared qv-platform X11 adapter over published x11rb 0.13.2 with QuickVault's bounded transport and framing budgets; `zxcvbn` (in `qv-core`) for typed master passwords / AGPL-3.0-or-later |

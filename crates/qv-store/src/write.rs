@@ -82,7 +82,8 @@ pub struct Write<'v> {
     poisoned: bool,
     finished: bool,
     receipt_blob: Option<Vec<u8>>,
-    /// The complete new `lan_link` row set, when this write changes links.
+    /// The new `lan_link` row set, when this write changes it: always
+    /// empty, to clear rows left by a file written before 0014 (0013 §9.1).
     links: Option<Vec<crate::lan_store::StoredLink>>,
 }
 
@@ -198,6 +199,8 @@ impl UnlockedVault {
             None => (self.state.writer, self.state.replica.next_counter),
         };
         let manifest = self.state.manifest.clone();
+        // Every commit writes the empty link set (0013 §9.1, plan 0042).
+        let links = (!self.state.links.is_empty()).then(Vec::new);
         Ok(Write {
             vault: self,
             keys,
@@ -215,7 +218,7 @@ impl UnlockedVault {
             poisoned: false,
             finished: false,
             receipt_blob: None,
-            links: None,
+            links,
         })
     }
 }
@@ -599,67 +602,11 @@ impl Write<'_> {
         self.manifest.remove_history(record, version)
     }
 
-    /// Adds a LAN link row (0013 §9.1), applied by [`Self::commit`] as part
-    /// of this one change. At most
-    /// [`crate::MAX_LAN_LINKS`] links ([`StoreError::LimitExceeded`]); a
-    /// reused link ID, a negative time or an invalid label is
-    /// [`StoreError::InvalidEdit`].
-    pub fn add_lan_link(
-        &mut self,
-        link_id: [u8; 16],
-        key: &qv_crypto::lan::LinkKey,
-        label: &str,
-        created_at: qv_model::Timestamp,
-    ) -> Result<(), StoreError> {
-        let mut rows = match self.links.take() {
-            Some(rows) => rows,
-            None => self.vault.state.links.clone(),
-        };
-        let result = (|| {
-            if rows.len() >= crate::lan_store::MAX_LAN_LINKS {
-                return Err(StoreError::LimitExceeded);
-            }
-            if rows.iter().any(|r| r.link_id == link_id) {
-                return Err(StoreError::InvalidEdit);
-            }
-            let created = u64::try_from(created_at.0).map_err(|_| StoreError::InvalidEdit)?;
-            let header = self.vault.file.header;
-            crate::lan_store::seal_row(&self.keys, &header, &link_id, key, label, created)
-        })();
-        match result {
-            Ok(sealed) => {
-                rows.push(crate::lan_store::StoredLink { link_id, sealed });
-                rows.sort_by_key(|a| a.link_id);
-                self.links = Some(rows);
-                Ok(())
-            }
-            Err(e) => {
-                // Nothing staged; an earlier change in this write is kept.
-                if rows != self.vault.state.links {
-                    self.links = Some(rows);
-                }
-                Err(e)
-            }
-        }
-    }
-
-    /// Removes a LAN link (0013 §12.1), applied by
-    /// [`Self::commit`]. An unknown ID is [`StoreError::NotFound`].
-    pub fn remove_lan_link(&mut self, link_id: &[u8; 16]) -> Result<(), StoreError> {
-        let mut rows = match self.links.take() {
-            Some(rows) => rows,
-            None => self.vault.state.links.clone(),
-        };
-        let before = rows.len();
-        rows.retain(|r| r.link_id != *link_id);
-        let found = rows.len() != before;
-        if found || rows != self.vault.state.links {
-            self.links = Some(rows);
-        }
-        if !found {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
+    /// Test only: makes this commit store `rows`, as a file written before
+    /// 0014 could hold them.
+    #[cfg(test)]
+    pub(crate) fn plant_lan_links(&mut self, rows: Vec<crate::lan_store::StoredLink>) {
+        self.links = Some(rows);
     }
 
     /// Commits the mutation (steps 3–8 of the module docs).

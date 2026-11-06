@@ -66,7 +66,7 @@ pub enum CoreError {
     /// the anchor could be copied or restored with the vault and would
     /// detect nothing (0005 §5.4). Move the vault elsewhere.
     AnchorLocation,
-    /// A LAN pairing failed (0013; exit codes come with the CLI commands in
+    /// A LAN session failed (0013; exit codes come with the CLI commands in
     /// roadmap 2.10).
     #[cfg(any(target_os = "linux", target_os = "android"))]
     Lan(qv_sync::lan::LanError),

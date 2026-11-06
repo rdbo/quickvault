@@ -1,31 +1,30 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! LAN pairing for frontends (0013 §4, §8–10, §12; plan 0037).
+//! LAN sync with one-use codes for frontends (0013 §4, §7–10, §12; plans
+//! 0037, 0038, 0042).
 //!
-//! - [`Session::open_pairing_window`] then [`PairingWindow::run`]: the
-//!   approving device. The window's code is shown to the user, and the
-//!   call blocks until a pairing completes or the window closes.
-//! - [`Core::join_new_device`]: a device without this vault pairs, receives
-//!   and verifies the vault, confirms it, checks the master password,
-//!   creates the vault at a new path and unlocks it (0013 §10).
-//! - [`Session::join_link`]: an unlocked copy of the same vault pairs with
-//!   the approver.
-//! - [`Session::lan_links`] and [`Session::remove_lan_link`]: local link
-//!   management (0013 §12.1).
-//! - [`Session::open_receive_window`] then [`ReceiveWindow::run`], and
-//!   [`Session::sync_lan`]: sync rounds between linked devices (0013 §5,
-//!   §7, §8). Each side merges through the archive acceptance path and
-//!   commits locally; local acceptance and peer receipt are reported
-//!   separately (0005 §6.5). Before accepting, the ordinary automatic
-//!   snapshot runs with its hourly coalescing (0007 §3.2).
+//! - [`Session::open_sync_window`] then [`SyncWindow::run`]: the offering
+//!   device. The window's code is shown to the user, and the call blocks
+//!   until its one session ends or the window closes. A new device's hello
+//!   asks the user to compare codes ([`ApproverUi`]); a sync needs no input.
+//! - [`Session::sync_with_code`]: an unlocked copy of the same vault proves
+//!   itself to the window and runs one sync round.
+//! - [`Core::join_new_device`]: a device without this vault receives and
+//!   verifies it, confirms it, checks the master password, creates the
+//!   vault at a new path and unlocks it (0013 §10).
+//!
+//! Each side merges through the archive acceptance path and commits
+//! locally; local acceptance and peer receipt are reported separately
+//! (0005 §6.5). Before accepting, the ordinary automatic snapshot runs with
+//! its hourly coalescing (0007 §3.2). Nothing about the other device is
+//! stored (0013 §9.1).
 //!
 //! Nothing here starts without an explicit call (0005 §0.5). The session
-//! mutex is held only for short reads and the link commit, never while
-//! waiting on the network or the user. A session lock or the caller's
-//! [`CancelToken`] closes a window or a join within about 100 ms, except
-//! inside the frontend's own confirmation prompt, which must end itself on
-//! cancel. Exit codes for [`CoreError::Lan`] are assigned with the CLI
-//! commands (roadmap 2.10).
+//! mutex is held only for short reads and commits, never while waiting on
+//! the network or the user. A session lock or the caller's
+//! [`CancelToken`] closes a window, a sync or a join within about 100 ms,
+//! except inside the frontend's own confirmation prompt, which must end
+//! itself on cancel.
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
@@ -33,19 +32,19 @@ use std::sync::atomic::Ordering;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use qv_crypto::lan::{LinkKey, LinkRoot, valid_link_label};
+use qv_crypto::lan::ProofRoot;
 use qv_crypto::{KeyGeneration, MasterPassword, SecretBytes, VaultId};
-use qv_model::{ObjectId, Text};
+use qv_model::ObjectId;
 use qv_store::{LanServeState, LanStaging, StoreError, VaultFile};
 use qv_sync::lan::{
-    self as sync, Accepted, ApproverContext, ApproverVault, Confirm, EndpointPolicy, ExchangeVault,
-    JoinerContext, JoinerVault, Outcome, ResponderVault, RoundReport, Sealer,
+    self as sync, Accepted, Approved, ApproverContext, ApproverVault, Confirm, EndpointPolicy,
+    ExchangeVault, JoinerContext, JoinerVault, Outcome, RoundReport, Sealer,
 };
 
 pub use qv_platform::net::local_addresses;
 pub use qv_sync::lan::{
-    JoinCode, JoinMode, JoinerUi, LanError, LanQrInfo, LanQrKind, LanTimeouts, ListenScope,
-    PAIRING_WINDOW_MAX, RECEIVE_WINDOW_DEFAULT, RECEIVE_WINDOW_MAX, Sas, WindowEnd, parse_endpoint,
+    JoinCode, JoinMode, JoinerUi, LanError, LanQrInfo, LanTimeouts, ListenScope,
+    PAIRING_WINDOW_MAX, Sas, parse_endpoint,
 };
 
 /// Inspect a scanned LAN code without initiating any network operation.
@@ -57,11 +56,9 @@ use crate::index::{Index, MAX_VIEW_BYTES};
 use crate::session::SessionTag;
 use crate::{CancelToken, Core, CoreError, Session};
 
-/// Options for a pairing window.
+/// Options for a sync window.
 #[derive(Clone, Debug)]
-pub struct PairingOptions {
-    /// This device's label for the joining device (1–64 bytes).
-    pub peer_label: String,
+pub struct SyncWindowOptions {
     /// Where to listen; frontends use [`ListenScope::AllInterfaces`].
     pub scope: ListenScope,
     /// A user-chosen port, or `None` for an OS-chosen one.
@@ -72,11 +69,10 @@ pub struct PairingOptions {
     pub timeouts: LanTimeouts,
 }
 
-impl PairingOptions {
+impl SyncWindowOptions {
     /// The defaults: all interfaces, an OS-chosen port, 10 minutes.
-    pub fn new(peer_label: &str) -> Self {
+    pub fn new() -> Self {
         Self {
-            peer_label: peer_label.to_owned(),
             scope: ListenScope::AllInterfaces,
             port: None,
             limit: PAIRING_WINDOW_MAX,
@@ -85,11 +81,15 @@ impl PairingOptions {
     }
 }
 
-/// Options for joining.
-#[derive(Clone, Debug)]
-pub struct JoinOptions {
-    /// This device's label for the approving device (1–64 bytes).
-    pub label: String,
+impl Default for SyncWindowOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Options for syncing with or joining from a code.
+#[derive(Clone, Debug, Default)]
+pub struct SyncOptions {
     /// Endpoints typed by the user, tried after the QR's.
     pub extra_endpoints: Vec<SocketAddr>,
     /// Allow loopback endpoints (tests only, 0013 §1.4).
@@ -98,45 +98,9 @@ pub struct JoinOptions {
     pub timeouts: LanTimeouts,
 }
 
-impl JoinOptions {
-    /// The defaults: no extra endpoints, loopback refused.
-    pub fn new(label: &str) -> Self {
-        Self {
-            label: label.to_owned(),
-            extra_endpoints: Vec::new(),
-            allow_loopback: false,
-            timeouts: LanTimeouts::default(),
-        }
-    }
-}
-
-/// A LAN link of this session's vault.
-#[derive(Clone, PartialEq, Eq)]
-pub struct LanLinkHandle {
-    session: SessionTag,
-    link_id: [u8; 16],
-}
-
-impl LanLinkHandle {
-    /// The link ID as 32 lowercase hex digits.
-    pub fn id_hex(&self) -> String {
-        self.link_id.iter().map(|b| format!("{b:02x}")).collect()
-    }
-}
-
-/// One link, for listing.
-pub struct LanLinkSummary {
-    /// The link.
-    pub handle: LanLinkHandle,
-    /// The user's label for the peer.
-    pub label: Text,
-    /// When the link was created (display only).
-    pub created_at: qv_model::Timestamp,
-}
-
-/// What to show for an open window. `manual` and `qr` carry the pairing
+/// What to show for an open window. `manual` and `qr` carry the code's
 /// secret: show them only on this device's screen.
-pub struct PairingCode {
+pub struct WindowCode {
     /// The 26-character code in groups of five (UTF-8).
     pub manual: SecretBytes,
     /// The QR payload bytes.
@@ -145,28 +109,18 @@ pub struct PairingCode {
     pub port: u16,
 }
 
-/// A completed pairing on the approving device.
-pub struct ApproveReport {
-    /// The joiner's mode.
-    pub mode: JoinMode,
-    /// The new link.
-    pub link: LanLinkHandle,
-    /// Whether the other device confirmed completion; otherwise "pairing may
-    /// be incomplete on the other device" (0013 §4.7). The link stays.
-    pub peer_confirmed: bool,
-    /// Why the transfer after the link commit failed, if it did.
-    pub failure: Option<LanError>,
-    /// Link mode: the sync round that followed the pairing (0013 §4.8). Its
-    /// failure leaves both links; the user syncs again later.
-    pub sync: Option<Result<SyncReport, CoreError>>,
-}
-
-/// A completed link-mode join.
-pub struct JoinLinkReport {
-    /// The new link.
-    pub link: LanLinkHandle,
-    /// The sync round that followed the pairing (0013 §4.8).
-    pub sync: Result<SyncReport, CoreError>,
+/// The window's one session, on the offering device.
+pub enum Served {
+    /// A new device joined (0013 §4.7). Without `peer_confirmed` it may not
+    /// have finished joining; `failure` says why.
+    Joined {
+        /// Whether the new device's `Done` arrived.
+        peer_confirmed: bool,
+        /// Why the transfer failed after the grant, if it did.
+        failure: Option<LanError>,
+    },
+    /// A sync with another copy of this vault (0013 §4.8).
+    Synced(SyncReport),
 }
 
 /// Whether this device committed anything in a round.
@@ -181,8 +135,6 @@ pub enum LocalAcceptance {
 /// One sync round's result (0005 §6.5): local acceptance, conflicts and
 /// confirmed peer receipt, reported separately.
 pub struct SyncReport {
-    /// The link the round used.
-    pub link: LanLinkHandle,
     /// What this device committed.
     pub local: LocalAcceptance,
     /// Unresolved conflicts after the round (all record kinds).
@@ -195,80 +147,11 @@ pub struct SyncReport {
     pub completion_error: Option<CoreError>,
 }
 
-/// Options for a receive window.
-#[derive(Clone, Debug)]
-pub struct ReceiveOptions {
-    /// Where to listen; frontends use [`ListenScope::AllInterfaces`].
-    pub scope: ListenScope,
-    /// A user-chosen port, or `None` for an OS-chosen one.
-    pub port: Option<u16>,
-    /// The window's time limit, at most [`RECEIVE_WINDOW_MAX`].
-    pub limit: Duration,
-    /// Serve further rounds within the limit instead of closing after the
-    /// first completed one.
-    pub stay_open: bool,
-    /// Protocol time limits.
-    pub timeouts: LanTimeouts,
-}
-
-impl ReceiveOptions {
-    /// The defaults: all interfaces, an OS-chosen port, 2 minutes, one round.
-    pub fn new() -> Self {
-        Self {
-            scope: ListenScope::AllInterfaces,
-            port: None,
-            limit: RECEIVE_WINDOW_DEFAULT,
-            stay_open: false,
-            timeouts: LanTimeouts::default(),
-        }
-    }
-}
-
-impl Default for ReceiveOptions {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Options for starting a round.
-#[derive(Clone, Debug, Default)]
-pub struct SyncOptions {
-    /// Allow loopback endpoints (tests only, 0013 §1.4).
-    pub allow_loopback: bool,
-    /// Protocol time limits.
-    pub timeouts: LanTimeouts,
-}
-
-/// What a receive window shows: its endpoints as text and as the
-/// address-only code (0013 §8.5). Neither carries a secret.
-pub struct ReceiveCode {
-    /// The address-only QR payload; empty when no local address was given.
-    pub qr: Vec<u8>,
-    /// The endpoints, at most 8.
-    pub endpoints: Vec<SocketAddr>,
-    /// The listening port.
-    pub port: u16,
-}
-
-/// Something a running receive window reports.
-pub enum ReceiveEvent {
-    /// A round passed the handshake and ended this way.
-    Round(Result<SyncReport, CoreError>),
-}
-
-/// How a receive window ended.
-pub struct ReceiveReport {
-    /// Rounds that completed.
-    pub rounds: usize,
-    /// Why it closed.
-    pub end: WindowEnd,
-}
-
-/// The approving user's decision (0013 §4.5).
+/// The offering user's decision for a new device (0013 §4.5).
 pub trait ApproverUi {
-    /// Shows the six-digit `sas`, the joiner's `mode` and the vault's name,
-    /// and returns `true` once the user confirmed that both screens match.
-    fn confirm(&mut self, sas: &str, mode: JoinMode, vault_name: &str) -> bool;
+    /// Shows the six-digit `sas` and the vault's name, and returns `true`
+    /// once the user confirmed that both screens match.
+    fn confirm(&mut self, sas: &str, vault_name: &str) -> bool;
 }
 
 macro_rules! redacted {
@@ -280,27 +163,7 @@ macro_rules! redacted {
         }
     )+};
 }
-redacted!(
-    LanLinkHandle,
-    LanLinkSummary,
-    PairingCode,
-    ApproveReport,
-    PairingWindow,
-    JoinLinkReport,
-    SyncReport,
-    ReceiveCode,
-    ReceiveEvent,
-    ReceiveReport,
-    ReceiveWindow
-);
-
-fn label_ok(label: &str) -> Result<(), CoreError> {
-    if valid_link_label(label) {
-        Ok(())
-    } else {
-        Err(CoreError::InvalidInput)
-    }
-}
+redacted!(WindowCode, Served, SyncWindow, SyncReport);
 
 fn lan(e: CoreError) -> LanError {
     match e {
@@ -316,19 +179,17 @@ fn digits(sas: &Sas) -> String {
     sas.digits().iter().map(|d| char::from(*d)).collect()
 }
 
-/// An open pairing window bound to one session.
-pub struct PairingWindow {
+/// An open sync window bound to one session.
+pub struct SyncWindow {
     inner: sync::PairingWindow,
     session: SessionTag,
-    label: String,
     timeouts: LanTimeouts,
 }
 
 impl Session {
-    /// Opens a pairing window for this vault (0013 §8.1). Writes must be
-    /// allowed: a recovery session is refused.
-    pub fn open_pairing_window(&self, options: PairingOptions) -> Result<PairingWindow, CoreError> {
-        label_ok(&options.peer_label)?;
+    /// Opens a one-use sync window for this vault (0013 §8.1). Writes must
+    /// be allowed: a recovery session is refused.
+    pub fn open_sync_window(&self, options: SyncWindowOptions) -> Result<SyncWindow, CoreError> {
         options
             .timeouts
             .validate()
@@ -339,88 +200,19 @@ impl Session {
         self.writable()?;
         let inner = sync::PairingWindow::open(options.scope, options.port, options.limit)
             .map_err(CoreError::Lan)?;
-        Ok(PairingWindow {
+        Ok(SyncWindow {
             inner,
             session: self.tag(),
-            label: options.peer_label,
             timeouts: options.timeouts,
         })
     }
 
-    /// Joins an approving device in link mode (0013 §4.8): both hold this
-    /// vault and generation. Commits the link, then runs one sync round over
-    /// the pairing keys.
-    pub fn join_link(
+    /// Syncs once with the window that shows `code` (0013 §4.8, §7): both
+    /// hold this vault and generation. Nothing starts without this call
+    /// (0005 §0.5), and nothing about the other device is stored.
+    pub fn sync_with_code(
         &self,
         code: JoinCode,
-        options: JoinOptions,
-        ui: &mut dyn JoinerUi,
-        cancel: Option<&CancelToken>,
-    ) -> Result<JoinLinkReport, CoreError> {
-        label_ok(&options.label)?;
-        self.writable()?;
-        let joiner = SessionJoiner {
-            session: self,
-            label: &options.label,
-            exchange: SessionExchange::new(self, cancel, None)?,
-        };
-        let cancelled =
-            || self.locking.load(Ordering::SeqCst) || cancel.is_some_and(CancelToken::is_cancelled);
-        let joined = sync::join_link(
-            code,
-            &options.extra_endpoints,
-            EndpointPolicy {
-                allow_loopback: options.allow_loopback,
-            },
-            &joiner,
-            ui,
-            &options.timeouts,
-            &cancelled,
-        )
-        .map_err(CoreError::Lan)?;
-        let link = LanLinkHandle {
-            session: self.tag(),
-            link_id: joined.link_id,
-        };
-        let sync = match joined.round {
-            Ok(round) => joiner.exchange.report(link.clone(), round),
-            Err(e) => Err(CoreError::Lan(e)),
-        };
-        Ok(JoinLinkReport { link, sync })
-    }
-
-    /// Opens a receive window for this vault (0013 §8.1): the other device
-    /// starts a round with [`Session::sync_lan`]. Writes must be allowed.
-    pub fn open_receive_window(&self, options: ReceiveOptions) -> Result<ReceiveWindow, CoreError> {
-        options
-            .timeouts
-            .validate()
-            .map_err(|_| CoreError::InvalidInput)?;
-        if options.limit.is_zero() || options.limit > RECEIVE_WINDOW_MAX {
-            return Err(CoreError::InvalidInput);
-        }
-        self.writable()?;
-        let inner = sync::ReceiveWindow::open(
-            options.scope,
-            options.port,
-            options.limit,
-            options.stay_open,
-        )
-        .map_err(CoreError::Lan)?;
-        Ok(ReceiveWindow {
-            inner,
-            session: self.tag(),
-            timeouts: options.timeouts,
-        })
-    }
-
-    /// Runs one sync round as initiator with `link` against the first of
-    /// `endpoints` that authenticates (0013 §5, §7). Nothing starts without
-    /// this call (0005 §0.5).
-    pub fn sync_lan(
-        &self,
-        link: &LanLinkHandle,
-        endpoints: &[SocketAddr],
         options: SyncOptions,
         cancel: Option<&CancelToken>,
     ) -> Result<SyncReport, CoreError> {
@@ -428,35 +220,25 @@ impl Session {
             .timeouts
             .validate()
             .map_err(|_| CoreError::InvalidInput)?;
-        let key = self.read(|ctx| {
-            ctx.own(link.session)?;
-            ctx.check_cancel()?;
-            if ctx.open.read_only {
-                return Err(StoreError::NoAnchor.into());
-            }
-            ctx.open
-                .vault
-                .lan_link_key(&link.link_id)
-                .map_err(|e| match e {
-                    StoreError::NotFound => CoreError::NotFound,
-                    e => e.into(),
-                })
-        })?;
-        let exchange = SessionExchange::new(self, cancel, None)?;
+        self.writable()?;
+        let joiner = SessionJoiner {
+            session: self,
+            exchange: SessionExchange::new(self, cancel, None)?,
+        };
         let cancelled =
             || self.locking.load(Ordering::SeqCst) || cancel.is_some_and(CancelToken::is_cancelled);
-        let round = sync::sync(
-            &key,
-            endpoints,
+        let round = sync::sync_with_code(
+            code,
+            &options.extra_endpoints,
             EndpointPolicy {
                 allow_loopback: options.allow_loopback,
             },
-            &exchange,
+            &joiner,
             &options.timeouts,
             &cancelled,
         )
         .map_err(CoreError::Lan)?;
-        exchange.report(link.clone(), round)
+        joiner.exchange.report(round)
     }
 
     /// Refuses read-only (recovery) sessions.
@@ -469,54 +251,13 @@ impl Session {
             Ok(())
         })
     }
-
-    /// This vault's LAN links.
-    pub fn lan_links(&self) -> Result<Vec<LanLinkSummary>, CoreError> {
-        self.read(|ctx| {
-            let tag = ctx.tag();
-            ctx.open
-                .vault
-                .lan_links()?
-                .into_iter()
-                .map(|r| {
-                    let label = core::str::from_utf8(r.label.expose_secret())
-                        .map_err(|_| CoreError::Internal)?;
-                    Ok(LanLinkSummary {
-                        handle: LanLinkHandle {
-                            session: tag,
-                            link_id: r.link_id,
-                        },
-                        label: Text::new(label).map_err(|_| CoreError::Internal)?,
-                        created_at: r.created_at,
-                    })
-                })
-                .collect()
-        })
-    }
-
-    /// Removes a link in one commit (0013 §12.1). The peer is
-    /// not told; its next attempt fails like an unreachable device. Removal
-    /// is not compromise recovery: that is rotation (§12.3).
-    pub fn remove_lan_link(&self, link: &LanLinkHandle) -> Result<(), CoreError> {
-        self.mutate(|ctx| {
-            ctx.own(link.session)?;
-            ctx.check_cancel()?;
-            let mut w = ctx.open.vault.write()?;
-            w.remove_lan_link(&link.link_id).map_err(|e| match e {
-                StoreError::NotFound => CoreError::NotFound,
-                e => e.into(),
-            })?;
-            w.commit()?;
-            Ok(())
-        })
-    }
 }
 
-impl PairingWindow {
+impl SyncWindow {
     /// The code to show: the manual code, and a QR payload naming up to
     /// eight of `local_addrs` (the frontend's interface addresses) with this
     /// window's port. Discovery is off in this phase.
-    pub fn code(&self, local_addrs: &[IpAddr]) -> Result<PairingCode, CoreError> {
+    pub fn code(&self, local_addrs: &[IpAddr]) -> Result<WindowCode, CoreError> {
         let manual = self.inner.manual_code();
         let qr = self.inner.qr(local_addrs).map_err(CoreError::Lan)?;
         let copy = |b: &[u8]| {
@@ -525,7 +266,7 @@ impl PairingWindow {
                 Ok::<(), CoreError>(())
             })
         };
-        Ok(PairingCode {
+        Ok(WindowCode {
             manual: copy(manual.as_bytes())?,
             qr: copy(&qr)?,
             port: self.inner.port().map_err(CoreError::Lan)?,
@@ -537,43 +278,37 @@ impl PairingWindow {
         self.inner.expires_at()
     }
 
-    /// Runs the window until one pairing completes or the window closes.
+    /// Runs the window until its one session ends or the window closes.
     pub fn run(
         self,
         session: &Session,
         ui: &mut dyn ApproverUi,
         cancel: Option<&CancelToken>,
-    ) -> Result<ApproveReport, CoreError> {
+    ) -> Result<Served, CoreError> {
         if session.tag() != self.session {
             return Err(CoreError::StaleHandle);
         }
         let approver = SessionApprover {
             session,
-            label: &self.label,
             exchange: SessionExchange::new(session, cancel, Some(self.inner.expires_at()))?,
         };
         let cancelled = || {
             session.locking.load(Ordering::SeqCst) || cancel.is_some_and(CancelToken::is_cancelled)
         };
         let mut confirm = UiConfirm(ui);
-        let approved = self
+        let served = self
             .inner
             .run(&approver, &mut confirm, &self.timeouts, &cancelled)
             .map_err(CoreError::Lan)?;
-        let link = LanLinkHandle {
-            session: self.session,
-            link_id: approved.link_id,
-        };
-        let sync = approved.round.map(|round| match round {
-            Ok(r) => approver.exchange.report(link.clone(), r),
-            Err(e) => Err(CoreError::Lan(e)),
-        });
-        Ok(ApproveReport {
-            mode: approved.mode,
-            link,
-            peer_confirmed: approved.peer_confirmed,
-            failure: approved.failure,
-            sync,
+        Ok(match served {
+            Approved::Joined {
+                peer_confirmed,
+                failure,
+            } => Served::Joined {
+                peer_confirmed,
+                failure,
+            },
+            Approved::Synced(round) => Served::Synced(approver.exchange.report(round)?),
         })
     }
 }
@@ -581,9 +316,9 @@ impl PairingWindow {
 struct UiConfirm<'u>(&'u mut dyn ApproverUi);
 
 impl Confirm for UiConfirm<'_> {
-    fn confirm(&mut self, sas: &Sas, mode: JoinMode, vault_name: &[u8]) -> bool {
+    fn confirm(&mut self, sas: &Sas, vault_name: &[u8]) -> bool {
         let name = core::str::from_utf8(vault_name).unwrap_or("");
-        self.0.confirm(&digits(sas), mode, name)
+        self.0.confirm(&digits(sas), name)
     }
 }
 
@@ -649,10 +384,9 @@ impl<'s> SessionExchange<'s> {
     }
 
     /// The report of a finished round.
-    fn report(&self, link: LanLinkHandle, round: RoundReport) -> Result<SyncReport, CoreError> {
+    fn report(&self, round: RoundReport) -> Result<SyncReport, CoreError> {
         let accepted = self.take();
         Ok(SyncReport {
-            link,
             local: if accepted.committed {
                 LocalAcceptance::Committed
             } else {
@@ -852,11 +586,10 @@ macro_rules! delegate_exchange {
         }
     )+};
 }
-delegate_exchange!(SessionApprover, SessionJoiner, SessionResponder);
+delegate_exchange!(SessionApprover, SessionJoiner);
 
 struct SessionApprover<'s> {
     session: &'s Session,
-    label: &'s str,
     exchange: SessionExchange<'s>,
 }
 
@@ -881,7 +614,7 @@ impl ApproverVault for SessionApprover<'_> {
                         o.copy_from_slice(name);
                         Ok::<(), CoreError>(())
                     })?,
-                    root: LinkRoot::derive(
+                    root: ProofRoot::derive(
                         v.vault_key(),
                         h.vault_id,
                         h.key_generation,
@@ -893,13 +626,7 @@ impl ApproverVault for SessionApprover<'_> {
             .map_err(lan)
     }
 
-    fn commit_link(&self, link_id: [u8; 16], key: &LinkKey) -> Result<(), LanError> {
-        commit_link(self.session, self.label, link_id, key, &|| {
-            self.exchange.cancelled()
-        })
-    }
-
-    fn grant(&self, link_id: &[u8; 16], seal: &mut Sealer<'_>) -> Result<Vec<u8>, LanError> {
+    fn grant(&self, seal: &mut Sealer<'_>) -> Result<Vec<u8>, LanError> {
         // VK is encoded into a wiped buffer and sealed inside this short
         // read; the driver sends the record after it (0037 finding 4).
         self.session
@@ -909,45 +636,15 @@ impl ApproverVault for SessionApprover<'_> {
                 }
                 let v = &ctx.open.vault;
                 let h = v.header();
-                let plaintext =
-                    sync::grant_plaintext(v.vault_key(), h.vault_id, h.key_generation, link_id)
-                        .map_err(CoreError::Lan)?;
+                let plaintext = sync::grant_plaintext(v.vault_key(), h.vault_id, h.key_generation)
+                    .map_err(CoreError::Lan)?;
                 seal(&plaintext).map_err(CoreError::Lan)
             })
             .map_err(lan)
     }
 }
 
-fn commit_link(
-    session: &Session,
-    label: &str,
-    link_id: [u8; 16],
-    key: &LinkKey,
-    cancelled: &dyn Fn() -> bool,
-) -> Result<(), LanError> {
-    session
-        .mutate(|ctx| {
-            ctx.check_cancel()?;
-            let c = ctx.canceller();
-            let stop = || c.is_cancelled() || cancelled();
-            if stop() {
-                return Err(CoreError::Cancelled);
-            }
-            let now = ctx.now();
-            let before = ctx.open.vault.local_seq();
-            let mut w = ctx.open.vault.write()?;
-            w.add_lan_link(link_id, key, label, now)?;
-            let result = w.commit_cancellable(&stop);
-            if result.is_err() && ctx.open.vault.local_seq() == before && stop() {
-                return Err(CoreError::Cancelled);
-            }
-            result?;
-            Ok(())
-        })
-        .map_err(lan)
-}
-
-fn link_root(session: &Session) -> Result<JoinerContext, LanError> {
+fn proof_root(session: &Session) -> Result<JoinerContext, LanError> {
     session
         .read(|ctx| {
             let v = &ctx.open.vault;
@@ -955,7 +652,7 @@ fn link_root(session: &Session) -> Result<JoinerContext, LanError> {
             Ok(JoinerContext {
                 vault_id: h.vault_id,
                 key_generation: h.key_generation,
-                root: LinkRoot::derive(
+                root: ProofRoot::derive(
                     v.vault_key(),
                     h.vault_id,
                     h.key_generation,
@@ -969,148 +666,34 @@ fn link_root(session: &Session) -> Result<JoinerContext, LanError> {
 
 struct SessionJoiner<'s> {
     session: &'s Session,
-    label: &'s str,
     exchange: SessionExchange<'s>,
 }
 
 impl JoinerVault for SessionJoiner<'_> {
     fn context(&self) -> Result<JoinerContext, LanError> {
-        link_root(self.session)
-    }
-
-    fn commit_link(&self, link_id: [u8; 16], key: &LinkKey) -> Result<(), LanError> {
-        commit_link(self.session, self.label, link_id, key, &|| {
-            self.exchange.cancelled()
-        })
-    }
-}
-
-/// A receive window's view of the session: its links and the exchange.
-struct SessionResponder<'s> {
-    session: &'s Session,
-    exchange: SessionExchange<'s>,
-}
-
-impl ResponderVault for SessionResponder<'_> {
-    fn links(&self) -> Result<Vec<([u8; 16], LinkKey)>, LanError> {
-        self.session
-            .read(|ctx| {
-                let v = &ctx.open.vault;
-                v.lan_links()?
-                    .into_iter()
-                    .map(|r| Ok((r.link_id, v.lan_link_key(&r.link_id)?)))
-                    .collect()
-            })
-            .map_err(lan)
-    }
-
-    fn has_link(&self, link_id: &[u8; 16]) -> Result<bool, LanError> {
-        self.session
-            .read(|ctx| {
-                Ok(ctx
-                    .open
-                    .vault
-                    .lan_links()?
-                    .iter()
-                    .any(|r| r.link_id == *link_id))
-            })
-            .map_err(lan)
-    }
-}
-
-/// An open receive window bound to one session (0013 §8).
-pub struct ReceiveWindow {
-    inner: sync::ReceiveWindow,
-    session: SessionTag,
-    timeouts: LanTimeouts,
-}
-
-impl ReceiveWindow {
-    /// What to show: the endpoints for `local_addrs` (the frontend's
-    /// addresses, e.g. [`local_addresses`]) and the address-only code.
-    pub fn code(&self, local_addrs: &[IpAddr]) -> Result<ReceiveCode, CoreError> {
-        let endpoints = self.inner.endpoints(local_addrs).map_err(CoreError::Lan)?;
-        let qr = if endpoints.is_empty() {
-            Vec::new()
-        } else {
-            self.inner.qr(local_addrs).map_err(CoreError::Lan)?
-        };
-        Ok(ReceiveCode {
-            qr,
-            endpoints,
-            port: self.inner.port().map_err(CoreError::Lan)?,
-        })
-    }
-
-    /// When the window closes on its own.
-    pub fn expires_at(&self) -> Instant {
-        self.inner.expires_at()
-    }
-
-    /// Runs the window until it closes. `on_event` sees each round that
-    /// passed the handshake. A lock or `cancel` closes it within ~100 ms.
-    pub fn run(
-        self,
-        session: &Session,
-        on_event: &mut dyn FnMut(ReceiveEvent),
-        cancel: Option<&CancelToken>,
-    ) -> Result<ReceiveReport, CoreError> {
-        if session.tag() != self.session {
-            return Err(CoreError::StaleHandle);
-        }
-        let responder = SessionResponder {
-            session,
-            exchange: SessionExchange::new(session, cancel, Some(self.inner.expires_at()))?,
-        };
-        let cancelled = || {
-            session.locking.load(Ordering::SeqCst) || cancel.is_some_and(CancelToken::is_cancelled)
-        };
-        let mut rounds = 0;
-        let tag = self.session;
-        let end = self
-            .inner
-            .run(
-                &responder,
-                &self.timeouts,
-                &cancelled,
-                &mut |link_id, result| {
-                    let link = LanLinkHandle {
-                        session: tag,
-                        link_id,
-                    };
-                    let report = match result {
-                        Ok(round) => responder.exchange.report(link, round),
-                        Err(e) => {
-                            responder.exchange.take();
-                            Err(CoreError::Lan(e))
-                        }
-                    };
-                    if report.is_ok() {
-                        rounds += 1;
-                    }
-                    on_event(ReceiveEvent::Round(report));
-                },
-            )
-            .map_err(CoreError::Lan)?;
-        Ok(ReceiveReport { rounds, end })
+        proof_root(self.session)
     }
 }
 
 impl Core {
-    /// Joins an approving device as a new device (0013 §4.7, §10): pairs,
+    /// Joins from another device's code as a new device (0013 §4.7, §10):
     /// receives and verifies the vault into private staging, asks the user
     /// to confirm the vault and enter its master password, creates it at the
-    /// new path `destination` with the link in its first head, and unlocks
-    /// it. Nothing appears at `destination` before the last step.
+    /// new path `destination`, and unlocks it. Nothing appears at
+    /// `destination` before the last step, and nothing about the other
+    /// device is stored.
     pub fn join_new_device(
         &self,
         code: JoinCode,
         destination: &Path,
-        options: JoinOptions,
+        options: SyncOptions,
         ui: &mut dyn JoinerUi,
         cancel: Option<&CancelToken>,
     ) -> Result<Session, CoreError> {
-        label_ok(&options.label)?;
+        options
+            .timeouts
+            .validate()
+            .map_err(|_| CoreError::InvalidInput)?;
         // The same guards as `create`, before any key is received.
         self.platform_gate()?;
         self.check_anchor_location(destination)?;
@@ -1134,12 +717,6 @@ impl Core {
             joined.proof,
             &joined.vk,
             &self.anchors,
-            qv_store::NewLanLink {
-                link_id: joined.link_id,
-                key: &joined.link_key,
-                label: &options.label,
-                created_at: self.time.now(),
-            },
             &cancelled,
         )?;
         self.unlock(destination, &password, cancel)
@@ -1172,7 +749,7 @@ mod repair_tests {
     #[test]
     fn lan_core_committed_report_survives_lock_before_done() {
         let env = Env::new();
-        let (a, b, link, _) = crate::lan_tests::linked_pair(&env, None);
+        let (a, b) = crate::lan_tests::replicas(&env);
         add_entry(&b, b.root().unwrap(), "arrived");
         let local = SessionExchange::new(&a, None, None).unwrap();
         let peer = SessionExchange::new(&b, None, None).unwrap();
@@ -1180,15 +757,12 @@ mod repair_tests {
         assert_eq!(accepted.outcome, Outcome::Merged);
         a.lock();
         let report = local
-            .report(
-                link,
-                RoundReport {
-                    local: accepted.outcome,
-                    peer: None,
-                    manifest_hash: accepted.manifest_hash,
-                    failure: Some(LanError::Cancelled),
-                },
-            )
+            .report(RoundReport {
+                local: accepted.outcome,
+                peer: None,
+                manifest_hash: accepted.manifest_hash,
+                failure: Some(LanError::Cancelled),
+            })
             .unwrap();
         assert_eq!(report.local, LocalAcceptance::Committed);
         assert!(!report.peer_confirmed);
@@ -1203,7 +777,7 @@ mod repair_tests {
     #[test]
     fn lan_core_cancel_and_expiry_before_acceptance_preserve_state() {
         let env = Env::new();
-        let (a, b, _, _) = crate::lan_tests::linked_pair(&env, None);
+        let (a, b) = crate::lan_tests::replicas(&env);
         add_entry(&b, b.root().unwrap(), "not accepted");
         let peer = SessionExchange::new(&b, None, None).unwrap();
         let before = seq(&a);
@@ -1218,24 +792,13 @@ mod repair_tests {
         local.expires = Some(Instant::now() - Duration::from_secs(1));
         assert_eq!(local.accept(staged), Err(LanError::Cancelled));
         assert_eq!(seq(&a), before);
-        let key = a
-            .read(|ctx| {
-                let links = ctx.open.vault.lan_links()?;
-                Ok(ctx.open.vault.lan_link_key(&links[0].link_id)?)
-            })
-            .unwrap();
         let approver = SessionApprover {
             session: &a,
-            label: "late",
             exchange: local,
         };
-        assert_eq!(
-            approver.commit_link([0x44; 16], &key),
-            Err(LanError::Cancelled)
-        );
         let mut sealed = false;
         assert_eq!(
-            approver.grant(&[0x44; 16], &mut |_| {
+            approver.grant(&mut |_| {
                 sealed = true;
                 Ok(Vec::new())
             }),

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! LAN pairing and sync in the app (0013; plan 0038 step 9), through qv-core
-//! only.
+//! LAN sync in the app (0013; plans 0038 step 9, 0042 step 8), through
+//! qv-core only.
 //!
 //! A LAN operation runs on the single vault worker and blocks there: a
-//! pairing window, a receive window, a sync round, a link-mode join, or a
-//! new-device join from the locked screen. What it shows and asks lives in
-//! one [`LanRun`] in the controller state:
-//! - the pairing code (a protected copy, shown only while the window runs);
+//! one-use sync window, a sync from another device's code, or a new-device
+//! join from the locked screen. Nothing about the other device is stored.
+//! What it shows and asks lives in one [`LanRun`] in the controller state:
+//! - the code (a protected copy, shown only while the window runs);
 //! - endpoints and the countdown;
 //! - the current question;
 //! - the final outcome.
@@ -28,9 +28,9 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use qv_core::{
-    ApproverUi, CancelToken, JoinCode, JoinMode, JoinOptions, JoinerUi, LanLinkHandle, ListenScope,
-    LocalAcceptance, MasterPassword, PAIRING_WINDOW_MAX, PairingOptions, ReceiveEvent,
-    ReceiveOptions, Sas, SecretBytes, Session, SyncOptions, SyncReport,
+    ApproverUi, CancelToken, JoinCode, JoinerUi, ListenScope, LocalAcceptance, MasterPassword,
+    PAIRING_WINDOW_MAX, Sas, SecretBytes, Served, Session, SyncOptions, SyncReport,
+    SyncWindowOptions,
 };
 use zeroize::Zeroize;
 
@@ -40,35 +40,24 @@ use crate::workspace::{Apply, WsField, protect};
 /// Which LAN operation runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LanKind {
-    /// A pairing window: this device approves.
-    Pair,
-    /// A receive window: a linked device syncs with this one.
-    Receive,
-    /// A sync round started here.
+    /// A one-use sync window: this device shows a code.
+    Window,
+    /// A sync with another device's code, started here.
     Sync,
-    /// Joining a pairing window with this vault (link mode).
-    Link,
     /// Joining as a new device (locked screen).
     Join,
 }
 
-/// What the running operation asks the user. Only the comparison code, the
-/// mode and the vault's name are shown; nothing else from the peer.
+/// What the running operation asks the user. Only the comparison code and
+/// the vault's name are shown; nothing else from the peer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Question {
-    /// Approver: do both screens show `sas`?
+    /// Offering device: a new device asks to join; do both screens show `sas`?
     Approve {
         /// The comparison code, `123 456`.
         sas: String,
-        /// The requested mode, as fixed text.
-        mode: &'static str,
         /// This vault's name (escaped by the renderer).
         vault: String,
-    },
-    /// Link-mode joiner: does the other device show `sas`?
-    Matches {
-        /// The comparison code.
-        sas: String,
     },
     /// New device: join the vault named `vault`?
     JoinVault {
@@ -87,7 +76,7 @@ pub enum Question {
 /// A finished operation: fixed lines and an optional error.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LanDone {
-    /// Result lines (fixed text, counts and link IDs).
+    /// Result lines (fixed text and counts).
     pub lines: Vec<String>,
     /// The failure, if it failed.
     pub error: Option<AppError>,
@@ -169,7 +158,7 @@ impl LanRun {
     pub(crate) fn defers_idle(&self) -> bool {
         self.running()
             && !self.cancel.is_cancelled()
-            && matches!(self.kind, LanKind::Pair | LanKind::Receive)
+            && self.kind == LanKind::Window
             && self.question.is_none()
             && self.expires.is_some_and(|t| Instant::now() < t)
     }
@@ -190,7 +179,7 @@ impl LanRun {
 pub struct LanView {
     /// The operation.
     pub kind: LanKind,
-    /// The pairing code while the pairing window runs (a protected copy).
+    /// The code while the window runs (a protected copy).
     pub code: Option<SecretBytes>,
     /// The protected binary QR symbol, only while its window runs.
     pub qr: Option<crate::qr::Symbol>,
@@ -254,7 +243,7 @@ impl Bridge {
         if let Some(ws) = s.workspace.as_mut() {
             ws.inputs.remove(&WsField::LanCode);
             ws.inputs.remove(&WsField::LanEndpoint);
-            ws.lan_endpoints.clear();
+            ws.lan_scanned = false;
         }
         if let Some(mut old) = s.lan.replace(run) {
             old.close();
@@ -370,39 +359,29 @@ fn grouped(digits: &[u8]) -> String {
 }
 
 impl ApproverUi for Bridge {
-    fn confirm(&mut self, sas: &str, mode: JoinMode, vault_name: &str) -> bool {
-        let mode = match mode {
-            JoinMode::NewDevice => "a new device, which will receive this vault",
-            JoinMode::Link => "a device with a copy of this vault",
-        };
+    fn confirm(&mut self, sas: &str, vault_name: &str) -> bool {
         self.answer(Question::Approve {
             sas: grouped(sas.as_bytes()),
-            mode,
             vault: vault_name.to_owned(),
         })
     }
 }
 
-/// The joining side's UI (link mode or new device).
+/// The new device's UI.
 struct JoinBridge {
     bridge: Bridge,
-    new_device: bool,
     attempts: usize,
 }
 
 impl JoinerUi for JoinBridge {
     fn show_code(&mut self, sas: &Sas) -> bool {
         let sas = grouped(&sas.digits());
-        if self.new_device {
-            self.bridge.update(|r| {
-                r.info = Some(format!(
-                    "Comparison code {sas}: check that the other device shows the same code. Receiving the vault…"
-                ))
-            });
-            true
-        } else {
-            self.bridge.answer(Question::Matches { sas })
-        }
+        self.bridge.update(|r| {
+            r.info = Some(format!(
+                "Comparison code {sas}: check that the other device shows the same code. Receiving the vault…"
+            ))
+        });
+        true
     }
 
     fn confirm_vault(&mut self, vault_name: &[u8], sas: &Sas) -> bool {
@@ -476,69 +455,41 @@ fn outcome(result: Result<LanDone, AppError>) -> LanDone {
     }
 }
 
-/// Inputs an unlocked LAN action needs, read from the workspace.
+/// The code and endpoints of the Devices form, consumed by this action.
 struct Inputs {
-    label: Option<String>,
-    code: Option<SecretBytes>,
+    code: SecretBytes,
     endpoints: Vec<SocketAddr>,
 }
 
-fn inputs(
-    c: &Controller,
-    epoch: FormEpoch,
-    label: bool,
-    code: bool,
-    endpoint: bool,
-) -> Result<Inputs, AppError> {
+fn inputs(c: &Controller, epoch: FormEpoch) -> Result<Inputs, AppError> {
     c.with_ws(epoch, |ws, _| {
-        let text = |f| ws.text(f).map(str::to_owned);
-        let label = if label {
-            let l = text(WsField::LanLabel)?;
-            if l.is_empty() {
-                return Err(AppError::InvalidInput);
-            }
-            Some(l)
-        } else {
-            None
-        };
-        let code = if code {
+        let result = (|| {
             let v = ws.input(WsField::LanCode);
             if v.is_empty() {
                 return Err(AppError::InvalidInput);
             }
-            Some(protect(v)?)
-        } else {
-            None
-        };
-        let endpoints = if endpoint {
-            let typed = text(WsField::LanEndpoint)?;
-            if !typed.is_empty() {
-                vec![qv_core::parse_endpoint(&typed).map_err(|_| AppError::InvalidInput)?]
-            } else if code.as_ref().is_some_and(|c| {
-                qv_core::inspect_lan_qr(c.expose_secret())
-                    .is_ok_and(|q| q.kind == qv_core::LanQrKind::Pairing && !q.endpoints.is_empty())
-            }) {
-                // A pairing QR supplies its own full candidate list. A manual
-                // code without an endpoint is refused by the normal join path.
+            let code = protect(v)?;
+            let typed = ws.text(WsField::LanEndpoint)?.to_owned();
+            let endpoints = if typed.is_empty() {
+                // A scanned code may carry its own candidates; a typed code
+                // without an address is refused by the session (no peer).
                 Vec::new()
             } else {
-                if ws.lan_endpoints.is_empty() {
-                    return Err(AppError::InvalidInput);
-                }
-                ws.lan_endpoints.clone()
+                vec![qv_core::parse_endpoint(&typed).map_err(|_| AppError::InvalidInput)?]
+            };
+            if endpoints.is_empty()
+                && !qv_core::inspect_lan_qr(code.expose_secret())
+                    .is_ok_and(|q| !q.endpoints.is_empty())
+            {
+                return Err(AppError::InvalidInput);
             }
-        } else {
-            Vec::new()
-        };
-        // Codes/hints belong to this explicit action, not the next one.
+            Ok(Inputs { code, endpoints })
+        })();
+        // The code and address belong to this explicit action only.
         ws.inputs.remove(&WsField::LanCode);
         ws.inputs.remove(&WsField::LanEndpoint);
-        ws.lan_endpoints.clear();
-        Ok(Inputs {
-            label,
-            code,
-            endpoints,
-        })
+        ws.lan_scanned = false;
+        result
     })
     .ok_or(AppError::InvalidInput)?
 }
@@ -551,74 +502,23 @@ fn join_code(code: &SecretBytes) -> Result<JoinCode, AppError> {
     JoinCode::from_manual(text).map_err(|_| AppError::InvalidInput)
 }
 
-fn link_of(s: &Session, id: &str) -> Result<LanLinkHandle, AppError> {
-    s.lan_links()?
-        .into_iter()
-        .find(|l| l.handle.id_hex() == id)
-        .map(|l| l.handle)
-        .ok_or(AppError::Core(qv_core::CoreError::NotFound))
-}
-
-/// Opens a pairing window and waits for one joining device.
-pub(crate) fn pair(c: &Controller, epoch: FormEpoch) -> Result<(), AppError> {
-    let label = inputs(c, epoch, true, false, false)?
-        .label
-        .ok_or(AppError::InvalidInput)?;
+/// Opens a one-use sync window and serves one sync or one new device.
+pub(crate) fn offer(c: &Controller, epoch: FormEpoch) -> Result<(), AppError> {
     c.run_op(epoch, None, move |s, _, ctl| {
-        let window = s.open_pairing_window(PairingOptions {
+        let window = s.open_sync_window(SyncWindowOptions {
             scope: scope(),
             limit: PAIRING_WINDOW_MAX,
-            ..PairingOptions::new(&label)
+            ..SyncWindowOptions::new()
         })?;
         let addrs = addresses();
         let code = window.code(&addrs)?;
-        let mut run = LanRun::new(LanKind::Pair);
+        let mut run = LanRun::new(LanKind::Window);
         run.qr = Some(crate::qr::encode(code.qr.expose_secret())?);
         run.code = Some(code.manual);
         run.endpoints = addrs
             .iter()
             .map(|ip| SocketAddr::new(*ip, code.port).to_string())
             .collect();
-        run.expires = Some(window.expires_at());
-        let (mut bridge, cancel) = Bridge::start(ctl, run)?;
-        let generation = bridge.generation;
-        let result = window
-            .run(s, &mut bridge, Some(&cancel))
-            .map_err(AppError::from)
-            .map(|report| {
-                let mut lines = vec![format!("Paired. Link {}.", report.link.id_hex())];
-                lines.push(
-                    if report.peer_confirmed {
-                        "The other device confirmed the pairing."
-                    } else {
-                        "Pairing may be incomplete on the other device; the link stays and can be removed."
-                    }
-                    .to_owned(),
-                );
-                match report.sync {
-                    Some(Ok(r)) => round_done(&r, lines),
-                    Some(Err(e)) => {
-                        lines.push("The first sync did not finish; sync again later.".to_owned());
-                        LanDone { lines, error: Some(e.into()) }
-                    }
-                    None => LanDone { lines, error: report.failure.map(|e| AppError::from(qv_core::CoreError::Lan(e))) },
-                }
-            });
-        Ok(finish(generation, outcome(result)))
-    })
-}
-
-/// Opens a receive window for linked devices.
-pub(crate) fn receive(c: &Controller, epoch: FormEpoch) -> Result<(), AppError> {
-    c.run_op(epoch, None, move |s, _, ctl| {
-        let window = s.open_receive_window(ReceiveOptions {
-            scope: scope(),
-            ..ReceiveOptions::new()
-        })?;
-        let code = window.code(&addresses())?;
-        let mut run = LanRun::new(LanKind::Receive);
-        if !code.qr.is_empty() { run.qr = Some(crate::qr::encode(&code.qr)?); }
-        run.endpoints = code.endpoints.iter().map(SocketAddr::to_string).collect();
         if run.endpoints.is_empty() {
             run.info = Some(format!(
                 "No local address was found. Give the other device this device's IP address with port {}.",
@@ -626,54 +526,46 @@ pub(crate) fn receive(c: &Controller, epoch: FormEpoch) -> Result<(), AppError> 
             ));
         }
         run.expires = Some(window.expires_at());
-        let (bridge, cancel) = Bridge::start(ctl, run)?;
+        let (mut bridge, cancel) = Bridge::start(ctl, run)?;
         let generation = bridge.generation;
-        let mut last = None;
-        let mut failed = None;
-        let result = window.run(
-            s,
-            &mut |event| match event {
-                ReceiveEvent::Round(Ok(r)) => last = Some(r),
-                ReceiveEvent::Round(Err(e)) => {
-                    failed = Some(e);
-                    bridge.update(|r| {
-                        r.info = Some("A sync round failed; the window stays open.".to_owned())
-                    });
+        let result = window
+            .run(s, &mut bridge, Some(&cancel))
+            .map_err(AppError::from)
+            .map(|served| match served {
+                Served::Synced(r) => {
+                    round_done(&r, vec!["Synced with a device that holds this vault.".to_owned()])
                 }
-            },
-            Some(&cancel),
-        );
-        let result = result.map_err(AppError::from).and_then(|report| {
-            let mut done = match last {
-                Some(r) => round_done(&r, Vec::new()),
-                None => {
-                    return Err(failed.map_or(
-                        AppError::Core(qv_core::CoreError::Lan(qv_core::LanError::WindowExpired)),
-                        AppError::from,
-                    ));
-                }
-            };
-            if report.rounds > 1 {
-                done.lines.push(format!("Rounds completed: {}", report.rounds));
-            }
-            Ok(done)
-        });
+                Served::Joined {
+                    peer_confirmed,
+                    failure,
+                } => LanDone {
+                    lines: vec![
+                        if peer_confirmed {
+                            "A new device joined this vault."
+                        } else {
+                            "The new device may not have finished joining."
+                        }
+                        .to_owned(),
+                    ],
+                    error: failure.map(|e| AppError::from(qv_core::CoreError::Lan(e))),
+                },
+            });
         Ok(finish(generation, outcome(result)))
     })
 }
 
-/// One sync round with `link` against the typed endpoint.
-pub(crate) fn sync(c: &Controller, epoch: FormEpoch, link: String) -> Result<(), AppError> {
-    let endpoints = inputs(c, epoch, false, false, true)?.endpoints;
+/// One sync with the code in the form (0014 §6.2, §6.4).
+pub(crate) fn sync(c: &Controller, epoch: FormEpoch) -> Result<(), AppError> {
+    let i = inputs(c, epoch)?;
+    let code = join_code(&i.code)?;
     c.run_op(epoch, None, move |s, _, ctl| {
-        let handle = link_of(s, &link)?;
         let (bridge, cancel) = Bridge::start(ctl, LanRun::new(LanKind::Sync))?;
         bridge.update(|r| r.info = Some("Syncing…".to_owned()));
         let result = s
-            .sync_lan(
-                &handle,
-                &endpoints,
+            .sync_with_code(
+                code,
                 SyncOptions {
+                    extra_endpoints: i.endpoints,
                     allow_loopback: loopback(),
                     ..SyncOptions::default()
                 },
@@ -685,65 +577,8 @@ pub(crate) fn sync(c: &Controller, epoch: FormEpoch, link: String) -> Result<(),
     })
 }
 
-/// Joins a pairing window with this vault (link mode).
-pub(crate) fn link(c: &Controller, epoch: FormEpoch) -> Result<(), AppError> {
-    let i = inputs(c, epoch, true, true, true)?;
-    let (Some(label), Some(code)) = (i.label, i.code) else {
-        return Err(AppError::InvalidInput);
-    };
-    let code = join_code(&code)?;
-    c.run_op(epoch, None, move |s, _, ctl| {
-        let (bridge, cancel) = Bridge::start(ctl, LanRun::new(LanKind::Link))?;
-        let generation = bridge.generation;
-        let mut ui = JoinBridge {
-            bridge,
-            new_device: false,
-            attempts: 0,
-        };
-        let result = s
-            .join_link(
-                code,
-                JoinOptions {
-                    extra_endpoints: i.endpoints,
-                    allow_loopback: loopback(),
-                    ..JoinOptions::new(&label)
-                },
-                &mut ui,
-                Some(&cancel),
-            )
-            .map_err(AppError::from)
-            .map(|report| {
-                let mut lines = vec![format!("Paired. Link {}.", report.link.id_hex())];
-                match report.sync {
-                    Ok(r) => round_done(&r, lines),
-                    Err(e) => {
-                        lines.push("The first sync did not finish; sync again later.".to_owned());
-                        LanDone {
-                            lines,
-                            error: Some(e.into()),
-                        }
-                    }
-                }
-            });
-        Ok(finish(generation, outcome(result)))
-    })
-}
-
-/// Removes a link (after the confirmation).
-pub(crate) fn remove(c: &Controller, epoch: FormEpoch, link: String) -> Result<(), AppError> {
-    c.run_op(epoch, None, move |s, _, _| {
-        let handle = link_of(s, &link)?;
-        s.remove_lan_link(&handle)?;
-        Ok(crate::workspace::on_ws(|ws| {
-            ws.notice = Some(
-                "Link removed. The other device is not notified; removal is not compromise recovery.",
-            )
-        }))
-    })
-}
-
-/// The new-device join of the locked screen: pairs, receives and verifies
-/// the vault, asks to confirm it and for its master password, creates it at
+/// The new-device join of the locked screen: receives and verifies the
+/// vault, asks to confirm it and for its master password, creates it at
 /// `path`, and returns the unlocked session (runs on the vault worker).
 pub(crate) fn join_new_device(
     c: &Controller,
@@ -751,7 +586,6 @@ pub(crate) fn join_new_device(
     path: &std::path::Path,
     code: &SecretBytes,
     endpoint: &[u8],
-    label: &[u8],
 ) -> Result<Session, AppError> {
     let code = join_code(code)?;
     let endpoints = if endpoint.is_empty() {
@@ -764,20 +598,18 @@ pub(crate) fn join_new_device(
                 .ok_or(AppError::InvalidInput)?,
         ]
     };
-    let label = std::str::from_utf8(label).map_err(|_| AppError::InvalidInput)?;
     let (bridge, cancel) = Bridge::start(c, LanRun::new(LanKind::Join))?;
     let mut ui = JoinBridge {
         bridge,
-        new_device: true,
         attempts: 0,
     };
     let session = core.join_new_device(
         code,
         path,
-        JoinOptions {
+        SyncOptions {
             extra_endpoints: endpoints,
             allow_loopback: loopback(),
-            ..JoinOptions::new(label)
+            ..SyncOptions::default()
         },
         &mut ui,
         Some(&cancel),
@@ -793,6 +625,11 @@ pub(crate) fn join_new_device(
 }
 
 impl Controller {
+    /// Whether the Devices form holds a scanned code (shown only as such).
+    pub fn lan_scanned(&self, epoch: FormEpoch) -> bool {
+        self.peek(epoch, |ws| ws.lan_scanned).unwrap_or(false)
+    }
+
     /// The LAN operation's renderer view, for the current epoch's session or
     /// the locked screen.
     pub fn lan_view(&self, epoch: FormEpoch) -> Option<LanView> {
@@ -955,7 +792,7 @@ pub(crate) mod fixture {
         let (code, endpoint, cancel, epoch) = {
             let s = controller.state();
             let run = s.lan.as_ref().ok_or(AppError::InvalidInput)?;
-            if run.kind != LanKind::Pair || !run.running() {
+            if run.kind != LanKind::Window || !run.running() {
                 return Err(AppError::InvalidInput);
             }
             let code = join_code(run.code.as_ref().ok_or(AppError::InvalidInput)?)?;
@@ -978,9 +815,9 @@ pub(crate) mod fixture {
         let session = peer.core()?.join_new_device(
             code,
             &base.join("vaults/peer.qvault"),
-            JoinOptions {
+            SyncOptions {
                 extra_endpoints: vec![endpoint],
-                ..JoinOptions::new("engine approver")
+                ..SyncOptions::default()
             },
             &mut ui,
             Some(&cancel),
@@ -988,10 +825,7 @@ pub(crate) mod fixture {
         let checked = (|| {
             let overview = session.overview()?;
             Ok::<_, AppError>(
-                ui.matched
-                    && overview.name.expose() == "Synthetic vault"
-                    && overview.entries == 1
-                    && session.lan_links()?.len() == 1,
+                ui.matched && overview.name.expose() == "Synthetic vault" && overview.entries == 1,
             )
         })();
         session.lock();
@@ -1052,7 +886,7 @@ mod repair_tests {
     fn lan_app_wait_expires_clears_secrets_and_idle_locks_without_ui_polling() {
         for idle in [false, true] {
             let env = Env::new();
-            let mut run = LanRun::new(LanKind::Pair);
+            let mut run = LanRun::new(LanKind::Window);
             run.expires = Some(Instant::now() + Duration::from_secs(60));
             run.code = Some(protect(b"synthetic pairing secret").unwrap());
             run.typed = Some(protect(b"synthetic password").unwrap());
@@ -1061,8 +895,9 @@ mod repair_tests {
             let (tx, rx) = std::sync::mpsc::channel();
             std::thread::scope(|scope| {
                 let h = scope.spawn(|| {
-                    tx.send(bridge.answer(Question::Matches {
+                    tx.send(bridge.answer(Question::Approve {
                         sas: "123 456".to_owned(),
+                        vault: "Synthetic vault".to_owned(),
                     }))
                     .unwrap();
                 });
@@ -1103,20 +938,11 @@ mod repair_tests {
 
     #[test]
     fn lan_app_only_unexpired_listeners_without_questions_defer_idle_lock() {
-        for kind in [
-            LanKind::Pair,
-            LanKind::Receive,
-            LanKind::Sync,
-            LanKind::Link,
-            LanKind::Join,
-        ] {
+        for kind in [LanKind::Window, LanKind::Sync, LanKind::Join] {
             let env = Env::new();
             let mut run = LanRun::new(kind);
             run.expires = Some(Instant::now() + Duration::from_secs(60));
-            assert_eq!(
-                run.defers_idle(),
-                matches!(kind, LanKind::Pair | LanKind::Receive)
-            );
+            assert_eq!(run.defers_idle(), kind == LanKind::Window);
             run.question = Some(Question::Password { retry: false });
             assert!(!run.defers_idle());
             run.question = None;

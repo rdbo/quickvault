@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! LAN pairing suites (plan 0037 step 6; 0013 Testing Requirements; 0012 §1
-//! "LAN discovery mistaken for trust"). Two devices run on loopback, which
+//! LAN code suites (plans 0037 step 6, 0042 step 5; 0013 Testing
+//! Requirements; 0012 §1 "LAN discovery mistaken for trust"). Two devices run on loopback, which
 //! is enabled explicitly (0013 §1.4), with shortened time limits.
 
 #![allow(clippy::unwrap_used)]
@@ -14,7 +14,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use qv_crypto::lan::{
-    LinkKey, LinkRoot, PairNonce, PairingKeys, PairingSecret, RecordOpener, RecordSealer, Sas,
+    PairNonce, PairingKeys, PairingSecret, ProofRoot, RecordOpener, RecordSealer, Sas,
 };
 use qv_crypto::{MasterPassword, SecretBytes, XWingDecapsKey};
 use qv_model::{ObjectId, RandomId, Timestamp};
@@ -170,8 +170,9 @@ impl Device {
     fn u(&self) -> MutexGuard<'_, UnlockedVault> {
         self.vault.lock().unwrap_or_else(PoisonError::into_inner)
     }
+    /// `lan_link` rows in this file: always none (0013 §9.1).
     fn links(&self) -> usize {
-        self.u().lan_links().unwrap().len()
+        self.u().retired_lan_links()
     }
 }
 
@@ -228,25 +229,6 @@ impl ExchangeVault for Device {
     }
 }
 
-impl ResponderVault for Device {
-    fn links(&self) -> Result<Vec<([u8; 16], LinkKey)>, LanError> {
-        let u = self.u();
-        u.lan_links()
-            .map_err(store)?
-            .into_iter()
-            .map(|r| Ok((r.link_id, u.lan_link_key(&r.link_id).map_err(store)?)))
-            .collect()
-    }
-    fn has_link(&self, link_id: &[u8; 16]) -> Result<bool, LanError> {
-        Ok(self
-            .u()
-            .lan_links()
-            .map_err(store)?
-            .iter()
-            .any(|r| r.link_id == *link_id))
-    }
-}
-
 fn store(e: StoreError) -> LanError {
     LanError::Store(e)
 }
@@ -263,30 +245,16 @@ impl ApproverVault for Device {
                 Ok::<(), ()>(())
             })
             .unwrap(),
-            root: LinkRoot::derive(
-                u.vault_key(),
-                h.vault_id,
-                h.key_generation,
-                h.derivation_profile,
-            )
-            .unwrap(),
+            root: proof_root(&u),
         })
     }
-    fn commit_link(&self, link_id: [u8; 16], key: &LinkKey) -> Result<(), LanError> {
-        let mut u = self.u();
-        let mut w = u.write().map_err(store)?;
-        w.add_lan_link(link_id, key, "joiner", Timestamp(1))
-            .map_err(store)?;
-        w.commit().map_err(store)
-    }
-    fn grant(&self, link_id: &[u8; 16], seal: &mut Sealer<'_>) -> Result<Vec<u8>, LanError> {
+    fn grant(&self, seal: &mut Sealer<'_>) -> Result<Vec<u8>, LanError> {
         let u = self.u();
         let h = u.header();
         seal(&grant_plaintext(
             u.vault_key(),
             h.vault_id,
             h.key_generation,
-            link_id,
         )?)
     }
 }
@@ -298,22 +266,48 @@ impl JoinerVault for Device {
         Ok(JoinerContext {
             vault_id: h.vault_id,
             key_generation: h.key_generation,
-            root: LinkRoot::derive(
-                u.vault_key(),
-                h.vault_id,
-                h.key_generation,
-                h.derivation_profile,
-            )
-            .unwrap(),
+            root: proof_root(&u),
         })
     }
-    fn commit_link(&self, link_id: [u8; 16], key: &LinkKey) -> Result<(), LanError> {
-        let mut u = self.u();
-        let mut w = u.write().map_err(store)?;
-        w.add_lan_link(link_id, key, "approver", Timestamp(2))
-            .map_err(store)?;
-        w.commit().map_err(store)
+}
+
+fn proof_root(u: &UnlockedVault) -> ProofRoot {
+    let h = u.header();
+    ProofRoot::derive(
+        u.vault_key(),
+        h.vault_id,
+        h.key_generation,
+        h.derivation_profile,
+    )
+    .unwrap()
+}
+
+/// The window's sync report.
+fn synced(r: Result<Approved, LanError>) -> Result<RoundReport, LanError> {
+    match r? {
+        Approved::Synced(report) => Ok(report),
+        other => panic!("not a sync: {other:?}"),
     }
+}
+
+/// The window's join outcome: whether the new device confirmed, and why not.
+fn joined(r: Approved) -> (bool, Option<LanError>) {
+    match r {
+        Approved::Joined {
+            peer_confirmed,
+            failure,
+        } => (peer_confirmed, failure),
+        other => panic!("not a join: {other:?}"),
+    }
+}
+
+fn private_dir(d: &Dir) -> PathBuf {
+    let private = d.join("private");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&private)
+        .unwrap();
+    private
 }
 
 fn fast() -> LanTimeouts {
@@ -342,7 +336,7 @@ impl Approve {
     }
 }
 impl Confirm for Approve {
-    fn confirm(&mut self, sas: &Sas, _: JoinMode, name: &[u8]) -> bool {
+    fn confirm(&mut self, sas: &Sas, name: &[u8]) -> bool {
         assert_eq!(name, b"Personal");
         if let Some(f) = &mut self.before {
             f();
@@ -438,21 +432,14 @@ fn lan_enroll_new_device_end_to_end() {
         };
         (h.join().unwrap(), joined)
     });
-    let approved = approved.unwrap();
+    let (confirmed, failure) = super::tests::joined(approved.unwrap());
     let joined = joined.unwrap();
     let _ = code;
-    assert_eq!(approved.mode, JoinMode::NewDevice);
-    assert!(approved.peer_confirmed, "{:?}", approved.failure);
+    assert!(confirmed, "{failure:?}");
+    assert!(approve.seen.is_some());
     assert_eq!(approve.seen, join.seen);
-    assert_eq!(joined.link_id, approved.link_id);
     assert_eq!(joined.staging.manifest(), a.u().manifest());
     assert!(joined.vk.ct_eq(a.u().vault_key()));
-    // Both sides derived the same link key.
-    assert!(
-        joined
-            .link_key
-            .ct_eq(&a.u().lan_link_key(&approved.link_id).unwrap())
-    );
     // B builds its vault (0013 §10 step 5).
     let anchors = AnchorDir::open(&b.join("anchors")).unwrap();
     let path = b.join("joined.qvault");
@@ -462,12 +449,6 @@ fn lan_enroll_new_device_end_to_end() {
         joined.proof,
         &joined.vk,
         &anchors,
-        qv_store::NewLanLink {
-            link_id: joined.link_id,
-            key: &joined.link_key,
-            label: "approver",
-            created_at: Timestamp(3),
-        },
         &never,
     )
     .unwrap();
@@ -479,44 +460,32 @@ fn lan_enroll_new_device_end_to_end() {
             .unwrap()
     };
     assert_eq!(u.manifest(), a.u().manifest());
-    assert_eq!(u.lan_links().unwrap().len(), 1);
-    assert!(
-        u.lan_link_key(&approved.link_id)
-            .unwrap()
-            .ct_eq(&joined.link_key)
-    );
-    assert_eq!(a.links(), 1);
+    // Nothing about the other device is stored on either side (0013 §9.1).
+    assert_eq!(u.retired_lan_links(), 0);
+    assert_eq!(a.links(), 0);
 }
 
 #[test]
-fn lan_enroll_link_mode_pairs_two_replicas() {
+fn lan_enroll_sync_mode_needs_no_comparison_code_and_stores_nothing() {
     let a = Device::personal();
     let b = a.replica();
     let (w, addr, code) = window();
     let mut approve = Approve::yes();
-    let mut join = Join::yes();
-    let (approved, link) = std::thread::scope(|s| {
+    let (approved, ours) = std::thread::scope(|s| {
         let h = s.spawn(|| w.run(&a, &mut approve, &fast(), &never));
-        let link = join_link(
+        let ours = sync_with_code(
             JoinCode::from_manual(&code).unwrap(),
             &[addr],
             LOOPBACK,
             &b,
-            &mut join,
             &fast(),
             &never,
         );
-        (h.join().unwrap(), link)
+        (h.join().unwrap(), ours)
     });
-    let approved = approved.unwrap();
-    let joined = link.unwrap();
-    let link = joined.link_id;
-    assert_eq!(approved.mode, JoinMode::Link);
-    assert!(approved.peer_confirmed, "{:?}", approved.failure);
-    assert_eq!(link, approved.link_id);
-    // The follow-up exchange (§4.8) ran: identical replicas, nothing new.
-    let ours = joined.round.unwrap();
-    let theirs = approved.round.unwrap().unwrap();
+    // The exchange (§4.8) ran: identical replicas, nothing new.
+    let ours = ours.unwrap();
+    let theirs = synced(approved).unwrap();
     assert_eq!(
         (ours.local, ours.peer, theirs.local, theirs.peer),
         (
@@ -526,32 +495,27 @@ fn lan_enroll_link_mode_pairs_two_replicas() {
             Some(Outcome::Unchanged)
         )
     );
-    assert_eq!(approve.seen, join.seen);
-    assert!(
-        a.u()
-            .lan_link_key(&link)
-            .unwrap()
-            .ct_eq(&b.u().lan_link_key(&link).unwrap())
-    );
+    // No comparison code was shown, and no row was written.
+    assert!(approve.seen.is_none());
+    assert_eq!(a.links() + b.links(), 0);
 }
 
 // 0012 §1: LAN discovery mistaken for trust
 #[test]
 fn lan_enroll_vault_substitution_releases_nothing() {
-    // Link mode with a different vault: A refuses B's proof.
+    // Sync mode with a different vault: A refuses B's proof.
     let a = Device::personal();
     let other = Device::from(template("Other"));
     let (w, addr, code) = window();
     let mut approve = Approve::yes();
-    let mut join = Join::yes();
+    let (sa, so) = (a.u().local_seq(), other.u().local_seq());
     let (approved, link) = std::thread::scope(|s| {
         let h = s.spawn(|| w.run(&a, &mut approve, &fast(), &never));
-        let link = join_link(
+        let link = sync_with_code(
             JoinCode::from_manual(&code).unwrap(),
             &[addr],
             LOOPBACK,
             &other,
-            &mut join,
             &fast(),
             &never,
         );
@@ -559,8 +523,8 @@ fn lan_enroll_vault_substitution_releases_nothing() {
     });
     assert_eq!(approved.unwrap_err(), LanError::VaultMismatch);
     assert_eq!(link.unwrap_err(), LanError::VaultMismatch);
-    assert_eq!(a.links(), 0);
-    assert_eq!(other.links(), 0);
+    assert_eq!((a.u().local_seq(), other.u().local_seq()), (sa, so));
+    assert_eq!(a.links() + other.links(), 0);
 }
 
 // 0012 §1: LAN discovery mistaken for trust
@@ -575,12 +539,11 @@ fn lan_enroll_wrong_code_gets_no_answer_and_counts() {
     let (approved, link) = std::thread::scope(|s| {
         let h = s.spawn(|| w.run(&a, &mut approve, &fast(), &cancel));
         let b = Device::personal();
-        let link = join_link(
+        let link = sync_with_code(
             JoinCode::from_manual(&wrong).unwrap(),
             &[addr],
             LOOPBACK,
             &b,
-            &mut Join::yes(),
             &fast(),
             &never,
         );
@@ -603,7 +566,6 @@ fn lan_enroll_spoofed_endpoint_first_is_skipped() {
     let spoof = TcpListener::bind("127.0.0.1:0").unwrap();
     let spoof_addr = spoof.local_addr().unwrap();
     let mut approve = Approve::yes();
-    let mut join = Join::yes();
     let (approved, link) = std::thread::scope(|s| {
         s.spawn(|| {
             let (stream, _) = spoof.accept().unwrap();
@@ -616,18 +578,17 @@ fn lan_enroll_spoofed_endpoint_first_is_skipped() {
             let _ = conn.send_frame(FramePhase::Handshake, &fake);
         });
         let h = s.spawn(|| w.run(&a, &mut approve, &fast(), &never));
-        let link = join_link(
+        let link = sync_with_code(
             JoinCode::from_manual(&code).unwrap(),
             &[spoof_addr, addr],
             LOOPBACK,
             &b,
-            &mut join,
             &fast(),
             &never,
         );
         (h.join().unwrap(), link)
     });
-    assert_eq!(link.unwrap().link_id, approved.unwrap().link_id);
+    assert_eq!(link.unwrap().local, synced(approved).unwrap().local);
 }
 
 /// Sends one handshake frame to `addr` and returns whether anything came back.
@@ -713,6 +674,7 @@ fn lan_enroll_hostile_hellos_are_silent_and_close_the_window() {
 struct Manual<'c> {
     ch: Channel<'c>,
     hello: Vec<u8>,
+    th: [u8; 32],
 }
 
 fn manual<'c>(
@@ -735,15 +697,18 @@ fn manual<'c>(
     let th = th(&attempt.hello_hash, &accept_hash).unwrap();
     let (b2a, a2b) = record_keys(keys, &ss, &th).unwrap();
     let mut ch = Channel::new(conn, RecordSealer::new(b2a), RecordOpener::new(a2b));
-    let revealed = reveal.unwrap_or(*attempt.nonce_b.expose_secret());
-    ch.send(
-        &PairReveal::encode(&revealed).unwrap(),
-        Duration::from_secs(5),
-    )
-    .unwrap();
+    if mode == JoinMode::NewDevice {
+        let revealed = reveal.unwrap_or(*attempt.nonce_b.expose_secret());
+        ch.send(
+            &PairReveal::encode(&revealed).unwrap(),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+    }
     Manual {
         ch,
         hello: attempt.hello.to_vec(),
+        th,
     }
 }
 
@@ -787,7 +752,7 @@ fn lan_enroll_identical_replayed_hello_is_refused_not_observed() {
     approve.answer = false;
     let approved = std::thread::scope(|s| {
         let h = s.spawn(|| w.run(&a, &mut approve, &fast(), &never));
-        let m = manual(addr, &keys, JoinMode::Link, None);
+        let m = manual(addr, &keys, JoinMode::NewDevice, None);
         *replay.lock().unwrap() = m.hello.clone();
         assert!(!poke(addr, &replay.lock().unwrap()));
         let r = h.join().unwrap();
@@ -822,54 +787,59 @@ fn lan_enroll_reveal_must_open_the_commitment() {
 
 #[test]
 fn lan_enroll_rejections_on_either_side() {
-    // A rejects.
+    // A rejects the comparison code.
     let a = Device::personal();
-    let b = a.replica();
+    let b = Dir::new();
+    let private = private_dir(&b);
     let (w, addr, code) = window();
     let mut approve = Approve::yes();
     approve.answer = false;
-    let (approved, link) = std::thread::scope(|s| {
+    let (approved, joined) = std::thread::scope(|s| {
         let h = s.spawn(|| w.run(&a, &mut approve, &fast(), &never));
-        let link = join_link(
+        let joined = join_new_device(
             JoinCode::from_manual(&code).unwrap(),
             &[addr],
             LOOPBACK,
-            &b,
+            &private,
             &mut Join::yes(),
             &fast(),
             &never,
         );
-        (h.join().unwrap(), link)
+        (h.join().unwrap(), joined)
     });
     assert_eq!(approved.unwrap_err(), LanError::Cancelled);
-    assert_eq!(link.unwrap_err(), LanError::PeerCancelled);
+    assert_eq!(joined.unwrap_err(), LanError::PeerCancelled);
     // B rejects.
     let (w, addr, code) = window();
     let mut join = Join::yes();
     join.show = false;
     let mut approve = Approve::yes();
-    let (approved, link) = std::thread::scope(|s| {
+    let (approved, joined) = std::thread::scope(|s| {
         let h = s.spawn(|| w.run(&a, &mut approve, &fast(), &never));
-        let link = join_link(
+        let joined = join_new_device(
             JoinCode::from_manual(&code).unwrap(),
             &[addr],
             LOOPBACK,
-            &b,
+            &private,
             &mut join,
             &fast(),
             &never,
         );
-        (h.join().unwrap(), link)
+        (h.join().unwrap(), joined)
     });
-    assert_eq!(link.unwrap_err(), LanError::Cancelled);
-    assert_eq!(approved.unwrap_err(), LanError::PeerCancelled);
-    assert_eq!(a.links() + b.links(), 0);
+    assert_eq!(joined.unwrap_err(), LanError::Cancelled);
+    // B cancels right after its reveal while A is still granting, so A sees
+    // either B's `cancelled` record or the closed connection. Either way the
+    // window fails and nothing is stored.
+    assert!(approved.is_err());
+    assert_eq!(a.links(), 0);
 }
 
 #[test]
 fn lan_enroll_cancel_during_the_confirmation_wait_is_prompt() {
     let a = Device::personal();
-    let b = a.replica();
+    let b = Dir::new();
+    let private = private_dir(&b);
     let (w, addr, code) = window();
     let stop = AtomicBool::new(false);
     let cancel = || stop.load(Ordering::SeqCst);
@@ -877,7 +847,7 @@ fn lan_enroll_cancel_during_the_confirmation_wait_is_prompt() {
     let wait = &release;
     struct Slow<'r>(&'r AtomicBool);
     impl Confirm for Slow<'_> {
-        fn confirm(&mut self, _: &Sas, _: JoinMode, _: &[u8]) -> bool {
+        fn confirm(&mut self, _: &Sas, _: &[u8]) -> bool {
             while !self.0.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -892,11 +862,11 @@ fn lan_enroll_cancel_during_the_confirmation_wait_is_prompt() {
             std::thread::sleep(Duration::from_millis(500));
             stop.store(true, Ordering::SeqCst);
         });
-        let link = join_link(
+        let link = join_new_device(
             JoinCode::from_manual(&code).unwrap(),
             &[addr],
             LOOPBACK,
-            &b,
+            &private,
             &mut Join::yes(),
             &fast(),
             &cancel,
@@ -908,7 +878,7 @@ fn lan_enroll_cancel_during_the_confirmation_wait_is_prompt() {
     });
     assert_eq!(link.unwrap_err(), LanError::Cancelled);
     assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
-    assert_eq!(a.links() + b.links(), 0);
+    assert_eq!(a.links(), 0);
 }
 
 #[test]
@@ -987,24 +957,24 @@ fn lan_enroll_exchange_refuses_bad_requests_and_tolerates_a_missing_done() {
             };
             (h.join().unwrap(), err)
         });
-        let approved = approved.unwrap();
-        // The link was committed before the grant and stays (0013 §4.7).
-        assert_eq!(a.links(), 1, "case {case}");
+        let (confirmed, failure) = joined(approved.unwrap());
+        // Nothing about the new device is stored, before or after the grant.
+        assert_eq!(a.links(), 0, "case {case}");
         match case {
             0 | 1 => {
                 assert_eq!(joiner_err, Some(LanError::Protocol), "case {case}");
-                assert_eq!(approved.failure, Some(LanError::Protocol));
-                assert!(!approved.peer_confirmed);
+                assert_eq!(failure, Some(LanError::Protocol));
+                assert!(!confirmed);
             }
             2 => {
-                assert!(!approved.peer_confirmed);
-                assert!(approved.failure.is_some());
+                assert!(!confirmed);
+                assert!(failure.is_some());
             }
             4 => {
-                assert!(!approved.peer_confirmed);
-                assert_eq!(approved.failure, Some(LanError::Protocol));
+                assert!(!confirmed);
+                assert_eq!(failure, Some(LanError::Protocol));
             }
-            _ => assert!(approved.peer_confirmed),
+            _ => assert!(confirmed),
         }
     }
 }
@@ -1109,8 +1079,7 @@ fn hostile_approver(
             let mut ch = Channel::new(conn, RecordSealer::new(a2b), RecordOpener::new(b2a));
             let t = Duration::from_secs(5);
             ch.recv(t, None).unwrap(); // reveal
-            let link_id = [4; 16];
-            let record = a.grant(&link_id, &mut |p| ch.seal(p)).unwrap();
+            let record = a.grant(&mut |p| ch.seal(p)).unwrap();
             ch.send_sealed(&record, t).unwrap();
             let state = a.serve_state().unwrap();
             State::decode(ch.recv(t, None).unwrap().expose_secret()).unwrap();

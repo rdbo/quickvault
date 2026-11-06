@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Sections beside the vault: generator, devices and LAN pairing, trash,
+//! Sections beside the vault: generator, devices and LAN sync, trash,
 //! conflicts, snapshots, archives, settings and autofill. File choices use
 //! the system picker; a typed path appears only when no picker is available.
-use super::icons::{Icon, Svg, hue, id_hue, initial};
+use super::icons::{Icon, Svg, id_hue, initial};
 use super::items::{Input, Kind};
 use super::shell::{ReportCard, Unreadable, act, go};
 use crate::controller::{Controller, FormEpoch};
@@ -224,99 +224,46 @@ fn Generator(controller: Controller, epoch: FormEpoch, revision: u64) -> Element
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum DeviceSheet {
-    None,
-    Pair,
-    Link,
-    Sync,
-}
-
 #[component]
 fn Devices(controller: Controller, epoch: FormEpoch, revision: u64, busy: bool) -> Element {
     let _ = revision;
-    let mut sheet = use_signal(|| (FormEpoch(u64::MAX), DeviceSheet::None, String::new()));
-    let links = match controller.read(epoch, views::lan_links) {
-        Some(Ok(v)) => v,
-        other => return rsx! { Unreadable { error: other.and_then(Result::err) } },
-    };
-    let open = if sheet().0 == epoch {
-        sheet().1
-    } else {
-        DeviceSheet::None
-    };
-    let target = sheet().2;
-    let close = move |_| sheet.set((epoch, DeviceSheet::None, String::new()));
+    let mut typing = use_signal(|| FormEpoch(u64::MAX));
+    // A scanned code without an address opens the form to ask for it.
+    let scanned = controller.lan_scanned(epoch);
+    let open = scanned || typing() == epoch;
+    let close = move |_| typing.set(FormEpoch(u64::MAX));
     rsx! {
         Head { controller: controller.clone(), epoch, title: "Devices", lead: "Sync directly over your local network. No account, no server. Nothing syncs until you start it." }
         div { class: "card",
-            if links.is_empty() {
-                div { class: "dev", div { class: "di", Svg { icon: Icon::Devices, large: true } }
-                    div { class: "l", b { "No linked devices yet" } span { "Pair another device to sync this vault with it." } }
-                }
-            }
-            for l in links {
-                div { class: "dev",
-                    div { class: "di", span { class: "tile big {hue(&l.label)}", "{initial(&l.label)}" } }
-                    div { class: "l", b { "{l.label}" } span { "Linked {l.created}" } }
-                    button { class: "btn", disabled: busy, onclick: { let id = l.id.clone(); move |_| sheet.set((epoch, DeviceSheet::Sync, id.clone())) }, Svg { icon: Icon::Refresh } "Sync…" }
-                    button { class: "btn subtle", "aria-label": "Remove {l.label}", disabled: busy, onclick: act(&controller, epoch, WsAction::LanRemove(l.id.clone())), Svg { icon: Icon::Trash } }
+            div { class: "dev", div { class: "di", Svg { icon: Icon::Devices, large: true } }
+                div { class: "l", b { "Sync with another device" }
+                    span { "One device shows a code; the other scans or types it. Each code works once, and nothing about the other device is kept." }
                 }
             }
         }
         div { class: "actions start",
-            button { class: "btn primary", id: "pair-device", disabled: busy, onclick: move |_| sheet.set((epoch, DeviceSheet::Pair, String::new())), Svg { icon: Icon::Plus } "Pair a device" }
-            button { class: "btn", id: "link-device", disabled: busy, onclick: move |_| sheet.set((epoch, DeviceSheet::Link, String::new())), Svg { icon: Icon::Qr } "Use a code from another device" }
-            button { class: "btn", id: "receive", disabled: busy, onclick: act(&controller, epoch, WsAction::LanReceive), Svg { icon: Icon::Devices } "Let a linked device sync with this one" }
+            button { class: "btn primary", id: "show-code", disabled: busy, onclick: act(&controller, epoch, WsAction::LanOffer), Svg { icon: Icon::Qr } "Show a code" }
+            ScanButton { controller: controller.clone(), epoch, target: crate::qr::QrTarget::Sync }
+            button { class: "btn", id: "type-code", disabled: busy, onclick: move |_| typing.set(epoch), Svg { icon: Icon::Devices } "Type a code" }
         }
-        match open {
-            DeviceSheet::None => rsx! {},
-            DeviceSheet::Pair => rsx! {
-                div { class: "layer",
-                    button { class: "scrim", "aria-label": "Close", onclick: close }
-                    div { class: "dialog", role: "dialog", "aria-modal": "true", "aria-label": "Pair a device",
-                        h3 { "Pair a device" }
-                        p { "This device shows a code. The other device scans or types it, and then both show a comparison code to check." }
-                        Input { controller: controller.clone(), epoch, field: WsField::LanLabel, label: "A name for the other device", kind: Kind::Line, value: None, disabled: false, autofocus: true, placeholder: "Phone" }
-                        div { class: "actions",
-                            button { class: "btn subtle", onclick: close, "Cancel" }
-                            button { class: "btn primary", id: "show-pairing-code", onclick: { let mut f = act(&controller, epoch, WsAction::LanPair); move |e| { sheet.set((epoch, DeviceSheet::None, String::new())); f(e) } }, "Show a pairing code" }
-                        }
+        if open {
+            div { class: "layer",
+                button { class: "scrim", "aria-label": "Close", onclick: close }
+                div { class: "dialog", role: "dialog", "aria-modal": "true", "aria-label": "Use another device's code",
+                    h3 { "Use another device's code" }
+                    p { "On the other device, open Devices and choose Show a code. Type the code and the address it shows." }
+                    if scanned {
+                        p { class: "banner ok", role: "status", id: "lan-code-scanned", Svg { icon: Icon::Check } " Code from the QR code" }
+                    } else {
+                        Input { controller: controller.clone(), epoch, field: WsField::LanCode, label: "Code", kind: Kind::Secret, value: None, disabled: false, autofocus: true }
+                    }
+                    Input { controller: controller.clone(), epoch, field: WsField::LanEndpoint, label: "The other device's address (ip:port)", kind: Kind::Line, value: None, disabled: false, autofocus: scanned }
+                    div { class: "actions",
+                        button { class: "btn subtle", onclick: close, "Cancel" }
+                        button { class: "btn primary", id: "sync-submit", "data-qv-clear": "true", onclick: { let mut f = act(&controller, epoch, WsAction::LanSync); move |e| { typing.set(FormEpoch(u64::MAX)); f(e) } }, "Sync" }
                     }
                 }
-            },
-            DeviceSheet::Link => rsx! {
-                div { class: "layer",
-                    button { class: "scrim", "aria-label": "Close", onclick: close }
-                    div { class: "dialog", role: "dialog", "aria-modal": "true", "aria-label": "Use a code from another device",
-                        h3 { "Link to another device's code" }
-                        p { "On the other device, choose Pair a device. Scan its code, or type the code and its address." }
-                        ScanButton { controller: controller.clone(), epoch, target: crate::qr::QrTarget::Link }
-                        Input { controller: controller.clone(), epoch, field: WsField::LanCode, label: "Pairing code", kind: Kind::Secret, value: None, disabled: false }
-                        Input { controller: controller.clone(), epoch, field: WsField::LanEndpoint, label: "The other device's address (ip:port)", kind: Kind::Line, value: None, disabled: false }
-                        Input { controller: controller.clone(), epoch, field: WsField::LanLabel, label: "A name for the other device", kind: Kind::Line, value: None, disabled: false }
-                        div { class: "actions",
-                            button { class: "btn subtle", onclick: close, "Cancel" }
-                            button { class: "btn primary", id: "link-submit", "data-qv-clear": "true", onclick: { let mut f = act(&controller, epoch, WsAction::LanLink); move |e| { sheet.set((epoch, DeviceSheet::None, String::new())); f(e) } }, "Link" }
-                        }
-                    }
-                }
-            },
-            DeviceSheet::Sync => rsx! {
-                div { class: "layer",
-                    button { class: "scrim", "aria-label": "Close", onclick: close }
-                    div { class: "dialog", role: "dialog", "aria-modal": "true", "aria-label": "Sync with a linked device",
-                        h3 { "Sync with a linked device" }
-                        p { "On the other device, choose \"Let a linked device sync with this one\". Then scan its code, or type the address it shows." }
-                        ScanButton { controller: controller.clone(), epoch, target: crate::qr::QrTarget::Sync }
-                        Input { controller: controller.clone(), epoch, field: WsField::LanEndpoint, label: "The other device's address (ip:port)", kind: Kind::Line, value: None, disabled: false, autofocus: true }
-                        div { class: "actions",
-                            button { class: "btn subtle", onclick: close, "Cancel" }
-                            button { class: "btn primary", id: "sync-submit", onclick: { let mut f = act(&controller, epoch, WsAction::LanSync(target.clone())); move |e| { sheet.set((epoch, DeviceSheet::None, String::new())); f(e) } }, "Sync now" }
-                        }
-                    }
-                }
-            },
+            }
         }
     }
 }
@@ -331,10 +278,8 @@ pub(crate) fn LanPanel(controller: Controller, epoch: FormEpoch, revision: u64) 
     };
     use crate::lan::{LanKind, Question};
     let title = match v.kind {
-        LanKind::Pair => "Show this code on the other device",
-        LanKind::Receive => "Ready for a linked device",
-        LanKind::Sync => "Syncing with a linked device",
-        LanKind::Link => "Joining another device's pairing window",
+        LanKind::Window => "Scan or type this code on the other device",
+        LanKind::Sync => "Syncing with another device",
         LanKind::Join => "Joining from another device",
     };
     let code = v
@@ -368,7 +313,7 @@ pub(crate) fn LanPanel(controller: Controller, epoch: FormEpoch, revision: u64) 
                 h3 { "{title}" }
                 if let Some(symbol) = v.qr.as_ref() { { qr_image(symbol) } }
                 if let Some(code) = code {
-                    p { class: "center hint", "Type this pairing code on the other device. Show it only to that device." }
+                    p { class: "center hint", "The code works once. Show it only to the device you want to sync with." }
                     div { class: "phrase single mono center", id: "lan-code", "{code.as_str()}" }
                 }
                 if !v.endpoints.is_empty() {
@@ -378,23 +323,13 @@ pub(crate) fn LanPanel(controller: Controller, epoch: FormEpoch, revision: u64) 
                 if v.seconds > 0 { p { class: "center hint", "Closes in {v.seconds / 60}:{v.seconds % 60:02}" } }
                 if let Some(i) = v.info.as_ref() { p { class: "banner ok notice", role: "status", "{i}" } }
                 match v.question.clone() {
-                    Some(Question::Approve { sas, mode, vault }) => rsx! {
+                    Some(Question::Approve { sas, vault }) => rsx! {
                         div { role: "alertdialog", "aria-label": "Compare codes",
-                            p { class: "center", "A device asks to pair with “{vault}”: {mode}." }
+                            p { class: "center", "A new device asks to join “{vault}”. It will receive this vault." }
                             div { class: "code-big mono phrase single", id: "lan-sas", "{sas}" }
                             p { class: "center hint", "Confirm only if the other device shows exactly this code." }
                             div { class: "actions",
                                 button { class: "btn subtle", onclick: answer(false), "They differ" }
-                                button { class: "btn primary", id: "lan-codes-match", onclick: answer(true), "Codes match" }
-                            }
-                        }
-                    },
-                    Some(Question::Matches { sas }) => rsx! {
-                        div { role: "alertdialog", "aria-label": "Compare codes",
-                            div { class: "code-big mono phrase single", id: "lan-sas", "{sas}" }
-                            p { class: "center hint", "Does the other device show exactly this code?" }
-                            div { class: "actions",
-                                button { class: "btn subtle", onclick: answer(false), "No, cancel" }
                                 button { class: "btn primary", id: "lan-codes-match", onclick: answer(true), "Codes match" }
                             }
                         }
@@ -463,7 +398,7 @@ pub(crate) fn ScanButton(
         button { class: "btn wide", disabled: !available || controller.snapshot().busy, "data-qv-clear": "true",
             onclick: move |_| controller.request_qr(epoch, target),
             Svg { icon: Icon::Qr }
-            if target == crate::qr::QrTarget::Sync { "Scan to sync" } else { "Scan pairing QR" }
+            "Scan a code"
         }
         if !available { p { class: "hint", "Camera scanning is unavailable. Type the code and address instead." } }
     }
@@ -475,7 +410,7 @@ pub(crate) fn ScanPanel(controller: Controller, epoch: FormEpoch) -> Element {
         div { class: "layer", div { class: "scrim" }
             div { class: "dialog", role: "status",
                 h3 { "Scan a QR code" }
-                p { "Point the camera at the other device's code. Scanning fills the form; you choose when to connect." }
+                p { "Point the camera at the other device's code. A code that names its address connects at once; otherwise you type the address." }
                 div { class: "actions", button { class: "btn", onclick: move |_| controller.cancel_qr(epoch), "Cancel scan" } }
             }
         }

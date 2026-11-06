@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Independent cross-check of qv-dev-lan-pairing.txt (spec 0013; plans 0037, 0038).
+"""Independent cross-check of qv-dev-lan-pairing.txt (spec 0013; plans 0037, 0038, 0042).
 
 Python 3 standard library only (hashlib, hmac). Run by hand, not in CI:
 
     python3 -I crates/qv-sync/tests/vectors/crosscheck_lan.py
 
 From the vector inputs (P, nonces, VK, IDs, X-Wing ek/ct/ss), this script
-recomputes every pairing and session-handshake value, and the address QR,
-with its own canonical CBOR and HKDF, then
+recomputes every new-device and sync-mode handshake value and the sync-mode
+proofs with its own canonical CBOR and HKDF, then
 compares it with the file. It cannot check the *_record values (XChaCha20-
 Poly1305 is not in the stdlib) or X-Wing itself (draft-11 KATs cover it).
 It exits non-zero on any mismatch.
@@ -79,7 +79,7 @@ def load():
 def main():
     v = load()
     p, nb, na = v["p"], v["nonce_b"], v["nonce_a"]
-    vk, vault, link_id = v["vk"], v["vault_id"], v["link_id"]
+    vk, vault = v["vk"], v["vault_id"]
     gen = int.from_bytes(v["key_generation"], "big")
     ek, ct, ss = v["ek_b"], v["ct"], v["ss"]
     want = {}
@@ -100,12 +100,6 @@ def main():
     k_a2b = hkdf(ss + p, th, arr(t("qv/lan-pair-key/v1"), t("a2b")))
     h = sha256(arr(t("qv/lan-pair-sas/v1"), b(th), b(nb)))
     sas = ("%06d" % (int.from_bytes(h[:4], "big") % 1_000_000)).encode()
-    k_lan = hkdf(vk, vault, arr(t("qv/purpose/v1"), t("lan-link"), u(gen), u(1)))
-    salt = sha256(arr(t("qv/lan-link-salt/v1"), b(th), b(nb), b(link_id)))
-    link = hkdf(k_lan + ss, salt, arr(t("qv/lan-link/v1"), b(vault), u(gen), b(link_id)))
-
-    def proof(role):
-        return mac1(k_lan, arr(t("qv/lan-pair-prove/v1"), b(th), t(role), b(vault), u(gen)))
 
     want.update(
         pairing_id=pid,
@@ -122,51 +116,48 @@ def main():
         k_b2a=k_b2a,
         k_a2b=k_a2b,
         sas=sas,
-        k_lan=k_lan,
-        link_key=link,
-        proof_a=proof("a"),
-        proof_b=proof("b"),
         reveal=arr(t("qv/lan-pair-reveal/v1"), b(nb)),
-        grant=arr(t("qv/lan-pair-grant/v1"), b(vault), u(gen), b(vk), b(link_id)),
+        grant=arr(t("qv/lan-pair-grant/v1"), b(vault), u(gen), b(vk)),
         error_integrity=arr(t("qv/lan-error/v1"), u(4)),
     )
 
-    # The session handshake (0013 §5) with the same X-Wing vector.
-    lk, ni, nr = v["session_link_key"], v["nonce_i"], v["nonce_r"]
-    k_i = hkdf(lk, b"", arr(t("qv/lan-auth/v1"), t("i")))
-    k_r = hkdf(lk, b"", arr(t("qv/lan-auth/v1"), t("r")))
-    sfields = [t("qv/lan-hello/v1"), u(1), b(ni), b(ek)]
+    # The sync-mode handshake (0013 §4.8): mode 1, same inputs.
+    sfields = [t("qv/lan-pair-hello/v1"), u(1), b(pid), u(1), b(commit), b(ek)]
     sbody = arr(*sfields)
-    shello = arr(*sfields, b(mac1(k_i, sbody)))
+    shello = arr(*sfields, b(mac1(k_hello, sbody)))
     shh = sha256(shello)
-    stranscript = arr(t("qv/lan-accept/v1"), b(shh), b(nr), b(ct))
-    saccept = arr(t("qv/lan-accept/v1"), b(nr), b(ct), b(mac1(k_r, stranscript)))
+    stranscript = arr(t("qv/lan-pair-accept/v1"), b(shh), b(na), b(ct))
+    saccept = arr(t("qv/lan-pair-accept/v1"), b(na), b(ct), b(mac1(k_accept, stranscript)))
     sah = sha256(saccept)
-    sth = sha256(arr(t("qv/lan-th/v1"), b(shh), b(sah)))
+    sth = sha256(arr(t("qv/lan-pair-th/v1"), b(shh), b(sah)))
+    k_proof = hkdf(vk, vault, arr(t("qv/purpose/v1"), t("lan-proof"), u(gen), u(1)))
+
+    def proof(role):
+        return mac1(k_proof, arr(t("qv/lan-pair-prove/v1"), b(sth), t(role), b(vault), u(gen)))
+
     want.update(
-        k_i=k_i,
-        k_r=k_r,
         sync_hello_body=sbody,
         sync_hello=shello,
         sync_hello_hash=shh,
         sync_accept_transcript=stranscript,
         sync_accept=saccept,
         sync_accept_hash=sah,
-        session_th=sth,
-        k_i2r=hkdf(ss + lk, sth, arr(t("qv/lan-session/v1"), t("i2r"))),
-        k_r2i=hkdf(ss + lk, sth, arr(t("qv/lan-session/v1"), t("r2i"))),
-        confirm=arr(t("qv/lan-confirm/v1"), b(sth)),
-    )
-    # The address-only receive-window code (0013 §8.5).
-    v6 = bytes.fromhex("20010db8000000000000000000000010")
-    want["addr_qr"] = arr(
-        t("qv/lan-addr-qr/v1"),
-        u(1),
-        arr(arr(b(bytes([192, 0, 2, 10])), u(7777)), arr(b(v6), u(7777))),
+        sync_th=sth,
+        k_proof=k_proof,
+        proof_a=proof("a"),
+        proof_b=proof("b"),
+        prove=arr(t("qv/lan-pair-prove/v1"), b(vault), u(gen), b(proof("b"))),
+        proved=arr(t("qv/lan-pair-proved/v1"), b(proof("a"))),
     )
     bad = [k for k, x in want.items() if v.get(k) != x]
     # Record lengths: plaintext + 16-byte tag (0013 §6).
-    for rec, msg in (("reveal_record", "reveal"), ("grant_record", "grant"), ("error_record", "error_integrity")):
+    for rec, msg in (
+        ("reveal_record", "reveal"),
+        ("grant_record", "grant"),
+        ("error_record", "error_integrity"),
+        ("prove_record", "prove"),
+        ("proved_record", "proved"),
+    ):
         if len(v[rec]) != len(want[msg]) + 16:
             bad.append(rec)
     if bad:

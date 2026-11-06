@@ -190,9 +190,9 @@ pub mod purpose {
         RecoveryEd25519 = "recovery-ed25519";
         /// Independent ML-DSA-65 recovery-key seed (uses come in later phases).
         RecoveryMlDsa65 = "recovery-mldsa65";
-        /// Root of pairwise LAN link keys (0002 §3.3, 0013 §4.6). Only
-        /// [`crate::lan::LinkRoot`] uses it.
-        LanLink = "lan-link";
+        /// VK possession proofs for one LAN sync session (0002 §3.3,
+        /// 0013 §4.6). Only [`crate::lan::ProofRoot`] uses it.
+        LanProof = "lan-proof";
     }
 }
 
@@ -340,8 +340,8 @@ impl<P: KeyPurpose> fmt::Debug for PurposeKey<P> {
     }
 }
 
-impl PurposeKey<purpose::LanLink> {
-    /// The link root bytes, for the LAN key schedule only.
+impl PurposeKey<purpose::LanProof> {
+    /// The proof key bytes, for the LAN key schedule only.
     pub(crate) fn expose_secret(&self) -> &[u8; 32] {
         self.key.expose_secret()
     }
@@ -506,7 +506,7 @@ mod tests {
             DeviceStorage,
             RecoveryEd25519,
             RecoveryMlDsa65,
-            LanLink
+            LanProof
         )
     }
 
@@ -529,7 +529,7 @@ mod tests {
                 "device-storage",
                 "recovery-ed25519",
                 "recovery-mldsa65",
-                "lan-link",
+                "lan-proof",
             ]
         );
     }

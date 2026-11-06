@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The joining device (0013 §3.3, §4, §10).
+//! The joining device (0013 §3.3, §4, §10): new-device mode and sync mode.
 //!
 //! Candidates are the QR endpoints plus the caller's, deduplicated, at most
 //! 16, and filtered by the [`EndpointPolicy`]. Each attempt uses a fresh
@@ -13,14 +13,11 @@ use std::net::SocketAddr;
 use std::path::Path;
 
 use qv_crypto::lan::{
-    LinkKey, LinkRoot, PairNonce, PairingKeys, PairingSecret, ProofRole, RecordOpener,
-    RecordSealer, Sas,
+    PairNonce, PairingKeys, PairingSecret, ProofRole, ProofRoot, RecordOpener, RecordSealer, Sas,
 };
-use qv_crypto::{
-    KeyGeneration, MacTag, MasterPassword, VaultId, VaultKey, XWingDecapsKey, XWingSharedSecret,
-};
+use qv_crypto::{KeyGeneration, MacTag, MasterPassword, VaultId, VaultKey, XWingDecapsKey};
 use qv_protocol::frame::FramePhase;
-use qv_protocol::lan::{JoinMode, PairDone, PairGrant, PairProve, PairProved, PairReveal};
+use qv_protocol::lan::{JoinMode, PairGrant, PairProve, PairProved, PairReveal};
 use qv_protocol::oob::{decode_manual, decode_qr};
 use qv_protocol::registry::LanProfile;
 use qv_store::{PasswordProof, StoreError, VerifiedLanStaging};
@@ -78,11 +75,9 @@ impl JoinCode {
     }
 }
 
-/// The joining user's decisions (0013 §4.5, §10.4).
+/// The joining user's decisions in new-device mode (0013 §4.5, §10.4).
 pub trait JoinerUi {
-    /// Shows the comparison code. In link mode, `true` confirms that both
-    /// screens match. In new-device mode the code is shown during the
-    /// transfer; `false` cancels.
+    /// Shows the comparison code during the transfer; `false` cancels.
     fn show_code(&mut self, sas: &Sas) -> bool;
     /// New device (§10 step 4): `true` to join the vault named `vault_name`.
     fn confirm_vault(&mut self, vault_name: &[u8], sas: &Sas) -> bool;
@@ -101,10 +96,6 @@ pub struct JoinedNewDevice {
     pub proof: PasswordProof,
     /// The checked master password, to unlock the new vault.
     pub password: MasterPassword,
-    /// The link to write in the first head.
-    pub link_id: [u8; 16],
-    /// Its key.
-    pub link_key: LinkKey,
 }
 
 impl core::fmt::Debug for JoinedNewDevice {
@@ -113,29 +104,27 @@ impl core::fmt::Debug for JoinedNewDevice {
     }
 }
 
-/// An unlocked vault joining in link mode.
+/// An unlocked vault syncing with a code.
 pub struct JoinerContext {
     /// The vault ID.
     pub vault_id: VaultId,
     /// The key generation.
     pub key_generation: KeyGeneration,
-    /// `K_lan` of this generation.
-    pub root: LinkRoot,
+    /// `K_proof` of this generation.
+    pub root: ProofRoot,
 }
 
-/// The joining device's unlocked vault in link mode.
+/// The joining device's unlocked vault in sync mode.
 pub trait JoinerVault: ExchangeVault {
-    /// The vault's identity and link root.
+    /// The vault's identity and proof key.
     fn context(&self) -> Result<JoinerContext, LanError>;
-    /// Commits B's link row.
-    fn commit_link(&self, link_id: [u8; 16], key: &LinkKey) -> Result<(), LanError>;
 }
 
-/// An authenticated pairing connection on the joiner's side.
+/// An authenticated pairing connection on the joiner's side. The shared
+/// secret is dropped once the record keys exist.
 struct Paired<'c> {
     ch: Channel<'c>,
     attempt: JoinAttempt,
-    ss: XWingSharedSecret,
     th: [u8; 32],
 }
 
@@ -182,13 +171,9 @@ fn connect<'c>(
         })?;
         let th = th(&attempt.hello_hash, &accept_hash)?;
         let (b2a, a2b) = record_keys(keys, &ss, &th)?;
+        drop(ss);
         let ch = Channel::new(conn, RecordSealer::new(b2a), RecordOpener::new(a2b));
-        return Ok(Paired {
-            ch,
-            attempt,
-            ss,
-            th,
-        });
+        return Ok(Paired { ch, attempt, th });
     }
     Err(LanError::NoPeer)
 }
@@ -226,26 +211,17 @@ pub fn join_new_device(
     let keys = code.secret.keys().map_err(|_| LanError::Io)?;
     let mut p = connect(&keys, JoinMode::NewDevice, &candidates, timeouts, cancelled)?;
     let sas = reveal(&mut p, ui, timeouts)?;
-    let (attempt, ss, th) = (&p.attempt, &p.ss, p.th);
-    let (vk, vault, generation, link_id, link_key, mut staging) = guarded(&mut p.ch, |ch| {
+    let (vk, mut staging) = guarded(&mut p.ch, |ch| {
         let msg = ch.recv(timeouts.confirm, None)?;
         let grant = PairGrant::decode(msg.expose_secret()).map_err(|_| LanError::Protocol)?;
         let vk = VaultKey::from_transfer(grant.vk).map_err(|_| LanError::Protocol)?;
         let vault = VaultId(grant.vault_id);
         let generation = KeyGeneration(grant.key_generation);
-        let link_id = grant.link_id;
         drop(msg);
-        // The derivation profile of 0002 §3.3 is the only registered one.
-        let root = LinkRoot::derive(&vk, vault, generation, qv_crypto::DerivationProfile::V1)
-            .map_err(|_| LanError::Protocol)?;
-        let link_key = root
-            .link_key(ss, &th, &attempt.nonce_b, &link_id, vault, generation)
-            .map_err(|_| LanError::Protocol)?;
         let staging =
             exchange::receive(ch, private_dir, &vk, vault, generation, timeouts, cancelled)?;
-        Ok((vk, vault, generation, link_id, link_key, staging))
+        Ok((vk, staging))
     })?;
-    let _ = (vault, generation);
     // §10 step 4, local: confirm the vault, then the master password.
     let name = staging.vault_name(&vk).map_err(LanError::Store)?;
     if cancelled() || !ui.confirm_vault(name.expose_secret(), &sas) {
@@ -269,40 +245,27 @@ pub fn join_new_device(
         staging,
         proof,
         password,
-        link_id,
-        link_key,
     })
 }
 
-/// A completed link-mode join.
-#[derive(Debug)]
-pub struct JoinedLink {
-    /// The committed link.
-    pub link_id: [u8; 16],
-    /// The ordinary exchange that followed (0013 §4.8). Its failure leaves
-    /// both links; the user syncs again later.
-    pub round: Result<RoundReport, LanError>,
-}
-
-/// Link mode (§4.8): pairs an unlocked copy of the same vault and
-/// generation, then runs one exchange as initiator over the pairing keys.
-pub fn join_link(
+/// Sync mode (§4.8): proves this unlocked copy to the code's window,
+/// verifies the window's proof, then runs one exchange as initiator over the
+/// pairing keys. Nothing about the peer is stored.
+pub fn sync_with_code(
     code: JoinCode,
     extra: &[SocketAddr],
     policy: EndpointPolicy,
     vault: &dyn JoinerVault,
-    ui: &mut dyn JoinerUi,
     timeouts: &LanTimeouts,
     cancelled: &(dyn Fn() -> bool + Sync),
-) -> Result<JoinedLink, LanError> {
+) -> Result<RoundReport, LanError> {
     timeouts.validate()?;
     let ctx = vault.context()?;
     let candidates = code.candidates(extra, policy);
     let keys = code.secret.keys().map_err(|_| LanError::Io)?;
-    let mut p = connect(&keys, JoinMode::Link, &candidates, timeouts, cancelled)?;
-    reveal(&mut p, ui, timeouts)?;
-    let (attempt, ss, th) = (&p.attempt, &p.ss, p.th);
-    let link_id = guarded(&mut p.ch, |ch| {
+    let mut p = connect(&keys, JoinMode::Sync, &candidates, timeouts, cancelled)?;
+    let th = p.th;
+    guarded(&mut p.ch, |ch| {
         let proof = ctx
             .root
             .proof(&th, ProofRole::B, ctx.vault_id, ctx.key_generation)
@@ -312,8 +275,9 @@ pub fn join_link(
                 .map_err(|_| LanError::Protocol)?,
             timeouts.message,
         )?;
-        let msg = ch.recv(timeouts.confirm, None)?;
+        let msg = ch.recv(timeouts.message, None)?;
         let proved = PairProved::decode(msg.expose_secret()).map_err(|_| LanError::Protocol)?;
+        // No exchange message before A's proof verifies (§4.8).
         ctx.root
             .verify_proof(
                 &th,
@@ -322,33 +286,15 @@ pub fn join_link(
                 ctx.key_generation,
                 &MacTag::from_bytes(proved.proof),
             )
-            .map_err(|_| LanError::Protocol)?;
+            .map_err(|_| LanError::VaultMismatch)?;
         if cancelled() {
             return Err(LanError::Cancelled);
         }
-        let link = ctx
-            .root
-            .link_key(
-                ss,
-                &th,
-                &attempt.nonce_b,
-                &proved.link_id,
-                ctx.vault_id,
-                ctx.key_generation,
-            )
-            .map_err(|_| LanError::Protocol)?;
-        vault.commit_link(proved.link_id, &link)?;
-        // PairDone only after the commit is durable (§4.8).
-        ch.send(
-            &PairDone::encode().map_err(|_| LanError::Protocol)?,
-            timeouts.message,
-        )?;
-        Ok(proved.link_id)
+        Ok(())
     })?;
-    // The ordinary exchange over the pairing keys, B initiating (§4.8).
     let round = guarded(&mut p.ch, |ch| {
         exchange::exchange(ch, Role::Initiator, vault, timeouts)
     });
     p.ch.conn.close();
-    Ok(JoinedLink { link_id, round })
+    round
 }

@@ -160,18 +160,6 @@ pub(crate) fn kind_icon(kind: &str) -> Icon {
     }
 }
 
-/// A hue class (`h0`–`h11`) from text, for tiles with no record ID (devices).
-/// A class, because the webview policy allows no inline styles.
-pub(crate) fn hue(text: &str) -> &'static str {
-    const HUES: [&str; 12] = [
-        "h0", "h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8", "h9", "h10", "h11",
-    ];
-    let h = text.chars().fold(0u32, |h, c| {
-        (h.wrapping_mul(31).wrapping_add(c as u32)) % 360
-    });
-    HUES[(h / 30) as usize % 12]
-}
-
 /// A stable colour for a vault item, from its random record ID (hex), so
 /// renaming keeps it and synced devices agree.
 const HUES: [&str; 12] = [

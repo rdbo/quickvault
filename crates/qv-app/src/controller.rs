@@ -36,13 +36,11 @@ pub enum InputField {
     Word2,
     /// A typed LAN pairing code (new-device join).
     LanCode,
-    /// The approving device's address, `ip:port`.
+    /// The offering device's address, `ip:port`.
     LanEndpoint,
-    /// This device's name for the approving device.
-    LanLabel,
 }
 /// How many locked-screen inputs exist.
-const INPUTS: usize = 11;
+const INPUTS: usize = 10;
 impl InputField {
     fn index(self) -> usize {
         self as usize
@@ -195,6 +193,13 @@ pub enum Mode {
     /// Join a vault from another device over the LAN (0013 §10).
     Join,
 }
+/// Locked-screen confirmations shown as a notice (the other statuses only
+/// name the current step, which the screen itself already shows).
+const QR_SCANNED: &str = "Code scanned. Type the other device's address and choose Join.";
+const ROTATION_CANCELLED: &str = "Key rotation cancelled; nothing changed.";
+/// A scanned code with endpoints that waits for the protection
+/// acknowledgement, which Join asks for first.
+const QR_READY: &str = "Code scanned. Choose Join to continue.";
 /// A current form generation; late input cannot affect a new generation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FormEpoch(pub u64);
@@ -245,6 +250,18 @@ pub struct View {
     pub theme: crate::prefs::Theme,
     /// Reduced protection needs the user's acknowledgement first.
     pub ack_needed: bool,
+}
+impl View {
+    /// Whether the Join form's code came from a scan (it is never rendered).
+    pub fn code_scanned(&self) -> bool {
+        self.status == QR_SCANNED || self.status == QR_READY
+    }
+    /// A locked-screen confirmation to show, if the status is one.
+    pub fn notice(&self) -> Option<&'static str> {
+        [QR_SCANNED, QR_READY, ROTATION_CANCELLED]
+            .contains(&self.status)
+            .then_some(self.status)
+    }
 }
 /// Core-backed foundation actions. None grants arbitrary IO or crypto access.
 #[derive(Clone, Copy)]
@@ -1414,7 +1431,6 @@ impl Controller {
                 &path,
                 &values[InputField::LanCode.index()],
                 values[InputField::LanEndpoint.index()].expose_secret(),
-                values[InputField::LanLabel.index()].expose_secret(),
             )?;
             return Ok(Opened::Session(session, path, false, None));
         }
@@ -1571,7 +1587,7 @@ impl Controller {
         match action {
             Action::CancelRotation => {
                 s.invalidate();
-                s.status = "Key rotation cancelled; nothing changed.";
+                s.status = ROTATION_CANCELLED;
                 Ok(())
             }
             Action::ConfirmRotation => {
@@ -1729,7 +1745,7 @@ impl Controller {
         use crate::qr::QrTarget;
         match target {
             QrTarget::NewDevice => s.phase == Phase::Locked && s.mode == Mode::Join,
-            QrTarget::Link | QrTarget::Sync => {
+            QrTarget::Sync => {
                 s.phase == Phase::Unlocked
                     && s.workspace
                         .as_ref()
@@ -1737,13 +1753,14 @@ impl Controller {
             }
         }
     }
-    /// Accept a validated scan for a current form; never initiate network I/O.
+    /// Accept a validated code for a current form, without network I/O.
+    /// `true` when the code names endpoints, so its action can start at once.
     pub fn accept_qr(
         &self,
         epoch: FormEpoch,
         target: crate::qr::QrTarget,
         payload: &[u8],
-    ) -> Result<(), AppError> {
+    ) -> Result<bool, AppError> {
         self.apply_qr(epoch, target, payload, false)
     }
     fn apply_qr(
@@ -1752,13 +1769,11 @@ impl Controller {
         target: crate::qr::QrTarget,
         payload: &[u8],
         scanning: bool,
-    ) -> Result<(), AppError> {
+    ) -> Result<bool, AppError> {
         use crate::qr::QrTarget;
         use crate::workspace::WsField;
         let info = qv_core::inspect_lan_qr(payload)?;
-        if (target == QrTarget::Sync) != (info.kind == qv_core::LanQrKind::Address) {
-            return Err(AppError::InvalidInput);
-        }
+        let addressed = !info.endpoints.is_empty();
         let mut s = self.state();
         if s.epoch != epoch.0 || !Self::qr_form(&s, target) {
             return Err(AppError::InvalidInput);
@@ -1773,41 +1788,60 @@ impl Controller {
         if self.0.working.load(Ordering::SeqCst) && !(scanning && s.scan.is_some()) {
             return Err(AppError::Busy);
         }
-        let protected = if target != QrTarget::Sync {
-            Some(crate::workspace::protect(payload)?)
-        } else {
-            None
-        };
+        // The code stays in protected state; only "from the QR" is shown.
+        let protected = crate::workspace::protect(payload)?;
         if target == QrTarget::NewDevice {
-            if let Some(protected) = protected {
-                s.inputs[InputField::LanCode.index()] = protected;
-            }
+            s.inputs[InputField::LanCode.index()] = protected;
             s.inputs[InputField::LanEndpoint.index()] = SecretBytes::zeroed(0);
-            s.status = "Pairing code scanned. Enter a label and choose Join.";
+            if !addressed {
+                s.status = QR_SCANNED;
+            }
         } else {
             let ws = s.workspace.as_mut().ok_or(AppError::InvalidInput)?;
             ws.inputs.remove(&WsField::LanEndpoint);
-            ws.lan_endpoints = if target == QrTarget::Sync {
-                info.endpoints
-            } else {
-                Vec::new()
-            };
-            if target == QrTarget::Sync {
-                ws.inputs.remove(&WsField::LanCode);
-            }
-            if let Some(protected) = protected {
-                ws.inputs.insert(WsField::LanCode, protected);
-            }
-            ws.notice = Some(if target == QrTarget::Sync {
-                "Address scanned. Choose a linked device and Sync."
-            } else {
-                "Pairing code scanned. Enter a label and choose Link."
-            });
+            ws.inputs.insert(WsField::LanCode, protected);
+            ws.lan_scanned = true;
+            ws.notice = (!addressed)
+                .then_some("Code scanned. Type the other device's address and choose Sync.");
             ws.error = None;
         }
         s.error = None;
         s.revision = s.revision.wrapping_add(1);
-        Ok(())
+        Ok(addressed)
+    }
+
+    /// Starts the scanned form's action, as the scan was the user's explicit
+    /// action (0014 §6.2–§6.3). A join still waits for both comparison
+    /// confirmations before any key is released.
+    pub(crate) fn start_scanned(&self, epoch: FormEpoch, target: crate::qr::QrTarget) {
+        let started = match target {
+            // An unacknowledged protection status is shown first, as when
+            // the user presses Join: the filled form waits for that.
+            crate::qr::QrTarget::NewDevice if self.protection_ack_needed() => {
+                let mut s = self.state();
+                if s.epoch == epoch.0 {
+                    s.status = QR_READY;
+                    s.revision = s.revision.wrapping_add(1);
+                }
+                Ok(())
+            }
+            crate::qr::QrTarget::NewDevice => {
+                self.submit(epoch, Action::JoinDevice, self.consent())
+            }
+            crate::qr::QrTarget::Sync => {
+                self.dispatch(epoch, crate::workspace::WsAction::LanSync, false, false)
+            }
+        };
+        if let Err(error) = started {
+            let mut s = self.state();
+            if s.epoch == epoch.0 {
+                if let Some(ws) = s.workspace.as_mut() {
+                    ws.error = Some(error);
+                } else {
+                    s.error = Some(error);
+                }
+            }
+        }
     }
     /// Record a data-free startup failure in the current rendered form.
     #[cfg(feature = "desktop")]
@@ -1847,26 +1881,34 @@ impl Controller {
         let started = std::thread::Builder::new()
             .name("qv-qr-scan".into())
             .spawn(move || {
-                let _worker = worker;
-                let result = crate::qr::capture(&cancel).and_then(|p| {
-                    if cancel.is_cancelled() {
-                        return Err(CoreError::Cancelled.into());
-                    }
-                    controller.apply_qr(epoch, target, p.expose_secret(), true)
-                });
-                let mut s = controller.state();
-                if s.epoch == epoch.0 {
-                    s.scan = None;
-                    if !cancel.is_cancelled()
-                        && let Err(e) = result
-                    {
-                        if let Some(ws) = s.workspace.as_mut() {
-                            ws.error = Some(e);
-                        } else {
-                            s.error = Some(e);
+                let start = {
+                    let _worker = worker;
+                    let result = crate::qr::capture(&cancel).and_then(|p| {
+                        if cancel.is_cancelled() {
+                            return Err(CoreError::Cancelled.into());
                         }
+                        controller.apply_qr(epoch, target, p.expose_secret(), true)
+                    });
+                    let mut s = controller.state();
+                    let current = s.epoch == epoch.0;
+                    if current {
+                        s.scan = None;
+                        if !cancel.is_cancelled()
+                            && let Err(e) = &result
+                        {
+                            if let Some(ws) = s.workspace.as_mut() {
+                                ws.error = Some(*e);
+                            } else {
+                                s.error = Some(*e);
+                            }
+                        }
+                        s.revision = s.revision.wrapping_add(1);
                     }
-                    s.revision = s.revision.wrapping_add(1);
+                    current && !cancel.is_cancelled() && matches!(result, Ok(true))
+                };
+                // The worker is released; a code with endpoints starts now.
+                if start {
+                    controller.start_scanned(epoch, target);
                 }
             });
         if started.is_err() {
@@ -2404,7 +2446,7 @@ mod tests {
 mod qr_tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    use crate::qr::{QrTarget, TEST_ADDR, TEST_PAIR};
+    use crate::qr::{QrTarget, TEST_ADDR, TEST_PAIR, TEST_PAIR_ADDR};
     use crate::workspace::{Screen, WsField};
     use crate::workspace_tests::{Env, KDF};
 
@@ -2419,13 +2461,38 @@ mod qr_tests {
                 .accept_qr(epoch, QrTarget::NewDevice, TEST_ADDR)
                 .is_err()
         );
-        env.c
-            .accept_qr(epoch, QrTarget::NewDevice, TEST_PAIR)
-            .unwrap();
+        // No endpoints: the code fills the form and the address is asked.
+        assert!(
+            !env.c
+                .accept_qr(epoch, QrTarget::NewDevice, TEST_PAIR)
+                .unwrap()
+        );
         assert_eq!(
             env.c.state().inputs[InputField::LanCode.index()].expose_secret(),
             TEST_PAIR
         );
+        assert_eq!(
+            env.c.snapshot().notice(),
+            Some(QR_SCANNED),
+            "the lock screen confirms the scan"
+        );
+        assert!(env.c.snapshot().code_scanned());
+        // Endpoints: the action can start at once, unless the protection
+        // status still needs its acknowledgement; then Join asks for it.
+        assert!(
+            env.c
+                .accept_qr(epoch, QrTarget::NewDevice, TEST_PAIR_ADDR)
+                .unwrap()
+        );
+        if env.c.protection_ack_needed() {
+            env.c.start_scanned(epoch, QrTarget::NewDevice);
+            assert!(
+                !env.c.snapshot().busy,
+                "no join without the acknowledgement"
+            );
+            assert_eq!(env.c.snapshot().notice(), Some(QR_READY));
+            assert!(env.c.snapshot().code_scanned());
+        }
         assert!(
             !env.c.snapshot().busy,
             "scan acceptance starts no worker/network action"
@@ -2442,12 +2509,14 @@ mod qr_tests {
             env.c.apply_qr(epoch, QrTarget::NewDevice, TEST_PAIR, true),
             Err(CoreError::Cancelled.into())
         );
+        env.c.state().scan = None;
         env.c.lock();
         assert!(
             env.c
                 .accept_qr(epoch, QrTarget::NewDevice, TEST_PAIR)
                 .is_err()
         );
+        assert_eq!(env.c.snapshot().notice(), None, "lock clears the notice");
         let state = env.c.state();
         assert!(state.inputs.iter().all(|p| p.is_empty()));
         assert!(state.scan.is_none());
@@ -2455,57 +2524,47 @@ mod qr_tests {
 
     // 0012 §1: Unrequested synchronization
     #[test]
-    fn qr_address_and_pairing_fill_only_devices_and_manual_edits_clear_hints() {
+    fn qr_codes_fill_only_devices_and_say_whether_they_can_start() {
         let _k = KDF.lock().unwrap_or_else(|e| e.into_inner());
         let env = Env::unlocked();
         assert!(
             env.c
-                .accept_qr(env.epoch(), QrTarget::Sync, TEST_ADDR)
-                .is_err()
+                .accept_qr(env.epoch(), QrTarget::Sync, TEST_PAIR)
+                .is_err(),
+            "only the Devices screen takes a code"
         );
         env.c.navigate(env.epoch(), Screen::Devices);
         let epoch = env.epoch();
-        env.c.accept_qr(epoch, QrTarget::Sync, TEST_ADDR).unwrap();
-        assert!(!env.c.snapshot().busy);
-        assert_eq!(
-            env.c
-                .state()
-                .workspace
-                .as_ref()
-                .unwrap()
-                .lan_endpoints
-                .len(),
-            1
-        );
-        assert!(env.c.accept_qr(epoch, QrTarget::Sync, TEST_PAIR).is_err());
-        env.put(WsField::LanEndpoint, "198.51.100.7:7777");
-        assert!(
-            env.c
-                .state()
-                .workspace
-                .as_ref()
-                .unwrap()
-                .lan_endpoints
-                .is_empty()
-        );
-        env.c.accept_qr(epoch, QrTarget::Link, TEST_PAIR).unwrap();
+        // The retired address-only QR is refused.
+        assert!(env.c.accept_qr(epoch, QrTarget::Sync, TEST_ADDR).is_err());
+        // No endpoints: the code is kept protected and only marked scanned.
+        assert!(!env.c.accept_qr(epoch, QrTarget::Sync, TEST_PAIR).unwrap());
+        assert!(!env.c.snapshot().busy, "a scan alone sends nothing");
+        assert!(env.c.lan_scanned(epoch));
         {
             let s = env.c.state();
             let ws = s.workspace.as_ref().unwrap();
             assert_eq!(ws.input(WsField::LanCode), TEST_PAIR);
             assert!(ws.input(WsField::LanEndpoint).is_empty());
-            assert!(ws.lan_endpoints.is_empty());
+            assert!(ws.notice.is_some_and(|n| n.contains("address")));
         }
-        env.c.navigate(epoch, Screen::Search);
+        // A typed code replaces the scanned one.
+        env.put(WsField::LanCode, "typed code");
+        assert!(!env.c.lan_scanned(epoch));
+        // Endpoints: the action can start at once.
         assert!(
             env.c
-                .state()
-                .workspace
-                .as_ref()
+                .accept_qr(epoch, QrTarget::Sync, TEST_PAIR_ADDR)
                 .unwrap()
-                .input(WsField::LanCode)
-                .is_empty()
         );
-        assert!(env.c.accept_qr(epoch, QrTarget::Link, TEST_PAIR).is_err());
+        // Leaving the screen discards the code.
+        env.c.navigate(epoch, Screen::Search);
+        {
+            let s = env.c.state();
+            let ws = s.workspace.as_ref().unwrap();
+            assert!(ws.input(WsField::LanCode).is_empty());
+            assert!(!ws.lan_scanned);
+        }
+        assert!(env.c.accept_qr(epoch, QrTarget::Sync, TEST_PAIR).is_err());
     }
 }

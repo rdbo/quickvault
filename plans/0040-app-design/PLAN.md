@@ -991,3 +991,19 @@ separate until save; 0008 §4 reveal and clipboard timers; input bounds;
       use events the bridge drops. Drag and maximize cannot be checked
       without a window manager.
     - Rename still closes on Enter/Esc.
+- 2026-11-06 (owner, testing on the phone: "I scanned it. but it doesnt seem
+  to have done anything afterwards"): regression from this plan's lock
+  screen. The old status pill was dropped, and with it the only display of
+  two confirmations: "Pairing code scanned. Enter a label and choose Join."
+  and "Key rotation cancelled; nothing changed." The scan worked, but nothing
+  showed it.
+  - Fix: `View::notice()` returns just those two fixed messages, and the
+    lock screen shows it as an `ok` banner where errors appear (an error
+    takes its place). Other statuses only name the current step, which the
+    screen already shows. Lock and mode changes reset the status, so the
+    notice clears too.
+  - Tests: the QR form test asserts the notice after a scan and its absence
+    after lock; the rotation test asserts the cancel notice.
+  - Device: the optical Join check failed (76 s) before the fix and passed
+    (6 s) after it on the owner's phone. Recorded in
+    `plans/0039-lan-qr/DEVICE-VALIDATION.md`.

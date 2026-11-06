@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! LAN pairing through core (plan 0037 step 7; 0013 testing rows "Generation
-//! transitions", "Account-dependent LAN sync" (pairing part), "Explicit
-//! initiation"; 0012 §1 "LAN discovery mistaken for trust").
+//! LAN sync through core (plans 0037 step 7, 0038 step 6, 0042 step 6; 0013
+//! testing rows "Generation transitions", "No peer state", "Account-dependent
+//! LAN sync" (loopback part), "Explicit initiation"; 0012 §1 "LAN discovery
+//! mistaken for trust").
 
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::panic)]
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -14,8 +15,8 @@ use qv_crypto::MasterPassword;
 use qv_store::{AnchorDir, ArchiveScope, SnapshotDir, VaultFile};
 
 use crate::lan::{
-    ApproverUi, JoinCode, JoinMode, JoinOptions, JoinerUi, LanError, LanTimeouts, ListenScope,
-    LocalAcceptance, PairingOptions, Sas,
+    ApproverUi, JoinCode, JoinerUi, LanError, LanTimeouts, ListenScope, LocalAcceptance, Sas,
+    Served, SyncOptions, SyncReport, SyncWindow, SyncWindowOptions,
 };
 use crate::snapshot::SnapshotPolicy;
 use crate::testutil::{Env, PASSWORD, TestDir, err, kdf, pw};
@@ -32,27 +33,27 @@ fn fast() -> LanTimeouts {
     }
 }
 
-fn options(label: &str) -> PairingOptions {
-    PairingOptions {
+fn options() -> SyncWindowOptions {
+    SyncWindowOptions {
         scope: ListenScope::LoopbackForTests,
         limit: Duration::from_secs(30),
         timeouts: fast(),
-        ..PairingOptions::new(label)
+        ..SyncWindowOptions::new()
     }
 }
 
-fn join_options(label: &str, port: u16) -> JoinOptions {
-    JoinOptions {
+fn sync_options(port: u16) -> SyncOptions {
+    SyncOptions {
         extra_endpoints: vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)],
         allow_loopback: true,
         timeouts: fast(),
-        ..JoinOptions::new(label)
     }
 }
 
+/// The offering user: confirms a new device's code (sync never asks).
 struct Yes(Option<String>, Option<Box<dyn FnMut() + Send>>);
 impl ApproverUi for Yes {
-    fn confirm(&mut self, sas: &str, _: JoinMode, name: &str) -> bool {
+    fn confirm(&mut self, sas: &str, name: &str) -> bool {
         assert_eq!(name, crate::testutil::NAME);
         if let Some(f) = &mut self.1 {
             f();
@@ -77,22 +78,40 @@ impl JoinerUi for Joiner {
     }
 }
 
-fn code(s: &Session, label: &str) -> (crate::PairingWindow, String, u16) {
-    let w = s.open_pairing_window(options(label)).unwrap();
+fn code(s: &Session) -> (SyncWindow, String, u16) {
+    let w = s.open_sync_window(options()).unwrap();
     let c = w.code(&[]).unwrap();
     let manual = String::from_utf8(c.manual.expose_secret().to_vec()).unwrap();
     (w, manual, c.port)
 }
 
-/// Pairs a new device from `a` into `b_env`'s directory.
-fn join_new(
+fn joined_report(s: Served) -> (bool, Option<LanError>) {
+    match s {
+        Served::Joined {
+            peer_confirmed,
+            failure,
+        } => (peer_confirmed, failure),
+        Served::Synced(_) => panic!("not a join"),
+    }
+}
+
+fn synced_report(s: Result<Served, CoreError>) -> Result<SyncReport, CoreError> {
+    match s? {
+        Served::Synced(r) => Ok(r),
+        Served::Joined { .. } => panic!("not a sync"),
+    }
+}
+
+/// Joins a new device from `a` into `b_env`'s directory with `password`.
+fn join_new_with(
     a: &Session,
     b_env: &Env,
     dest: &std::path::Path,
-) -> (crate::ApproveReport, Result<Session, CoreError>) {
-    let (w, manual, port) = code(a, "phone");
+    password: &'static str,
+) -> (Served, Result<Session, CoreError>) {
+    let (w, manual, port) = code(a);
     let mut yes = Yes(None, None);
-    let mut joiner = Joiner(None);
+    let mut joiner = JoinerPw(password);
     let core = b_env.core();
     std::thread::scope(|s| {
         let h = s.spawn(|| w.run(a, &mut yes, None));
@@ -101,7 +120,7 @@ fn join_new(
             core.join_new_device(
                 JoinCode::from_manual(&manual).unwrap(),
                 dest,
-                join_options("laptop", port),
+                sync_options(port),
                 &mut joiner,
                 None,
             )
@@ -110,46 +129,55 @@ fn join_new(
     })
 }
 
+fn join_new(
+    a: &Session,
+    b_env: &Env,
+    dest: &std::path::Path,
+) -> (Served, Result<Session, CoreError>) {
+    join_new_with(a, b_env, dest, PASSWORD)
+}
+
+struct JoinerPw(&'static str);
+impl JoinerUi for JoinerPw {
+    fn show_code(&mut self, _: &Sas) -> bool {
+        true
+    }
+    fn confirm_vault(&mut self, _: &[u8], _: &Sas) -> bool {
+        true
+    }
+    fn master_password(&mut self) -> Option<MasterPassword> {
+        Some(pw(self.0))
+    }
+}
+
+/// `lan_link` rows left in `s`'s file (0013 §9.1).
+fn rows(s: &Session) -> usize {
+    s.read(|ctx| Ok(ctx.open.vault.retired_lan_links()))
+        .unwrap()
+}
+
 // 0012 §1: LAN discovery mistaken for trust
 #[test]
-fn lan_core_new_device_joins_and_both_list_one_link() {
+fn lan_core_new_device_joins_and_neither_side_stores_the_other() {
     let a_env = Env::new();
     let a = a_env.unlock();
     let root = a.root().unwrap();
     crate::testutil::add_entry(&a, root, "shared over the LAN");
     let b_env = Env::empty(TestDir::new());
     let dest = b_env.dir.path().join("joined.qvault");
-    let (report, joined) = join_new(&a, &b_env, &dest);
+    let (served, joined) = join_new(&a, &b_env, &dest);
     let b = joined.unwrap();
-    assert_eq!(report.mode, JoinMode::NewDevice);
-    assert!(report.peer_confirmed);
+    let (confirmed, failure) = joined_report(served);
+    assert!(confirmed, "{failure:?}");
     let (ao, bo) = (a.overview().unwrap(), b.overview().unwrap());
     assert_eq!(ao.name.expose(), bo.name.expose());
     assert_eq!(ao.entries, bo.entries);
-    let al = a.lan_links().unwrap();
-    let bl = b.lan_links().unwrap();
-    assert_eq!((al.len(), bl.len()), (1, 1));
-    assert_eq!(al[0].label.expose(), "phone");
-    assert_eq!(bl[0].label.expose(), "laptop");
-    assert_eq!(al[0].handle.id_hex(), bl[0].handle.id_hex());
-    assert_eq!(al[0].handle.id_hex(), report.link.id_hex());
-    // Removal is local: only A's link goes.
-    a.remove_lan_link(&al[0].handle).unwrap();
-    assert!(a.lan_links().unwrap().is_empty());
-    assert_eq!(err(a.remove_lan_link(&al[0].handle)), CoreError::NotFound);
-    assert_eq!(
-        err(b.remove_lan_link(&al[0].handle)),
-        CoreError::StaleHandle
-    );
-    assert_eq!(b.lan_links().unwrap().len(), 1);
-    // Removal preserves the vault's contents.
-    assert_eq!(a.overview().unwrap().entries, ao.entries);
+    assert_eq!(rows(&a) + rows(&b), 0);
 }
 
-#[test]
-fn lan_core_link_mode_between_replicas() {
-    let env = Env::new();
-    let a = env.unlock();
+/// Two replicas of one vault in `env` (B restored from an archive of A).
+pub(super) fn replicas_with(env: &Env, policy_a: Option<SnapshotPolicy>) -> (Session, Session) {
+    let a = env.unlock_with(policy_a);
     let b_path = env.dir.path().join("b.qvault");
     a.read(|ctx| {
         let mut bytes = Vec::new();
@@ -171,46 +199,127 @@ fn lan_core_link_mode_between_replicas() {
         let _k = kdf();
         env.core().unlock(&b_path, &pw(PASSWORD), None).unwrap()
     };
-    let (w, manual, port) = code(&a, "desktop");
+    (a, b)
+}
+
+pub(super) fn replicas(env: &Env) -> (Session, Session) {
+    replicas_with(env, None)
+}
+
+/// `w_side` shows a code; `scanner` syncs with it once.
+fn round(
+    w_side: &Session,
+    scanner: &Session,
+) -> (Result<SyncReport, CoreError>, Result<SyncReport, CoreError>) {
+    let (w, manual, port) = code(w_side);
     let mut yes = Yes(None, None);
-    let mut joiner = Joiner(None);
-    let (report, link) = std::thread::scope(|s| {
-        let h = s.spawn(|| w.run(&a, &mut yes, None));
-        let link = b.join_link(
+    let (served, sent) = std::thread::scope(|s| {
+        let h = s.spawn(|| w.run(w_side, &mut yes, None));
+        let sent = scanner.sync_with_code(
             JoinCode::from_manual(&manual).unwrap(),
-            join_options("tablet", port),
-            &mut joiner,
+            sync_options(port),
             None,
         );
-        (h.join().unwrap().unwrap(), link.unwrap())
+        (h.join().unwrap(), sent)
     });
-    assert_eq!(report.mode, JoinMode::Link);
-    assert!(report.peer_confirmed);
-    assert_eq!(link.link.id_hex(), report.link.id_hex());
-    // The follow-up round (0013 §4.8): identical replicas, nothing new.
-    let ours = link.sync.unwrap();
-    let theirs = report.sync.unwrap().unwrap();
-    assert_eq!(
-        (ours.local, theirs.local),
-        (LocalAcceptance::Unchanged, LocalAcceptance::Unchanged)
-    );
-    assert!(ours.peer_confirmed && theirs.peer_confirmed);
-    assert_eq!(
-        yes.0.unwrap().as_bytes(),
-        &joiner.0.unwrap()[..],
-        "both screens showed the same code"
-    );
-    assert_eq!(b.lan_links().unwrap()[0].label.expose(), "tablet");
+    // A sync never shows a comparison code.
+    assert!(yes.0.is_none());
+    (synced_report(served), sent)
+}
+
+fn titles(s: &Session) -> Vec<String> {
+    let mut t: Vec<String> = s
+        .list(s.root().unwrap())
+        .unwrap()
+        .entries
+        .iter()
+        .map(|e| e.title.expose().to_owned())
+        .collect();
+    t.sort();
+    t
+}
+
+// 0012 §1: Account-dependent LAN sync
+#[test]
+fn lan_core_sync_converges_both_ways_and_reports_conflicts() {
+    let env = Env::new();
+    let (a, b) = replicas(&env);
+    crate::testutil::add_entry(&a, a.root().unwrap(), "from a");
+    crate::testutil::add_entry(&b, b.root().unwrap(), "from b");
+    let (got, sent) = round(&b, &a);
+    let sent = sent.unwrap();
+    assert_eq!(sent.local, LocalAcceptance::Committed);
+    assert!(sent.peer_confirmed);
+    assert!(sent.completion_error.is_none());
+    assert_eq!(got.unwrap().local, LocalAcceptance::Committed);
+    assert_eq!(titles(&a), ["from a", "from b"]);
+    assert_eq!(titles(&a), titles(&b));
+    // The other direction, then a conflict.
+    let shared = crate::testutil::add_entry(&b, b.root().unwrap(), "shared");
+    let (_, sent) = round(&a, &b);
+    assert_eq!(sent.unwrap().local, LocalAcceptance::Unchanged);
+    assert_eq!(titles(&a), titles(&b));
+    let on_a = a
+        .list(a.root().unwrap())
+        .unwrap()
+        .entries
+        .into_iter()
+        .find(|e| e.title.expose() == "shared")
+        .unwrap()
+        .handle;
+    for (s, h, t) in [(&a, on_a, "shared, a"), (&b, shared, "shared, b")] {
+        let mut d = s.edit_entry(h).unwrap();
+        d.entry_mut().title = Text::new(t).unwrap();
+        s.save_entry(d).unwrap();
+    }
+    let (got, sent) = round(&b, &a);
+    let sent = sent.unwrap();
+    assert_eq!(sent.local, LocalAcceptance::Committed);
+    assert!(sent.conflicts >= 1);
+    assert!(got.unwrap().conflicts >= 1);
+    assert_eq!(rows(&a) + rows(&b), 0);
+}
+
+// 0012 §1: LAN discovery mistaken for trust
+#[test]
+fn lan_core_sync_with_another_vault_fails_on_both_sides() {
+    let env = Env::new();
+    let a = env.unlock();
+    // A separately created vault (`Env::new` copies one shared fixture).
+    let other_env = Env::empty(TestDir::new());
+    let other = {
+        let _k = kdf();
+        other_env
+            .core()
+            .create(&other_env.path, &pw(PASSWORD), crate::testutil::NAME)
+            .unwrap()
+            .session
+    };
+    let (w, manual, port) = code(&a);
+    let (served, sent) = std::thread::scope(|s| {
+        let h = s.spawn(|| w.run(&a, &mut Yes(None, None), None));
+        let sent = other.sync_with_code(
+            JoinCode::from_manual(&manual).unwrap(),
+            sync_options(port),
+            None,
+        );
+        (h.join().unwrap(), sent)
+    });
+    assert!(matches!(
+        served.err(),
+        Some(CoreError::Lan(LanError::VaultMismatch))
+    ));
+    assert_eq!(err(sent), CoreError::Lan(LanError::VaultMismatch));
 }
 
 #[test]
-fn lan_core_lock_closes_the_window_without_a_link() {
+fn lan_core_lock_closes_the_window_without_a_grant() {
     let env = Env::new();
     let a = env.unlock();
-    let (w, manual, port) = code(&a, "phone");
+    let (w, manual, port) = code(&a);
     let b_env = Env::empty(TestDir::new());
     let dest = b_env.dir.path().join("joined.qvault");
-    // The approver's session locks while the user compares the codes.
+    // The offering session locks while the user compares the codes.
     let lock: &Session = &a;
     let comparing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let flag = comparing.clone();
@@ -234,7 +343,7 @@ fn lan_core_lock_closes_the_window_without_a_link() {
         let joined = core.join_new_device(
             JoinCode::from_manual(&manual).unwrap(),
             &dest,
-            join_options("laptop", port),
+            sync_options(port),
             &mut joiner,
             None,
         );
@@ -249,28 +358,43 @@ fn lan_core_lock_closes_the_window_without_a_link() {
         Some(CoreError::Lan(LanError::PeerCancelled))
     ));
     assert!(!dest.exists());
+}
+
+#[test]
+fn lan_core_lock_closes_a_waiting_window_promptly() {
+    let env = Env::new();
     let a = env.unlock();
-    assert!(a.lan_links().unwrap().is_empty());
+    let (w, _, _) = code(&a);
+    let started = std::time::Instant::now();
+    let r = std::thread::scope(|s| {
+        let h = s.spawn(|| w.run(&a, &mut Yes(None, None), None));
+        std::thread::sleep(Duration::from_millis(100));
+        a.lock();
+        h.join().unwrap()
+    });
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(matches!(r.err(), Some(CoreError::Lan(LanError::Cancelled))));
 }
 
 #[test]
 fn lan_core_refuses_invalid_options_and_recovery_sessions() {
     let env = Env::new();
     let s = env.unlock();
-    for label in ["", "a\u{7}b"] {
-        assert_eq!(
-            err(s.open_pairing_window(options(label))),
-            CoreError::InvalidInput
-        );
-    }
-    let mut long = options("x");
+    let mut long = options();
     long.limit = Duration::from_secs(601);
-    assert_eq!(err(s.open_pairing_window(long)), CoreError::InvalidInput);
-    let mut slow = options("x");
+    assert_eq!(err(s.open_sync_window(long)), CoreError::InvalidInput);
+    let mut slow = options();
     slow.timeouts.message = Duration::from_secs(11);
-    assert_eq!(err(s.open_pairing_window(slow)), CoreError::InvalidInput);
+    assert_eq!(err(s.open_sync_window(slow)), CoreError::InvalidInput);
+    let mut slow = sync_options(1);
+    slow.timeouts.message = Duration::from_secs(11);
+    let code = "AAAAA-AAAAA-AAAAA-AAAAA-AAAAA-A";
+    assert_eq!(
+        err(s.sync_with_code(JoinCode::from_manual(code).unwrap(), slow, None)),
+        CoreError::InvalidInput
+    );
     drop(s);
-    // A vault opened for recovery (no anchor) cannot pair.
+    // A vault opened for recovery (no anchor) can neither offer nor sync.
     std::fs::remove_dir_all(&env.anchors).unwrap();
     let (r, _) = {
         let _k = kdf();
@@ -278,11 +402,15 @@ fn lan_core_refuses_invalid_options_and_recovery_sessions() {
             .unlock_for_recovery(&env.path, &pw(PASSWORD), None)
             .unwrap()
     };
-    assert!(r.open_pairing_window(options("x")).is_err());
+    assert!(r.open_sync_window(options()).is_err());
+    assert!(
+        r.sync_with_code(JoinCode::from_manual(code).unwrap(), sync_options(1), None)
+            .is_err()
+    );
 }
 
 #[test]
-fn lan_core_new_device_refuses_an_anchor_directory_destination_before_pairing() {
+fn lan_core_new_device_refuses_an_anchor_directory_destination_before_connecting() {
     // As for `create`: a vault inside the anchor directory is refused before
     // any key is received (reviewer fix, plan 0037).
     let b_env = Env::empty(TestDir::new());
@@ -295,7 +423,7 @@ fn lan_core_new_device_refuses_an_anchor_directory_destination_before_pairing() 
     let joined = core.join_new_device(
         JoinCode::from_manual(code).unwrap(),
         &dest,
-        join_options("laptop", port),
+        sync_options(port),
         &mut Joiner(None),
         None,
     );
@@ -317,7 +445,7 @@ fn policy(env: &Env) -> SnapshotPolicy {
 const NEW: &str = "replacement generation passphrase for lan rotation";
 
 #[test]
-fn lan_core_rotation_drops_links_and_repairing_works() {
+fn lan_core_rotation_stops_old_copies_and_joining_again_works() {
     let a_env = Env::new();
     let core = a_env.core_with(Some(policy(&a_env)));
     let a = {
@@ -326,27 +454,9 @@ fn lan_core_rotation_drops_links_and_repairing_works() {
     };
     let b_env = Env::empty(TestDir::new());
     let old_copy: PathBuf = b_env.dir.path().join("old.qvault");
-    let (report, joined) = join_new(&a, &b_env, &old_copy);
+    let (served, joined) = join_new(&a, &b_env, &old_copy);
     let old = joined.unwrap();
-    assert!(report.peer_confirmed);
-    old.lock();
-    let old_bytes = std::fs::read(&old_copy).unwrap();
-    // The old link root of A's generation.
-    let (vault, old_root) = a
-        .read(|ctx| {
-            let h = ctx.open.vault.header();
-            Ok((
-                h.vault_id,
-                qv_crypto::lan::LinkRoot::derive(
-                    ctx.open.vault.vault_key(),
-                    h.vault_id,
-                    h.key_generation,
-                    h.derivation_profile,
-                )
-                .unwrap(),
-            ))
-        })
-        .unwrap();
+    assert!(joined_report(served).0);
     // Rotate A (0002 §3.5).
     let mut r = {
         let _k = kdf();
@@ -361,79 +471,31 @@ fn lan_core_rotation_drops_links_and_repairing_works() {
         let _k = kdf();
         core.unlock(&a_env.path, &pw(NEW), None).unwrap()
     };
-    // The replacement generation has no links (0013 §12.2).
-    assert!(a2.lan_links().unwrap().is_empty());
-    let (g2, new_root) = a2
-        .read(|ctx| {
-            let h = ctx.open.vault.header();
-            Ok((
-                h.key_generation,
-                qv_crypto::lan::LinkRoot::derive(
-                    ctx.open.vault.vault_key(),
-                    h.vault_id,
-                    h.key_generation,
-                    h.derivation_profile,
-                )
-                .unwrap(),
-            ))
-        })
-        .unwrap();
-    assert_eq!(g2.0, 2);
-    // An old-generation proof never verifies under the new generation.
-    let proof = old_root
-        .proof(&[1; 32], qv_crypto::lan::ProofRole::B, vault, g2)
-        .unwrap();
-    assert!(
-        new_root
-            .verify_proof(&[1; 32], qv_crypto::lan::ProofRole::B, vault, g2, &proof)
-            .is_err()
-    );
-    // Re-pairing in new-device mode creates a new file; the old copy stays
-    // untouched (0013 §10.6, §12.2).
+    // The old-generation copy fails the sync proof (0013 §12.2).
+    let (w, manual, port) = code(&a2);
+    let (served, sent) = std::thread::scope(|s| {
+        let h = s.spawn(|| w.run(&a2, &mut Yes(None, None), None));
+        let sent = old.sync_with_code(
+            JoinCode::from_manual(&manual).unwrap(),
+            sync_options(port),
+            None,
+        );
+        (h.join().unwrap(), sent)
+    });
+    assert_eq!(err(sent), CoreError::Lan(LanError::VaultMismatch));
+    assert!(matches!(
+        served.err(),
+        Some(CoreError::Lan(LanError::VaultMismatch))
+    ));
+    old.lock();
+    let old_bytes = std::fs::read(&old_copy).unwrap();
+    // Joining again in new-device mode creates a new file; the old copy
+    // stays untouched (0013 §10.6, §12.2).
     let fresh = b_env.dir.path().join("fresh.qvault");
-    let (report, joined) = join_new_with(&a2, &b_env, &fresh, NEW);
-    assert!(report.peer_confirmed);
-    assert_eq!(joined.unwrap().lan_links().unwrap().len(), 1);
+    let (served, joined) = join_new_with(&a2, &b_env, &fresh, NEW);
+    assert!(joined_report(served).0);
+    assert_eq!(rows(&joined.unwrap()), 0);
     assert_eq!(std::fs::read(&old_copy).unwrap(), old_bytes);
-}
-
-struct JoinerPw(&'static str);
-impl JoinerUi for JoinerPw {
-    fn show_code(&mut self, _: &Sas) -> bool {
-        true
-    }
-    fn confirm_vault(&mut self, _: &[u8], _: &Sas) -> bool {
-        true
-    }
-    fn master_password(&mut self) -> Option<MasterPassword> {
-        Some(pw(self.0))
-    }
-}
-
-fn join_new_with(
-    a: &Session,
-    b_env: &Env,
-    dest: &std::path::Path,
-    password: &'static str,
-) -> (crate::ApproveReport, Result<Session, CoreError>) {
-    let (w, manual, port) = code(a, "phone");
-    let mut yes = Yes(None, None);
-    let mut joiner = JoinerPw(password);
-    let core = b_env.core();
-    std::thread::scope(|s| {
-        let h = s.spawn(|| w.run(a, &mut yes, None));
-        let joined = {
-            let _k = kdf();
-            core.join_new_device(
-                JoinCode::from_manual(&manual).unwrap(),
-                dest,
-                join_options("laptop", port),
-                &mut joiner,
-                None,
-            )
-        };
-        (h.join().unwrap().unwrap(), joined)
-    })
 }
 
 #[test]
@@ -481,248 +543,42 @@ fn lan_core_conflicted_keyslot_refuses_a_new_device() {
     assert!(merged.accepted);
     let b_env = Env::empty(TestDir::new());
     let dest = b_env.dir.path().join("joined.qvault");
-    let (w, manual, port) = code(&a, "phone");
+    let (w, manual, port) = code(&a);
     let mut yes = Yes(None, None);
     let mut joiner = Joiner(None);
     let core_b = b_env.core();
-    let (report, joined) = std::thread::scope(|s| {
+    let (served, joined) = std::thread::scope(|s| {
         let h = s.spawn(|| w.run(&a, &mut yes, None));
         let joined = core_b.join_new_device(
             JoinCode::from_manual(&manual).unwrap(),
             &dest,
-            join_options("laptop", port),
+            sync_options(port),
             &mut joiner,
             None,
         );
         (h.join().unwrap().unwrap(), joined)
     });
     assert_eq!(err(joined), CoreError::Lan(LanError::Keyslot));
-    assert!(!report.peer_confirmed);
-    assert_eq!(report.failure, Some(LanError::Keyslot));
+    let (confirmed, failure) = joined_report(served);
+    assert!(!confirmed);
+    assert_eq!(failure, Some(LanError::Keyslot));
     assert!(!dest.exists());
-}
-
-// ---- sync rounds (plan 0038 step 6) ----
-
-/// Two replicas of one vault in `env` (B restored from an archive of A),
-/// linked in link mode; returns each side's link handle.
-pub(super) fn linked_pair(
-    env: &Env,
-    policy_a: Option<SnapshotPolicy>,
-) -> (Session, Session, crate::LanLinkHandle, crate::LanLinkHandle) {
-    let a = env.unlock_with(policy_a);
-    let b_path = env.dir.path().join("b.qvault");
-    a.read(|ctx| {
-        let mut bytes = Vec::new();
-        let now = ctx.now();
-        ctx.open.vault.write_archive(&mut bytes, now, &|| false)?;
-        let h = ctx.open.vault.header();
-        VaultFile::create_from_archive(
-            &b_path,
-            &mut std::io::Cursor::new(bytes),
-            ArchiveScope::new(h.vault_id, h.key_generation),
-            ctx.open.vault.vault_key(),
-            &AnchorDir::open(&env.anchors)?,
-            &|| false,
-        )?;
-        Ok(())
-    })
-    .unwrap();
-    let b = {
-        let _k = kdf();
-        env.core().unlock(&b_path, &pw(PASSWORD), None).unwrap()
-    };
-    let (w, manual, port) = code(&a, "tablet");
-    let (report, joined) = std::thread::scope(|s| {
-        let h = s.spawn(|| w.run(&a, &mut Yes(None, None), None));
-        let joined = b.join_link(
-            JoinCode::from_manual(&manual).unwrap(),
-            join_options("desktop", port),
-            &mut Joiner(None),
-            None,
-        );
-        (h.join().unwrap().unwrap(), joined.unwrap())
-    });
-    (a, b, report.link, joined.link)
-}
-
-fn receive_options() -> crate::ReceiveOptions {
-    crate::ReceiveOptions {
-        scope: ListenScope::LoopbackForTests,
-        limit: Duration::from_secs(30),
-        timeouts: fast(),
-        ..crate::ReceiveOptions::new()
-    }
-}
-
-fn sync_options() -> crate::SyncOptions {
-    crate::SyncOptions {
-        allow_loopback: true,
-        timeouts: fast(),
-    }
-}
-
-/// `r` receives one round that `i` starts with `link`.
-fn round(
-    r: &Session,
-    i: &Session,
-    link: &crate::LanLinkHandle,
-) -> (
-    Vec<Result<crate::SyncReport, CoreError>>,
-    crate::ReceiveReport,
-    Result<crate::SyncReport, CoreError>,
-) {
-    let w = r.open_receive_window(receive_options()).unwrap();
-    let code = w.code(&[IpAddr::V4(Ipv4Addr::LOCALHOST)]).unwrap();
-    assert_eq!(code.endpoints.len(), 1);
-    assert!(!code.qr.is_empty());
-    let addr = code.endpoints[0];
-    std::thread::scope(|s| {
-        let h = s.spawn(|| {
-            let mut events = Vec::new();
-            let report = w
-                .run(
-                    r,
-                    &mut |e| match e {
-                        crate::ReceiveEvent::Round(x) => events.push(x),
-                    },
-                    None,
-                )
-                .unwrap();
-            (events, report)
-        });
-        let sent = i.sync_lan(link, &[addr], sync_options(), None);
-        let (events, report) = h.join().unwrap();
-        (events, report, sent)
-    })
-}
-
-fn titles(s: &Session) -> Vec<String> {
-    let mut t: Vec<String> = s
-        .list(s.root().unwrap())
-        .unwrap()
-        .entries
-        .iter()
-        .map(|e| e.title.expose().to_owned())
-        .collect();
-    t.sort();
-    t
-}
-
-// 0012 §1: Account-dependent LAN sync
-#[test]
-fn lan_core_sync_converges_both_ways_and_reports_conflicts() {
-    let env = Env::new();
-    let (a, b, a_link, b_link) = linked_pair(&env, None);
-    crate::testutil::add_entry(&a, a.root().unwrap(), "from a");
-    crate::testutil::add_entry(&b, b.root().unwrap(), "from b");
-    let (events, report, sent) = round(&b, &a, &a_link);
-    let sent = sent.unwrap();
-    assert_eq!(sent.local, LocalAcceptance::Committed);
-    assert!(sent.peer_confirmed);
-    assert!(sent.completion_error.is_none());
-    assert_eq!(report.rounds, 1);
-    assert_eq!(report.end, crate::WindowEnd::Completed);
-    let got = events.into_iter().next().unwrap().unwrap();
-    assert_eq!(got.local, LocalAcceptance::Committed);
-    assert_eq!(got.link.id_hex(), b_link.id_hex());
-    assert_eq!(titles(&a), ["from a", "from b"]);
-    assert_eq!(titles(&a), titles(&b));
-    // The other direction, then a conflict.
-    let shared = crate::testutil::add_entry(&b, b.root().unwrap(), "shared");
-    let (_, _, sent) = round(&a, &b, &b_link);
-    assert_eq!(sent.unwrap().local, LocalAcceptance::Unchanged);
-    assert_eq!(titles(&a), titles(&b));
-    let on_a = a
-        .list(a.root().unwrap())
-        .unwrap()
-        .entries
-        .into_iter()
-        .find(|e| e.title.expose() == "shared")
-        .unwrap()
-        .handle;
-    for (s, h, t) in [(&a, on_a, "shared, a"), (&b, shared, "shared, b")] {
-        let mut d = s.edit_entry(h).unwrap();
-        d.entry_mut().title = Text::new(t).unwrap();
-        s.save_entry(d).unwrap();
-    }
-    let (events, _, sent) = round(&b, &a, &a_link);
-    let sent = sent.unwrap();
-    assert_eq!(sent.local, LocalAcceptance::Committed);
-    assert!(sent.conflicts >= 1);
-    assert!(events[0].as_ref().unwrap().conflicts >= 1);
-}
-
-#[test]
-fn lan_core_windows_refuse_removed_links_and_close_on_lock() {
-    let env = Env::new();
-    let (a, b, a_link, b_link) = linked_pair(&env, None);
-    // B removes the link: A's round finds no device that answers.
-    b.remove_lan_link(&b_link).unwrap();
-    let (events, report, sent) = std::thread::scope(|s| {
-        let w = b.open_receive_window(receive_options()).unwrap();
-        let addr = w
-            .code(&[IpAddr::V4(Ipv4Addr::LOCALHOST)])
-            .unwrap()
-            .endpoints[0];
-        let h = s.spawn(|| {
-            let mut events = 0;
-            let r = w.run(&b, &mut |_| events += 1, None).unwrap();
-            (events, r)
-        });
-        let sent = a.sync_lan(&a_link, &[addr], sync_options(), None);
-        // Locking B closes its window promptly.
-        let started = std::time::Instant::now();
-        b.lock();
-        let (events, report) = h.join().unwrap();
-        assert!(started.elapsed() < Duration::from_secs(2));
-        (events, report, sent)
-    });
-    assert_eq!(err(sent), CoreError::Lan(LanError::NoPeer));
-    assert_eq!(events, 0);
-    assert_eq!(report.end, crate::WindowEnd::Cancelled);
-    // A handle of another session is refused.
-    assert_eq!(
-        err(a.sync_lan(&b_link, &[], sync_options(), None)),
-        CoreError::StaleHandle
-    );
-    let mut bad = receive_options();
-    bad.limit = Duration::from_secs(15 * 60 + 1);
-    assert_eq!(err(a.open_receive_window(bad)), CoreError::InvalidInput);
-}
-
-#[test]
-fn lan_core_recovery_sessions_neither_receive_nor_sync() {
-    let env = Env::new();
-    let (a, _b, a_link, _) = linked_pair(&env, None);
-    drop(a);
-    std::fs::remove_dir_all(&env.anchors).unwrap();
-    let (r, _) = {
-        let _k = kdf();
-        env.core()
-            .unlock_for_recovery(&env.path, &pw(PASSWORD), None)
-            .unwrap()
-    };
-    assert!(r.open_receive_window(receive_options()).is_err());
-    let link = r.lan_links().unwrap().remove(0).handle;
-    assert!(r.sync_lan(&link, &[], sync_options(), None).is_err());
-    let _ = a_link;
 }
 
 #[test]
 fn lan_core_merges_take_an_ordinary_snapshot_at_most_once_per_interval() {
     let env = Env::new();
-    let (a, b, a_link, _) = linked_pair(&env, Some(policy(&env)));
+    let (a, b) = replicas_with(&env, Some(policy(&env)));
     let count = || a.snapshots().unwrap().snapshots.len();
     let before = count();
     crate::testutil::add_entry(&b, b.root().unwrap(), "one");
-    let (_, _, sent) = round(&b, &a, &a_link);
+    let (_, sent) = round(&b, &a);
     assert_eq!(sent.unwrap().local, LocalAcceptance::Committed);
     // The unlock's snapshot is recent: the merge does not add another.
     assert_eq!(count(), before);
     env.time.set(env.time.now().0 + 2 * 60 * 60 * 1000);
     crate::testutil::add_entry(&b, b.root().unwrap(), "two");
-    let (_, _, sent) = round(&b, &a, &a_link);
+    let (_, sent) = round(&b, &a);
     assert_eq!(sent.unwrap().local, LocalAcceptance::Committed);
     assert_eq!(count(), before + 1);
 }

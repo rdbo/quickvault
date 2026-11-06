@@ -587,7 +587,6 @@ pub(crate) fn Confirm(
         ConfirmKind::LinkApp => "Link this app to the entry? QuickVault verified the app's package and signing certificate, but cannot tell whether the app belongs to the service. Link only an app you trust.".to_owned(),
         ConfirmKind::ReducedQuick => "Reduced protection: this makes your device PIN, pattern or password a vault credential. Enable this separate policy? Biometrics never fall back to it automatically.".to_owned(),
         ConfirmKind::WeakPassword => "This password is weak and could be guessed by an attacker who obtains your vault file. Use it anyway?".to_owned(),
-        ConfirmKind::RemoveLink => "Remove this link? The other device is not notified and keeps its copy of the vault. Removal is not compromise recovery: rotate the vault key for that.".to_owned(),
     };
     let weak = kind == ConfirmKind::WeakPassword;
     rsx! {

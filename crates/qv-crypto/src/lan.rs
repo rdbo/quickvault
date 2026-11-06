@@ -56,8 +56,7 @@ use crate::primitives::{
     MacTag, NONCE_LEN, TAG_LEN, hkdf_sha512_into, mac1, mac1_verify, sha256, xchacha_open_in_place,
     xchacha_seal_in_place,
 };
-use crate::profile::{DerivationProfile, StoredDataProfile};
-use crate::stored_data::Sealed;
+use crate::profile::DerivationProfile;
 use crate::xwing::XWingSharedSecret;
 
 /// Largest record plaintext: one message of 1 MiB plus 1 KiB (0013 §6.2).
@@ -212,10 +211,6 @@ impl RecordOpener {
 
 /// Length of the pairing secret `P`.
 pub const PAIRING_SECRET_LEN: usize = 16;
-/// Longest link label in bytes (0013 §9.1).
-pub const LINK_LABEL_MAX: usize = 64;
-/// Largest sealed link-row ciphertext (0004 §2.4).
-pub const LINK_ROW_CIPHERTEXT_MAX: usize = 512;
 
 /// `H(x)`: SHA-256 of an already canonical encoding (0013 §1.2).
 pub fn transcript_hash(canonical: &[u8]) -> [u8; 32] {
@@ -469,10 +464,10 @@ impl core::fmt::Debug for Sas {
     }
 }
 
-/// Which side a link-mode proof speaks for (0013 §4.8).
+/// Which side a sync-mode proof speaks for (0013 §4.8).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProofRole {
-    /// The approving device, `"a"`.
+    /// The offering device, `"a"`.
     A,
     /// The joining device, `"b"`.
     B,
@@ -487,50 +482,20 @@ impl ProofRole {
     }
 }
 
-/// `K_lan`: the generation's link root (0013 §4.6). Only holders of this
-/// generation's VK can derive it.
-pub struct LinkRoot(PurposeKey<purpose::LanLink>);
+/// `K_proof`: the generation's LAN proof key (0013 §4.6). Only holders of
+/// this generation's VK can derive it.
+pub struct ProofRoot(PurposeKey<purpose::LanProof>);
 
-impl LinkRoot {
-    /// The `lan-link` purpose key of VK for this vault and generation.
+impl ProofRoot {
+    /// The `lan-proof` purpose key of VK for this vault and generation.
     pub fn derive(
         vk: &VaultKey,
         vault: VaultId,
         generation: KeyGeneration,
         profile: DerivationProfile,
     ) -> Result<Self, CryptoError> {
-        Ok(Self(vk.purpose_key::<purpose::LanLink>(
+        Ok(Self(vk.purpose_key::<purpose::LanProof>(
             vault, generation, profile,
-        )?))
-    }
-
-    /// The pairwise link key (0013 §4.6).
-    pub fn link_key(
-        &self,
-        ss: &XWingSharedSecret,
-        th: &[u8; 32],
-        nonce_b: &PairNonce,
-        link_id: &[u8; 16],
-        vault: VaultId,
-        generation: KeyGeneration,
-    ) -> Result<LinkKey, CryptoError> {
-        let salt = hash_array(|a| {
-            a.text("qv/lan-link-salt/v1");
-            a.bytes(th);
-            a.bytes(nonce_b.expose_secret());
-            a.bytes(link_id);
-        })?;
-        let info = cbor_array(|a| {
-            a.text("qv/lan-link/v1");
-            a.bytes(&vault.0);
-            a.uint(generation.0.into());
-            a.bytes(link_id);
-        })?;
-        Ok(LinkKey(derive_concat::<64>(
-            self.0.expose_secret(),
-            ss.expose_secret(),
-            &salt,
-            &info,
         )?))
     }
 
@@ -549,7 +514,7 @@ impl LinkRoot {
         })
     }
 
-    /// A link-mode proof for `role` (0013 §4.8).
+    /// A sync-mode proof for `role` (0013 §4.8).
     pub fn proof(
         &self,
         th: &[u8; 32],
@@ -563,7 +528,7 @@ impl LinkRoot {
         )
     }
 
-    /// Verifies a link-mode proof in constant time ([`CryptoError::Integrity`]).
+    /// Verifies a sync-mode proof in constant time ([`CryptoError::Integrity`]).
     pub fn verify_proof(
         &self,
         th: &[u8; 32],
@@ -580,238 +545,18 @@ impl LinkRoot {
     }
 }
 
-impl core::fmt::Debug for LinkRoot {
+impl core::fmt::Debug for ProofRoot {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("LinkRoot(<redacted>)")
+        f.write_str("ProofRoot(<redacted>)")
     }
-}
-
-/// A pairwise link key (0013 §4.6, §9.1). Phase 2.10 derives the session
-/// authentication keys from it.
-pub struct LinkKey(SecretArray<32>);
-
-impl LinkKey {
-    /// Constant-time equality, for tests and duplicate checks.
-    pub fn ct_eq(&self, other: &LinkKey) -> bool {
-        self.0.ct_eq(other.0.expose_secret())
-    }
-}
-
-impl core::fmt::Debug for LinkKey {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("LinkKey(<redacted>)")
-    }
-}
-
-impl LinkKey {
-    /// `K_i` and `K_r` of this link (0013 §5.1): `HKDF(link_key, empty,
-    /// ["qv/lan-auth/v1", "i"|"r"])`.
-    pub fn session_auth(&self) -> Result<SessionAuth, CryptoError> {
-        let key = |role: &str| {
-            derive_secret(
-                self.0.expose_secret(),
-                Some(&[]),
-                &cbor_array(|a| {
-                    a.text("qv/lan-auth/v1");
-                    a.text(role);
-                })?,
-            )
-        };
-        Ok(SessionAuth {
-            i: key("i")?,
-            r: key("r")?,
-        })
-    }
-}
-
-/// The session authentication keys of one link (0013 §5.1–5.2): `K_i` MACs
-/// the initiator's hello, `K_r` the responder's accept.
-pub struct SessionAuth {
-    i: SecretArray<32>,
-    r: SecretArray<32>,
-}
-
-impl SessionAuth {
-    /// `MAC/1(K_i, canonical(body))` of a sync hello.
-    pub fn hello_mac(&self, body: &[u8]) -> Result<MacTag, CryptoError> {
-        mac1(self.i.expose_secret(), body)
-    }
-
-    /// Verifies a sync hello tag in constant time ([`CryptoError::Integrity`]).
-    pub fn verify_hello(&self, body: &[u8], tag: &MacTag) -> Result<(), CryptoError> {
-        mac1_verify(self.i.expose_secret(), body, tag)
-    }
-
-    /// `MAC/1(K_r, canonical(["qv/lan-accept/v1", H(hello), nonce_R, ct]))`;
-    /// `transcript` is that canonical array.
-    pub fn accept_mac(&self, transcript: &[u8]) -> Result<MacTag, CryptoError> {
-        mac1(self.r.expose_secret(), transcript)
-    }
-
-    /// Verifies a sync accept tag in constant time ([`CryptoError::Integrity`]).
-    pub fn verify_accept(&self, transcript: &[u8], tag: &MacTag) -> Result<(), CryptoError> {
-        mac1_verify(self.r.expose_secret(), transcript, tag)
-    }
-}
-
-impl core::fmt::Debug for SessionAuth {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("SessionAuth(<redacted>)")
-    }
-}
-
-/// `(k_i2r, k_r2i)`, each `HKDF(ss ‖ link_key, th, ["qv/lan-session/v1",
-/// "i2r"|"r2i"])` (0013 §5.2).
-pub fn session_record_keys(
-    ss: &XWingSharedSecret,
-    link: &LinkKey,
-    th: &[u8; 32],
-) -> Result<(RecordKey, RecordKey), CryptoError> {
-    let key = |direction: &str| -> Result<RecordKey, CryptoError> {
-        let info = cbor_array(|a| {
-            a.text("qv/lan-session/v1");
-            a.text(direction);
-        })?;
-        Ok(RecordKey::from_secret(derive_concat::<64>(
-            ss.expose_secret(),
-            link.0.expose_secret(),
-            th,
-            &info,
-        )?))
-    };
-    Ok((key("i2r")?, key("r2i")?))
-}
-
-/// A decrypted link row (0013 §9.1).
-pub struct LinkRow {
-    /// The link key.
-    pub key: LinkKey,
-    /// The user-chosen label (UTF-8, at most [`LINK_LABEL_MAX`] bytes).
-    pub label: SecretBytes,
-    /// Creation time, milliseconds since the Unix epoch.
-    pub created_at: u64,
-}
-
-impl core::fmt::Debug for LinkRow {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("LinkRow(<redacted>)")
-    }
-}
-
-/// A link label: 1–64 bytes of UTF-8 without control characters.
-pub fn valid_link_label(label: &str) -> bool {
-    !label.is_empty() && label.len() <= LINK_LABEL_MAX && !label.chars().any(char::is_control)
-}
-
-fn link_row_aad(
-    vault: VaultId,
-    generation: KeyGeneration,
-    link_id: &[u8; 16],
-) -> Result<zeroize::Zeroizing<Vec<u8>>, CryptoError> {
-    cbor_array(|a| {
-        a.text("qv/lan-link-row/v1");
-        a.bytes(&vault.0);
-        a.uint(generation.0.into());
-        a.bytes(link_id);
-    })
-}
-
-/// Seals a link row under the `local-state` key (0013 §9.1, 0004 §2.4). An
-/// invalid label is [`CryptoError::LimitExceeded`].
-#[allow(clippy::too_many_arguments)] // the row's fields and its AAD context
-pub fn seal_link_row(
-    key: &PurposeKey<purpose::LocalState>,
-    profile: StoredDataProfile,
-    vault: VaultId,
-    generation: KeyGeneration,
-    link_id: &[u8; 16],
-    link: &LinkKey,
-    label: &str,
-    created_at: u64,
-) -> Result<Sealed, CryptoError> {
-    if !valid_link_label(label) {
-        return Err(CryptoError::LimitExceeded);
-    }
-    let plaintext = cbor_array(|a| {
-        a.bytes(link.0.expose_secret());
-        a.text(label);
-        a.uint(created_at);
-    })?;
-    crate::stored_data::seal(
-        key,
-        profile,
-        &link_row_aad(vault, generation, link_id)?,
-        &plaintext,
-        LINK_ROW_CIPHERTEXT_MAX,
-    )
-}
-
-/// Authenticates and decodes a sealed link row. Any failure after the bound
-/// check is [`CryptoError::Integrity`].
-pub fn open_link_row(
-    key: &PurposeKey<purpose::LocalState>,
-    profile: StoredDataProfile,
-    vault: VaultId,
-    generation: KeyGeneration,
-    link_id: &[u8; 16],
-    nonce: &[u8; NONCE_LEN],
-    ciphertext: &[u8],
-) -> Result<LinkRow, CryptoError> {
-    let plaintext = crate::stored_data::open(
-        key,
-        profile,
-        &link_row_aad(vault, generation, link_id)?,
-        nonce,
-        ciphertext,
-        LINK_ROW_CIPHERTEXT_MAX,
-    )?;
-    let bad = |_| CryptoError::Integrity;
-    let mut d = qv_encoding::Decoder::new(plaintext.expose_secret()).map_err(bad)?;
-    if d.array().map_err(bad)? != 3 {
-        return Err(CryptoError::Integrity);
-    }
-    let raw = d.bytes().map_err(bad)?;
-    if raw.len() != 32 {
-        return Err(CryptoError::Integrity);
-    }
-    let key = LinkKey(SecretArray::try_init(|out| {
-        out.copy_from_slice(raw);
-        Ok::<(), CryptoError>(())
-    })?);
-    let text = d.text().map_err(bad)?;
-    if !valid_link_label(text) {
-        return Err(CryptoError::Integrity);
-    }
-    let label = SecretBytes::try_init(text.len(), |out| {
-        out.copy_from_slice(text.as_bytes());
-        Ok::<(), CryptoError>(())
-    })?;
-    let created_at = d.uint().map_err(bad)?;
-    d.finish().map_err(bad)?;
-    Ok(LinkRow {
-        key,
-        label,
-        created_at,
-    })
 }
 
 /// Key bytes for the interoperability vectors only (plan 0037 step 8). The
 /// `test-vectors` feature is enabled only by dev-dependencies.
 #[cfg(any(test, feature = "test-vectors"))]
 pub mod vectors {
-    use super::{LinkKey, LinkRoot, PairingKeys, RecordKey, SessionAuth};
+    use super::{PairingKeys, ProofRoot, RecordKey};
 
-    /// `K_i` and `K_r`.
-    pub fn session_auth(k: &SessionAuth) -> ([u8; 32], [u8; 32]) {
-        (*k.i.expose_secret(), *k.r.expose_secret())
-    }
-    /// A link key with chosen bytes, for the session vectors.
-    pub fn link_key_from(bytes: [u8; 32]) -> Result<LinkKey, crate::CryptoError> {
-        Ok(LinkKey(crate::memory::SecretArray::try_init(|out| {
-            *out = bytes;
-            Ok::<(), crate::CryptoError>(())
-        })?))
-    }
     /// `K_hello` and `K_accept`.
     pub fn pairing_mac_keys(k: &PairingKeys) -> ([u8; 32], [u8; 32]) {
         (*k.hello.expose_secret(), *k.accept.expose_secret())
@@ -820,12 +565,8 @@ pub mod vectors {
     pub fn record_key(k: &RecordKey) -> [u8; 32] {
         *k.0.expose_secret()
     }
-    /// `K_lan`.
-    pub fn link_root(k: &LinkRoot) -> [u8; 32] {
-        *k.0.expose_secret()
-    }
-    /// A link key.
-    pub fn link_key(k: &LinkKey) -> [u8; 32] {
+    /// `K_proof`.
+    pub fn proof_root(k: &ProofRoot) -> [u8; 32] {
         *k.0.expose_secret()
     }
 }
@@ -979,15 +720,14 @@ mod tests {
     const TH: [u8; 32] = [8; 32];
     const VAULT: VaultId = VaultId([0x55; 16]);
     const GEN: KeyGeneration = KeyGeneration(3);
-    const LINK: [u8; 16] = [0x33; 16];
     fn ss(byte: u8) -> XWingSharedSecret {
         crate::xwing::tests_support::shared_secret([byte; 32])
     }
     fn nonce(byte: u8) -> PairNonce {
         PairNonce::from_bytes(&[byte; 32]).unwrap()
     }
-    fn root() -> LinkRoot {
-        LinkRoot::derive(
+    fn root() -> ProofRoot {
+        ProofRoot::derive(
             &VaultKey::from_bytes([0x44; 32]),
             VAULT,
             GEN,
@@ -1065,37 +805,13 @@ mod tests {
     }
 
     #[test]
-    fn lan_link_key_and_proofs_match_and_bind_their_context() {
+    fn lan_proofs_match_and_bind_their_context() {
         let vk = VaultKey::from_bytes([0x44; 32]);
         let root = root();
-        // K_lan is the "lan-link" purpose key.
-        let info = arr(&[t("qv/purpose/v1"), t("lan-link"), vec![3], vec![1]]);
-        let k_lan = hkdf(&vk.bytes(), &VAULT.0, &info, 32);
-        assert_eq!(&root.0.expose_secret()[..], &k_lan[..]);
-
-        let link = root
-            .link_key(&ss(9), &TH, &nonce(0x11), &LINK, VAULT, GEN)
-            .unwrap();
-        let salt = sha(&arr(&[
-            t("qv/lan-link-salt/v1"),
-            b(&TH),
-            b(&[0x11; 32]),
-            b(&LINK),
-        ]));
-        let info = arr(&[t("qv/lan-link/v1"), b(&VAULT.0), vec![3], b(&LINK)]);
-        let want = hkdf(&[k_lan.as_slice(), &[9; 32]].concat(), &salt, &info, 32);
-        assert_eq!(&link.0.expose_secret()[..], &want[..]);
-        // Each input changes the key.
-        for other in [
-            root.link_key(&ss(8), &TH, &nonce(0x11), &LINK, VAULT, GEN),
-            root.link_key(&ss(9), &[0; 32], &nonce(0x11), &LINK, VAULT, GEN),
-            root.link_key(&ss(9), &TH, &nonce(0x12), &LINK, VAULT, GEN),
-            root.link_key(&ss(9), &TH, &nonce(0x11), &[0; 16], VAULT, GEN),
-            root.link_key(&ss(9), &TH, &nonce(0x11), &LINK, VaultId([0; 16]), GEN),
-            root.link_key(&ss(9), &TH, &nonce(0x11), &LINK, VAULT, KeyGeneration(4)),
-        ] {
-            assert!(!other.unwrap().ct_eq(&link));
-        }
+        // K_proof is the "lan-proof" purpose key.
+        let info = arr(&[t("qv/purpose/v1"), t("lan-proof"), vec![3], vec![1]]);
+        let k_proof = hkdf(&vk.bytes(), &VAULT.0, &info, 32);
+        assert_eq!(&root.0.expose_secret()[..], &k_proof[..]);
 
         let proof = root.proof(&TH, ProofRole::B, VAULT, GEN).unwrap();
         let input = arr(&[
@@ -1105,126 +821,37 @@ mod tests {
             b(&VAULT.0),
             vec![3],
         ]);
-        assert_eq!(proof.as_bytes(), &mac(&k_lan, &input));
+        assert_eq!(proof.as_bytes(), &mac(&k_proof, &input));
         root.verify_proof(&TH, ProofRole::B, VAULT, GEN, &proof)
             .unwrap();
-        // Reflection, other vault, generation, transcript or root all fail.
+        // The two roles give different proofs.
+        assert_ne!(
+            root.proof(&TH, ProofRole::A, VAULT, GEN)
+                .unwrap()
+                .as_bytes(),
+            proof.as_bytes()
+        );
+        // Reflection, other vault, generation, transcript or VK all fail.
         let fails = [
             root.verify_proof(&TH, ProofRole::A, VAULT, GEN, &proof),
             root.verify_proof(&TH, ProofRole::B, VaultId([0; 16]), GEN, &proof),
             root.verify_proof(&TH, ProofRole::B, VAULT, KeyGeneration(4), &proof),
             root.verify_proof(&[0; 32], ProofRole::B, VAULT, GEN, &proof),
-            LinkRoot::derive(&vk, VAULT, KeyGeneration(4), DerivationProfile::V1)
+            ProofRoot::derive(&vk, VAULT, KeyGeneration(4), DerivationProfile::V1)
                 .unwrap()
                 .verify_proof(&TH, ProofRole::B, VAULT, GEN, &proof),
+            ProofRoot::derive(
+                &VaultKey::from_bytes([0x45; 32]),
+                VAULT,
+                GEN,
+                DerivationProfile::V1,
+            )
+            .unwrap()
+            .verify_proof(&TH, ProofRole::B, VAULT, GEN, &proof),
         ];
         for f in fails {
             assert_eq!(f, Err(CryptoError::Integrity));
         }
-    }
-
-    #[test]
-    fn lan_link_rows_round_trip_and_bind_their_aad() {
-        let vk = VaultKey::from_bytes([0x44; 32]);
-        let local = vk
-            .purpose_key::<purpose::LocalState>(VAULT, GEN, DerivationProfile::V1)
-            .unwrap();
-        let link = root()
-            .link_key(&ss(9), &TH, &nonce(0x11), &LINK, VAULT, GEN)
-            .unwrap();
-        let p = StoredDataProfile::V1;
-        let sealed = seal_link_row(&local, p, VAULT, GEN, &LINK, &link, "Phone", 1234).unwrap();
-        assert!(sealed.ciphertext.len() <= LINK_ROW_CIPHERTEXT_MAX);
-        let row = open_link_row(
-            &local,
-            p,
-            VAULT,
-            GEN,
-            &LINK,
-            &sealed.nonce,
-            &sealed.ciphertext,
-        )
-        .unwrap();
-        assert!(row.key.ct_eq(&link));
-        assert_eq!(row.label.expose_secret(), b"Phone");
-        assert_eq!(row.created_at, 1234);
-        assert_eq!(
-            format!("{row:?} {link:?}"),
-            "LinkRow(<redacted>) LinkKey(<redacted>)"
-        );
-        // The AAD binds vault, generation and link ID.
-        for (v, g, l) in [
-            (VaultId([0; 16]), GEN, LINK),
-            (VAULT, KeyGeneration(4), LINK),
-            (VAULT, GEN, [0; 16]),
-        ] {
-            assert_eq!(
-                open_link_row(&local, p, v, g, &l, &sealed.nonce, &sealed.ciphertext).err(),
-                Some(CryptoError::Integrity)
-            );
-        }
-        let mut bad = sealed.ciphertext.clone();
-        bad[0] ^= 1;
-        assert!(open_link_row(&local, p, VAULT, GEN, &LINK, &sealed.nonce, &bad).is_err());
-        // Labels: 1–64 bytes, no control characters.
-        for label in ["", "a\nb", &"x".repeat(65)] {
-            assert_eq!(
-                seal_link_row(&local, p, VAULT, GEN, &LINK, &link, label, 0).err(),
-                Some(CryptoError::LimitExceeded)
-            );
-        }
-        assert!(seal_link_row(&local, p, VAULT, GEN, &LINK, &link, &"é".repeat(32), 0).is_ok());
-    }
-
-    fn link(byte: u8) -> LinkKey {
-        vectors::link_key_from([byte; 32]).unwrap()
-    }
-
-    #[test]
-    fn lan_session_keys_match_an_independent_construction() {
-        let l = link(0x66);
-        let auth = l.session_auth().unwrap();
-        let (ki, kr) = vectors::session_auth(&auth);
-        let info = |role: &str| arr(&[t("qv/lan-auth/v1"), t(role)]);
-        assert_eq!(ki.to_vec(), hkdf(&[0x66; 32], &[], &info("i"), 32));
-        assert_eq!(kr.to_vec(), hkdf(&[0x66; 32], &[], &info("r"), 32));
-        // The hello tag is K_i's, the accept tag K_r's; neither verifies
-        // under the other (no reflection).
-        let body = b"hello body";
-        let tag = auth.hello_mac(body).unwrap();
-        assert_eq!(tag.as_bytes(), &mac(&ki, body));
-        auth.verify_hello(body, &tag).unwrap();
-        assert_eq!(
-            auth.verify_accept(body, &tag).unwrap_err(),
-            CryptoError::Integrity
-        );
-        let accept = auth.accept_mac(body).unwrap();
-        assert_eq!(accept.as_bytes(), &mac(&kr, body));
-        assert!(auth.verify_hello(body, &accept).is_err());
-        // Another link's keys refuse both.
-        let other = link(0x67).session_auth().unwrap();
-        assert!(other.verify_hello(body, &tag).is_err());
-        assert!(other.verify_accept(body, &accept).is_err());
-
-        let (i2r, r2i) = session_record_keys(&ss(0x99), &l, &TH).unwrap();
-        let ikm = [[0x99; 32], [0x66; 32]].concat();
-        let info = |d: &str| arr(&[t("qv/lan-session/v1"), t(d)]);
-        assert_eq!(
-            vectors::record_key(&i2r).to_vec(),
-            hkdf(&ikm, &TH, &info("i2r"), 32)
-        );
-        assert_eq!(
-            vectors::record_key(&r2i).to_vec(),
-            hkdf(&ikm, &TH, &info("r2i"), 32)
-        );
-        assert_ne!(vectors::record_key(&i2r), vectors::record_key(&r2i));
-        // Each input changes both keys.
-        for (s, k, th) in [(0x98, 0x66, TH), (0x99, 0x67, TH), (0x99, 0x66, [9; 32])] {
-            let (a, b) = session_record_keys(&ss(s), &link(k), &th).unwrap();
-            assert_ne!(vectors::record_key(&a), vectors::record_key(&i2r));
-            assert_ne!(vectors::record_key(&b), vectors::record_key(&r2i));
-        }
-        assert_eq!(format!("{auth:?}"), "SessionAuth(<redacted>)");
     }
 
     #[test]
@@ -1257,7 +884,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             format!("{secret:?} {keys:?} {:?} {:?}", nonce(1), root()),
-            "PairingSecret(<redacted>) PairingKeys(<redacted>) PairNonce(<redacted>) LinkRoot(<redacted>)"
+            "PairingSecret(<redacted>) PairingKeys(<redacted>) PairNonce(<redacted>) ProofRoot(<redacted>)"
         );
     }
 

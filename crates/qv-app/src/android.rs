@@ -903,7 +903,8 @@ pub(crate) fn capture_qr(cancel: &CancelToken) -> Result<qv_core::SecretBytes, A
         })?;
         if let Some(frame) = frame {
             attempts += 1;
-            if let Some(payload) = crate::qr::decode_frame(frame?.expose_secret())? {
+            // An unreadable or ambiguous frame is skipped (0014 §6.6).
+            if let Some(payload) = crate::qr::scan_frame(frame?.expose_secret()) {
                 if Instant::now() >= end || cancel.is_cancelled() {
                     return Err(qv_core::CoreError::Cancelled.into());
                 }

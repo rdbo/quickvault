@@ -59,14 +59,14 @@ of attacker-supplied SQL constraints.
 | `sync_state` | remote ID | encrypted verified remote base, cursor and pending publication |
 | `archive_receipts` | exactly one row | sealed local filename/complete-archive digest set (§2.3), bound by `local_head`; never in archives or sync |
 | `replica` | exactly one row | local-only writer state (0005 §1.3): replica ID naming this DB's external anchor, writer ID, next counter; never in archives or sync |
-| `lan_link` | link ID | sealed pairwise LAN link key, label and creation time, bound by the local head's `lan_links_digest` (0013 §9.1); local-only, never in archives or sync |
+| `lan_link` | link ID | kept for format compatibility and always empty after a commit (0013 §9.1, 0014 §5); bound by the local head's `lan_links_digest`; local-only, never in archives or sync |
 
 Server checkpoint fields and `sync_state` rows are optional server-mode state.
 Creating or operating an offline or LAN-only vault MUST NOT require a server
 identity, account, checkpoint or dummy server row. LAN exchanges use the same
-verified objects/manifests and local commit/anchor path; the local-only peer
-state is the `lan_link` schema of 0013 §9, which MUST NOT be
-inferred from the server `sync_state` layout.
+verified objects/manifests and local commit/anchor path; no LAN peer state is
+stored (0013 §9.1), and nothing LAN-related may be inferred from the server
+`sync_state` layout.
 
 2.1. A record may have several active versions. The manifest defines active,
 historical and suppressed versions; a single record-ID primary key or upload
@@ -146,7 +146,9 @@ CREATE TABLE lan_link (link_id BLOB PRIMARY KEY CHECK (length(link_id) = 16), ke
 `[1, data_profile:uint, nonce:bstr24, ciphertext:bstr]`, with stored-data/1
 framing and AEAD under the generation's `local-state` purpose key, a fresh
 random nonce, AAD `["qv/lan-link-row/v1", vault_id, key_generation, link_id]`
-and the plaintext of 0013 §9.1. The ciphertext is at most 512 bytes.
+and the plaintext of 0013 §9.1 before 0014 (link key, label, creation
+time). The ciphertext is at most 512 bytes. Rows in this layout exist only in
+files written before 0014 and are cleared at their next commit.
 
 On open:
 - at most 64 rows are allowed, checked before any value is read;
@@ -155,10 +157,12 @@ On open:
 - `lan_links_digest` (local-head key 8) must equal the digest of 0013 §9.1
   over the stored rows. A mismatch is an integrity error.
 
-Rows are decrypted only when used. No peer endpoint is stored (0013 §9.2).
-Creation, new-path restore and a rotation replacement start with no rows and
-the digest of the empty set. New-device creation (0013 §10) writes its
-single link row in the first head. The development schema/header version
+Rows are never read for authentication. No peer endpoint is stored (0013
+§9.2). Every commit deletes all rows and writes the digest of the empty set
+(0013 §9.1), so a file from before 0014 clears at its next commit. Creation,
+new-path restore, new-device creation (0013 §10) and a rotation replacement
+start with no rows. The table and digest are removed at the next format
+change. The development schema/header version
 with this table is `0x7FFF0004`. Older development files are rejected,
 without a migration.
 
@@ -362,6 +366,9 @@ is unsupported ([SQLite warning](https://www.sqlite.org/howtocorrupt.html)).
 
 ## Changelog
 
+- 2026-11-06: Accepted 0014 (owner, plan 0042): `lan_link` and
+  `lan_links_digest` stay in the format but are always empty after a commit;
+  new-device creation writes no row. The development version is unchanged.
 - 2026-11-03: Drop the `lan_hint` table: no peer endpoint is stored (0013
   §9.2; owner decision). The development version stays `0x7FFF0004` (that
   format was never committed with hints).

@@ -254,13 +254,6 @@ fn lan_command() -> Command {
             .action(ArgAction::Append)
             .help("The other device's address, a.b.c.d:port or [v6]:port (repeatable)")
     };
-    let label = |help: &'static str| {
-        Arg::new("label")
-            .long("label")
-            .value_name("NAME")
-            .required(true)
-            .help(help)
-    };
     let port = || {
         Arg::new("port")
             .long("port")
@@ -276,55 +269,38 @@ fn lan_command() -> Command {
             .help(help)
     };
     Command::new("lan")
-        .about("Pair devices and sync directly on the local network (no account or server)")
+        .about("Sync directly with another device on the local network (no account or server)")
         .after_help(
-            "The pairing code is typed at a hidden prompt and shown only on the alternate \
-             screen; it is never an argument. Addresses are not secret.",
+            "One device shows a code with `lan open`; the other types it with `lan sync` (a \
+             copy of the same vault) or `lan join --new` (a new device). A code works once. \
+             It is typed at a hidden prompt and shown only on the alternate screen; it is \
+             never an argument. Addresses are not secret. Nothing about the other device is \
+             stored.",
         )
         .subcommand_required(true)
         .subcommand(
-            Command::new("pair")
-                .about("Open a pairing window and show its code (this device approves)")
-                .arg(label("This device's name for the joining device (1-64 bytes)"))
+            Command::new("open")
+                .about("Show a one-use code for one sync or one new device")
                 .arg(port())
-                .arg(minutes("How long the window stays open, 1-10 (default 10)")),
+                .arg(minutes("How long the code works, 1-10 (default 10)")),
+        )
+        .subcommand(
+            Command::new("sync")
+                .about("Sync once with the device that shows a code (both hold this vault)")
+                .arg(endpoint()),
         )
         .subcommand(
             Command::new("join")
-                .about("Join a pairing window with its code (link mode, or --new for a new device)")
+                .about("Receive the vault as a new device from the device that shows a code")
                 .arg(endpoint())
-                .arg(label("This device's name for the approving device (1-64 bytes)"))
                 .arg(
                     Arg::new("new")
                         .long("new")
                         .value_name("PATH")
+                        .required(true)
                         .value_parser(value_parser!(PathBuf))
-                        .help("Receive the vault as a new device and create it at PATH (must not exist)"),
+                        .help("Create the joined vault at PATH (must not exist)"),
                 ),
-        )
-        .subcommand(
-            Command::new("receive")
-                .about("Open a receive window for one sync round started by a linked device")
-                .arg(port())
-                .arg(minutes("How long the window stays open, 1-15 (default 2)"))
-                .arg(flag("stay", "Serve further rounds until the window closes")),
-        )
-        .subcommand(
-            Command::new("sync")
-                .about("Sync with a linked device that has a receive window open")
-                .arg(endpoint())
-                .arg(
-                    Arg::new("link")
-                        .long("link")
-                        .value_name("ID")
-                        .help("The link to use, by 6-32 hex digits of its ID (default: the only link)"),
-                ),
-        )
-        .subcommand(Command::new("links").about("List this vault's LAN links"))
-        .subcommand(
-            Command::new("unlink")
-                .about("Remove a LAN link (local only; not compromise recovery)")
-                .arg(Arg::new("link").required(true).value_name("ID")),
         )
 }
 

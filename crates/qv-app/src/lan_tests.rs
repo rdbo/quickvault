@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Headless LAN tests through two real controllers and cores on loopback
-//! (enabled for tests only; plan 0038 step 9). The renderer's calls are
+//! (enabled for tests only; plans 0038 step 9, 0042 step 8). The renderer's calls are
 //! made directly: answers, typed secrets, cancel and lock.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::sync::atomic::Ordering;
@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use crate::controller::{Action, AppError, InputField, Mode, Phase};
 use crate::lan::{LanView, Question, TEST_LOOPBACK};
 use crate::views;
-use crate::workspace::{ConfirmKind, Screen, WsAction, WsField};
+use crate::workspace::{Screen, WsAction, WsField};
 use crate::workspace_tests::{Env, KDF, PASSWORD};
 
 fn kdf() -> std::sync::MutexGuard<'static, ()> {
@@ -41,15 +41,29 @@ fn titles(env: &Env) -> Vec<String> {
         .collect()
 }
 
-/// A pairs B as a new device through the locked screen's Join mode; returns
-/// B unlocked. The joiner's first password is wrong when `wrong` is set.
+/// A's window shows its code; returns the manual code and first endpoint.
+fn offer(a: &Env) -> (String, String) {
+    a.c.navigate(a.epoch(), Screen::Devices);
+    a.c.act(a.epoch(), WsAction::LanOffer);
+    until(a, "the code", |v| {
+        let code = v.code.as_ref()?;
+        assert!(v.qr.is_some(), "the window displays the binary QR");
+        Some((
+            String::from_utf8(code.expose_secret().to_vec()).unwrap(),
+            v.endpoints.first()?.clone(),
+        ))
+    })
+}
+
+/// B joins A as a new device through the locked screen's Join mode; returns
+/// B unlocked. The joiner's first password is wrong when `wrong` is set; a
+/// scanned code with endpoints starts the join by itself.
 fn join_new(a: &Env, wrong: bool, scanned: bool) -> Env {
     a.c.navigate(a.epoch(), Screen::Devices);
-    a.put(WsField::LanLabel, "phone");
-    a.c.act(a.epoch(), WsAction::LanPair);
-    let (code, endpoint) = until(a, "the pairing code", |v| {
+    a.c.act(a.epoch(), WsAction::LanOffer);
+    let (code, endpoint) = until(a, "the code", |v| {
         let code = v.code.as_ref()?;
-        assert!(v.qr.is_some(), "pairing window displays the binary QR");
+        assert!(v.qr.is_some(), "the window displays the binary QR");
         Some((
             String::from_utf8(code.expose_secret().to_vec()).unwrap(),
             v.endpoints.first()?.clone(),
@@ -60,18 +74,23 @@ fn join_new(a: &Env, wrong: bool, scanned: bool) -> Env {
     if scanned {
         b.c.select_mode(b.epoch(), Mode::Join);
         let payload = scanned_payload(a);
-        b.c.accept_qr(
-            b.epoch(),
-            crate::qr::QrTarget::NewDevice,
-            payload.expose_secret(),
-        )
-        .unwrap();
+        let addressed =
+            b.c.accept_qr(
+                b.epoch(),
+                crate::qr::QrTarget::NewDevice,
+                payload.expose_secret(),
+            )
+            .unwrap();
+        assert!(addressed, "the window's QR names its endpoints");
+        // What the scan thread does once it releases the camera (after the
+        // protection status was acknowledged).
+        b.c.acknowledge_protection().unwrap();
+        b.c.start_scanned(b.epoch(), crate::qr::QrTarget::NewDevice);
     } else {
         b.fill(InputField::LanCode, &code);
         b.fill(InputField::LanEndpoint, &endpoint);
+        b.c.submit(b.epoch(), Action::JoinDevice, true).unwrap();
     }
-    b.fill(InputField::LanLabel, "laptop");
-    b.c.submit(b.epoch(), Action::JoinDevice, true).unwrap();
     // A compares the code; B confirms the vault and gives its password.
     let sas = until(a, "the approval question", |v| match &v.question {
         Some(Question::Approve { sas, vault, .. }) => {
@@ -109,10 +128,9 @@ fn join_new(a: &Env, wrong: bool, scanned: bool) -> Env {
     b.wait();
     assert_eq!(b.c.snapshot().phase, Phase::Unlocked);
     a.wait();
-    let done = until(a, "the pairing outcome", |v| v.done.clone());
+    let done = until(a, "the join outcome", |v| v.done.clone());
     assert!(done.error.is_none(), "{done:?}");
-    assert!(done.lines[0].starts_with("Paired."));
-    assert!(done.lines[1].contains("confirmed"));
+    assert_eq!(done.lines[0], "A new device joined this vault.");
     assert!(
         a.c.lan_view(a.epoch()).unwrap().qr.is_none(),
         "finished QR cleared"
@@ -127,48 +145,40 @@ fn v_seconds(env: &Env) -> u64 {
 }
 
 #[test]
-fn lan_app_new_device_join_then_sync_and_remove() {
+fn lan_app_new_device_join_then_sync_with_a_typed_code() {
     let _k = kdf();
     let a = Env::unlocked();
     a.add_entry("Mail", "s3cret-canary-value");
     let b = join_new(&a, true, false);
     assert_eq!(titles(&b), ["Mail"]);
-    let links = b.read(views::lan_links);
-    assert_eq!(links.len(), 1);
-    assert_eq!(links[0].label, "laptop");
     // A post-commit failure must retain acceptance lines and surface the error.
-    let link = b.read(|s| Ok(s.lan_links()?.remove(0).handle));
     for error in [
         qv_core::CoreError::Store(qv_core::StoreError::Io),
         qv_core::CoreError::Lan(qv_core::LanError::Timeout),
     ] {
         let done = crate::lan::round_done(
             &qv_core::SyncReport {
-                link: link.clone(),
                 local: qv_core::LocalAcceptance::Committed,
                 conflicts: 2,
                 peer_confirmed: true,
                 completion_error: Some(error),
             },
-            vec!["Paired.".to_owned()],
+            vec!["Synced.".to_owned()],
         );
         assert_eq!(done.error, Some(AppError::from(error)));
-        assert_eq!(done.lines[0], "Paired.");
+        assert_eq!(done.lines[0], "Synced.");
         assert!(done.lines[1].contains("accepted"));
         assert_eq!(done.lines[2], "Unresolved conflicts: 2");
     }
 
-    // A edits, opens a receive window; B syncs with its link.
+    // A edits and shows a new code; B types it and syncs.
     a.c.navigate(a.epoch(), Screen::Browse(None));
     a.add_entry("Bank", "another-canary");
-    a.c.navigate(a.epoch(), Screen::Devices);
-    a.c.act(a.epoch(), WsAction::LanReceive);
-    let endpoint = until(&a, "the receive endpoints", |v| {
-        v.endpoints.first().cloned()
-    });
+    let (code, endpoint) = offer(&a);
     b.c.navigate(b.epoch(), Screen::Devices);
+    b.put(WsField::LanCode, &code);
     b.put(WsField::LanEndpoint, &endpoint);
-    b.act(WsAction::LanSync(links[0].id.clone()));
+    b.act(WsAction::LanSync);
     let done = until(&b, "the sync outcome", |v| v.done.clone());
     assert!(done.error.is_none(), "{done:?}");
     assert_eq!(
@@ -177,18 +187,20 @@ fn lan_app_new_device_join_then_sync_and_remove() {
     );
     assert!(done.lines[2].contains("confirmed"));
     a.wait();
-    let a_done = until(&a, "the receive outcome", |v| v.done.clone());
-    assert_eq!(a_done.lines[0], "Nothing new from the other device.");
+    let a_done = until(&a, "the window outcome", |v| v.done.clone());
+    assert_eq!(
+        a_done.lines[0],
+        "Synced with a device that holds this vault."
+    );
+    assert_eq!(a_done.lines[1], "Nothing new from the other device.");
     let mut t = titles(&b);
     t.sort();
     assert_eq!(t, ["Bank", "Mail"]);
-    // Removing the link asks first.
-    b.c.lan_dismiss(b.epoch());
-    b.act(WsAction::LanRemove(links[0].id.clone()));
-    assert_eq!(b.c.pending(b.epoch()), Some(ConfirmKind::RemoveLink));
-    b.act(WsAction::Answer(true));
-    assert!(b.read(views::lan_links).is_empty());
-    assert!(b.notice().unwrap().contains("not notified"));
+    // The code and address were consumed by the action.
+    let s = b.c.state();
+    let ws = s.workspace.as_ref().unwrap();
+    assert!(ws.input(WsField::LanCode).is_empty());
+    assert!(ws.input(WsField::LanEndpoint).is_empty());
 }
 
 #[test]
@@ -196,10 +208,9 @@ fn lan_app_cancel_and_lock_end_windows_and_prompts() {
     let _k = kdf();
     let a = Env::unlocked();
     a.c.navigate(a.epoch(), Screen::Devices);
-    // Cancel ends a waiting pairing window.
-    a.put(WsField::LanLabel, "phone");
-    a.c.act(a.epoch(), WsAction::LanPair);
-    until(&a, "the pairing code", |v| v.code.as_ref().map(|_| ()));
+    // Cancel ends a waiting window.
+    a.c.act(a.epoch(), WsAction::LanOffer);
+    until(&a, "the code", |v| v.code.as_ref().map(|_| ()));
     // A waiting window counts as activity for the idle lock.
     {
         let mut s = a.c.state();
@@ -220,9 +231,9 @@ fn lan_app_cancel_and_lock_end_windows_and_prompts() {
         "the code is gone"
     );
     a.c.lan_dismiss(a.epoch());
-    // A lock ends a waiting receive window and drops its state.
-    a.c.act(a.epoch(), WsAction::LanReceive);
-    until(&a, "the receive window", |v| {
+    // A lock ends a waiting window and drops its state.
+    a.c.act(a.epoch(), WsAction::LanOffer);
+    until(&a, "the window", |v| {
         (!v.endpoints.is_empty()).then_some(())
     });
     a.c.lock();
@@ -233,33 +244,30 @@ fn lan_app_cancel_and_lock_end_windows_and_prompts() {
     assert!(!a.c.snapshot().busy);
     assert_eq!(a.c.snapshot().phase, Phase::Locked);
     assert!(a.c.lan_view(a.epoch()).is_none());
-    // Input bounds: a missing label or endpoint is refused before any work.
+    // Input bounds: a missing code or address, or a host name, is refused
+    // before any work.
     a.unlock(PASSWORD);
     a.c.navigate(a.epoch(), Screen::Devices);
-    a.act(WsAction::LanPair);
+    a.act(WsAction::LanSync);
     assert_eq!(a.error(), Some(AppError::InvalidInput));
+    a.put(WsField::LanCode, "AAAAA-AAAAA-AAAAA-AAAAA-AAAAA-A");
+    a.act(WsAction::LanSync);
+    assert_eq!(a.error(), Some(AppError::InvalidInput));
+    a.put(WsField::LanCode, "AAAAA-AAAAA-AAAAA-AAAAA-AAAAA-A");
     a.put(WsField::LanEndpoint, "localhost:80");
-    a.act(WsAction::LanSync("00".repeat(16)));
+    a.act(WsAction::LanSync);
     assert_eq!(a.error(), Some(AppError::InvalidInput));
+    assert!(a.c.lan_view(a.epoch()).is_none());
 }
 
 #[test]
 fn lan_app_join_refused_by_the_approver_creates_nothing() {
     let _k = kdf();
     let a = Env::unlocked();
-    a.c.navigate(a.epoch(), Screen::Devices);
-    a.put(WsField::LanLabel, "phone");
-    a.c.act(a.epoch(), WsAction::LanPair);
-    let (code, endpoint) = until(&a, "the pairing code", |v| {
-        Some((
-            String::from_utf8(v.code.as_ref()?.expose_secret().to_vec()).unwrap(),
-            v.endpoints.first()?.clone(),
-        ))
-    });
+    let (code, endpoint) = offer(&a);
     let b = Env::new();
     b.fill(InputField::LanCode, &code);
     b.fill(InputField::LanEndpoint, &endpoint);
-    b.fill(InputField::LanLabel, "laptop");
     b.c.submit(b.epoch(), Action::JoinDevice, true).unwrap();
     until(&a, "the approval question", |v| {
         matches!(v.question, Some(Question::Approve { .. })).then_some(())
@@ -270,7 +278,6 @@ fn lan_app_join_refused_by_the_approver_creates_nothing() {
     assert!(b.c.snapshot().error.is_some());
     assert!(!b.dir.join("vaults/main.qvault").exists());
     a.wait();
-    assert!(a.read(views::lan_links).is_empty());
 }
 
 /// Synthetic camera luminance from the actual window's protected binary symbol.
@@ -298,7 +305,7 @@ fn scanned_payload(env: &Env) -> qv_core::SecretBytes {
 
 // 0012 §1: LAN discovery mistaken for trust
 #[test]
-fn lan_app_qr_new_device_link_and_address_sync_use_binary_payloads() {
+fn lan_app_scanned_codes_start_the_join_and_the_sync() {
     let _k = kdf();
     // Unlike loopback-only protocol tests, QR inspection enforces production
     // endpoint policy. This host's LAN address is also required by CLI tests.
@@ -308,17 +315,20 @@ fn lan_app_qr_new_device_link_and_address_sync_use_binary_payloads() {
     let b = join_new(&a, false, true);
     assert_eq!(titles(&b), ["QR initial"]);
     b.add_entry("QR received", "synthetic-password-2");
-    a.c.act(a.epoch(), WsAction::LanReceive);
+    // A shows a new code; B scans it on Devices and the sync starts itself.
+    a.c.navigate(a.epoch(), Screen::Devices);
+    a.c.act(a.epoch(), WsAction::LanOffer);
     let payload = scanned_payload(&a);
     b.c.navigate(b.epoch(), Screen::Devices);
-    b.c.accept_qr(
-        b.epoch(),
-        crate::qr::QrTarget::Sync,
-        payload.expose_secret(),
-    )
-    .unwrap();
-    let link = b.read(views::lan_links).remove(0).id;
-    b.c.act(b.epoch(), WsAction::LanSync(link));
+    let addressed =
+        b.c.accept_qr(
+            b.epoch(),
+            crate::qr::QrTarget::Sync,
+            payload.expose_secret(),
+        )
+        .unwrap();
+    assert!(addressed);
+    b.c.start_scanned(b.epoch(), crate::qr::QrTarget::Sync);
     b.wait();
     a.wait();
     assert!(
@@ -327,52 +337,9 @@ fn lan_app_qr_new_device_link_and_address_sync_use_binary_payloads() {
             .is_none()
     );
     assert!(titles(&a).iter().any(|title| title == "QR received"));
-    assert!(
-        b.c.state()
-            .workspace
-            .as_ref()
-            .unwrap()
-            .lan_endpoints
-            .is_empty()
-    );
-    a.c.lan_dismiss(a.epoch());
-    b.c.lan_dismiss(b.epoch());
-    a.put(WsField::LanLabel, "second QR link");
-    a.c.act(a.epoch(), WsAction::LanPair);
-    let payload = scanned_payload(&a);
-    b.c.accept_qr(
-        b.epoch(),
-        crate::qr::QrTarget::Link,
-        payload.expose_secret(),
-    )
-    .unwrap();
-    b.put(WsField::LanLabel, "QR approver");
-    b.c.act(b.epoch(), WsAction::LanLink);
-    let sas = until(&a, "QR approval", |v| match &v.question {
-        Some(Question::Approve { sas, .. }) => Some(sas.clone()),
-        _ => None,
-    });
-    let peer = until(&b, "QR comparison", |v| match &v.question {
-        Some(Question::Matches { sas }) => Some(sas.clone()),
-        _ => None,
-    });
-    assert_eq!(sas, peer);
-    b.c.lan_answer(b.epoch(), true);
-    a.c.lan_answer(a.epoch(), true);
-    b.wait();
-    a.wait();
-    assert!(
-        until(&b, "QR link result", |v| v.done.clone())
-            .error
-            .is_none()
-    );
-    assert_eq!(b.read(views::lan_links).len(), 2);
-    assert!(
-        b.c.state()
-            .workspace
-            .as_ref()
-            .unwrap()
-            .input(WsField::LanCode)
-            .is_empty()
-    );
+    // Nothing of the scanned code is left for the next action.
+    let s = b.c.state();
+    let ws = s.workspace.as_ref().unwrap();
+    assert!(ws.input(WsField::LanCode).is_empty());
+    assert!(!ws.lan_scanned);
 }

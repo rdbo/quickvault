@@ -19,11 +19,11 @@ cryptographic audit or platform validation have been completed here.
 | Mobile deferred behind shared-UI claims | 0009 §1.4, §1.6, §6: Android-first shared app with isolated OS adapters | Early Android/Linux shared-flow evidence, real-device Dioxus input cleanup/lifecycle, keystore/autofill entry-point feasibility and unlock/memory benchmarks; neither remote server nor iOS is a prerequisite |
 | Unrequested synchronization | 0005 §0.5, 0009 §1.5: manual initiation first | For both modes, unlock/edit/login/discovery/timers/reconnection start no round; explicit sync exchanges data; failure/cancellation/restart leaves pending work until the next explicit sync; bounded in-operation retries stop on lock |
 | Implicit server prerequisite | 0005 §0, 0009: complete offline use | With no account/configured server and networking blocked, create/unlock/edit/recover a local vault; server outage or account expiry does not disable it |
-| Account-dependent LAN sync | 0005 §6: direct account-free exchange | With Internet access blocked and no server deployed, link two same-network devices through the selected approved protocol and sync from either device |
+| Account-dependent LAN sync | 0005 §6: direct account-free exchange | With Internet access blocked and no server deployed, sync two same-network devices with a one-use code (0013), starting from either device |
 | LAN discovery mistaken for trust | 0001, 0005 §6: authenticate/approve intended peers | Spoof addresses/advertisements, race enrollment, substitute vault/generation/profile; no key release or accepted-state change |
 | LAN partial acceptance | 0004 §5, 0005 §6: bounded verification and local durable commit | Interrupt, lock, duplicate and retry at transfer/commit/acknowledgement boundaries; preserve local edits/anchor and reject incomplete manifests |
 | Mixed-mode state confusion | 0005 §0.3: shared versions, separate server base | Deliver edits via LAN then server and vice versa, preserve conflicts/tombstones/floors, deduplicate, and never let LAN receipt clear remote publication or advance its checkpoint |
-| Server revocation overclaim | 0002 §3.5, 0006 scope | Server-revoked devices lose remote access, retain copied-key capability; independent local/LAN operation remains possible; test selected LAN peer-removal policy separately |
+| Server revocation overclaim | 0002 §3.5, 0006 scope | Server-revoked devices lose remote access, retain copied-key capability; independent local/LAN operation remains possible; there is no stored LAN peer state to revoke |
 | Isolated forks/freeze | 0001, 0005: limited claims, checkpoint comparison | Both forks can pass in isolation; comparison detects incompatibility; frozen head not labeled globally fresh |
 | Old-date concurrent edits | 0005: vector causality | Preserve a concurrent edit despite older time |
 | Order-dependent merges | 0005: maximal whole-record versions | All permutations, regrouping and duplicate delivery converge |
@@ -151,6 +151,9 @@ implementation evidence, not claims that this repository already has them.
 
 ## Changelog
 
+- 2026-11-06: Accepted 0014 (owner, plan 0042): the account-free LAN row
+  syncs with a one-use code instead of linking; the revocation row notes there
+  is no stored LAN peer state.
 - 2026-10-26: Align GUI evidence with Dioxus input and bounded cleanup claims;
   retain active-content, OS, lifecycle and release gates. Framework residual
   copies alone are not a requirement for native dialogs or a custom engine.

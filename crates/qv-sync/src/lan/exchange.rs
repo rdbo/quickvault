@@ -50,15 +50,8 @@ pub fn grant_plaintext(
     vk: &VaultKey,
     vault: VaultId,
     generation: KeyGeneration,
-    link_id: &[u8; 16],
 ) -> Result<Zeroizing<Vec<u8>>, LanError> {
-    PairGrant::encode(
-        &vault.0,
-        generation.0,
-        |e| vk.encode_for_transfer(e),
-        link_id,
-    )
-    .map_err(bad)
+    PairGrant::encode(&vault.0, generation.0, |e| vk.encode_for_transfer(e)).map_err(bad)
 }
 
 /// What one vault offers an exchange. qv-core implements it over a session

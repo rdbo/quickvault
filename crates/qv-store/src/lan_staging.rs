@@ -549,21 +549,3 @@ impl VerifiedLanStaging {
         Ok(&mut self.archive.file)
     }
 }
-
-/// The first link of a vault created from a pairing (0013 §10 step 5).
-pub struct NewLanLink<'a> {
-    /// The link ID from the grant.
-    pub link_id: [u8; 16],
-    /// The link key.
-    pub key: &'a qv_crypto::lan::LinkKey,
-    /// The user's label for the approving device.
-    pub label: &'a str,
-    /// Creation time.
-    pub created_at: qv_model::Timestamp,
-}
-
-impl core::fmt::Debug for NewLanLink<'_> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("NewLanLink(<redacted>)")
-    }
-}

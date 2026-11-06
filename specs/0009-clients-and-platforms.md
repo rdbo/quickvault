@@ -59,10 +59,16 @@ duplicate the application per OS or claim that cross-platform rendering alone
 implements OS security and autofill integration.
 
 1.7. **LAN QR camera input (Android).** The shared app renders the exact binary
-QR payloads of 0013 §4.2 and §8.5 with a four-module quiet zone; typing remains
-available. Scanning fills a selected Join/Link/Sync form and MUST NOT start a
-network operation. Apply the same canonical payload/profile and endpoint policy
-as typed input; scanned addresses grant no trust. Reject ambiguous multiple codes.
+QR payload of 0013 §4.2 with a four-module quiet zone; typing remains
+available. Scanning is the user's explicit action (0014 §6): in Sync (an
+unlocked vault) or Join (the locked screen), a code with endpoints starts the
+session at once; one without endpoints shows that the code came from the QR,
+without rendering it, and asks for the address. Join still releases VK only
+after both comparison confirmations (0013 §4.5, §10). Apply the same canonical
+payload/profile and endpoint policy as typed input; scanned addresses grant no
+trust, and a typed address replaces them. A frame without a decodable code, or
+with several codes, is skipped; a decoded payload that fails validation ends
+the scan with an error.
 
 Request camera permission only after an explicit Scan action, never at startup.
 Use an in-app native preview in the existing activity; the webview's camera
@@ -319,6 +325,9 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-06: §1.7 follows accepted 0014 (owner, plan 0042): one QR kind; a
+  scan with endpoints starts Sync or Join at once, one without asks for the
+  address; undecodable or multi-code frames are skipped. Still Draft.
 - 2026-11-06: §1.8 vault names: the stored, synced vault name is the only
   name; the lock screen shows a private copy, and files are never renamed
   (owner, refining 2026-11-05).

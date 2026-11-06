@@ -330,6 +330,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
         }
     };
     let error = view.error;
+    let notice = view.notice();
     let picked = controller.picked_vault(epoch);
     let app_vault = controller.app_vault_exists();
     let first_run = !app_vault && picked.is_none();
@@ -425,6 +426,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
     let reduced = os.is_reduced() || process_reduced;
     let err_view = rsx! {
         if let Some(e) = error { div { class: "err", role: "alert", Svg { icon: Icon::Warn } span { "{e.message()}" } } }
+        else if let Some(n) = notice { p { class: "banner ok", role: "status", "{n}" } }
     };
     let vault_menu = rsx! {
         button { class: "pop-scrim", "aria-label": "Close menu", tabindex: "-1", onclick: move |_| sheet.set(Sheet::None) }
@@ -655,11 +657,14 @@ fn Locked(controller: Controller, revision: u64) -> Element {
         rsx! {
             div { class: "wizard fade-in",
                 h2 { "Join from another device" }
-                p { "On the other device, open Devices and choose Pair a device. Scan its code, or type the code and the address it shows." }
+                p { "On the other device, open Devices and choose Show a code. Scan it, or type the code and the address it shows." }
                 pages::ScanButton { controller: controller.clone(), epoch, target: crate::qr::QrTarget::NewDevice }
-                SecretInput { controller: controller.clone(), epoch, field: InputField::LanCode, label: "Pairing code", id: "lan-join-code", secret: true, disabled: busy }
+                if view.code_scanned() {
+                    p { class: "banner ok", role: "status", id: "lan-code-scanned", Svg { icon: Icon::Check } " Code from the QR code" }
+                } else {
+                    SecretInput { controller: controller.clone(), epoch, field: InputField::LanCode, label: "Code", id: "lan-join-code", secret: true, disabled: busy }
+                }
                 SecretInput { controller: controller.clone(), epoch, field: InputField::LanEndpoint, label: "The other device's address (ip:port)", id: "lan-join-endpoint", secret: false, disabled: busy }
-                SecretInput { controller: controller.clone(), epoch, field: InputField::LanLabel, label: "A name for the other device", id: "lan-join-label", secret: false, disabled: busy }
                 {err_view}
                 div { class: "actions",
                     button { class: "btn subtle", onclick: to_mode(Mode::Unlock), "Back" }

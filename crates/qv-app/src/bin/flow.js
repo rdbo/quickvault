@@ -69,18 +69,16 @@ try{
  input("ws-path",root+"/exports");await tap("export-archive");await until(()=>($(".report")?.textContent||"").includes("Archive published:"));
  const archive=$(".report").textContent.match(/Archive published: ([a-f0-9]+)/)?.[1];if(!archive)throw new Error("synthetic archive id");
  input("ws-path",root+"/exports/"+archive+".qvsnap");await tap("merge-archive");await until(()=>/Archive merged|already accepted/.test($(".report")?.textContent||""));
- // LAN pairing window: code, QR, navigation locked, cancel clears secrets.
- stage=64;await tap("nav-devices");await until(()=>title()==="Devices");await tap("pair-device");await until(()=>!!$("#ws-lan-label"));
- input("ws-lan-label","engine phone");await tap("show-pairing-code");
+ // LAN sync window: code, QR, navigation locked, cancel clears secrets.
+ stage=64;await tap("nav-devices");await until(()=>title()==="Devices");await tap("show-code");
  await until(()=>(byIdOpt("lan-code")?.textContent||"").length===31);
- if(!$("#lan-qr path")||$("#lan-qr rect")?.getAttribute("fill")!=="white")throw new Error("synthetic pairing QR absent");
+ if(!$("#lan-qr path")||$("#lan-qr rect")?.getAttribute("fill")!=="white")throw new Error("synthetic code QR absent");
  if($(".side .nav:not([disabled])")||$(".tabbar button:not([disabled])"))throw new Error("synthetic nav enabled during a window");
  await tap("lan-cancel");await until(()=>!!$("#lan-dismiss"));
- if($("#lan-code"))throw new Error("synthetic pairing code remained");
- if($("#lan-qr"))throw new Error("synthetic pairing QR remained");
+ if($("#lan-code"))throw new Error("synthetic code remained");
+ if($("#lan-qr"))throw new Error("synthetic code QR remained");
  await tap("lan-dismiss");await until(()=>!$(".lan"));
- stage=65;await until(()=>!!$("#pair-device")&&!$("#pair-device").disabled);await tap("pair-device");await until(()=>!!$("#ws-lan-label"));
- input("ws-lan-label","engine core peer");await tap("show-pairing-code");
+ stage=65;await until(()=>!!$("#show-code")&&!$("#show-code").disabled);await tap("show-code");
  await until(()=>(byIdOpt("lan-code")?.textContent||"").length===31);
  input("validation-result","LAN-PEER");
  stage=66;
@@ -89,8 +87,8 @@ try{
  await tap("lan-codes-match");
  stage=67;
  await until(()=>!!$("#lan-dismiss"));
- if($(".lan .error")||!$(".lan")?.textContent.includes("The other device confirmed the pairing."))throw new Error("synthetic pairing failed");
- if($("#lan-code")||$("#lan-sas"))throw new Error("synthetic pairing secrets remained");
+ if($(".lan .error")||!$(".lan")?.textContent.includes("A new device joined this vault."))throw new Error("synthetic join failed");
+ if($("#lan-code")||$("#lan-sas"))throw new Error("synthetic code secrets remained");
  stage=68;
  await until(()=>$(".lan .notice")?.textContent==="Synthetic peer opened the vault.");
  await tap("lan-dismiss");await until(()=>!$(".lan"));

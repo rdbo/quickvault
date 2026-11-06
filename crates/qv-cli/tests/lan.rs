@@ -1,24 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault lan` end to end (spec 0011 *LAN command contracts*, 0013; plan
-//! 0038 step 8). The other device runs in the test process through
-//! qv-core. Rounds between CLI processes use this host's first non-loopback
-//! address, because the CLI never allows loopback endpoints (0013 §1.4); a
-//! host without one fails these tests with an explicit message.
+//! `qvault lan open|sync|join` end to end (spec 0011 *LAN command contracts*,
+//! 0013; plans 0038 step 8, 0042 step 7). The other device runs in the test
+//! process through qv-core. Sessions with a CLI process use this host's
+//! first non-loopback address, because the CLI never allows loopback
+//! endpoints (0013 §1.4); a host without one fails these tests with an
+//! explicit message.
 #![cfg(any(target_os = "linux", target_os = "android"))]
 #![allow(clippy::unwrap_used, clippy::panic)]
 
 mod common;
 
-use std::io::{BufRead, BufReader, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::process::Stdio;
 use std::time::Duration;
 
 use common::{Home, Interactive, Output, PASSWORD, arg, piped, pw, serial};
 use qv_core::{
-    ApproverUi, JoinCode, JoinMode, JoinOptions, JoinerUi, LanTimeouts, ListenScope,
-    MasterPassword, PairingOptions, Sas, Session,
+    ApproverUi, JoinCode, JoinerUi, LanTimeouts, ListenScope, MasterPassword, Sas, Served, Session,
+    SyncOptions, SyncWindowOptions,
 };
 
 fn lan_addr() -> IpAddr {
@@ -39,7 +38,7 @@ fn run(h: &Home, extra: &[&str]) -> Output {
 
 struct Yes(Option<String>);
 impl ApproverUi for Yes {
-    fn confirm(&mut self, sas: &str, _: JoinMode, _: &str) -> bool {
+    fn confirm(&mut self, sas: &str, _: &str) -> bool {
         self.0 = Some(sas.to_owned());
         true
     }
@@ -69,16 +68,20 @@ fn fast() -> LanTimeouts {
     }
 }
 
-/// A's vault (created) and B as a new device paired from it, in process.
-fn paired(a_home: &Home, b_home: &Home) -> (Session, Session) {
+fn window_options(scope: ListenScope) -> SyncWindowOptions {
+    SyncWindowOptions {
+        scope,
+        limit: Duration::from_secs(60),
+        timeouts: fast(),
+        ..SyncWindowOptions::new()
+    }
+}
+
+/// A's vault (created) and B as a new device joined from it, in process.
+fn joined(a_home: &Home, b_home: &Home) -> (Session, Session) {
     let a = a_home.create();
     let w = a
-        .open_pairing_window(PairingOptions {
-            scope: ListenScope::LoopbackForTests,
-            limit: Duration::from_secs(60),
-            timeouts: fast(),
-            ..PairingOptions::new("laptop")
-        })
+        .open_sync_window(window_options(ListenScope::LoopbackForTests))
         .unwrap();
     let c = w.code(&[]).unwrap();
     let manual = String::from_utf8(c.manual.expose_secret().to_vec()).unwrap();
@@ -91,17 +94,22 @@ fn paired(a_home: &Home, b_home: &Home) -> (Session, Session) {
             .join_new_device(
                 JoinCode::from_manual(&manual).unwrap(),
                 &b_home.vault(),
-                JoinOptions {
+                SyncOptions {
                     extra_endpoints: vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)],
                     allow_loopback: true,
                     timeouts: fast(),
-                    ..JoinOptions::new("desktop")
                 },
                 &mut Joiner(None),
                 None,
             )
             .unwrap();
-        assert!(h.join().unwrap().peer_confirmed);
+        assert!(matches!(
+            h.join().unwrap(),
+            Served::Joined {
+                peer_confirmed: true,
+                ..
+            }
+        ));
         b
     });
     (a, b)
@@ -123,187 +131,23 @@ fn titles(s: &Session) -> Vec<String> {
 
 // 0012 §1: Account-dependent LAN sync
 #[test]
-fn lan_cli_receive_and_sync_between_two_processes() {
+fn lan_cli_open_serves_one_sync_and_shows_the_code_only_on_the_alternate_screen() {
     let (a_home, b_home) = (Home::new(), Home::new());
-    let (a, b) = paired(&a_home, &b_home);
-    add_entry(&a, "made on a");
-    a.lock();
-    b.lock();
-    let ip = lan_addr();
-    // B receives (no TTY needed), A syncs.
-    let vault_b = arg(&b_home.vault());
-    let mut receiver = b_home
-        .qvault([
-            "--password-stdin",
-            "-v",
-            &vault_b,
-            "lan",
-            "receive",
-            "--minutes",
-            "1",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    {
-        let _s = serial();
-        let mut i = receiver.stdin.take().unwrap();
-        i.write_all(format!("{PASSWORD}\n").as_bytes()).unwrap();
-    }
-    let mut lines = BufReader::new(receiver.stdout.take().unwrap()).lines();
-    assert_eq!(lines.next().unwrap().unwrap(), "endpoints:");
-    let mut endpoint = None;
-    for line in lines.by_ref() {
-        let line = line.unwrap();
-        if line.starts_with("waiting up to") {
-            break;
-        }
-        let e: SocketAddr = line.trim().parse().unwrap();
-        if e.ip() == ip {
-            endpoint = Some(e);
-        }
-    }
-    let endpoint = endpoint.expect("the receive window lists this host's address");
-    let sent = run(
-        &a_home,
-        &["lan", "sync", "--endpoint", &endpoint.to_string()],
-    );
-    assert_eq!(sent.code, 0, "{}", sent.stderr);
-    assert!(
-        sent.stdout.contains("local acceptance: unchanged"),
-        "{}",
-        sent.stdout
-    );
-    assert!(
-        sent.stdout.contains("peer receipt: confirmed"),
-        "{}",
-        sent.stdout
-    );
-    let rest: Vec<String> = lines.map(|l| l.unwrap()).collect();
-    let status = receiver.wait().unwrap();
-    assert_eq!(status.code(), Some(0));
-    assert!(
-        rest.iter().any(|l| l == "local acceptance: committed"),
-        "{rest:?}"
-    );
-    assert!(rest.iter().any(|l| l == "conflicts: 0"), "{rest:?}");
-    let b = b_home.unlock();
-    assert!(titles(&b).contains(&"made on a".to_owned()));
-}
-
-#[test]
-fn lan_cli_usage_link_selection_and_exit_codes() {
-    let (a_home, b_home) = (Home::new(), Home::new());
-    // Before unlock: usage errors (2).
-    for extra in [
-        vec!["lan", "sync"],
-        vec!["lan", "sync", "--endpoint", "localhost:80"],
-        vec!["lan", "sync", "--endpoint", "[fe80::1%2]:80"],
-        vec!["--json", "lan", "sync", "--endpoint", "10.0.0.1:1"],
-        vec!["lan", "pair", "--label", "x"],
-        vec!["lan", "join", "--endpoint", "10.0.0.1:1", "--label", "x"],
-        vec!["lan", "receive", "--minutes", "16"],
-        vec!["lan", "sync", "--endpoint", "10.0.0.1:1", "--link", "xyz"],
-    ] {
-        let o = run(&a_home, &extra);
-        assert_eq!(o.code, 2, "{extra:?}: {}", o.stderr);
-        assert!(o.stdout.is_empty(), "{extra:?}");
-    }
-    let (a, b) = paired(&a_home, &b_home);
-    a.lock();
-    let o = run(&a_home, &["--json", "lan", "links"]);
-    assert_eq!(o.code, 0, "{}", o.stderr);
-    assert!(
-        o.stdout.starts_with("{\"links\":[{\"id\":\""),
-        "{}",
-        o.stdout
-    );
-    assert!(o.stdout.contains("\"label\":\"laptop\""), "{}", o.stdout);
-    // The only link, but no device answers (loopback is never allowed): 10.
-    let o = run(&a_home, &["lan", "sync", "--endpoint", "127.0.0.1:9"]);
-    assert_eq!(o.code, 10, "{}", o.stderr);
-    // Two links (B pairs again in link mode): ambiguous without --link (5).
-    let a = a_home.unlock();
-    let w = a
-        .open_pairing_window(PairingOptions {
-            scope: ListenScope::LoopbackForTests,
-            limit: Duration::from_secs(60),
-            timeouts: fast(),
-            ..PairingOptions::new("again")
-        })
-        .unwrap();
-    let c = w.code(&[]).unwrap();
-    let manual = String::from_utf8(c.manual.expose_secret().to_vec()).unwrap();
-    std::thread::scope(|s| {
-        let h = s.spawn(|| w.run(&a, &mut Yes(None), None).unwrap());
-        b.join_link(
-            JoinCode::from_manual(&manual).unwrap(),
-            JoinOptions {
-                extra_endpoints: vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), c.port)],
-                allow_loopback: true,
-                timeouts: fast(),
-                ..JoinOptions::new("desktop again")
-            },
-            &mut Joiner(None),
-            None,
-        )
-        .unwrap();
-        h.join().unwrap();
-    });
-    let ids: Vec<String> = a
-        .lan_links()
-        .unwrap()
-        .iter()
-        .map(|l| l.handle.id_hex())
-        .collect();
-    a.lock();
-    b.lock();
-    assert_eq!(ids.len(), 2);
-    let o = run(&a_home, &["lan", "sync", "--endpoint", "127.0.0.1:9"]);
-    assert_eq!(o.code, 5, "{}", o.stderr);
-    assert!(o.stderr.contains(&ids[0]) && o.stderr.contains(&ids[1]));
-    // Unlink one (confirmed by --yes); the other remains.
-    let o = run(&a_home, &["--yes", "lan", "unlink", &ids[0][..8]]);
-    assert_eq!(o.code, 0, "{}", o.stderr);
-    assert_eq!(o.stdout, format!("removed: {}\n", ids[0]));
-    assert!(o.stderr.contains("not notified"));
-    let o = run(&a_home, &["lan", "links"]);
-    assert_eq!(o.code, 0);
-    assert!(
-        o.stdout.starts_with(&ids[1]) && !o.stdout.contains(&ids[0]),
-        "{}",
-        o.stdout
-    );
-    // A vault without links: 4.
-    let c_home = Home::new();
-    drop(c_home.create());
-    let o = run(&c_home, &["lan", "sync", "--endpoint", "10.0.0.1:1"]);
-    assert_eq!(o.code, 4, "{}", o.stderr);
-    let o = run(&c_home, &["lan", "unlink", "abcdef"]);
-    assert_eq!(o.code, 2, "--password-stdin without --yes: {}", o.stderr);
-}
-
-#[test]
-fn lan_cli_pair_shows_the_code_only_on_the_alternate_screen() {
-    let (a_home, b_home) = (Home::new(), Home::new());
-    let (a, b) = paired(&a_home, &b_home);
+    let (a, b) = joined(&a_home, &b_home);
+    add_entry(&b, "made on b");
     a.lock();
     let ip = lan_addr();
     let mut p = Interactive::spawn(a_home.qvault([
         "-v",
         &arg(&a_home.vault()),
         "lan",
-        "pair",
-        "--label",
-        "tablet",
+        "open",
         "--minutes",
         "1",
     ]));
     p.expect("Master password:");
     p.line(PASSWORD);
-    let at = p.expect("Pairing code (type it on the other device):");
+    let at = p.expect("Code (type it on the other device; it works once):");
     let end = p.expect_from(at, "This device's address:");
     let shown = String::from_utf8_lossy(&p.seen[at..end]).into_owned();
     let code = shown.split_whitespace().next().unwrap().to_owned();
@@ -316,41 +160,114 @@ fn lan_cli_pair_shows_the_code_only_on_the_alternate_screen() {
         .collect::<String>()
         .parse()
         .unwrap();
-    let mut joiner = Joiner(None);
-    let joined = std::thread::scope(|s| {
-        let h = s.spawn(|| {
-            b.join_link(
-                JoinCode::from_manual(&code).unwrap(),
-                JoinOptions {
-                    extra_endpoints: vec![SocketAddr::new(ip, port)],
-                    timeouts: fast(),
-                    ..JoinOptions::new("desktop")
-                },
-                &mut joiner,
-                None,
-            )
-        });
-        let asked = p.expect("Do both devices show ");
-        p.line("y");
-        let r = h.join().unwrap().unwrap();
-        (asked, r)
-    });
-    let (asked, report) = joined;
-    let digits = String::from_utf8(joiner.0.unwrap().to_vec()).unwrap();
-    let sas = format!("{} {}", &digits[..3], &digits[3..]);
-    assert!(String::from_utf8_lossy(&p.seen[asked..]).starts_with(&sas));
+    let sent = b
+        .sync_with_code(
+            JoinCode::from_manual(&code).unwrap(),
+            SyncOptions {
+                extra_endpoints: vec![SocketAddr::new(ip, port)],
+                timeouts: fast(),
+                ..SyncOptions::default()
+            },
+            None,
+        )
+        .unwrap();
+    assert_eq!(sent.local, qv_core::LocalAcceptance::Unchanged);
     let (code_exit, all) = p.finish();
     assert_eq!(code_exit, 0, "{all}");
-    assert!(
-        all.contains(&format!("paired: {}", report.link.id_hex())),
-        "{all}"
-    );
-    assert!(all.contains("local acceptance: unchanged"), "{all}");
+    // A sync asks nothing on the offering device and prints the sync lines.
+    assert!(!all.contains("Do both devices show"), "{all}");
+    assert!(all.contains("local acceptance: committed"), "{all}");
+    assert!(all.contains("conflicts: 0"), "{all}");
+    assert!(all.contains("peer receipt: confirmed"), "{all}");
     // The code was shown on the alternate screen, which is left and
     // cleared before the result lines.
     let leave = all.rfind("\u{1b}[?1049l").unwrap();
     assert!(all.find(&code).unwrap() < leave);
     assert!(!all[leave..].contains(&code));
+    let a = a_home.unlock();
+    assert!(titles(&a).contains(&"made on b".to_owned()));
+}
+
+// 0012 §1: Account-dependent LAN sync
+#[test]
+fn lan_cli_sync_prompts_for_the_code_and_prints_the_sync_lines() {
+    let (a_home, b_home) = (Home::new(), Home::new());
+    let (a, b) = joined(&a_home, &b_home);
+    add_entry(&a, "made on a");
+    b.lock();
+    let ip = lan_addr();
+    let w = a
+        .open_sync_window(window_options(ListenScope::AllInterfaces))
+        .unwrap();
+    let c = w.code(&[ip]).unwrap();
+    let manual = String::from_utf8(c.manual.expose_secret().to_vec()).unwrap();
+    let endpoint = SocketAddr::new(ip, c.port).to_string();
+    std::thread::scope(|s| {
+        let h = s.spawn(|| w.run(&a, &mut Yes(None), None).unwrap());
+        let mut p = Interactive::spawn(b_home.qvault([
+            "-v",
+            &arg(&b_home.vault()),
+            "lan",
+            "sync",
+            "--endpoint",
+            &endpoint,
+        ]));
+        p.expect("Master password:");
+        p.line(PASSWORD);
+        p.expect("Code: ");
+        p.line(&manual.to_lowercase());
+        let (code, out) = p.finish();
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains("local acceptance: committed"), "{out}");
+        assert!(out.contains("peer receipt: confirmed"), "{out}");
+        // The typed code is not echoed.
+        assert!(!out.to_lowercase().contains(&manual.to_lowercase()));
+        assert!(matches!(h.join().unwrap(), Served::Synced(_)));
+    });
+    let b = b_home.unlock();
+    assert!(titles(&b).contains(&"made on a".to_owned()));
+}
+
+#[test]
+fn lan_cli_usage_and_exit_codes() {
+    let (a_home, b_home) = (Home::new(), Home::new());
+    // Usage errors (2): missing or invalid arguments, --json, the removed
+    // link commands, and --password-stdin (every LAN command prompts).
+    for extra in [
+        vec!["lan", "sync"],
+        vec!["lan", "sync", "--endpoint", "localhost:80"],
+        vec!["lan", "sync", "--endpoint", "[fe80::1%2]:80"],
+        vec!["--json", "lan", "sync", "--endpoint", "10.0.0.1:1"],
+        vec!["lan", "sync", "--endpoint", "10.0.0.1:1"],
+        vec!["lan", "open"],
+        vec!["lan", "open", "--minutes", "11"],
+        vec!["lan", "join", "--endpoint", "10.0.0.1:1"],
+        vec!["lan", "pair", "--label", "x"],
+        vec!["lan", "receive"],
+        vec!["lan", "links"],
+        vec!["lan", "unlink", "abcdef"],
+    ] {
+        let o = run(&a_home, &extra);
+        assert_eq!(o.code, 2, "{extra:?}: {}", o.stderr);
+        assert!(o.stdout.is_empty(), "{extra:?}");
+    }
+    let (a, _b) = joined(&a_home, &b_home);
+    a.lock();
+    // No device answers (loopback is never allowed): 10.
+    let mut p = Interactive::spawn(a_home.qvault([
+        "-v",
+        &arg(&a_home.vault()),
+        "lan",
+        "sync",
+        "--endpoint",
+        "127.0.0.1:9",
+    ]));
+    p.expect("Master password:");
+    p.line(PASSWORD);
+    p.expect("Code: ");
+    p.line("AAAAA-AAAAA-AAAAA-AAAAA-AAAAA-A");
+    let (code, out) = p.finish();
+    assert_eq!(code, 10, "{out}");
 }
 
 #[test]
@@ -360,17 +277,13 @@ fn lan_cli_join_new_device_prompts_for_code_vault_and_password() {
     add_entry(&a, "only on a");
     let ip = lan_addr();
     let w = a
-        .open_pairing_window(PairingOptions {
-            limit: Duration::from_secs(60),
-            timeouts: fast(),
-            ..PairingOptions::new("phone")
-        })
+        .open_sync_window(window_options(ListenScope::AllInterfaces))
         .unwrap();
     let c = w.code(&[ip]).unwrap();
     let manual = String::from_utf8(c.manual.expose_secret().to_vec()).unwrap();
     let dest = b_home.vault();
     let endpoint = SocketAddr::new(ip, c.port).to_string();
-    // An existing destination is refused before pairing.
+    // An existing destination is refused before connecting.
     std::fs::write(&dest, b"x").unwrap();
     let p = Interactive::spawn(b_home.qvault([
         "lan",
@@ -379,8 +292,6 @@ fn lan_cli_join_new_device_prompts_for_code_vault_and_password() {
         &arg(&dest),
         "--endpoint",
         &endpoint,
-        "--label",
-        "laptop",
     ]));
     let (code, out) = p.finish();
     assert_eq!(code, 2, "{out}");
@@ -395,10 +306,8 @@ fn lan_cli_join_new_device_prompts_for_code_vault_and_password() {
             &arg(&dest),
             "--endpoint",
             &endpoint,
-            "--label",
-            "laptop",
         ]));
-        p.expect("Pairing code: ");
+        p.expect("Code: ");
         p.line(&manual.to_lowercase());
         p.expect("comparison code: ");
         p.expect("Join vault \"Test vault\"? Comparison code ");
@@ -410,12 +319,18 @@ fn lan_cli_join_new_device_prompts_for_code_vault_and_password() {
         let (code, out) = p.finish();
         assert_eq!(code, 0, "{out}");
         assert!(out.contains("created: "), "{out}");
-        assert!(out.contains("paired: "), "{out}");
+        assert!(!out.contains("paired: "), "{out}");
         // The typed code is not echoed.
         assert!(!out.to_lowercase().contains(&manual.to_lowercase()));
-        assert!(h.join().unwrap().peer_confirmed);
+        assert!(matches!(
+            h.join().unwrap(),
+            Served::Joined {
+                peer_confirmed: true,
+                ..
+            }
+        ));
     });
+    assert!(yes.0.is_some(), "the offering device compared codes");
     let b = b_home.unlock();
     assert_eq!(titles(&b), ["only on a"]);
-    assert_eq!(b.lan_links().unwrap().len(), 1);
 }

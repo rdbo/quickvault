@@ -16,14 +16,13 @@ pub const MAX_AXIS: usize = 1024;
 /// Camera/decoder pixel bound, before library allocation.
 pub const MAX_PIXELS: usize = 786_432;
 
-/// The explicit form a scan may fill; a scan never starts pairing or sync.
+/// The form a scan fills. A code with endpoints starts its action at once;
+/// one without asks for the address (0014 §6.2–§6.3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QrTarget {
     /// Locked-screen new-device join.
     NewDevice,
-    /// Link an existing unlocked copy.
-    Link,
-    /// Address hints for a selected existing link.
+    /// One sync of this unlocked vault (Devices screen).
     Sync,
 }
 pub(crate) struct Scan {
@@ -188,8 +187,23 @@ pub fn decode_frame(frame: &[u8]) -> Result<Option<SecretBytes>, AppError> {
     decode(width, height, &frame[8..])
 }
 
+/// One camera frame of a running scan (0014 §6.6): the decoded payload, or
+/// `None` to skip the frame and keep scanning. A frame without a readable
+/// code, with several codes or with a code that is not a binary payload is
+/// skipped; the caller validates a decoded payload and ends the scan on a
+/// foreign or hostile one. Only the Android camera adapter scans.
+#[cfg(any(test, all(feature = "desktop", target_os = "android")))]
+pub(crate) fn scan_frame(frame: &[u8]) -> Option<SecretBytes> {
+    decode_frame(frame).ok().flatten()
+}
+
 #[cfg(test)]
 pub(crate) const TEST_PAIR: &[u8] = b"\x85\x71qv/lan-pair-qr/v1\x01\x50synthetic-secret\x80\x60";
+/// [`TEST_PAIR`] with the endpoint hint 198.51.100.7:7777 (TEST-NET-2).
+#[cfg(test)]
+pub(crate) const TEST_PAIR_ADDR: &[u8] =
+    b"\x85\x71qv/lan-pair-qr/v1\x01\x50synthetic-secret\x81\x82\x44\xc6\x33\x64\x07\x19\x1e\x61\x60";
+/// The retired address-only QR (0014): refused like any foreign code.
 #[cfg(test)]
 pub(crate) const TEST_ADDR: &[u8] =
     b"\x83\x71qv/lan-addr-qr/v1\x01\x81\x82\x44\xc0\x00\x02\x0a\x19\x1e\x61";
@@ -214,7 +228,7 @@ mod tests {
     }
     #[test]
     fn qr_binary_round_trip_rotated_and_scaled_and_redacted() {
-        for payload in [TEST_PAIR, TEST_ADDR] {
+        for payload in [TEST_PAIR, TEST_PAIR_ADDR] {
             let symbol = encode(payload).unwrap();
             assert_eq!(format!("{symbol:?}"), "Symbol(<redacted>)");
             for (scale, rotate) in [(3, false), (4, true)] {
@@ -247,6 +261,21 @@ mod tests {
             both[y * w * 2 + w..(y + 1) * w * 2].copy_from_slice(&p[y * w..y * w + w]);
         }
         assert!(decode(w * 2, w, &both).is_err());
+        // During a scan such frames are skipped, not fatal (0014 §6.6).
+        let frame = |w: usize, h: usize, pixels: &[u8]| {
+            let mut f = Zeroizing::new(Vec::new());
+            f.extend_from_slice(&(w as u32).to_le_bytes());
+            f.extend_from_slice(&(h as u32).to_le_bytes());
+            f.extend_from_slice(pixels);
+            f
+        };
+        assert!(scan_frame(&frame(w * 2, w, &both)).is_none());
+        assert!(scan_frame(&frame(64, 64, &[255; 4096])).is_none());
+        assert!(scan_frame(&[0; 7]).is_none());
+        assert_eq!(
+            scan_frame(&frame(w, w, &p)).unwrap().expose_secret(),
+            b"synthetic"
+        );
     }
     #[test]
     fn qr_non_byte_mode_is_refused() {

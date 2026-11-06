@@ -254,7 +254,8 @@ checkpoint. Referenced data is verified independently (0004 §3.6).
 (0004 `local_head`): `{ vault_id, key_generation, local_seq, previous_digest,
 manifest_hash, remote_checkpoint_id?, remote_sequence?, archive_receipts_digest,
 lan_links_digest }`
-(0004 §2.3, 0013 §9.1), MAC'd under the
+(0004 §2.3, 0013 §9.1; the LAN digest is always that of the empty set after
+a commit), MAC'd under the
 local-state key. `local_seq` increases by one per commit; `local_digest` is
 SHA-256 of the canonical head including its MAC. The external anchor, in private
 state outside the DB and archives (keystore-backed where available), stores `{
@@ -304,8 +305,10 @@ the initiator/receiver distinction MUST NOT affect the logical merge result.
 
 6.2. Same-network presence, discovery advertisements, hostnames and IP addresses
 MUST NOT be treated as authentication or permission to receive keys or data.
-The user must explicitly approve linking the intended devices for the selected
-vault/generation, through an authenticated out-of-band enrollment design.
+The user must explicitly approve each session for the selected vault and
+generation through an authenticated out-of-band code: 0013 uses a one-use code
+shown by an unlocked device plus a transcript-bound VK proof, and stores no
+pairing.
 New-device setup MUST protect VK and bind the intended peers, vault, generation
 and protocol profile. Merely logging in to an account MUST NOT authorize a LAN
 peer. The exact peer identity, key-transfer and session protocol is undecided;
@@ -434,10 +437,15 @@ Resource budgets and transactional acceptance apply even to authenticated data.
    - explicit time-boxed pairing and receive windows;
    - local link removal, with rotation plus re-pairing for compromise.
 
-   Questions 3–6 are resolved by 0013.
+   Questions 3–6 are resolved by 0013. On 2026-11-06 accepted
+   [0014](0014-lan-one-scan-sync.md) replaced links, receive windows and
+   link removal with one-use sync codes and transcript-bound VK proofs.
 
 ## Changelog
 
+- 2026-11-06: Accepted 0014 (owner, plan 0042): §6.2 approval is a one-use
+  code per session plus a VK proof, with no stored pairing; §5.4 notes that
+  `lan_links_digest` is always the empty-set digest.
 - 2026-10-30: Bind durable archive filename receipts to the local head and
   acceptance transaction through 0004 §2.3 (owner delegation in 0026; plan 0027).
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The approving device's pairing window (0013 §4, §8; plan 0037 decision 6).
+//! The offering device's sync window (0013 §4, §8; plans 0037 decision 6,
+//! 0042).
 //!
 //! [`PairingWindow::run`] runs the protocol on the caller's thread, with the
 //! shared acceptor of `window`:
@@ -12,10 +13,12 @@
 //!   observed, so the pairing aborts. Anything else counts as a failed
 //!   attempt;
 //! - the window closes at 16 failed attempts, at its time limit, on cancel
-//!   or lock, or when the pairing completes or aborts.
+//!   or lock, or when its one session completes or aborts.
 //!
-//! In link mode the pairing is followed by one ordinary exchange over the
-//! pairing keys, with A as responder (0013 §4.8).
+//! New-device mode shows the comparison code and needs the user's
+//! confirmation before VK is granted (§4.5, §4.7). Sync mode needs no input:
+//! A verifies B's proof before sending its own, then runs one exchange as
+//! responder (§4.8). Nothing about the peer is stored.
 
 use std::net::{IpAddr, TcpListener, TcpStream};
 use std::sync::PoisonError;
@@ -24,8 +27,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, sync_channel};
 use std::time::{Duration, Instant};
 
 use qv_crypto::lan::{
-    LinkKey, LinkRoot, PairNonce, PairingKeys, PairingSecret, ProofRole, RecordOpener,
-    RecordSealer, Sas,
+    PairNonce, PairingKeys, PairingSecret, ProofRole, ProofRoot, RecordOpener, RecordSealer, Sas,
 };
 use qv_crypto::{KeyGeneration, MacTag, SecretBytes, VaultId, random_array};
 use qv_protocol::frame::FramePhase;
@@ -41,7 +43,7 @@ use super::transport::{Channel, Conn, guarded};
 use super::window::{POLL, Phase, Shared, acceptor, closing};
 use super::{LanError, LanTimeouts, PAIRING_WINDOW_MAX, exchange};
 
-/// What the approving vault provides.
+/// What the offering vault provides.
 pub struct ApproverContext {
     /// The vault ID.
     pub vault_id: VaultId,
@@ -49,52 +51,48 @@ pub struct ApproverContext {
     pub key_generation: KeyGeneration,
     /// The vault's name, shown with the comparison code.
     pub vault_name: SecretBytes,
-    /// `K_lan` of this generation.
-    pub root: LinkRoot,
+    /// `K_proof` of this generation.
+    pub root: ProofRoot,
 }
 
-/// The approving device's vault, reached through short calls (qv-core
+/// The offering device's vault, reached through short calls (qv-core
 /// implements it over a session).
 pub trait ApproverVault: ExchangeVault {
-    /// The vault's identity and link root.
+    /// The vault's identity and proof key.
     fn context(&self) -> Result<ApproverContext, LanError>;
-    /// Commits the new link row (0013 §9.1).
-    fn commit_link(&self, link_id: [u8; 16], key: &LinkKey) -> Result<(), LanError>;
     /// Builds the grant plaintext ([`super::grant_plaintext`]), passes it to
     /// `seal`, and returns the sealed record. The driver sends it after this
     /// call returns, so no vault lock is held on the network.
-    fn grant(&self, link_id: &[u8; 16], seal: &mut Sealer<'_>) -> Result<Vec<u8>, LanError>;
+    fn grant(&self, seal: &mut Sealer<'_>) -> Result<Vec<u8>, LanError>;
 }
 
 /// Seals one record of the pairing channel (see [`ApproverVault::grant`]).
 pub type Sealer<'a> = dyn FnMut(&[u8]) -> Result<Vec<u8>, LanError> + 'a;
 
-/// Shows the comparison code and waits for the user (0013 §4.5).
+/// Shows a new device's comparison code and waits for the user (0013 §4.5).
+/// Sync mode never calls it.
 pub trait Confirm {
     /// `true` once the user confirmed that both devices show `sas`. It must
     /// return promptly when the frontend's cancellation fires.
-    fn confirm(&mut self, sas: &Sas, mode: JoinMode, vault_name: &[u8]) -> bool;
+    fn confirm(&mut self, sas: &Sas, vault_name: &[u8]) -> bool;
 }
 
-/// A completed pairing on the approving side.
+/// The window's one session, completed on the offering side.
 #[derive(Debug)]
-pub struct Approved {
-    /// The joiner's mode.
-    pub mode: JoinMode,
-    /// The committed link.
-    pub link_id: [u8; 16],
-    /// Whether the joiner confirmed completion (new device: its `Done`; link
-    /// mode: its `PairDone`). Otherwise the pairing may be incomplete on the
-    /// other device; the link stays (0013 §4.7).
-    pub peer_confirmed: bool,
-    /// Why the exchange after the link commit failed, if it did.
-    pub failure: Option<LanError>,
-    /// Link mode: the ordinary exchange that followed the pairing (0013
-    /// §4.8). Its failure leaves both links.
-    pub round: Option<Result<RoundReport, LanError>>,
+pub enum Approved {
+    /// A new device joined (0013 §4.7).
+    Joined {
+        /// Whether the new device sent its `Done`. Otherwise it may not
+        /// have finished joining.
+        peer_confirmed: bool,
+        /// Why the transfer failed after the grant, if it did.
+        failure: Option<LanError>,
+    },
+    /// One sync with a copy of this vault (0013 §4.8).
+    Synced(RoundReport),
 }
 
-/// An open pairing window for one unlocked vault (0013 §8.1).
+/// An open sync window for one unlocked vault (0013 §8.1).
 pub struct PairingWindow {
     listener: TcpListener,
     keys: PairingKeys,
@@ -166,7 +164,7 @@ impl PairingWindow {
         encode_manual(self.keys.secret().expose_secret())
     }
 
-    /// Runs the window until a pairing completes or the window closes.
+    /// Runs the window until its one session ends or the window closes.
     pub fn run(
         self,
         vault: &dyn ApproverVault,
@@ -308,72 +306,59 @@ fn pair(
     let th = th(&hello.hash, &accept_hash)?;
     let (b2a, a2b) = record_keys(keys, &ss, &th)?;
     let mut ch = Channel::new(conn, RecordSealer::new(a2b), RecordOpener::new(b2a));
-    let mode = hello.mode;
     let ctx = vault.context();
-    let pre = guarded(&mut ch, |ch| {
-        let ctx = ctx?;
-        let msg = ch.recv(t.message, Some(expires))?;
-        let reveal = PairReveal::decode(msg.expose_secret()).map_err(|_| LanError::Protocol)?;
-        let nonce_b = PairNonce::from_bytes(&*reveal.nonce_b).map_err(|_| LanError::Protocol)?;
-        if !nonce_b
-            .matches(&hello.commit)
-            .map_err(|_| LanError::Protocol)?
-        {
-            return Err(LanError::Protocol);
-        }
-        let sas = Sas::compute(&th, &nonce_b).map_err(|_| LanError::Protocol)?;
-        observed()?;
-        let ok = confirm.confirm(&sas, mode, ctx.vault_name.expose_secret());
-        observed()?;
-        if cancelled() {
-            return Err(LanError::Cancelled);
-        }
-        if Instant::now() >= expires {
-            return Err(LanError::WindowExpired);
-        }
-        if !ok {
-            return Err(LanError::Cancelled);
-        }
-        Ok((ctx, nonce_b))
-    })?;
-    let (ctx, nonce_b) = pre;
-    match mode {
+    match hello.mode {
         JoinMode::NewDevice => {
-            let link_id = random_array::<16>().map_err(|_| LanError::Io)?;
-            let link = ctx
-                .root
-                .link_key(
-                    &ss,
-                    &th,
-                    &nonce_b,
-                    &link_id,
-                    ctx.vault_id,
-                    ctx.key_generation,
-                )
-                .map_err(|_| LanError::Protocol);
-            guarded(&mut ch, |ch| {
+            let ctx = guarded(&mut ch, |ch| {
+                let ctx = ctx?;
+                let msg = ch.recv(t.message, Some(expires))?;
+                let reveal =
+                    PairReveal::decode(msg.expose_secret()).map_err(|_| LanError::Protocol)?;
+                let nonce_b =
+                    PairNonce::from_bytes(&*reveal.nonce_b).map_err(|_| LanError::Protocol)?;
+                if !nonce_b
+                    .matches(&hello.commit)
+                    .map_err(|_| LanError::Protocol)?
+                {
+                    return Err(LanError::Protocol);
+                }
+                let sas = Sas::compute(&th, &nonce_b).map_err(|_| LanError::Protocol)?;
                 observed()?;
-                vault.commit_link(link_id, &link?)?;
-                let record = vault.grant(&link_id, &mut |plaintext| ch.seal(plaintext))?;
-                ch.send_sealed(&record, t.message)
+                let ok = confirm.confirm(&sas, ctx.vault_name.expose_secret());
+                observed()?;
+                if cancelled() {
+                    return Err(LanError::Cancelled);
+                }
+                if Instant::now() >= expires {
+                    return Err(LanError::WindowExpired);
+                }
+                if !ok {
+                    return Err(LanError::Cancelled);
+                }
+                Ok(ctx)
             })?;
             drop(ss);
+            guarded(&mut ch, |ch| {
+                observed()?;
+                let record = vault.grant(&mut |plaintext| ch.seal(plaintext))?;
+                ch.send_sealed(&record, t.message)
+            })?;
             let failure = guarded(&mut ch, |ch| {
                 exchange::serve(ch, vault, ctx.vault_id, ctx.key_generation, t)
             })
             .err();
-            Ok(Approved {
-                mode,
-                link_id,
+            Ok(Approved::Joined {
                 peer_confirmed: failure.is_none(),
                 failure,
-                round: None,
             })
         }
-        JoinMode::Link => {
-            let link_id = random_array::<16>().map_err(|_| LanError::Io)?;
+        JoinMode::Sync => {
+            drop(ss);
+            // B proves first; A sends nothing derived from K_proof before
+            // that proof verifies (§4.8).
             guarded(&mut ch, |ch| {
-                let msg = ch.recv(t.confirm, Some(expires))?;
+                let ctx = ctx?;
+                let msg = ch.recv(t.message, Some(expires))?;
                 let prove =
                     PairProve::decode(msg.expose_secret()).map_err(|_| LanError::Protocol)?;
                 if prove.vault_id != ctx.vault_id.0 || prove.key_generation != ctx.key_generation.0
@@ -390,52 +375,21 @@ fn pair(
                     )
                     .map_err(|_| LanError::VaultMismatch)?;
                 observed()?;
-                let link = ctx
-                    .root
-                    .link_key(
-                        &ss,
-                        &th,
-                        &nonce_b,
-                        &link_id,
-                        ctx.vault_id,
-                        ctx.key_generation,
-                    )
-                    .map_err(|_| LanError::Protocol)?;
-                vault.commit_link(link_id, &link)?;
-                Ok(())
-            })?;
-            drop(ss);
-            // The link is committed: a later failure leaves it (§4.8).
-            let failure = guarded(&mut ch, |ch| {
                 let proof = ctx
                     .root
                     .proof(&th, ProofRole::A, ctx.vault_id, ctx.key_generation)
                     .map_err(|_| LanError::Protocol)?;
                 ch.send(
-                    &PairProved::encode(&link_id, proof.as_bytes())
-                        .map_err(|_| LanError::Protocol)?,
+                    &PairProved::encode(proof.as_bytes()).map_err(|_| LanError::Protocol)?,
                     t.message,
-                )?;
-                let msg = ch.recv(t.idle, None)?;
-                qv_protocol::lan::PairDone::decode(msg.expose_secret())
-                    .map_err(|_| LanError::Protocol)
-            })
-            .err();
+                )
+            })?;
             // The ordinary exchange over the pairing keys, A responding.
-            let round = failure.is_none().then(|| {
-                let r = guarded(&mut ch, |ch| {
-                    exchange::exchange(ch, Role::Responder, vault, t)
-                });
-                ch.conn.close();
-                r
+            let round = guarded(&mut ch, |ch| {
+                exchange::exchange(ch, Role::Responder, vault, t)
             });
-            Ok(Approved {
-                mode,
-                link_id,
-                peer_confirmed: failure.is_none(),
-                failure,
-                round,
-            })
+            ch.conn.close();
+            round.map(Approved::Synced)
         }
     }
 }

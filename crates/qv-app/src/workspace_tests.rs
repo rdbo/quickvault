@@ -921,7 +921,13 @@ fn security_settings_password_change_phrase_redisplay_and_rotation() {
     env.c
         .submit(env.epoch(), Action::CancelRotation, false)
         .unwrap();
-    assert!(env.c.snapshot().status.contains("nothing changed"));
+    assert!(
+        env.c
+            .snapshot()
+            .notice()
+            .is_some_and(|n| n.contains("nothing changed")),
+        "the cancellation is shown on the lock screen"
+    );
     env.unlock(NEW);
     assert_eq!(env.c.snapshot().phase, Phase::Unlocked);
     env.c

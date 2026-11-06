@@ -5,16 +5,14 @@
 use std::path::Path;
 
 use qv_crypto::{KeyGeneration, VaultId, VaultKey};
-use qv_model::Timestamp;
 
 use crate::anchor::AnchorDir;
 use crate::crash::CrashPoint;
 use crate::crash::test::{arm, disarm};
 use crate::fs::test_dir::{TestDir, write_file};
-use crate::lan_store_tests::link_key;
 use crate::vault::UnlockedVault;
 use crate::vault::tests::{NAME, PASSWORD, err, kdf, pw, unlock};
-use crate::{LanStaging, NewLanLink, StagedKeyslot, StoreError, VaultFile, VerifiedLanStaging};
+use crate::{LanStaging, StagedKeyslot, StoreError, VaultFile, VerifiedLanStaging};
 
 fn begin(u: &UnlockedVault, dir: &Path) -> Result<LanStaging, StoreError> {
     let state = u.lan_serve_state()?;
@@ -51,29 +49,15 @@ fn create(
     path: &Path,
     anchors: &AnchorDir,
 ) -> Result<(), StoreError> {
-    let key = link_key(u, &[9; 16]);
     let proof = {
         let _k = kdf();
         staging.verify_password(u.vault_key(), &pw(PASSWORD))?
     };
-    VaultFile::create_from_lan(
-        path,
-        staging,
-        proof,
-        u.vault_key(),
-        anchors,
-        NewLanLink {
-            link_id: [9; 16],
-            key: &key,
-            label: "Laptop",
-            created_at: Timestamp(5),
-        },
-        &|| false,
-    )
+    VaultFile::create_from_lan(path, staging, proof, u.vault_key(), anchors, &|| false)
 }
 
 #[test]
-fn lan_staging_builds_an_identical_vault_with_one_link() {
+fn lan_staging_builds_an_identical_vault_with_no_peer_state() {
     let (d, _a, u, _record) = crate::verify_tests::setup();
     let mut staging = staged(&u, &private(&d));
     assert_eq!(staging.manifest(), u.manifest());
@@ -104,10 +88,12 @@ fn lan_staging_builds_an_identical_vault_with_one_link() {
     let joined = unlock(&path, &anchors, PASSWORD).unwrap();
     assert_eq!(joined.manifest(), u.manifest());
     assert_eq!(joined.header().vault_id, u.header().vault_id);
-    let links = joined.lan_links().unwrap();
-    assert_eq!(links.len(), 1);
-    assert_eq!(links[0].link_id, [9; 16]);
-    assert_eq!(links[0].label.expose_secret(), b"Laptop");
+    // Nothing about the other device is stored (0013 §9.1).
+    assert!(joined.state.links.is_empty());
+    assert_eq!(
+        joined.state.head.lan_links_digest,
+        crate::lan_store::empty_digest().unwrap()
+    );
     assert_eq!(joined.local_seq(), 1);
     // A fresh replica, never the source's.
     assert_ne!(joined.state.replica.replica_id, u.state.replica.replica_id);

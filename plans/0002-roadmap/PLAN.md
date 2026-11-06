@@ -2225,3 +2225,21 @@ release; it is not weakened.
 
   2.10a stays unticked until the fresh-context review, the phone run and the
   owner's acceptance. No commit, push, branch, install or dependency change.
+
+- 2026-11-06: Owner direction while testing sync on the phone: "Not sure I
+  see the point in pairing devices when there is no identity. Maybe scanning
+  = 1 sync only". Spec 0014 (accepted by the owner the same day) and plan
+  0042 replace 0013's stored links, session handshake and receive windows
+  with one-use sync windows.
+  - **Protocol:** sync mode proves VK possession with transcript-bound MACs
+    (`lan-proof`) and runs one exchange; new-device mode keeps the
+    comparison code; nothing about a peer is stored. No vault format change.
+  - **Frontends:** `qvault lan open|sync|join`; the app's Devices screen
+    shows a code, scans one or takes a typed one, and a scanned code that
+    names its address starts at once.
+  - **Effect on phases:** 2.9 and 2.10 delivered work is superseded where it
+    concerns links, receive windows and the address QR; 2.10b's QR display
+    and scanning carry over with one QR kind. The attended checks carried
+    to 2.11 (0039 step 6) are rewritten for the new flows in
+    `plans/0039-lan-qr/DEVICE-VALIDATION.md`. D12 still reviews the
+    composition before any LAN release.

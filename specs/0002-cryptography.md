@@ -104,7 +104,7 @@ derivation_profile]`.
 | device-storage | Wrap local device signing bundles when bound to this vault |
 | recovery-ed25519 | Independent Ed25519 recovery-key seed |
 | recovery-mldsa65 | Independent ML-DSA-65 recovery-key seed |
-| lan-link | Root of pairwise LAN link keys (0013 §4.6) |
+| lan-proof | VK possession proofs for one LAN sync session (0013 §4.6, §4.8) |
 
 Labels are never reused. Algorithm-specific seeds are separate derivations;
 do not reuse one signature algorithm's seed for another.
@@ -169,11 +169,10 @@ or device signing keys were also compromised, replace those credentials and
 server trust before distributing new VK. Missing trusted device approval uses
 recovery plus out-of-band verification; no automatic old-key-only transition.
 
-LAN peer approvals are pairwise link keys bound to one key generation
-(0013 §9, §12). A rotated vault has no links and old link keys fail
-authentication. Each remaining device re-pairs through 0013 §4 in
-new-device mode. Removal is local and is not compromise recovery. Server
-revocation does not affect LAN links.
+LAN sessions need a fresh one-use code from an unlocked device and a proof
+of the current generation's VK (0013 §4, §12). Old-generation copies fail
+that proof and join again in new-device mode. No LAN approval is stored, so
+there is nothing to revoke; server revocation does not affect LAN use.
 
 3.6. Derive record keys from the record purpose key with HKDF-SHA-512,
 salt=vault ID, 32-byte output, info=`["qv/record-key/v1", record_id]`.
@@ -295,6 +294,9 @@ password guessing and device compromise are separate from vault encryption.
 
 ## Changelog
 
+- 2026-11-06: Accepted 0014 (owner, plan 0042): the purpose label `lan-link`
+  becomes `lan-proof`; §3.5 states that LAN sessions need a fresh code and a
+  current-generation VK proof, and that no LAN approval is stored.
 - 2026-10-30: Owner-delegated acceptance of 0013 (roadmap D10, plan 0025): add the `lan / 1` profile namespace and the `lan-link` purpose label; §3.5 states that LAN approvals are generation-bound link keys and that rotation requires re-pairing.
 - 2026-10-29: Owner approved plan 0021 D1 A: an offline-only rotation may
   defer recovery public-key derivation until sync configuration needs those

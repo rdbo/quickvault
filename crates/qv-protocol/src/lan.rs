@@ -48,8 +48,9 @@ fn bad<E>(_: E) -> ProtocolError {
 pub enum JoinMode {
     /// `0`: the joiner has no copy of this vault and generation.
     NewDevice,
-    /// `1`: the joiner holds the same vault and generation, unlocked.
-    Link,
+    /// `1`: the joiner holds the same vault and generation, unlocked, and
+    /// asks for one sync session (0013 §4.8).
+    Sync,
 }
 
 impl JoinMode {
@@ -57,14 +58,14 @@ impl JoinMode {
     pub const fn code(self) -> u64 {
         match self {
             Self::NewDevice => 0,
-            Self::Link => 1,
+            Self::Sync => 1,
         }
     }
 
     fn from_code(code: u64) -> Result<Self, ProtocolError> {
         match code {
             0 => Ok(Self::NewDevice),
-            1 => Ok(Self::Link),
+            1 => Ok(Self::Sync),
             _ => Err(ProtocolError::Malformed),
         }
     }
@@ -265,166 +266,6 @@ pub fn pair_th_input(
     .map_err(bad)
 }
 
-/// `SyncHello` (0013 §5.1): `body ++ [mac]`. It names no link or vault.
-#[derive(Debug)]
-pub struct SyncHello<'a> {
-    /// The raw `lan_profile`, checked by the caller after the shape.
-    pub profile: u64,
-    /// `nonce_I`.
-    pub nonce_i: [u8; 32],
-    /// I's X-Wing encapsulation key (not yet validated).
-    pub ek: &'a [u8; EK_LEN],
-    /// `MAC/1(K_i, canonical(body))`.
-    pub mac: [u8; 32],
-}
-
-impl<'a> SyncHello<'a> {
-    fn fields(a: &mut Encoder, profile: LanProfile, nonce_i: &[u8; 32], ek: &[u8; EK_LEN]) {
-        a.uint(profile.id());
-        a.bytes(nonce_i);
-        a.bytes(ek);
-    }
-
-    /// The canonical body that the tag covers: the first four elements.
-    pub fn body(
-        profile: LanProfile,
-        nonce_i: &[u8; 32],
-        ek: &[u8; EK_LEN],
-    ) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
-        qv_encoding::encode_array(|a| {
-            a.text(Label::Hello.as_str());
-            Self::fields(a, profile, nonce_i, ek);
-            Ok(())
-        })
-        .map_err(bad)
-    }
-
-    /// The complete hello.
-    pub fn encode(
-        profile: LanProfile,
-        nonce_i: &[u8; 32],
-        ek: &[u8; EK_LEN],
-        mac: &[u8; 32],
-    ) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
-        write_message(Label::Hello, HANDSHAKE_FRAME_MAX, |a| {
-            Self::fields(a, profile, nonce_i, ek);
-            a.bytes(mac);
-            Ok(())
-        })
-    }
-
-    /// Decodes the exact shape; use [`crate::message::body_without_last`]
-    /// for the tagged bytes.
-    pub fn decode(bytes: &'a [u8]) -> Result<Self, ProtocolError> {
-        let mut r = MessageReader::open(bytes, Label::Hello)?;
-        let m = Self {
-            profile: r.uint()?,
-            nonce_i: r.bytes_exact()?,
-            ek: exact(&mut r)?,
-            mac: r.bytes_exact()?,
-        };
-        r.finish()?;
-        Ok(m)
-    }
-}
-
-/// `SyncAccept` (0013 §5.2).
-#[derive(Debug)]
-pub struct SyncAccept<'a> {
-    /// `nonce_R`.
-    pub nonce_r: [u8; 32],
-    /// The X-Wing ciphertext.
-    pub ct: &'a [u8; CT_LEN],
-    /// `MAC/1(K_r, canonical([label, H(hello), nonce_R, ct]))`.
-    pub mac: [u8; 32],
-}
-
-impl<'a> SyncAccept<'a> {
-    /// The canonical array that the accept tag covers.
-    pub fn transcript(
-        hello_hash: &[u8; 32],
-        nonce_r: &[u8; 32],
-        ct: &[u8; CT_LEN],
-    ) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
-        qv_encoding::encode_array(|a| {
-            a.text(Label::Accept.as_str());
-            a.bytes(hello_hash);
-            a.bytes(nonce_r);
-            a.bytes(ct);
-            Ok(())
-        })
-        .map_err(bad)
-    }
-
-    /// The complete accept.
-    pub fn encode(
-        nonce_r: &[u8; 32],
-        ct: &[u8; CT_LEN],
-        mac: &[u8; 32],
-    ) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
-        write_message(Label::Accept, HANDSHAKE_FRAME_MAX, |a| {
-            a.bytes(nonce_r);
-            a.bytes(ct);
-            a.bytes(mac);
-            Ok(())
-        })
-    }
-
-    /// Decodes the exact shape.
-    pub fn decode(bytes: &'a [u8]) -> Result<Self, ProtocolError> {
-        let mut r = MessageReader::open(bytes, Label::Accept)?;
-        let m = Self {
-            nonce_r: r.bytes_exact()?,
-            ct: exact(&mut r)?,
-            mac: r.bytes_exact()?,
-        };
-        r.finish()?;
-        Ok(m)
-    }
-}
-
-/// The canonical `["qv/lan-th/v1", H(hello), H(accept)]`; the session `th`
-/// is its hash (0013 §5.2).
-pub fn session_th_input(
-    hello_hash: &[u8; 32],
-    accept_hash: &[u8; 32],
-) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
-    qv_encoding::encode_array(|a| {
-        a.text("qv/lan-th/v1");
-        a.bytes(hello_hash);
-        a.bytes(accept_hash);
-        Ok(())
-    })
-    .map_err(bad)
-}
-
-/// `Confirm` (0013 §5.3): I's first record.
-#[derive(Debug)]
-pub struct Confirm {
-    /// The session transcript hash.
-    pub th: [u8; 32],
-}
-
-impl Confirm {
-    /// Encodes a confirm.
-    pub fn encode(th: &[u8; 32]) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
-        write_message(Label::Confirm, MESSAGE_MAX, |a| {
-            a.bytes(th);
-            Ok(())
-        })
-    }
-
-    /// Decodes the exact shape.
-    pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
-        let mut r = MessageReader::open(bytes, Label::Confirm)?;
-        let m = Self {
-            th: r.bytes_exact()?,
-        };
-        r.finish()?;
-        Ok(m)
-    }
-}
-
 /// `PairReveal` (0013 §4.5).
 pub struct PairReveal {
     /// The revealed `nonce_B`.
@@ -457,8 +298,6 @@ pub struct PairGrant<'a> {
     pub key_generation: u32,
     /// VK, 32 bytes.
     pub vk: &'a [u8],
-    /// The new link's ID.
-    pub link_id: [u8; 16],
 }
 
 impl<'a> PairGrant<'a> {
@@ -467,13 +306,11 @@ impl<'a> PairGrant<'a> {
         vault_id: &[u8; 16],
         key_generation: u32,
         write_vk: impl FnOnce(&mut Encoder),
-        link_id: &[u8; 16],
     ) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
         write_message(Label::PairGrant, MESSAGE_MAX, |a| {
             a.bytes(vault_id);
             a.uint(key_generation.into());
             write_vk(a);
-            a.bytes(link_id);
             Ok(())
         })
     }
@@ -491,7 +328,6 @@ impl<'a> PairGrant<'a> {
             vault_id,
             key_generation,
             vk,
-            link_id: r.bytes_exact()?,
         };
         r.finish()?;
         Ok(m)
@@ -546,20 +382,14 @@ impl PairProve {
 /// `PairProved` (0013 §4.8).
 #[derive(Debug)]
 pub struct PairProved {
-    /// The new link's ID.
-    pub link_id: [u8; 16],
     /// `proof_A`.
     pub proof: [u8; 32],
 }
 
 impl PairProved {
-    /// Encodes the approver's proof.
-    pub fn encode(
-        link_id: &[u8; 16],
-        proof: &[u8; 32],
-    ) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
+    /// Encodes the offering device's proof.
+    pub fn encode(proof: &[u8; 32]) -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
         write_message(Label::PairProved, MESSAGE_MAX, |a| {
-            a.bytes(link_id);
             a.bytes(proof);
             Ok(())
         })
@@ -569,28 +399,10 @@ impl PairProved {
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
         let mut r = MessageReader::open(bytes, Label::PairProved)?;
         let m = Self {
-            link_id: r.bytes_exact()?,
             proof: r.bytes_exact()?,
         };
         r.finish()?;
         Ok(m)
-    }
-}
-
-/// `PairDone` (0013 §4.8).
-#[derive(Debug)]
-pub struct PairDone;
-
-impl PairDone {
-    /// Encodes `["qv/lan-pair-done/v1"]`.
-    pub fn encode() -> Result<Zeroizing<Vec<u8>>, ProtocolError> {
-        write_message(Label::PairDone, MESSAGE_MAX, |_| Ok(()))
-    }
-
-    /// Decodes the exact shape.
-    pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
-        MessageReader::open(bytes, Label::PairDone)?.finish()?;
-        Ok(Self)
     }
 }
 
@@ -839,11 +651,11 @@ mod tests {
     #[test]
     fn lan_pairing_messages_round_trip() {
         let body =
-            PairHello::body(LanProfile::V1, &[1; 16], JoinMode::Link, &[2; 32], &EK).unwrap();
+            PairHello::body(LanProfile::V1, &[1; 16], JoinMode::Sync, &[2; 32], &EK).unwrap();
         let hello = PairHello::encode(
             LanProfile::V1,
             &[1; 16],
-            JoinMode::Link,
+            JoinMode::Sync,
             &[2; 32],
             &EK,
             &[5; 32],
@@ -854,7 +666,7 @@ mod tests {
         let h = PairHello::decode(&hello).unwrap();
         assert_eq!(
             (h.profile, h.pairing_id, h.mode, h.commit, h.mac),
-            (1, [1; 16], JoinMode::Link, [2; 32], [5; 32])
+            (1, [1; 16], JoinMode::Sync, [2; 32], [5; 32])
         );
         assert_eq!(h.ek, &EK);
 
@@ -869,11 +681,11 @@ mod tests {
         let reveal = PairReveal::encode(&[9; 32]).unwrap();
         assert_eq!(*PairReveal::decode(&reveal).unwrap().nonce_b, [9; 32]);
 
-        let grant = PairGrant::encode(&[1; 16], 7, |e| e.bytes(&[0xaa; 32]), &[2; 16]).unwrap();
+        let grant = PairGrant::encode(&[1; 16], 7, |e| e.bytes(&[0xaa; 32])).unwrap();
         let g = PairGrant::decode(&grant).unwrap();
         assert_eq!(
-            (g.vault_id, g.key_generation, g.vk, g.link_id),
-            ([1; 16], 7, &[0xaa; 32][..], [2; 16])
+            (g.vault_id, g.key_generation, g.vk),
+            ([1; 16], 7, &[0xaa; 32][..])
         );
         assert_eq!(format!("{g:?}"), "PairGrant(<redacted>)");
 
@@ -883,10 +695,8 @@ mod tests {
             (p.vault_id, p.key_generation, p.proof),
             ([1; 16], 7, [3; 32])
         );
-        let proved = PairProved::encode(&[2; 16], &[4; 32]).unwrap();
-        let p = PairProved::decode(&proved).unwrap();
-        assert_eq!((p.link_id, p.proof), ([2; 16], [4; 32]));
-        PairDone::decode(&PairDone::encode().unwrap()).unwrap();
+        let proved = PairProved::encode(&[4; 32]).unwrap();
+        assert_eq!(PairProved::decode(&proved).unwrap().proof, [4; 32]);
         assert_eq!(
             pair_th_input(&[1; 32], &[2; 32]).unwrap().len(),
             1 + 18 + 2 * 34
@@ -961,73 +771,46 @@ mod tests {
     }
 
     #[test]
-    fn lan_session_messages_round_trip_and_refuse_bad_shapes() {
-        let body = SyncHello::body(LanProfile::V1, &[1; 32], &EK).unwrap();
-        let hello = SyncHello::encode(LanProfile::V1, &[1; 32], &EK, &[2; 32]).unwrap();
-        assert!(hello.len() <= HANDSHAKE_FRAME_MAX);
-        assert_eq!(body_without_last(&hello).unwrap(), body);
-        let h = SyncHello::decode(&hello).unwrap();
-        assert_eq!((h.profile, h.nonce_i, h.mac), (1, [1; 32], [2; 32]));
-        assert_eq!(h.ek, &EK);
-        // The body is exactly the spec's array: label, profile, nonce, ek.
-        let expected = msg("qv/lan-hello/v1", |a| {
+    fn lan_removed_and_old_shapes_are_refused() {
+        // 0014: the session handshake, PairDone and the address QR are gone.
+        for label in [
+            "qv/lan-hello/v1",
+            "qv/lan-accept/v1",
+            "qv/lan-confirm/v1",
+            "qv/lan-pair-done/v1",
+        ] {
+            let m = msg(label, |a| a.bytes(&[8; 32]));
+            assert_eq!(
+                ErrorMsg::peek(&m).err(),
+                Some(ProtocolError::UnknownLabel),
+                "{label}"
+            );
+            assert!(PairProved::decode(&m).is_err(), "{label}");
+        }
+        // The pre-0014 grant (with link_id) and proved (with link_id).
+        let old_grant = msg("qv/lan-pair-grant/v1", |a| {
+            a.bytes(&[1; 16]);
             a.uint(1);
-            a.bytes(&[1; 32]);
-            a.bytes(&EK);
+            a.bytes(&[0; 32]);
+            a.bytes(&[2; 16]);
         });
-        assert_eq!(body.as_slice(), expected.as_slice());
-
-        let accept = SyncAccept::encode(&[3; 32], &CT, &[4; 32]).unwrap();
-        assert!(accept.len() <= HANDSHAKE_FRAME_MAX);
-        let a = SyncAccept::decode(&accept).unwrap();
-        assert_eq!((a.nonce_r, a.ct, a.mac), ([3; 32], &CT, [4; 32]));
-        let t = SyncAccept::transcript(&[5; 32], &[3; 32], &CT).unwrap();
-        let expected = msg("qv/lan-accept/v1", |a| {
-            a.bytes(&[5; 32]);
-            a.bytes(&[3; 32]);
-            a.bytes(&CT);
-        });
-        assert_eq!(t.as_slice(), expected.as_slice());
-        let th = session_th_input(&[6; 32], &[7; 32]).unwrap();
-        let expected = msg("qv/lan-th/v1", |a| {
-            a.bytes(&[6; 32]);
-            a.bytes(&[7; 32]);
-        });
-        assert_eq!(th.as_slice(), expected.as_slice());
-        let c = Confirm::decode(&Confirm::encode(&[8; 32]).unwrap()).unwrap();
-        assert_eq!(c.th, [8; 32]);
-
-        // Wrong labels, arity and lengths.
-        assert!(SyncHello::decode(&accept).is_err());
-        assert!(SyncAccept::decode(&hello).is_err());
-        assert!(PairHello::decode(&hello).is_err());
-        let short_ek = msg("qv/lan-hello/v1", |a| {
-            a.uint(1);
-            a.bytes(&[1; 32]);
-            a.bytes(&EK[..EK_LEN - 1]);
-            a.bytes(&[2; 32]);
-        });
-        assert!(SyncHello::decode(&short_ek).is_err());
-        let short_nonce = msg("qv/lan-hello/v1", |a| {
-            a.uint(1);
-            a.bytes(&[1; 31]);
-            a.bytes(&EK);
-            a.bytes(&[2; 32]);
-        });
-        assert!(SyncHello::decode(&short_nonce).is_err());
-        let extra = msg("qv/lan-confirm/v1", |a| {
-            a.bytes(&[8; 32]);
-            a.uint(0);
-        });
-        assert!(Confirm::decode(&extra).is_err());
-        let short_th = msg("qv/lan-confirm/v1", |a| a.bytes(&[8; 31]));
-        assert!(Confirm::decode(&short_th).is_err());
-        let short_ct = msg("qv/lan-accept/v1", |a| {
-            a.bytes(&[3; 32]);
-            a.bytes(&CT[..CT_LEN - 1]);
+        assert_eq!(
+            PairGrant::decode(&old_grant).err(),
+            Some(ProtocolError::Malformed)
+        );
+        let old_proved = msg("qv/lan-pair-proved/v1", |a| {
+            a.bytes(&[2; 16]);
             a.bytes(&[4; 32]);
         });
-        assert!(SyncAccept::decode(&short_ct).is_err());
+        assert_eq!(
+            PairProved::decode(&old_proved).err(),
+            Some(ProtocolError::Malformed)
+        );
+        let short_proof = msg("qv/lan-pair-proved/v1", |a| a.bytes(&[4; 31]));
+        assert_eq!(
+            PairProved::decode(&short_proof).err(),
+            Some(ProtocolError::Malformed)
+        );
     }
 
     #[test]
@@ -1072,7 +855,6 @@ mod tests {
             a.bytes(&[1; 16]);
             a.uint(1);
             a.bytes(&[0; 31]);
-            a.bytes(&[2; 16]);
         });
         malformed(PairGrant::decode(&grant31).map(drop));
         let done3 = msg("qv/lan-done/v1", |a| {
@@ -1112,12 +894,15 @@ mod tests {
         malformed(ManifestPart::decode(&part).map(drop));
         // Another label in place of the expected one.
         assert_eq!(
-            Want::decode(&PairDone::encode().unwrap()).err(),
+            Want::decode(&PairProved::encode(&[4; 32]).unwrap()).err(),
             Some(ProtocolError::UnexpectedLabel)
         );
         // Extra element.
-        let extra = msg("qv/lan-pair-done/v1", |a| a.uint(0));
-        malformed(PairDone::decode(&extra).map(drop));
+        let extra = msg("qv/lan-pair-proved/v1", |a| {
+            a.bytes(&[4; 32]);
+            a.uint(0);
+        });
+        malformed(PairProved::decode(&extra).map(drop));
     }
 
     proptest! {
@@ -1129,16 +914,12 @@ mod tests {
             let _ = PairGrant::decode(&bytes);
             let _ = PairProve::decode(&bytes);
             let _ = PairProved::decode(&bytes);
-            let _ = PairDone::decode(&bytes);
             let _ = State::decode(&bytes);
             let _ = ManifestPart::decode(&bytes);
             let _ = Want::decode(&bytes);
             let _ = ObjectMsg::decode(&bytes);
             let _ = Done::decode(&bytes);
             let _ = ErrorMsg::peek(&bytes);
-            let _ = SyncHello::decode(&bytes);
-            let _ = SyncAccept::decode(&bytes);
-            let _ = Confirm::decode(&bytes);
         }
     }
 }

@@ -5,6 +5,10 @@ what they say, and behaviour changes start with a spec change.
 
 ## Index
 
+0014 (accepted by the owner 2026-11-06, plan 0042) replaces 0013's stored
+device links with one-use sync codes; its amendments are applied to 0013,
+0002, 0004, 0005, 0009, 0011 and 0012.
+
 0009 §1.8 specifies the owner-delegated app shell, preferences and item
 editor profile (2026-11-05, plan 0040), approved for implementation. 0003 §5.5
 adds the app colour token in the existing `icon` text. Its vault-list bullet (plan
@@ -36,6 +40,7 @@ phase 2.4 implementation; neither spec's overall status is promoted.
 | [0011](0011-cli.md) | Command-Line Interface | Accepted |
 | [0012](0012-security-validation.md) | Security Validation and Release Gates | Accepted |
 | [0013](0013-lan-sync-protocol.md) | Direct LAN Sync Protocol | Accepted |
+| [0014](0014-lan-one-scan-sync.md) | One-Scan LAN Sync (no device links) | Accepted |
 
 0004 §6.2 and 0011 §4 specify the delegated archive merge/export contracts and
 explicit self-contained backup slots (2026-10-31, plan 0028).

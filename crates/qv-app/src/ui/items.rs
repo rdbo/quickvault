@@ -63,7 +63,6 @@ pub(crate) fn dom_id(field: WsField) -> String {
         WsField::Confirmation => "ws-confirmation".into(),
         WsField::LanCode => "ws-lan-code".into(),
         WsField::LanEndpoint => "ws-lan-endpoint".into(),
-        WsField::LanLabel => "ws-lan-label".into(),
     }
 }
 

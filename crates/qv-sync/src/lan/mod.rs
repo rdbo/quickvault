@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Direct LAN pairing (spec 0013 §1–4, §8–10; plan 0037).
+//! Direct LAN sync with one-use codes (spec 0013 §1–4, §6–10; plans 0037,
+//! 0038, 0042).
 //!
 //! - `transport`: TCP frames with time limits and prompt cancellation, and
 //!   the record channel under the pairing keys.
 //! - `steps`: the pure pairing computations (hello, accept, transcript),
 //!   shared by the drivers and the interoperability vectors.
-//! - [`PairingWindow`] (the approving device A): a TCP listener for one
-//!   unlocked vault; one session at a time, 16 failed attempts, second-hello
+//! - [`PairingWindow`] (the offering device A): a TCP listener for one
+//!   unlocked vault and one session; 16 failed attempts, second-hello
 //!   detection (§8.3), the time limit and cancellation.
-//! - [`join_new_device`] and [`join_link`] (the joining device B): candidate
-//!   endpoints tried one at a time until one authenticates (§3.3).
+//! - [`join_new_device`] and [`sync_with_code`] (the joining device B):
+//!   candidate endpoints tried one at a time until one authenticates (§3.3).
 //! - `exchange`: the exchange (§7) between two holders of the vault, and the
 //!   new-device form (§4.7, §10). Each side stages the peer's state and
 //!   verifies it completely before merging and committing.
-//! - `session`: the pure session-handshake computations (§5).
-//! - [`ReceiveWindow`] (the responder) and [`sync`] (the initiator): sync
-//!   rounds between linked devices (§5, §7, §8).
-//! - `window`: the listener and acceptor shared by both windows.
+//! - `window`: the listener and acceptor.
+//!
+//! Nothing about a peer is stored (§9.1).
 //!
 //! **Trust.** Endpoints are hints (§3.1). Nothing is sent before the hello
 //! MAC verifies, and nothing is decapsulated before the accept MAC verifies.
@@ -29,11 +29,8 @@
 mod approver;
 mod endpoint;
 mod exchange;
-mod initiator;
 mod joiner;
 mod qr;
-mod receiver;
-pub(crate) mod session;
 pub(crate) mod steps;
 mod transport;
 mod window;
@@ -47,25 +44,21 @@ use qv_store::StoreError;
 pub use approver::{Approved, ApproverContext, ApproverVault, Confirm, PairingWindow, Sealer};
 pub use endpoint::{EndpointPolicy, ListenScope, parse_endpoint};
 pub use exchange::{Accepted, ExchangeVault, Role, RoundReport, grant_plaintext};
-pub use initiator::sync;
 pub use joiner::{
-    JoinCode, JoinedLink, JoinedNewDevice, JoinerContext, JoinerUi, JoinerVault, join_link,
-    join_new_device,
+    JoinCode, JoinedNewDevice, JoinerContext, JoinerUi, JoinerVault, join_new_device,
+    sync_with_code,
 };
-pub use qr::{LanQrInfo, LanQrKind, inspect_lan_qr};
+pub use qr::{LanQrInfo, inspect_lan_qr};
 pub use qv_crypto::lan::Sas;
 pub use qv_protocol::lan::JoinMode;
 pub use qv_protocol::lan::Outcome;
-pub use receiver::{
-    RECEIVE_WINDOW_DEFAULT, RECEIVE_WINDOW_MAX, ReceiveWindow, ResponderVault, WindowEnd,
-};
 
-/// Why a LAN pairing failed. Carries no data (0008 §1).
+/// Why a LAN session failed. Carries no data (0008 §1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum LanError {
     /// No candidate authenticated: a wrong code, an unreachable device, a
-    /// removed link or a closed window. Looks like a closed port.
+    /// closed or used window. Looks like a closed port.
     NoPeer,
     /// An authenticated peer stopped responding within the time limit.
     Timeout,
@@ -80,7 +73,7 @@ pub enum LanError {
     TooManyAttempts,
     /// The window's time limit passed (0013 §8.2).
     WindowExpired,
-    /// Another vault or generation, or a failed link-mode proof.
+    /// Another vault or generation, or a failed sync-mode proof.
     VaultMismatch,
     /// An unknown profile or a required feature this build lacks.
     Unsupported,
@@ -111,7 +104,7 @@ impl core::fmt::Display for LanError {
             Self::PeerCancelled => "cancelled on the other device",
             Self::CodeObserved => "a second device used the code; it may have been observed",
             Self::TooManyAttempts => "unexpected connection attempts",
-            Self::WindowExpired => "the pairing window expired",
+            Self::WindowExpired => "the code expired",
             Self::VaultMismatch => "the devices hold different vaults or key generations",
             Self::Unsupported => "unsupported protocol version or feature",
             Self::Limit => "a size limit would be exceeded",
@@ -226,7 +219,7 @@ impl LanTimeouts {
     }
 }
 
-/// The longest pairing window (0013 §8.2).
+/// The longest sync window (0013 §8.2).
 pub const PAIRING_WINDOW_MAX: Duration = Duration::from_secs(600);
 
 /// Most candidate endpoints tried per action (0013 §3.3).

@@ -10,7 +10,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Direct LAN pairing (0013; plan 0037).
+/// Direct LAN sync with one-use codes (0013; plans 0037, 0038, 0042).
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub mod lan;
 

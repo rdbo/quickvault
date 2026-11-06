@@ -80,3 +80,4 @@ plan, or a new plan that names the one it supersedes.
 | [0039](0039-lan-qr/PLAN.md) | LAN QR display and Android camera scanning (roadmap 2.10b) | Reviewed — approved with two test-only fixes; native/optical phone checks pass; live peer/offline checks carried to 2.11 |
 | [0040](0040-app-design/PLAN.md) | App design: application look and feel (roadmap 2.10a) | Implemented — new UI from the approved prototype; fresh review, phone run and owner acceptance pending |
 | [0041](0041-vault-list/PLAN.md) | Vault list, default folder and name-only create (owner follow-up to 2.10a) | Implemented — fresh review and owner acceptance pending |
+| [0042](0042-lan-one-scan-sync/PLAN.md) | One-scan LAN sync, no device links (owner direction; spec 0014) | Implemented — fresh review, phone run and D12 pending |

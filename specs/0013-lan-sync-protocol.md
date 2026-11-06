@@ -10,18 +10,27 @@ Account-free synchronization between two devices on the same network:
 - **Discovery:** endpoints come from a pairing QR, manual entry or DNS-SD
   advertisements made only while a user-opened window is open. No address
   is trusted.
-- **Pairing:** an out-of-band pairing (QR, or a 26-character code with a
-  128-bit secret, plus a committed six-digit comparison code) creates a
-  **pairwise link key** for one peer, one vault and one key generation. In
-  new-device mode it also transfers VK.
-- **Sessions:** each session authenticates with the link key and gets
-  forward secrecy and hybrid post-quantum confidentiality from a fresh
-  X-Wing exchange.
+- **Codes:** a device with the vault unlocked opens a one-use **sync
+  window** and shows a code: a QR, or a 26-character code holding a
+  128-bit secret, with its address. Scanning or typing it runs exactly one
+  session; nothing about the other device is stored.
+- **Sync mode:** both devices prove they hold this vault and generation's
+  key with MACs bound to the session transcript, then run one exchange.
+  There is no comparison code.
+- **New-device mode:** a committed six-digit comparison code is confirmed
+  on both screens before VK is transferred.
+- **Keys:** each session gets forward secrecy and hybrid post-quantum
+  confidentiality from a fresh X-Wing exchange mixed with the code's
+  secret.
 - **Exchange:** peers trade complete encrypted manifests and the immutable
   objects the other lacks. Each side verifies them, merges under 0005 §2 and
   commits locally under 0004 §5 and 0005 §5.4.
-- **Removal:** local, per link. Rotation drops every link; compromise
-  recovery is rotation plus re-pairing.
+- **Generations:** rotation stops old-generation copies, which join again
+  in new-device mode; compromise recovery is rotation.
+
+Amended 2026-11-06 by [0014](0014-lan-one-scan-sync.md) (owner direction):
+stored pairwise links, the session handshake (§5) and receive windows
+(§8.5) were removed. Section numbers are kept; removed sections are stubs.
 
 This spec resolves 0005 Open Questions 3–6 (roadmap D10, delegated by the
 owner on 2026-10-30; acceptance also delegated the same day). It uses only primitives already
@@ -51,9 +60,11 @@ Milestone 2 needs a protocol that:
   would still need a hybrid application signature bound to the channel,
   and VK transfer would still need its own X-Wing envelope (0002 §6.3).
 
-Pairwise link keys give per-peer approval and local blocking. Their
-authentication is symmetric, so quantum attacks don't break it. They use
-only existing profiles.
+Pairwise link keys were chosen on 2026-10-30 for per-peer approval and
+local blocking. 0014 (2026-11-06) replaced them: each session now needs a
+fresh one-use code from an unlocked device plus a transcript-bound VK
+proof, which answers the objection to a VK-only credential above. See
+0014 *Motivation*.
 
 ## Specification
 
@@ -99,7 +110,7 @@ reads at most one frame ahead. Time limits:
   pairing reveal and the confirm. Opening a connection is also bounded by
   10 s;
 - a read that waits on the other user's confirmation (the grant, the
-  link-mode proof and its reply) is bounded by the pairing window limit
+  sync-mode proof and its reply) is bounded by the pairing window limit
   (§8.2), not by the 10 s limit;
 - 60 s idle during an exchange;
 - the window limits in §8.
@@ -111,14 +122,14 @@ explicitly.
 
 ### 2. Roles and states
 
-- *Approving device* **A**: has the vault unlocked and opens a pairing
-  window.
-- *Joining device* **B**: scans or types the pairing code. It joins in
+- *Offering device* **A**: has the vault unlocked and opens a sync
+  window (§8).
+- *Joining device* **B**: scans or types the window's code. It joins in
   **new-device** mode (it has no copy of this vault and generation) or
-  **link** mode (it already holds the same vault and generation, unlocked).
-- *Initiator* **I** and *responder* **R** in a sync session: R has an open
-  receive window; I connects. Roles never affect the merge result
-  (0005 §6.1).
+  **sync** mode (it already holds the same vault and generation, unlocked).
+  The window accepts either; A learns the mode from the hello.
+- In the exchange (§7), B is the *initiator* **I** and A the *responder*
+  **R**. Roles never affect the merge result (0005 §6.1).
 
 Each window or session is a state machine. Any message other than the next
 expected one, a failed check, a timeout, a lock or a cancellation moves it
@@ -135,20 +146,19 @@ Committed local state stays committed (0005 §6.5).
 3.1. Endpoints come only from:
 - the pairing QR (§4.2);
 - manual entry;
-- the address-only code shown by a receive window (§8.5);
 - DNS-SD results collected during an explicit user action.
 
 No endpoint is remembered between actions (§9.2).
 
 All of them are untrusted hints (0005 §6.2). Authentication comes only from
-§4 and §5.
+§4.
 
-3.2. **Advertising** runs only while a pairing or receive window is open
+3.2. **Advertising** runs only while a sync window is open
 (§8). It is off when the user disables discovery, which must be possible
 on every platform, and then manual entry still works.
 - Service type: `_qvault._tcp.local`.
 - Instance name: `qv-` plus 16 lowercase hex digits, random per window.
-- TXT record: `v=1`. Pairing windows add `p=` plus 8 hex digits of
+- TXT record: `v=1`. Sync windows add `p=` plus 8 hex digits of
   `HKDF(IKM=P, salt=pairing_id, info=["qv/lan-pair-tag/v1"], L=4)`,
   which lets the joining device pick the right advertisement.
 
@@ -158,11 +168,11 @@ label, it MUST use a random per-window label. Otherwise the OS host name is
 accepted leakage, documented per platform (0009). Advertising stops when
 the window closes.
 
-3.3. **Browsing** runs only during an explicit pair or sync action, for at
+3.3. **Browsing** runs only during an explicit join or sync action, for at
 most 3 s. It keeps at most 16 candidate endpoints. The initiator tries the
 candidates one at a time and stops at the first authenticated session. A
-wrong responder gets one hello, which holds no identifier and nothing
-reusable (§5.1).
+wrong responder gets one pairing hello. It can only relay it to the
+intended window, where the single-hello rule applies (§4.3).
 
 3.4. **Android** (0009): resolve discovered or QR-named services through
 the platform's service-discovery API where possible. It grants
@@ -172,7 +182,7 @@ or the platform requires it, with an explanation, and never at start-up.
 
 ### 4. Pairing
 
-4.1. **Opening.** A opens a pairing window for one unlocked vault (§8.1).
+4.1. **Opening.** A opens a sync window for one unlocked vault (§8.1).
 It generates:
 - the pairing secret `P`: 16 random bytes;
 - `pairing_id = HKDF(IKM=P, salt=empty, info=["qv/lan-pair-id/v1"], L=16)`;
@@ -196,7 +206,7 @@ other check.
 
 ```
 body   = ["qv/lan-pair-hello/v1", lan_profile: uint, pairing_id: bstr(16),
-          mode: uint (0 = new device, 1 = link), commit_B: bstr(32),
+          mode: uint (0 = new device, 1 = sync), commit_B: bstr(32),
           ek_B: bstr(1216)]
 commit_B = H(["qv/lan-pair-commit/v1", nonce_B])
 hello    = body ++ [MAC/1(K_hello, canonical(body))]      (one 7-element array)
@@ -227,7 +237,9 @@ k_a2b  = HKDF(ss ‖ P, th, ["qv/lan-pair-key/v1", "a2b"])
 B verifies the MAC in constant time and decapsulates. From here both
 directions use the §6 record layer with these keys.
 
-4.5. **Reveal and comparison code.**
+4.5. **Reveal and comparison code** (new-device mode only). In sync mode B
+sends no reveal, `commit_B` is never opened and neither side computes or
+shows a comparison code; §4.8 follows the accept directly.
 - B sends `["qv/lan-pair-reveal/v1", nonce_B: bstr(32)]`, and A checks it
   against `commit_B`.
 - Both compute `SAS = (u32be(first 4 bytes of
@@ -244,122 +256,63 @@ A shows the code with B's requested mode and the vault's name. A releases
 nothing until the user confirms that both codes match. A mismatch or a
 cancellation aborts on both sides.
 
-4.6. **Link derivation.** A draws `link_id` (16 random bytes).
-`K_lan = HKDF(VK, vault_id, ["qv/purpose/v1", "lan-link", key_generation,
-derivation_profile])` is the new purpose key (0002 §3.3, amended in §13).
-Then:
+4.6. **Vault proof key.**
+`K_proof = HKDF(VK, vault_id, ["qv/purpose/v1", "lan-proof", key_generation,
+derivation_profile])` (0002 §3.3). It authenticates sync mode (§4.8): only
+holders of this generation's VK can derive it, and it changes with every
+rotation. Nothing else is derived from it, and it is never stored.
 
-```
-link_key = HKDF(K_lan ‖ ss,
-                ["qv/lan-link-salt/v1", th, nonce_B, link_id],
-                ["qv/lan-link/v1", vault_id, key_generation, link_id])
-```
-
-Binding to `K_lan` makes a link usable only by holders of this
-generation's VK, and makes every link invalid after rotation.
-
-4.7. **New-device mode.** After confirmation, A commits its link row (§9.1).
-It then sends
+4.7. **New-device mode.** After confirmation, A sends
 `["qv/lan-pair-grant/v1", vault_id: bstr(16), key_generation: uint,
-vk: bstr(32), link_id: bstr(16)]`.
+vk: bstr(32)]`. A stores nothing about B.
 
-B derives `K_lan` and `link_key`. The connection then runs one exchange
-(§7), with B as initiator and A as responder, over the pairing keys
-(`k_b2a` as `k_i2r`, `k_a2b` as `k_r2i`, with their sequence numbers
-continuing). B starts empty: it sends the state message with an empty
-manifest and requests everything. B then initializes the vault under §10.
+The connection then runs one exchange (§7), with B as initiator and A as
+responder, over the pairing keys (`k_b2a` as `k_i2r`, `k_a2b` as `k_r2i`,
+with their sequence numbers continuing). B starts empty: it sends the state
+message with an empty manifest and requests everything. B then initializes
+the vault under §10.
 
-A reports "paired" only after B's `Done`. If B never sends it, A reports
-"pairing may be incomplete on the other device" and keeps the link. Nobody
-else can derive that key, so the leftover link is harmless; the user can
-remove it.
+A reports "joined" only after B's `Done`. If B never sends it, A reports
+"the other device may not have finished joining".
 
-4.8. **Link mode.** After confirmation, B (which has the vault unlocked)
-sends
-`["qv/lan-pair-prove/v1", vault_id, key_generation, proof_B]`, where
-`proof_B = MAC/1(K_lan, canonical(["qv/lan-pair-prove/v1", th, "b",
+4.8. **Sync mode.** B (which has the vault unlocked) sends as its first
+record `["qv/lan-pair-prove/v1", vault_id: bstr(16), key_generation: uint,
+proof_B: bstr(32)]`, where
+`proof_B = MAC/1(K_proof, canonical(["qv/lan-pair-prove/v1", th, "b",
 vault_id, key_generation]))`.
 
 A checks:
 - the vault ID and generation against the window's vault;
-- `proof_B` in constant time, with its own `K_lan`.
+- `proof_B` in constant time, with its own `K_proof`.
 
-A mismatch sends error `vault_mismatch` and aborts; nothing is stored.
+A mismatch sends error `vault_mismatch` and aborts. **A sends nothing
+derived from `K_proof` before `proof_B` verifies.**
 
-A then commits its link row (§9.1) and sends
-`["qv/lan-pair-proved/v1", link_id, proof_A]`, with `proof_A` defined in the
-same way with role `"a"`. B verifies it and commits its own row. B sends
-`["qv/lan-pair-done/v1"]` after its commit is durable. The connection then
-runs one ordinary exchange (§7) over the pairing keys, with B as
-initiator, as in §4.7. A failure of that exchange leaves both links in
-place; the user syncs again later.
+A then sends `["qv/lan-pair-proved/v1", proof_A: bstr(32)]`, with
+`proof_A` defined in the same way with role `"a"`. B verifies it in
+constant time; on mismatch it sends `vault_mismatch` and aborts. B sends no
+exchange message before it verifies. The connection then runs one ordinary
+exchange (§7) over the pairing keys, with B as initiator, as in §4.7.
+Nothing is stored about the peer, and `PairDone` is not sent.
 
-VK never crosses the network in link mode.
+Each leg of a man in the middle who knows `P` has its own `th`, so a proof
+from one leg fails on the other; sync mode needs no comparison code. VK
+never crosses the network in sync mode.
 
 4.9. Pairing transfers no endpoint authority and no checkpoint. LAN
 pairing establishes no server base (0005 §6.4).
 
-### 5. Session handshake
+### 5. (Removed: session handshake)
 
-5.1. **SyncHello (I → R, cleartext frame).** I draws `nonce_I` (32 bytes)
-and a fresh X-Wing key pair `(dk_I, ek_I)`.
-
-```
-K_i   = HKDF(link_key, empty, ["qv/lan-auth/v1", "i"])
-K_r   = HKDF(link_key, empty, ["qv/lan-auth/v1", "r"])
-body  = ["qv/lan-hello/v1", lan_profile: uint, nonce_I: bstr(32), ek_I: bstr(1216)]
-hello = body ++ [MAC/1(K_i, canonical(body))]
-```
-
-The hello carries **no link or vault identifier**. R evaluates the tag
-against every link of the window's vault (at most 64, §9.1). It SHOULD
-check all of them rather than stopping at the first match, and compare
-each tag in constant time.
-
-I uses one link per attempt: the link the user selected for this action,
-or the vault's only link. It does not try other links against the same
-window. Each wrong tag counts as a failed attempt there (§8.3), so trying
-every link could close the window, and it would tell R how many links I
-holds.
-- No match: R closes the connection, sends nothing and counts a failure.
-- A `nonce_I` already seen in this window: R refuses the hello.
-
-R performs no KEM operation before a tag verifies, so an unauthenticated
-peer cannot make R do expensive work.
-
-5.2. **SyncAccept (R → I, cleartext frame).** R computes
-`(ct, ss) = X-Wing.Encaps(ek_I)` and draws `nonce_R`.
-
-```
-body   = ["qv/lan-accept/v1", nonce_R: bstr(32), ct: bstr(1120)]
-accept = body ++ [MAC/1(K_r, canonical(["qv/lan-accept/v1", H(hello), nonce_R, ct]))]
-th     = H(["qv/lan-th/v1", H(hello), H(accept)])
-k_i2r  = HKDF(ss ‖ link_key, th, ["qv/lan-session/v1", "i2r"])
-k_r2i  = HKDF(ss ‖ link_key, th, ["qv/lan-session/v1", "r2i"])
-```
-
-I verifies the tag in constant time, which authenticates R freshly, since
-`H(hello)` covers `nonce_I`. I then decapsulates and erases `dk_I` and `ss`.
-
-5.3. **Confirm.** I's first record (§6) is `["qv/lan-confirm/v1", th]`.
-R accepts nothing else before it. A valid confirm proves that I holds
-`dk_I`, so a replayed hello can never get past this step. R then erases
-`ss`.
-
-5.4. **Properties claimed** (the review in 0012 §3 must confirm them):
-- mutual authentication by the link key;
-- the session key depends on a fresh hybrid KEM secret, so recorded
-  traffic stays confidential if the link key or VK leaks later, and
-  breaking only one half of X-Wing does not expose it;
-- the separate `"i"`/`"r"` and `"i2r"`/`"r2i"` labels prevent reflection;
-- every handshake field is bound into `th`.
-
-Not claimed: protection against a party that holds the link key (it also
-holds VK, 0001); hiding traffic patterns.
+Removed by 0014 on 2026-11-06. Every session is a §4 pairing session in
+sync or new-device mode. The labels `qv/lan-hello/v1`, `qv/lan-accept/v1`,
+`qv/lan-th/v1`, `qv/lan-session/v1`, `qv/lan-auth/v1` and
+`qv/lan-confirm/v1` are retired; decoders treat them as unknown.
 
 ### 6. Record layer
 
-6.1. Each direction has its own key (`k_a2b`/`k_b2a` or `k_i2r`/`k_r2i`) and
+6.1. Each direction has its own key (`k_a2b`/`k_b2a`, used as `k_r2i`/`k_i2r`
+in the exchange) and
 a 64-bit sequence number that starts at 0 and is never sent. A record is
 one frame whose body is
 
@@ -485,7 +438,7 @@ A LAN round never changes `sync_state`, server checkpoints or the outbox
 
 ### 8. Windows (listening lifecycle)
 
-8.1. **Opening.** A pairing window or a receive window opens only through
+8.1. **Opening.** A sync window opens only through
 an explicit user action, for one unlocked vault. Nothing opens one
 automatically (0005 §0.5). While the window is open:
 - a TCP listener runs on an OS-chosen port, or one the user chooses;
@@ -493,13 +446,10 @@ automatically (0005 §0.5). While the window is open:
 - the UI shows that the device is reachable and how long remains.
 
 8.2. **Closing.** A window closes at the earliest of these:
-- its time limit: pairing 10 minutes; receive 2 minutes by default,
-  at most 15 minutes;
+- its time limit: 10 minutes;
 - an explicit cancel, a lock, process exit, or the app leaving the
   foreground on mobile;
-- a pairing completing or aborting;
-- for a receive window, the first completed session, unless the user
-  asked to stay open for further sessions within the limit;
+- the end of its one session, completed or aborted;
 - 16 failed pre-authentication attempts (§8.3).
 
 There is no background service and no retry after the window closes
@@ -513,7 +463,7 @@ the window's secrets.
   and then close it without answering. That frame is checked as a pairing
   hello (§4.3): a valid hello with different bytes aborts the window, an
   identical one is refused, and anything else counts as a failed attempt.
-- 16 failed hellos or pairing hellos close the window, and the user is
+- 16 failed pairing hellos close the window, and the user is
   told "unexpected connection attempts".
 - Handshake time limits are in §1.3.
 
@@ -522,53 +472,37 @@ user action. The action may retry within itself (bounded, while unlocked),
 but nothing is scheduled afterwards (0005 §0.5). Both vaults must be
 unlocked (0005 §6.1).
 
-8.5. **Receive-window code.** A receive window shows its endpoints as an
-address-only QR and as text:
-- **QR:** `["qv/lan-addr-qr/v1", lan_profile: uint, endpoints: [ [addr:
-  bstr(4)|bstr(16), port: uint] ]]`, with 1–8 entries and at most 1024
-  bytes in canonical encoding. Decoders reject any other shape.
-- **Text:** one endpoint per line, `a.b.c.d:port` or `[v6]:port`. Entry
-  accepts the same form: IP literals only (§1.4), port 1–65535, no zone
-  identifier.
-
-The code carries no secret and no vault, link, device or user data, so
-showing or photographing it reveals only addresses (accepted leakage,
-0001). It is a §3.1 hint: the initiator applies §1.4 and authenticates the
-responder only through §5. Link-local addresses are not listed, because the
-code has no scope identifier.
+8.5. (Removed: receive-window code.) Removed by 0014 on 2026-11-06 with
+receive windows. The label `qv/lan-addr-qr/v1` is retired; decoders treat
+it as unknown.
 
 ### 9. Peer state
 
-9.1. **`lan_link`** is a local-only table, at most 64 rows per vault:
+9.1. **No peer state.** Nothing about a peer is stored: no key, label,
+row or address. For compatibility with existing development files, the
+`lan_link` table and the local head's `lan_links_digest` remain in the
+format (0004 §2, 0005 §5.4), always empty after a commit:
+- every commit deletes all `lan_link` rows and sets `lan_links_digest` to
+  `H(["qv/lan-links/v1", []])`, in the head's transaction;
+- open still checks that the rows match the head's digest
+  (`H(["qv/lan-links/v1", sorted [link_id, SHA-256(sealed)]])`); a
+  mismatch is an integrity error, handled like a local head mismatch;
+- no row is ever read for authentication.
 
-| Column | Contents |
-|--------|----------|
-| `link_id` | `bstr(16)`, primary key |
-| `key_generation` | the generation the link is bound to |
-| `sealed` | XChaCha20-Poly1305 under the `local-state` purpose key, random nonce, AAD `["qv/lan-link-row/v1", vault_id, key_generation, link_id]`, plaintext `[link_key: bstr(32), label: tstr (≤ 64 bytes, user-chosen), created_at: uint]` |
+Both structures are removed at the next format change.
 
-Every insertion or removal is one commit through the ordinary write path.
-The commit writes a new local head whose `lan_links_digest` is
-`H(["qv/lan-links/v1", sorted [link_id, SHA-256(sealed)]])` (amendment to
-0005 §5.4 and 0004 §2, see §13). On open:
-- rows that do not match the head's digest are an integrity error,
-  handled like a local head mismatch;
-- removed rows cannot be planted back without moving the head, which the
-  anchor catches.
-
-9.2. **No endpoint hints.** A device does not store where a linked peer
+9.2. **No endpoint hints.** A device does not store where a peer
 was last reached. An address cannot tell which device answers it, and v1
 has no device identity, so a remembered address would only send hellos to
 whatever device now holds it. Every pairing and sync action takes its
 endpoints from §3.1 at that time.
 
 9.3. The `lan_link` table is excluded from manifests, archives, snapshots and
-restores (0004 §3.5, 0007). A restored or rotated vault starts with no
-links.
+restores (0004 §3.5, 0007). A restored or rotated vault starts with an
+empty table.
 
 9.4. **Ephemeral secrets** are `P`, `K_hello`, `K_accept`, `dk_*`, `ss`,
-nonces before reveal, the pairing and session keys, and decrypted
-`link_key`s. They are held in `qv_crypto` protected containers
+nonces before reveal, the pairing keys and `K_proof`. They are held in `qv_crypto` protected containers
 (0008 §1), are never logged, and are erased on completion, abort, lock
 or window close. Lock invalidates staged-response handles (0005 §6.5).
 
@@ -594,7 +528,7 @@ B in new-device mode must not expose data before acceptance. Order:
    - a fresh replica and writer ID;
    - the adopted password slot;
    - the merged objects and manifest;
-   - the `lan_link` row, in the first local head.
+   - an empty `lan_link` set in the first local head (§9.1).
 
    Write it as a private temporary file, verify it, fsync it and publish
    it by no-replace rename (the 1.13b restore path, 0004 §5). Then create
@@ -611,7 +545,7 @@ After the session keys exist, an error is the record
 
 | Code | Name | Meaning |
 |------|------|---------|
-| 1 | `vault_mismatch` | Different vault ID or generation, or a failed link-mode proof |
+| 1 | `vault_mismatch` | Different vault ID or generation, or a failed sync-mode proof |
 | 2 | `unsupported` | Unknown profile or required feature |
 | 3 | `limit` | A 0004 budget would be exceeded |
 | 4 | `integrity` | Manifest, object or reference verification failed |
@@ -627,33 +561,28 @@ port. Unknown codes are treated as `protocol`. Frontends map the codes onto
 
 ### 12. Generation transitions and removal
 
-12.1. **Removing a link** is a local commit that deletes the row.
-The peer is not notified. Its next hello fails authentication and looks
-like an unreachable peer, so I's frontend says: "no linked device
-answered; it may have removed this link or rotated the vault key". A
-removed peer that holds VK can still read its own copy and forge
-same-generation state (0001). Removal only stops this device from
-exchanging with it.
+12.1. (Removed: link removal.) There are no links. A device stops syncing
+with another simply by not showing or scanning its codes.
 
 12.2. **Rotation** (0002 §3.5):
-- the replacement vault has no `lan_link` rows;
-- `K_lan` changes with the generation, so every old link key is
-  unusable;
-- each remaining device re-pairs in new-device mode, which creates a new
-  vault file for the new generation (§10.6);
-- old-generation peers stop normal sync: their hellos fail.
+- `K_proof` changes with the generation, so an old-generation copy fails
+  §4.8 with `vault_mismatch`;
+- each remaining device joins the new generation in new-device mode, which
+  creates a new vault file (§10.6);
+- the frontend tells the user the other device has a different key
+  generation and offers to join again.
 
-This meets 0002 §3.5.5, because approval is authenticated by a fresh
-out-of-band pairing that does not depend on old VK.
+This meets 0002 §3.5.5: every session is approved by a fresh out-of-band
+code shown by an unlocked device of the current generation.
 
-12.3. **Suspected compromise** of a linked device is handled by rotation
-plus re-pairing of the trusted devices. Local removal alone is not
-compromise recovery.
+12.3. **Suspected compromise** of a device is handled by rotation and
+re-joining the trusted devices.
 
 ### 13. Amendments to other specs (applied 2026-10-30)
 
 These edits were applied on acceptance, each with a Changelog line in its
-spec.
+spec. Items 2–5 were amended again by 0014 §9 on 2026-11-06 (`lan-proof`,
+no stored approvals, always-empty link set).
 
 1. **0002 §1.2**, new table row:
    `lan / 1 | X-Wing draft-11, HKDF-SHA-512, MAC/1, XChaCha20-Poly1305 with
@@ -683,26 +612,31 @@ spec.
 | 0005 requirement | Where |
 |------------------|-------|
 | §6.1: no server or account; both vaults unlocked; no primary; roles do not affect the merge | §2, §7.1, §8.4 |
-| §6.2: discovery is not trust; explicit out-of-band approval binding peers, vault, generation and profile; no reuse of 0006 transcripts | §3.1, §4 (own labels; binds `th`, mode, vault and generation) |
-| §6.3: authenticated, confidential, integrity- and replay-protected session; complete manifest before merge; budgets; no SQLite or local-only data; fail closed | §5, §6, §7.3–7.5, §7.8, §1.1 |
+| §6.2: discovery is not trust; explicit out-of-band approval binding peers, vault, generation and profile; no reuse of 0006 transcripts | §3.1, §4 (one-use code per session; own labels; sync-mode proofs bind `th`, vault and generation; new-device comparison code) |
+| §6.3: authenticated, confidential, integrity- and replay-protected session; complete manifest before merge; budgets; no SQLite or local-only data; fail closed | §4.4, §4.8, §6, §7.3–7.5, §7.8, §1.1 |
 | §6.4: snapshot as merge input; no cross-generation merge; no server base | §7.2, §7.6, §4.9 |
 | §6.5: local commit/anchor; lock cancels; idempotent retry; acceptance reported separately | §2, §7.6–7.7, §9.4 |
 | §6.6: no server checkpoint or publication | §7.8 |
-| §6.7 and OQ3–OQ6 | §3, §4–§6, §8, §9, §12 |
+| §6.7 and OQ3–OQ6 | §3, §4, §6, §8, §9, §12 |
 
 ## Security Considerations
 
 - **The pairing secret** has 128 bits. Offline search against an observed
   hello or accept MAC is infeasible. Observing the QR is the realistic
-  threat; the single-hello rule and the committed comparison code (§4.3,
-  §4.5) cover it. A user who confirms codes without comparing them is
-  the residual risk, as in 0006.
-- **Link keys** need `K_lan`, so a stolen locked device yields nothing
-  usable without VK. Every party holding a link key also holds VK, and
-  0001 already concedes everything to such a party.
+  threat. In new-device mode the single-hello rule and the committed
+  comparison code (§4.3, §4.5) cover it; a user who confirms codes without
+  comparing them is the residual risk, as in 0006. In sync mode an observer
+  without VK can take the window's one hello and then fails §4.8: denial of
+  service only, and A sends no proof first.
+- **Approval** is the window: a user action on an unlocked device, one
+  session, at most 10 minutes. Nothing outlives it, so nothing needs
+  revoking. A party with VK but no code cannot connect.
+- **A VK holder who also observes the code** can take a sync session in
+  place of the intended device. 0001 already concedes same-generation state
+  to any VK holder; the intended device then fails to connect. Rotation is
+  the recovery (§12.3).
 - **Post-quantum.** Authentication is symmetric (MAC/1). Confidentiality
-  and VK transfer use hybrid X-Wing (SG6). Session keys also mix in the
-  link key, or `P` during pairing.
+  and VK transfer use hybrid X-Wing (SG6). Session keys also mix in `P`.
 - **Denial of service** is limited to the windows: they are short,
   explicit and abort after 16 failures. No KEM or KDF work happens before
   a MAC check.
@@ -713,7 +647,7 @@ spec.
 - **Hostile authenticated peers** (T5) are bounded exactly like archives:
   authenticate, then bound, then verify each object before AEAD, and never
   accept partially.
-- **Not reviewed.** The composition (pairing, link derivation, handshake,
+- **Not reviewed.** The composition (pairing, sync-mode proofs, handshake,
   record layer, secret lifecycle) has had no independent review. The 0012
   §3 LAN gate, including the review (roadmap D12) and interoperability
   vectors, must pass before any LAN release.
@@ -726,12 +660,16 @@ Release evidence for the 0012 §3 LAN gate and the 0012 §1 LAN rows:
 |-------------|----------|
 | Byte-level interoperability | Vectors for every message, key derivation, transcript and error record (§4–§7, §11), produced by the implementation and checked independently |
 | LAN discovery mistaken for trust | Spoofed advertisements and endpoints, and a raced or second pairing hello: no key release, no state change |
-| Context substitution | A swapped vault ID, generation, profile, mode, `link_id` or role label; a reflected hello; a replayed hello or confirm: all fail |
+| Context substitution | A swapped vault ID, generation, profile, mode or role label; a reflected hello; a replayed hello: all fail |
 | Comparison-code grinding | A man in the middle who knows `P` cannot force equal codes (a test of the ordering) |
 | Hostile unauthenticated peers | Oversized frames, garbage, slow peers: bounded memory and time, no reply before authentication |
 | LAN partial acceptance | Interrupt, lock, duplicate and retry at every message boundary and at the commit/anchor crash points; local edits and anchor preserved, no partial manifest |
 | Peer state rollback | A removed row planted back, or a modified row, is detected (§9.1) |
-| Generation transitions | Links fail after rotation; re-pairing in new-device mode works; the old copy stays untouched |
+| Generation transitions | Old-generation copies fail the sync proof after rotation; new-device join of the new generation works; the old copy stays untouched |
+| Sync proof binding and order | Wrong VK, vault ID or generation on either side fails with `vault_mismatch` and commits nothing; A sends no `proved` after a failed or missing `prove`; B sends no exchange message before verifying `proved`; a `prove` from one session fails in another |
+| One use | After one completed or aborted session the window refuses further hellos |
+| No peer state | After sync and join the `lan_link` set is empty; an older file with rows opens, and its next commit clears them |
+| Removed messages | SyncHello, SyncAccept, the address-only QR and the old `proved`/`grant` shapes are refused |
 | Account-dependent LAN sync | LAN-only operation without Internet, account or server; either side initiates |
 | Mixed-mode state confusion | A LAN round never touches `sync_state` or checkpoints |
 | Explicit initiation | No window or session without a user action; nothing resumes afterwards |
@@ -740,15 +678,29 @@ Release evidence for the 0012 §3 LAN gate and the 0012 §1 LAN rows:
 
 ## Open Questions
 
-1. **Window defaults** (receive 2 minutes, at most 15; one session unless
-   kept open) are sane defaults to revisit after user testing.
+1. **Window default** (a sync window lasts 10 minutes and serves one
+   session) is a sane default to revisit after user testing.
 2. **Incremental exchange.** Every round sends the full manifest (up to
    64 MiB). Manifest diffs or paging would follow 0005 OQ2 and are
    deferred until benchmarks call for them.
 3. **Several vaults per window or session.** v1 handles one vault per window
-   and per session. A device can still hold links for several vaults.
+   and per session. A device can still hold several vaults.
 
 ## Changelog
+
+- 2026-11-06: Amended by 0014 (owner direction; owner accepted 0014 the
+  same day, plan 0042):
+  - stored links are removed; each session needs a one-use code from a
+    sync window (§2, §4.1, §8);
+  - sync mode replaces link mode: transcript-bound `K_proof` proofs, no
+    comparison code, no rows (§4.5, §4.6, §4.8); the new-device grant has
+    no `link_id` (§4.7);
+  - §5 (session handshake), §8.5 (receive-window code) and §12.1 (link
+    removal) are removed and kept as stubs;
+  - §9.1 keeps `lan_link`/`lan_links_digest` in the format, always empty
+    after a commit;
+  - Summary, §10, §11, §12, §14, Security Considerations, Testing
+    Requirements and OQ1 follow.
 
 - 2026-11-03: Amendments for roadmap 2.10 (plan 0038; owner-delegated,
   standing 2026-11-02; the receive-window code is owner-directed,

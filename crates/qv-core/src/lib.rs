@@ -189,11 +189,9 @@ pub use qv_model::{Deletion, RecordKind};
 mod lan;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use lan::{
-    ApproveReport, ApproverUi, JoinCode, JoinLinkReport, JoinMode, JoinOptions, JoinerUi, LanError,
-    LanLinkHandle, LanLinkSummary, LanQrInfo, LanQrKind, LanTimeouts, ListenScope, LocalAcceptance,
-    PAIRING_WINDOW_MAX, PairingCode, PairingOptions, PairingWindow, RECEIVE_WINDOW_DEFAULT,
-    RECEIVE_WINDOW_MAX, ReceiveCode, ReceiveEvent, ReceiveOptions, ReceiveReport, ReceiveWindow,
-    Sas, SyncOptions, SyncReport, WindowEnd, inspect_lan_qr, local_addresses, parse_endpoint,
+    ApproverUi, JoinCode, JoinMode, JoinerUi, LanError, LanQrInfo, LanTimeouts, ListenScope,
+    LocalAcceptance, PAIRING_WINDOW_MAX, Sas, Served, SyncOptions, SyncReport, SyncWindow,
+    SyncWindowOptions, WindowCode, inspect_lan_qr, local_addresses, parse_endpoint,
 };
 #[cfg(all(test, any(target_os = "linux", target_os = "android")))]
 mod lan_tests;

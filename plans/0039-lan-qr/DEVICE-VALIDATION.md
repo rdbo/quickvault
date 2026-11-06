@@ -7,6 +7,11 @@ roadmap boxes or claim a LAN release until actual results are recorded. This
 list carries all remaining attended phase 2.10 work into the end of 2.10b.
 D12 independent protocol review remains a separate release gate.
 
+**Amended 2026-11-06 (plan 0042, spec 0014):** devices no longer pair or
+store links. The pending rows below describe one-use sync windows: one
+device shows a code; the other syncs once with it, or joins as a new device
+after comparing codes. Results recorded before this date stay as history.
+
 ## Record before running
 
 - [ ] Linux OS/app or CLI revision, phone model/Android/WebView versions, package
@@ -43,49 +48,53 @@ D12 independent protocol review remains a separate release gate.
   pause/background, activity destruction and permission revocation. Listener
   windows/other pending LAN work must still obey the existing lock contract.
 - [ ] Confirm late frame/permission callbacks and stale request ids do not
-  reopen the camera or refill a locked/different form. Partial/ambiguous/foreign
-  QR codes and unsupported profile/address/size are refused. Test rotation,
-  glare, tilted codes, a second code in view and both camera orientations.
+  reopen the camera or refill a locked/different form. Frames without a
+  readable code, or with a second code in view, are skipped and the scan
+  continues; foreign codes and unsupported profile/address/size end the scan
+  with an error. Test rotation, glare, tilted codes and both camera
+  orientations.
 - [ ] Inspect app-private/cache/gallery locations before/after: no captured
   image files or persisted pairing payload. Record framework/OS cleanup limits;
   no physical-erasure claim. Inspect logs/errors for synthetic canaries.
 
-## Pairing and initialization — carried 2.10 gate plus QR
+## New-device join — carried 2.10 gate plus QR
 
-- [ ] Linux app shows its pairing QR and typed fallback; phone scans from Join.
-  Scan fills the form only. Select Join explicitly, compare the six-digit code
-  on both devices, approve, confirm the received vault and password-check it.
-- [ ] Reverse direction: phone displays a pairing QR; Linux types the fallback
-  code/address. Confirm both screens and durable new-device creation. Camera
-  scanning is a phone capability; Linux camera support is out of scope.
-- [ ] Link existing unlocked copies by scanning a pairing QR. Confirm the same
-  SAS; the follow-up exchange keeps concurrent edits and reports both local
-  acceptance and peer receipt. Reject a mismatched SAS and stale/observed code.
-- [ ] Window expiry/cancel/lock removes both manual and graphical codes. New
-  pending questions retain inactivity locking; none outlives its operation.
-- [ ] QR without endpoint hints requires a typed endpoint; incorrect or absent
-  route does not establish trust. Typing remains usable when camera is disabled.
+- [ ] Linux app shows a code (Devices → Show a code); the phone scans it from
+  "Join from another device". A code naming its address connects at once.
+  Compare the six-digit code on both devices, approve on Linux, confirm the
+  vault on the phone and enter its password. The joined vault opens.
+- [ ] Reverse direction: the phone shows a code; Linux types the code and
+  address in its Join form. Confirm both screens and durable creation.
+  Camera scanning is a phone capability; Linux camera support is out of scope.
+- [ ] A QR without endpoint hints marks the code as scanned and asks for the
+  address; an incorrect or absent address establishes nothing. Typing
+  remains usable when the camera is disabled.
+- [ ] Rejecting the comparison code on either side creates nothing.
 
-## Offline exchange in both directions — remaining 2.10 evidence
+## Sync with one-use codes — remaining 2.10 evidence
 
-- [ ] Make different edits on each device. Open a receive window on Linux;
-  phone scans the address-only QR, chooses the intended existing link and Sync.
-  Scan alone sends nothing. Verify convergence, conflicts and separate local
-  acceptance/peer-receipt reporting, with Internet still unavailable.
-- [ ] Open Receive on the phone and sync from Linux using the typed address.
-  Repeat with Linux app/CLI as appropriate; neither device is a primary.
-- [ ] Repeat unchanged rounds; no new local commit. Add concurrent edits and
-  verify none are overwritten. No account/server contact or background retry.
+- [ ] Make different edits on each device. Linux shows a code; the phone
+  scans it on Devices and the sync starts at once. Verify convergence,
+  conflicts and separate local acceptance/peer-receipt reporting, with
+  Internet still unavailable. No prompt appears on Linux.
+- [ ] The phone shows a code; Linux types it with the address (Devices → Type
+  a code, or `qvault lan sync`). Neither device is a primary.
+- [ ] Repeat unchanged rounds with fresh codes; no new local commit. Add
+  concurrent edits and verify none are overwritten. No account/server
+  contact or background retry.
+- [ ] One use: after a sync the same code no longer answers; an expired code
+  (10 minutes) does not answer either.
+- [ ] A copy of another vault, or of an older key generation, fails with
+  "different vault or key generation" on both devices and changes nothing.
 - [ ] Interrupt transfer (manifest/object), commit and acknowledgement turns:
   retain prior local edits, reject partial candidates, preserve a completed
-  commit and report an unconfirmed receipt if Done is lost. Retry explicitly
-  and check convergence/anchor-consistent reopen on both devices.
-- [ ] Exercise lock/cancel and receive-window expiry during an active round and
-  an unanswered comparison/password prompt. Preserve durable-commit reports
-  and completion errors, and verify the listener closes.
-- [ ] Remove a link and verify it no longer authenticates; a scanned address
-  never restores trust. Manual endpoint edits supersede scanned address hints.
-  Endpoints are not remembered between actions.
+  commit and report an unconfirmed receipt if Done is lost. Retry with a new
+  code and check convergence/anchor-consistent reopen on both devices.
+- [ ] Exercise lock/cancel and window expiry during an active round and an
+  unanswered comparison/password prompt. Preserve durable-commit reports and
+  completion errors, and verify the listener closes.
+- [ ] Nothing about the other device is kept: Devices lists no devices, and
+  endpoints are not remembered between actions.
 
 ## Completion record
 
@@ -166,7 +175,7 @@ Results before the opt-in optical extension:
 | Validation adapter: strides/bounds, no startup capture, stale frame | PASS, 0.578 s | `/tmp/qv-0039-device-qr-monitor.log`, `/tmp/qv-android-tests-kxv7tzvp/instrumentation.log` |
 | Ordinary APK: same checks plus camera unavailable/start refused | PASS, 0.653 s | `/tmp/qv-0039-device-qr-product.log`, `/tmp/qv-android-tests-s21cf06g/instrumentation.log` |
 | Explicit validation live camera: actual permission grant, real bounded luminance frames, finish, stale frame/completion isolation, pause cleanup, 30 s timeout | PASS, 37.859 s | `/tmp/qv-0039-device-qr-permission.log`, `/tmp/qv-android-tests-gps58rhh/instrumentation.log` |
-| Shared Join optical path | INCOMPLETE: no scan accepted within 75 s; permission prompt observed, permission denied in snapshots before/after | `/tmp/qv-0039-device-qr-optics.log`, `/tmp/qv-android-tests-l_e5fsn_/instrumentation.log` |
+| Shared Join optical path | INCOMPLETE: no scan accepted within 75 s; permission prompt observed; the owner's earlier one-time grant had expired, so the permission read as not granted before/after (not an owner denial) | `/tmp/qv-0039-device-qr-optics.log`, `/tmp/qv-android-tests-l_e5fsn_/instrumentation.log` |
 
 The successful live-camera check used test APK SHA-256
 `a792378a638c0e3cdda89c5a15a11f3246323899eb30681ba3db3b0941c18a62`
@@ -288,3 +297,42 @@ Implementation is complete. Fresh-context review and the unchecked real-peer,
 offline/interruption and remaining lifecycle rows are explicitly pending.
 Owner's wrap-up instruction ends this testing session; no release/device gate
 is inferred from the incomplete attempts.
+
+## Redesign regression and optical re-check — 2026-11-06
+
+Phone: Xiaomi 2412DPC0AG (rodin), Android 15 (API 35), WebView
+156.0.8078.47. Linux tree: 58f9f62 plus the fix below (uncommitted). The
+owner's camera permission is "Ask every time"; the owner granted it at the
+prompt. Fixture: the same public `TEST_PAIR` constant, this time encoded with
+qrcodegen-no-heap 1.8.1 (the app's own encoder crate, in a scratch program,
+medium ECC, 4-module quiet zone) and shown in a window titled "QuickVault QR
+validation fixture". This is weaker independence than the earlier qrcode 8.2
+chart; the earlier pass remains the independent-encoder evidence.
+
+First optical run: **FAIL**, 76.3 s, "Camera -> JNI -> Rust decode -> core ->
+current Join form". The camera service log shows the app opened camera 0 at
+640x480 and closed it about 2 s later, after the owner aimed the phone, with
+no second session. The scan had been accepted, but the 2.10a redesign (plan
+0040) had stopped rendering the locked-screen status, so the "Pairing code
+scanned" confirmation (and "Key rotation cancelled; nothing changed.") never
+appeared. The owner saw no change; the test waits for that text.
+
+Fix: `View::notice()` returns those two fixed confirmations, and the lock
+screen renders it where errors appear (`crates/qv-app/src/controller.rs`,
+`crates/qv-app/src/ui/mod.rs`); unit assertions cover scan, lock clearing and
+rotation cancel. Rebuilt validation app SHA-256
+`6c461004e9deb4b5a94b0bb2f71496c1123932b771a5ac182739e05b5f9a551b`, test APK
+`3cc4fff21d8eaf7c2522fab4683c3f03488c07875eb5a62a72d67eb743594f08`.
+
+Second optical run: **PASS**, 5.954 s (confirmation shown, empty renderer
+code/endpoint inputs, no implicit Join, cleanup after Back). Logs:
+`/tmp/qv-android-tests-_wp0i6cf/instrumentation.log`. No existing vault was
+opened; app data was not cleared.
+
+Found, not fixed: `android::capture_qr` propagates a `decode_frame` error
+(an extraction failure or a second code in view), which ends the whole scan
+rather than skipping that frame. Refusing ambiguous codes is intended; ending
+the scan on one noisy frame may not be. Left for the camera lifecycle rows.
+
+The other unchecked rows above (lifecycle, pairing, offline exchange,
+Internet isolation) remain pending, and the ordinary camera gate stays closed.

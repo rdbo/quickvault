@@ -9,6 +9,31 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-06: LAN sync without device links (spec 0014, accepted by the
+  owner; plan 0042):
+  - One device shows a one-use code (QR, or the 26-character code and an
+    address) for up to 10 minutes. The other device scans or types it and
+    syncs once. Both prove they hold this vault and key generation with
+    proofs tied to that session; no comparison code is needed and nothing
+    about the other device is stored.
+  - A new device still compares the six-digit code on both screens before
+    the vault key is sent.
+  - Removed: linked devices, link names and removal, receive windows, the
+    address-only QR and the separate session handshake. The `lan_link`
+    table stays in the file format but is cleared at each save, so existing
+    vaults keep opening.
+  - CLI: `qvault lan open | sync | join` replace `lan pair`, `receive`,
+    `links` and `unlink`.
+  - App: Devices has "Show a code", "Scan a code" and "Type a code". A
+    scanned code that names its address starts the sync or join at once;
+    one without an address shows "Code from the QR code" and asks for the
+    address. A camera frame without a readable code, or with two codes, is
+    skipped instead of ending the scan.
+  - Specs 0013, 0002, 0004, 0005, 0009, 0011 and 0012 amended. The new
+    composition still needs the independent review before any LAN release.
+- 2026-11-06: The lock screen again confirms a scanned pairing code and a
+  cancelled key rotation. The 2.10a redesign had stopped showing both
+  messages (plan 0040).
 - 2026-11-06: Vault list (plan 0041, owner follow-up to 2.10a):
   - Create a vault with just a name. It is saved as `<name>.qvault` in a
     default folder: `~/.local/share/quickvault/vaults` on Linux (changeable),

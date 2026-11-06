@@ -1,31 +1,32 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Local LAN peer state (0013 §9, 0004 §2.4): `lan_link` rows bound to the
-//! head by `lan_links_digest`. No peer address is remembered: without device
-//! identity there is nothing to remember it for (owner, 2026-11-03).
+//! The retired `lan_link` rows (0013 §9.1, 0004 §2.4; plan 0042). Nothing
+//! about a LAN peer is stored any more. The table and the head's
+//! `lan_links_digest` stay in the format so that files written before 0014
+//! still open: every commit writes the empty set, and open still checks the
+//! stored rows against the head.
 //!
 //! The row check runs before any value is read: at most [`MAX_LAN_LINKS`]
 //! rows, 16-byte IDs, the header's generation, and bounded blobs. On open the
-//! digest of the stored rows must equal head key 8, so a removed row planted
-//! back or a modified row is an integrity error. The anchor catches a moved
-//! head. Rows are decrypted only when used.
+//! digest of the stored rows must equal head key 8, so a planted or modified
+//! row is an integrity error. The anchor catches a moved head. Rows are
+//! never decrypted.
 
-use qv_crypto::lan::{LINK_ROW_CIPHERTEXT_MAX, LinkKey, LinkRow, open_link_row, seal_link_row};
 use qv_crypto::{ObjectHashProfile, StoredDataProfile, object_hash};
-use qv_encoding::{Decoder, encode_array};
+use qv_encoding::encode_array;
 use qv_model::RandomId;
 use rusqlite::Connection;
 
 use crate::StoreError;
 use crate::header::Header;
 use crate::schema::validation_err;
-use crate::vault::{Keys, accepted_profile};
+use crate::vault::accepted_profile;
 
-/// Most `lan_link` rows per vault (0013 §9.1).
-pub const MAX_LAN_LINKS: usize = 64;
-/// Largest stored sealed envelope: the ciphertext bound plus the envelope
-/// fields.
-pub(crate) const MAX_LAN_ENVELOPE: usize = LINK_ROW_CIPHERTEXT_MAX + 64;
+/// Most `lan_link` rows a pre-0014 file may hold.
+pub(crate) const MAX_LAN_LINKS: usize = 64;
+/// Largest stored sealed envelope: the pre-0014 ciphertext bound (512
+/// bytes, 0004 §2.4) plus the envelope fields.
+pub(crate) const MAX_LAN_ENVELOPE: usize = 512 + 64;
 
 /// One stored link row: its ID and exact sealed envelope.
 #[derive(Clone, PartialEq, Eq)]
@@ -59,10 +60,6 @@ pub(crate) fn digest(rows: &[StoredLink]) -> Result<[u8; 32], StoreError> {
 /// The digest of no links (new, restored and rotated vaults).
 pub(crate) fn empty_digest() -> Result<[u8; 32], StoreError> {
     digest(&[])
-}
-
-fn malformed<T>(_: T) -> StoreError {
-    StoreError::Integrity
 }
 
 fn len_of(n: i64) -> Result<usize, StoreError> {
@@ -136,111 +133,6 @@ pub(crate) fn read(conn: &Connection, header: &Header) -> Result<Vec<StoredLink>
     Ok(out)
 }
 
-fn envelope(
-    profile: StoredDataProfile,
-    nonce: &[u8; 24],
-    ciphertext: &[u8],
-) -> Result<Vec<u8>, StoreError> {
-    Ok(encode_array(|a| {
-        a.uint(1);
-        a.uint(u64::from(profile.id()));
-        a.bytes(nonce);
-        a.bytes(ciphertext);
-        Ok(())
-    })
-    .map_err(|_| StoreError::Internal)?
-    .to_vec())
-}
-
-/// `(profile, nonce, ciphertext)` of a bounded `[1, profile, nonce, ct]`.
-fn parse_envelope<'a>(
-    header: &Header,
-    blob: &'a [u8],
-) -> Result<(StoredDataProfile, [u8; 24], &'a [u8]), StoreError> {
-    if blob.len() > MAX_LAN_ENVELOPE {
-        return Err(StoreError::LimitExceeded);
-    }
-    let mut d = Decoder::new(blob).map_err(malformed)?;
-    if d.array().map_err(malformed)? != 4 {
-        return Err(StoreError::Integrity);
-    }
-    if d.uint().map_err(malformed)? != 1 {
-        return Err(StoreError::Unsupported);
-    }
-    let profile = u16::try_from(d.uint().map_err(malformed)?).map_err(malformed)?;
-    let profile = accepted_profile(header, profile)?;
-    let nonce: [u8; 24] = d
-        .bytes()
-        .map_err(malformed)?
-        .try_into()
-        .map_err(malformed)?;
-    let ciphertext = d.bytes().map_err(malformed)?;
-    d.finish().map_err(malformed)?;
-    Ok((profile, nonce, ciphertext))
-}
-
-/// Seals a link row (0013 §9.1). An invalid label is
-/// [`StoreError::InvalidEdit`].
-pub(crate) fn seal_row(
-    keys: &Keys,
-    header: &Header,
-    link_id: &[u8; 16],
-    key: &LinkKey,
-    label: &str,
-    created_at: u64,
-) -> Result<Vec<u8>, StoreError> {
-    if !qv_crypto::lan::valid_link_label(label) {
-        return Err(StoreError::InvalidEdit);
-    }
-    let sealed = seal_link_row(
-        &keys.local,
-        header.data_profile,
-        header.vault_id,
-        header.key_generation,
-        link_id,
-        key,
-        label,
-        created_at,
-    )?;
-    envelope(header.data_profile, &sealed.nonce, &sealed.ciphertext)
-}
-
-/// Authenticates and decodes a stored link row; any failure is
-/// [`StoreError::Integrity`].
-pub(crate) fn open_row(
-    keys: &Keys,
-    header: &Header,
-    row: &StoredLink,
-) -> Result<LinkRow, StoreError> {
-    let (profile, nonce, ciphertext) = parse_envelope(header, &row.sealed)?;
-    open_link_row(
-        &keys.local,
-        profile,
-        header.vault_id,
-        header.key_generation,
-        &row.link_id,
-        &nonce,
-        ciphertext,
-    )
-    .map_err(|_| StoreError::Integrity)
-}
-
-/// A decrypted link row without its key: what a frontend lists.
-pub struct LanLinkRow {
-    /// The link ID.
-    pub link_id: [u8; 16],
-    /// The user-chosen label (UTF-8).
-    pub label: qv_crypto::SecretBytes,
-    /// When the link was created (display only).
-    pub created_at: qv_model::Timestamp,
-}
-
-impl core::fmt::Debug for LanLinkRow {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("LanLinkRow(<redacted>)")
-    }
-}
-
 /// What this vault serves in a LAN exchange (0013 §7.2–7.5): its committed
 /// manifest envelope and the references that envelope names.
 pub struct LanServeState {
@@ -285,37 +177,10 @@ impl LanServeState {
 }
 
 impl crate::UnlockedVault {
-    /// The LAN links, decrypted (labels and times only). Any row failure is
-    /// [`StoreError::Integrity`].
-    pub fn lan_links(&self) -> Result<Vec<LanLinkRow>, StoreError> {
-        let keys = Keys::derive(&self.vk, &self.file.header)?;
-        self.state
-            .links
-            .iter()
-            .map(|r| {
-                let row = open_row(&keys, &self.file.header, r)?;
-                Ok(LanLinkRow {
-                    link_id: r.link_id,
-                    label: row.label,
-                    created_at: qv_model::Timestamp(
-                        i64::try_from(row.created_at).map_err(|_| StoreError::Integrity)?,
-                    ),
-                })
-            })
-            .collect()
-    }
-
-    /// The link key of `link_id`, for the LAN session handshake (phase
-    /// 2.10). [`StoreError::NotFound`] if there is no such link.
-    pub fn lan_link_key(&self, link_id: &[u8; 16]) -> Result<LinkKey, StoreError> {
-        let keys = Keys::derive(&self.vk, &self.file.header)?;
-        let r = self
-            .state
-            .links
-            .iter()
-            .find(|r| r.link_id == *link_id)
-            .ok_or(StoreError::NotFound)?;
-        Ok(open_row(&keys, &self.file.header, r)?.key)
+    /// How many `lan_link` rows a file written before 0014 still holds.
+    /// They are never read, and the next commit clears them (0013 §9.1).
+    pub fn retired_lan_links(&self) -> usize {
+        self.state.links.len()
     }
 
     /// The committed manifest envelope and its references, for serving.

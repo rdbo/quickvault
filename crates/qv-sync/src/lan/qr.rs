@@ -2,23 +2,13 @@
 
 //! Scanned hints use the existing canonical codecs and production address policy.
 use super::{EndpointPolicy, LanError};
-use qv_protocol::oob::{decode_addr_qr, decode_qr};
+use qv_protocol::oob::decode_qr;
 use qv_protocol::registry::LanProfile;
 use std::net::{IpAddr, SocketAddr};
 
-/// Which explicit form a scanned code can fill.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LanQrKind {
-    /// A secret pairing code; still requires comparison-code approval.
-    Pairing,
-    /// Address hints for an already linked vault.
-    Address,
-}
-
-/// Non-secret information from a validated scanned code. Hints grant no trust.
+/// Non-secret information from a validated scanned code (0013 §4.2). Hints
+/// grant no trust.
 pub struct LanQrInfo {
-    /// The expected form.
-    pub kind: LanQrKind,
     /// Distinct usable hints, at most eight. Never remembered beyond an action.
     pub endpoints: Vec<SocketAddr>,
 }
@@ -28,14 +18,10 @@ impl core::fmt::Debug for LanQrInfo {
     }
 }
 
-/// Validate a canonical pairing/address QR and its profile, without network I/O.
+/// Validate a canonical code QR and its profile, without network I/O.
 pub fn inspect_lan_qr(bytes: &[u8]) -> Result<LanQrInfo, LanError> {
-    let (kind, profile, hints) = if let Ok(q) = decode_qr(bytes) {
-        (LanQrKind::Pairing, q.profile, q.endpoints)
-    } else {
-        let q = decode_addr_qr(bytes).map_err(|_| LanError::Protocol)?;
-        (LanQrKind::Address, q.profile, q.endpoints)
-    };
+    let q = decode_qr(bytes).map_err(|_| LanError::Protocol)?;
+    let (profile, hints) = (q.profile, q.endpoints);
     LanProfile::from_id(profile).map_err(|_| LanError::Unsupported)?;
     let had_hints = !hints.is_empty();
     let mut endpoints = Vec::new();
@@ -53,17 +39,17 @@ pub fn inspect_lan_qr(bytes: &[u8]) -> Result<LanQrInfo, LanError> {
             endpoints.push(addr);
         }
     }
-    if endpoints.is_empty() && (had_hints || kind == LanQrKind::Address) {
+    if endpoints.is_empty() && had_hints {
         return Err(LanError::Protocol);
     }
-    Ok(LanQrInfo { kind, endpoints })
+    Ok(LanQrInfo { endpoints })
 }
 
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    use qv_protocol::oob::{WireEndpoint, encode_addr_qr, encode_qr};
+    use qv_protocol::oob::{WireEndpoint, encode_qr};
     // 0012 §1: LAN discovery mistaken for trust
     #[test]
     fn qr_inspection_refuses_hostile_profiles_shapes_and_unusable_addresses() {
@@ -73,7 +59,6 @@ mod tests {
         };
         let code = encode_qr(LanProfile::V1, &[7; 16], &[endpoint("192.0.2.10")], "").unwrap();
         let info = inspect_lan_qr(&code).unwrap();
-        assert_eq!(info.kind, LanQrKind::Pairing);
         assert_eq!(info.endpoints.len(), 1);
         assert_eq!(format!("{info:?}"), "LanQrInfo(<redacted>)");
         let empty = encode_qr(LanProfile::V1, &[7; 16], &[], "").unwrap();
@@ -87,14 +72,28 @@ mod tests {
             "fe80::1",
             "::ffff:127.0.0.1",
         ] {
-            let q = encode_addr_qr(LanProfile::V1, &[endpoint(ip)]).unwrap();
-            assert!(inspect_lan_qr(&q).is_err());
+            let q = encode_qr(LanProfile::V1, &[7; 16], &[endpoint(ip)], "").unwrap();
+            assert!(inspect_lan_qr(&q).is_err(), "{ip}");
         }
-        let mut q = encode_addr_qr(LanProfile::V1, &[endpoint("192.0.2.10")]).unwrap();
-        let profile = 2 + qv_protocol::oob::ADDR_QR_LABEL.len();
+        let mut q = encode_qr(LanProfile::V1, &[7; 16], &[endpoint("192.0.2.10")], "").unwrap();
+        let profile = 2 + qv_protocol::oob::QR_LABEL.len();
         q[profile] = 2;
         assert_eq!(inspect_lan_qr(&q).err(), Some(LanError::Unsupported));
         assert!(inspect_lan_qr(&[0; 1025]).is_err());
         assert!(inspect_lan_qr(b"https://example.invalid/").is_err());
+        // The retired address-only QR (0014).
+        let old = qv_encoding::encode_array(|a| {
+            a.text("qv/lan-addr-qr/v1");
+            a.uint(1);
+            a.array(|a| {
+                a.array(|a| {
+                    a.bytes(&[192, 0, 2, 10]);
+                    a.uint(7777);
+                    Ok(())
+                })
+            })
+        })
+        .unwrap();
+        assert_eq!(inspect_lan_qr(&old).err(), Some(LanError::Protocol));
     }
 }

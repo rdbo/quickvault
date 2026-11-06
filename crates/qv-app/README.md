@@ -224,12 +224,20 @@ integration and dependency patch scope are documented in
 [third-party](../../third-party/README.md).
 
 
-LAN QR codes (plan 0039) are displayed by the shared Devices screen for pairing
-and Receive. They carry the exact binary 0013 payload, with a four-module quiet
-zone; the typed code/address fallback remains available. Scanning only fills
-Join, Link or Sync; the user must still explicitly connect and approve the SAS.
-A manually edited endpoint supersedes scanned address hints. Lock/navigation
-clear pending scanned secrets and hints, and each LAN action consumes them.
+LAN sync (plans 0038, 0039, 0042; 0013 as amended by 0014). The Devices screen's
+"Show a code" opens a one-use, ten-minute window with a QR (the exact binary
+0013 payload, four-module quiet zone), the 26-character code and this
+device's addresses. The other device either syncs ("Scan a code" or "Type a
+code" on Devices) or joins as a new device (the locked screen's "Join from
+another device"). A sync needs no confirmation and stores nothing about the
+other device; a new device's join shows the comparison code on both screens
+and VK leaves only after both confirm. A scanned code that names its address
+starts the sync or join at once; one without an address shows "Code from the
+QR code" (the code itself is never rendered) and asks for the address. A
+typed address replaces scanned hints. Lock and navigation clear pending codes,
+and each action consumes them. If the reduced-protection notice is still
+unacknowledged, a scanned join waits for the user to press Join, which shows
+it first.
 
 Android uses an in-app Camera2 preview, asks CAMERA permission only at Scan,
 keeps one bounded luminance frame in memory and closes on cancel, timeout,
@@ -253,9 +261,9 @@ frames, stale requests, cancellation, pause cleanup and the 30-second timeout.
 Only its test window stays awake; it saves no frame. This mode requires the
 marked validation package. `QV_ANDROID_QR_OPTICS=1` instead checks the shared
 Join Scan button through the camera, JNI, Rust decoder and core form insertion;
-aim the phone at a known synthetic pairing QR displayed on Linux. It checks
-that no pairing payload prefills DOM controls and that navigation clears the
-form. Neither mode pairs a real peer or establishes offline sync evidence.
+aim the phone at a known synthetic QR (no endpoints) displayed on Linux. It
+checks that the code is only marked as scanned, never rendered, that nothing
+starts without an address, and that navigation clears the form. Neither mode pairs a real peer or establishes offline sync evidence.
 
 The runner supports just the named PlatformTest/QrTest classes and verifies
 installed hashes. It does not clear app data. Physical camera permission,

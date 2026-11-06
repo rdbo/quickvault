@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The listening side shared by pairing and receive windows (0013 §8; plan
-//! 0037 decision 6, plan 0038).
+//! The listening side of a sync window (0013 §8; plans 0037 decision 6,
+//! 0038, 0042).
 //!
 //! The window's protocol runs on the caller's thread. One scoped acceptor
 //! thread polls a non-blocking listener and hands the worker one connection
@@ -9,8 +9,7 @@
 //! - while the worker checks a hello, other connections close at once,
 //!   unanswered;
 //! - once a hello was accepted (`Used`), each extra connection goes to the
-//!   window's `used` handler. Pairing reads one probe frame (§8.3); a
-//!   receive window closes it unanswered.
+//!   window's `used` handler, which reads one probe frame (§8.3).
 //!
 //! The acceptor stops when the worker finishes or the window closes:
 //! 16 failed attempts, the time limit, a cancel or lock, or an observed code.
