@@ -854,6 +854,12 @@ pub(crate) fn capture_qr(cancel: &CancelToken) -> Result<qv_core::SecretBytes, A
     if cancel.is_cancelled() {
         return Err(qv_core::CoreError::Cancelled.into());
     }
+    // The camera permission prompt backgrounds the app like the document
+    // picker; defer only background expiry while this scan runs, taken before
+    // the scan starts so the prompt cannot pause the app first. The scan ends
+    // on any other pause, and a deferred lock fires when this guard drops
+    // while still in the background (screen lock never waits).
+    let _deferral = OS.get().and_then(|os| os.defer_background());
     let id = call(|env, a| env.call_method(a, "qvQrStart", "()J", &[])?.j())?;
     if id <= 0 {
         return Err(AppError::Unavailable);

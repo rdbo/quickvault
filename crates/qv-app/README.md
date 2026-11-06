@@ -113,11 +113,12 @@ App limits (plan 0031):
 - Android marks clips sensitive (API 33+) and clears them at expiry or lock
   only when it can verify the clip is still its own. While another app has
   focus, Android may hide that, so the clip is left for the system to expire.
-- Background locking is immediate on Android, except for two app-started OS
+- Background locking is immediate on Android, except for three app-started OS
   interactions begun in the foreground: a copy keeps the vault open until its
-  20 s hold ends, so it can be pasted, and the system document picker (which
+  20 s hold ends, so it can be pasted; the system document picker (which
   always backgrounds the app) keeps it open until the app is back with a
-  choice or cancellation. Screen-off, lost protection and the 60 s inactivity
+  choice or cancellation; and the camera permission prompt of a Scan keeps
+  it open while that scan runs (at most 30 s), then the camera opens. Screen-off, lost protection and the 60 s inactivity
   lock still apply.
 
 On Linux, install GTK 3, WebKitGTK 4.1, libxdo and the AppIndicator development
@@ -248,6 +249,8 @@ Camera/provider/JVM/decoder stack and renderer copies still have best-effort
 cleanup limits (0008); do not claim complete erasure.
 
 The ordinary APK's QR camera gate remains closed pending physical validation.
+`QV_APP_QR_CAMERA=1` opens it in an ordinary package for the owner's own
+testing (owner decision 2026-11-06); the default build stays closed.
 Build a marked validation APK with `QV_APP_DEVICE_VALIDATION=1`; then select
 that same variant when running its focused adapter instrumentation:
 

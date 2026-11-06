@@ -79,7 +79,11 @@ if os.environ.get('QV_APP_DEVICE_VALIDATION')=='1':
     main_activity.write_text(source.replace('const val VALIDATION = false','const val VALIDATION = true'))
 if source.count('const val QR_VALIDATION = false')!=1:
     raise SystemExit('Unexpected QR camera gate source')
-if os.environ.get('QV_APP_DEVICE_VALIDATION')=='1':
+# QR camera gate (plan 0039): closed in ordinary packages until the device
+# checklist passes. QV_APP_QR_CAMERA=1 opens it in an ordinary package for the
+# owner's own testing (owner decision 2026-11-06, plan 0042); the default
+# build stays closed.
+if os.environ.get('QV_APP_DEVICE_VALIDATION')=='1' or os.environ.get('QV_APP_QR_CAMERA')=='1':
     main_activity.write_text(main_activity.read_text().replace('const val QR_VALIDATION = false','const val QR_VALIDATION = true'))
 shutil.copyfile(root/'android/tests/QrTest.java',tests/'QrTest.java')
 shutil.copyfile(root/'android/tests/AutofillTest.java',tests/'AutofillTest.java')
@@ -129,5 +133,7 @@ if len(main)!=1 or main[0].get(ns+'launchMode')!='singleTask':
     raise SystemExit('The Rust-bridged activity must stay single-instance')
 p=Path(os.environ['QV_APP_BUILT_APK'])
 print('APK SHA-256:',hashlib.sha256(p.read_bytes()).hexdigest())
+if os.environ.get('QV_APP_QR_CAMERA')=='1' and os.environ.get('QV_APP_DEVICE_VALIDATION')!='1':
+    print('QR camera gate: OPEN in this ordinary package (QV_APP_QR_CAMERA=1, owner test build).')
 print('Built only. Inspect the final manifest/signature before any device install.')
 PY

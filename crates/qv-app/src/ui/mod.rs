@@ -222,6 +222,9 @@ pub(crate) struct ShellView {
     pub(crate) busy: bool,
     pub(crate) scanning: bool,
     pub(crate) reduced_lifecycle: bool,
+    /// Seconds left in a LAN window: part of the props so its countdown
+    /// redraws every second.
+    pub(crate) lan_seconds: u64,
 }
 impl From<&View> for ShellView {
     fn from(v: &View) -> Self {
@@ -229,6 +232,7 @@ impl From<&View> for ShellView {
             epoch: v.epoch,
             revision: v.revision,
             live: v.live,
+            lan_seconds: v.lan_seconds,
             busy: v.busy,
             scanning: v.scanning,
             reduced_lifecycle: v.reduced_lifecycle,
@@ -671,7 +675,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                     button { class: "btn primary", id: "join-submit", "data-qv-clear": "true", disabled: busy || preview, onclick: move |_| g1(Action::JoinDevice), if busy { "Joining…" } else { "Join" } }
                 }
             }
-            pages::LanPanel { controller: controller.clone(), epoch, revision }
+            pages::LanPanel { controller: controller.clone(), epoch, revision, seconds: view.lan_seconds }
             if view.scanning { pages::ScanPanel { controller: controller.clone(), epoch } }
         }
     } else if first_run && !busy {

@@ -78,7 +78,11 @@ at most two offered frames per second and a 30-second scan action. No gallery,
 external camera app, captured-image file, cloud/service decoder or background
 camera is used. A scan closes on cancel, denial, failure, timeout, lock, pause
 or destruction; erase pending frames and reject stale request/epoch results.
-Camera windows use FLAG_SECURE. Scans do not defer background locking.
+Camera windows use FLAG_SECURE. The camera permission prompt that a Scan
+opens backgrounds the app; like the document picker, it defers only background
+expiry while that scan runs (at most its 30 seconds), and the camera opens once
+the app is back. Any other pause ends the scan, and a deferred lock fires when
+the scan ends in the background; screen lock never waits.
 
 Binary pairing payloads and QR modules use protected Rust buffers. Wipe exposed
 JVM/native adapter and decoder buffers promptly; OS/camera/JVM/library scratch
@@ -325,6 +329,10 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-06: §1.7: the camera permission prompt that a Scan opens defers
+  background expiry for that scan, like the document picker, so granting
+  permission continues to the camera instead of locking (owner-reported bug,
+  plan 0042). Still Draft.
 - 2026-11-06: §1.7 follows accepted 0014 (owner, plan 0042): one QR kind; a
   scan with endpoints starts Sync or Join at once, one without asks for the
   address; undecodable or multi-code frames are skipped. Still Draft.

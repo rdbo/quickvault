@@ -336,3 +336,15 @@ the scan on one noisy frame may not be. Left for the camera lifecycle rows.
 
 The other unchecked rows above (lifecycle, pairing, offline exchange,
 Internet isolation) remain pending, and the ordinary camera gate stays closed.
+
+## Owner test build with the camera open — 2026-11-06
+
+The owner chose to test scanning with their real vault before the remaining
+camera rows pass ("i think we should test camera first, and then type the
+code"). `QV_APP_QR_CAMERA=1 sh crates/qv-app/scripts/build-android.sh` now
+opens the camera gate in an ordinary package; the default build keeps it
+closed. Installed on the owner's phone: app SHA-256
+`9de22a4d1b8bdb6b24232ffc8df68337eab2a13ce84ba86948c48add5e0bac8f` (tree
+with plan 0042). This is the owner's test build, not a passed gate: the
+unchecked rows above stay pending, and enabling the camera by default still
+waits for them.

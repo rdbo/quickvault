@@ -336,7 +336,7 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
         if busy && controller.lan_view(epoch).is_none() && !view.scanning {
             div { class: "toasts", div { class: "toast busy-toast", role: "status", "Working… other actions wait until this finishes." } }
         }
-        pages::LanPanel { controller: controller.clone(), epoch, revision }
+        pages::LanPanel { controller: controller.clone(), epoch, revision, seconds: view.lan_seconds }
         if view.scanning { pages::ScanPanel { controller: controller.clone(), epoch } }
         if let Some(kind) = pending.filter(|_| !busy) {
             Confirm { controller: controller.clone(), epoch, kind, seconds: live.weak_seconds }

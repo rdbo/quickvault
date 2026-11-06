@@ -450,15 +450,28 @@ fn lan_sync_joiner_refuses_a_window_without_the_vault() {
 #[test]
 fn lan_sync_windows_serve_one_session_and_close_on_failures_and_expiry() {
     let (a, b) = replicas();
-    // 16 garbage hellos close the window.
-    let (window, ()) = with_window(&b, |addr, _| {
-        for _ in 0..16 {
-            assert!(!poke(addr, b"garbage"));
+    // Repeated garbage hellos close the window. A connection that arrives
+    // while the previous one is still being checked is closed uncounted
+    // (0013 §8.3), so keep sending until the listener is gone; the exact
+    // count of 16 is checked one connection at a time in
+    // `lan_enroll_hostile_hellos_are_silent_and_close_the_window`.
+    let (window, sent) = with_window(&b, |addr, _| {
+        let mut sent = 0;
+        while sent < 64 {
+            let Ok(stream) = TcpStream::connect(addr) else {
+                break;
+            };
+            let mut conn = Conn::new(stream, &never).unwrap();
+            conn.within(Duration::from_secs(3), None);
+            let _ = conn.send_frame(FramePhase::Handshake, b"garbage");
+            let mut buf = Vec::new();
+            assert!(conn.recv_frame(FramePhase::Handshake, &mut buf).is_err());
+            sent += 1;
         }
-        // Let the window see the 16th failure before it is closed.
-        std::thread::sleep(Duration::from_millis(300));
+        sent
     });
     assert_eq!(window.unwrap_err(), LanError::TooManyAttempts);
+    assert!((16..64).contains(&sent), "{sent}");
     // Expiry.
     let w = PairingWindow::open(
         ListenScope::LoopbackForTests,

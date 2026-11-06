@@ -99,6 +99,9 @@ fn join_new(a: &Env, wrong: bool, scanned: bool) -> Env {
         }
         _ => None,
     });
+    // The new device shows the same code prominently while it waits.
+    let waiting = until(&b, "the new device's code", |v| v.sas.clone());
+    assert_eq!(waiting, sas, "the new device shows the comparison code");
     a.c.lan_answer(a.epoch(), true);
     let shown = until(&b, "the vault question", |v| match &v.question {
         Some(Question::JoinVault { vault, sas }) => {
@@ -249,14 +252,14 @@ fn lan_app_cancel_and_lock_end_windows_and_prompts() {
     a.unlock(PASSWORD);
     a.c.navigate(a.epoch(), Screen::Devices);
     a.act(WsAction::LanSync);
-    assert_eq!(a.error(), Some(AppError::InvalidInput));
+    assert_eq!(a.error(), Some(AppError::LanInput));
     a.put(WsField::LanCode, "AAAAA-AAAAA-AAAAA-AAAAA-AAAAA-A");
     a.act(WsAction::LanSync);
-    assert_eq!(a.error(), Some(AppError::InvalidInput));
+    assert_eq!(a.error(), Some(AppError::LanInput));
     a.put(WsField::LanCode, "AAAAA-AAAAA-AAAAA-AAAAA-AAAAA-A");
     a.put(WsField::LanEndpoint, "localhost:80");
     a.act(WsAction::LanSync);
-    assert_eq!(a.error(), Some(AppError::InvalidInput));
+    assert_eq!(a.error(), Some(AppError::LanInput));
     assert!(a.c.lan_view(a.epoch()).is_none());
 }
 

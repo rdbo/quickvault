@@ -87,6 +87,9 @@ pub enum AppError {
     VaultExists,
     /// The listed vault file is not there.
     VaultMissing,
+    /// A LAN code or address that cannot be used (missing, malformed, or a
+    /// typed code without an address).
+    LanInput,
 }
 impl AppError {
     /// Fixed user-facing text.
@@ -110,6 +113,7 @@ impl AppError {
                 "The mandatory recovery snapshot does not fit the snapshot budget. Nothing was changed."
             }
             Self::Core(CoreError::Cancelled) => "The operation was cancelled.",
+            Self::Core(CoreError::Lan(e)) => lan_message(e),
             Self::Core(_) => {
                 "The vault operation could not be completed. Check protection status and the selected vault."
             }
@@ -151,6 +155,9 @@ impl AppError {
             Self::VaultMissing => {
                 "This vault file is not where it was. Open it from its new place, or remove it from the list."
             }
+            Self::LanInput => {
+                "Type the code the other device shows, and its address as ip:port (for example 192.168.1.20:41234)."
+            }
             Self::NoFilePicker => {
                 "No file dialog is available on this desktop. Type the full path of the file instead."
             }
@@ -160,6 +167,40 @@ impl AppError {
 impl From<CoreError> for AppError {
     fn from(e: CoreError) -> Self {
         Self::Core(e)
+    }
+}
+/// Fixed text for a LAN failure (0014 §8). Nothing from the peer is shown.
+fn lan_message(e: qv_core::LanError) -> &'static str {
+    use qv_core::LanError as L;
+    match e {
+        L::NoPeer => {
+            "No device answered with this code. Check the address, that both devices are on the same network, and that no firewall or VPN blocks it; then open a new code on the other device."
+        }
+        L::Timeout => "The other device stopped responding. Try again with a new code.",
+        L::Cancelled => "The operation was cancelled.",
+        L::PeerCancelled => "The other device cancelled.",
+        L::CodeObserved => {
+            "Another device used this code, so it may have been seen. Open a new code."
+        }
+        L::TooManyAttempts => "Unexpected connection attempts closed the code. Open a new one.",
+        L::WindowExpired => "The code expired. Open a new code on the other device.",
+        L::VaultMismatch => "The other device has a different vault or key generation.",
+        L::Unsupported => "The other device uses an unsupported version of QuickVault.",
+        L::Limit => {
+            "The other device's vault is larger than the allowed limits. Nothing was accepted."
+        }
+        L::Integrity => "Data from the other device failed verification. Nothing was accepted.",
+        L::Busy | L::StateChanged => {
+            "The other device's vault changed or is busy. Try again with a new code."
+        }
+        L::Keyslot => {
+            "Resolve this vault's password conflict on the other device first, then try again."
+        }
+        L::Protocol => "The other device sent something unexpected. Nothing was accepted.",
+        L::Io => {
+            "A network error stopped the connection. Check that both devices are on the same network."
+        }
+        _ => "The local network operation could not be completed.",
     }
 }
 /// The screen currently authorized by Rust state.

@@ -270,9 +270,15 @@ fn Devices(controller: Controller, epoch: FormEpoch, revision: u64, busy: bool) 
 
 /// The running or finished LAN operation as a modal: code, QR, endpoints,
 /// countdown, comparison questions and the outcome. Also on the locked screen.
+/// `seconds` is a prop only so that the countdown redraws as it changes.
 #[component]
-pub(crate) fn LanPanel(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
-    let _ = revision;
+pub(crate) fn LanPanel(
+    controller: Controller,
+    epoch: FormEpoch,
+    revision: u64,
+    seconds: u64,
+) -> Element {
+    let _ = (revision, seconds);
     let Some(v) = controller.lan_view(epoch) else {
         return rsx! {};
     };
@@ -321,6 +327,13 @@ pub(crate) fn LanPanel(controller: Controller, epoch: FormEpoch, revision: u64) 
                     div { class: "center mono", for e in v.endpoints.iter() { div { "{e}" } } }
                 }
                 if v.seconds > 0 { p { class: "center hint", "Closes in {v.seconds / 60}:{v.seconds % 60:02}" } }
+                if let (Some(sas), true) = (v.sas.as_ref(), v.question.is_none() && v.done.is_none()) {
+                    div { role: "status", "aria-label": "Comparison code",
+                        p { class: "center", "Check that the other device shows this code:" }
+                        div { class: "code-big mono phrase single", id: "lan-sas-wait", "{sas}" }
+                        p { class: "center hint", "If the codes differ, cancel. The vault is only joined after you confirm it." }
+                    }
+                }
                 if let Some(i) = v.info.as_ref() { p { class: "banner ok notice", role: "status", "{i}" } }
                 match v.question.clone() {
                     Some(Question::Approve { sas, vault }) => rsx! {

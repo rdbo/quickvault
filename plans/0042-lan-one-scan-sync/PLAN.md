@@ -511,4 +511,62 @@ None.
     OK.
   No dependency change, so no deny/vet run. Not done here: the attended
   phone run (needs the owner), the fresh-context review, and D12.
+- 2026-11-06: Owner decision: test the camera with their real vault before
+  typing codes. Added `QV_APP_QR_CAMERA=1` to
+  `crates/qv-app/scripts/build-android.sh`; it opens the QR camera gate in an
+  ordinary package and the build prints that it did. The default build is
+  unchanged (closed). Built and installed on the owner's phone (SHA-256
+  `9de22a4d…0bac8f`); recorded in `plans/0039-lan-qr/DEVICE-VALIDATION.md`.
+- 2026-11-06: Owner-reported bugs on the phone, fixed:
+  - **Permission prompt:** granting camera permission returned to the lock
+    screen, because the prompt pauses the activity and the pause both
+    cancelled the scan and locked. Now the scan holds the platform's
+    background deferral (as the document picker does), a pause while the
+    permission request is pending keeps the scan, and the camera opens after
+    resume (`handler.post`). Any other pause still ends the scan; a deferred
+    lock fires when the scan ends in the background. 0009 §1.7 amended (with
+    a Changelog line), app README updated.
+  - **Countdown:** the window's "Closes in" stayed at 10:00 because the
+    panel's props did not change; `lan_seconds` is now part of the shell
+    view and the panel's props.
+  - **Messages:** every LAN failure showed the generic "vault operation
+    could not be completed". `AppError::message` now maps each `LanError`
+    to fixed text (0014 §8), e.g. no device answered (address, network,
+    firewall or VPN), different vault or generation, timeout, expired code.
+  - Phone-to-computer TCP was checked again and works; the computer also has
+    a ProtonVPN address (`10.2.0.2`) that the QR lists, which costs a
+    connect timeout when tried first. Found, not fixed: windows advertise
+    point-to-point tunnel addresses.
+  - Checks: fmt, SPDX, diff check, app clippy (validation and Android
+    `mobile`), `cargo test -p qv-app --features validation --lib -- lan qr`:
+    13 passed. Rebuilt with `QV_APP_QR_CAMERA=1` and installed (SHA-256
+    `edfa6efc…7fdda`).
+- 2026-11-06: Owner: the window showed only the VPN address. Cause: the
+  route probes target fixed private destinations, and the owner's
+  ProtonVPN policy routing sends all of them through its tunnel table, so
+  every probe returned `10.2.0.2`; the LAN `192.168.15.7` is only on the
+  main table's attached `192.168.15.0/24`. Fix (qv-platform `net`): probe
+  one address inside each attached IPv4 network of `/proc/net/route` first
+  (bounded 64 KiB read; up, no gateway, prefix 1–30, not `lo`), then the
+  fixed probes. On this host: `[192.168.15.7, 10.2.0.2, 2a07:b944::2:2]`.
+  Where `/proc/net/route` is unreadable (Android), only the fixed probes
+  run. Deviation from plan 0038 decision 3 ("no interface list is read"):
+  the route table is read, still no interface enumeration or dependency.
+  Test `net_attached_networks_come_from_the_main_route_table`.
+- 2026-11-06: The camera deferral is now taken before `qvQrStart`, so a fast
+  permission prompt cannot pause the app first. LAN form input errors are
+  `AppError::LanInput` ("Type the code … and its address as ip:port");
+  `InvalidInput` now only means a stale form, which helps tell the two
+  apart if the owner's "Check the input bounds" report recurs (its cause was
+  not reproduced). Checks: fmt, clippy (app validation, platform, Android
+  `mobile`), app `lan qr` tests 13 passed, platform tests 30 passed.
+  Installed `QV_APP_QR_CAMERA=1` build `d84b6a11…ec969f7`.
+- 2026-11-06: Owner: the first real Linux/phone join and sync worked ("it
+  worked now ... The vault synced nicely"), but the comparison code on the
+  phone was "a bit too hidden". The new device now shows it in the same
+  large code box as the offering device (`lan-sas-wait`), with "Check that
+  the other device shows this code" and a cancel hint, instead of inside the
+  status line. The app test checks both screens show the same code before
+  approval. App `lan` tests 8 passed; clippy clean. Installed with
+  `QV_APP_QR_CAMERA=1`.
 

@@ -146,7 +146,10 @@ class MainActivity : WryActivity() {
         return null
     }
     override fun onResume() { super.onResume(); foreground = true }
-    override fun onPause() { foreground = false; lifecycleGeneration++; qr.cancel(); super.onPause() }
+    // The camera permission prompt that Scan opens pauses this activity; that
+    // pause keeps the scan (Rust defers the background lock for it, as for the
+    // document picker). Any other pause ends the scan.
+    override fun onPause() { foreground = false; lifecycleGeneration++; if (!qr.awaitingPermission()) qr.cancel(); super.onPause() }
     // The Rust/Dioxus runtime starts once per process (wry/ndk-context, and
     // this app's own bridge). After destroy, Rust locks and acknowledges, then
     // the process ends so any later activity starts fresh (plan 0035).
@@ -742,10 +745,17 @@ class NativeQrCamera(private val activity: MainActivity) {
         }
         return request
     }
+    @Synchronized fun awaitingPermission():Boolean = permissionId!=0L
     fun permission(granted:Boolean) {
         val request=synchronized(this){permissionId.also{permissionId=0}}
         if(!running(request)) return
-        if(granted && (activity.qvStatus() and 7) == 7) show(request) else end(request,2)
+        if(!granted){end(request,2);return}
+        // The result arrives before onResume: open the camera once the activity
+        // is in front again, or end the scan if it is not.
+        handler.post {
+            if(!running(request)) return@post
+            if((activity.qvStatus() and 7) == 7) show(request) else end(request,1)
+        }
     }
     fun cancel() {val request=synchronized(this){id};if(request>0) end(request,1)}
     fun finish(request:Long) = activity.runOnUiThread {

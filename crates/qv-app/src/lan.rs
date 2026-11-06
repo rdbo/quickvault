@@ -102,6 +102,8 @@ pub(crate) struct LanRun {
     endpoints: Vec<String>,
     expires: Option<Instant>,
     info: Option<String>,
+    /// A new device's comparison code, shown large while the vault arrives.
+    sas: Option<String>,
     question: Option<Question>,
     done: Option<LanDone>,
     /// A password typed for [`Question::Password`], until submitted.
@@ -119,6 +121,7 @@ impl LanRun {
             endpoints: Vec::new(),
             expires: None,
             info: None,
+            sas: None,
             question: None,
             done: None,
             typed: None,
@@ -145,6 +148,7 @@ impl LanRun {
         self.code = None;
         self.qr = None;
         self.typed = None;
+        self.sas = None;
         self.question = None;
     }
 
@@ -189,6 +193,8 @@ pub struct LanView {
     pub seconds: u64,
     /// Progress text.
     pub info: Option<String>,
+    /// A new device's comparison code while it receives the vault.
+    pub sas: Option<String>,
     /// The question waiting for an answer.
     pub question: Option<Question>,
     /// The outcome once finished.
@@ -377,9 +383,8 @@ impl JoinerUi for JoinBridge {
     fn show_code(&mut self, sas: &Sas) -> bool {
         let sas = grouped(&sas.digits());
         self.bridge.update(|r| {
-            r.info = Some(format!(
-                "Comparison code {sas}: check that the other device shows the same code. Receiving the vault…"
-            ))
+            r.sas = Some(sas);
+            r.info = Some("Receiving the vault…".to_owned());
         });
         true
     }
@@ -438,6 +443,7 @@ fn finish(generation: u64, done: LanDone) -> Apply {
             run.qr = None;
             run.question = None;
             run.typed = None;
+            run.sas = None;
             run.expires = None;
             run.done = Some(done);
         }
@@ -466,7 +472,7 @@ fn inputs(c: &Controller, epoch: FormEpoch) -> Result<Inputs, AppError> {
         let result = (|| {
             let v = ws.input(WsField::LanCode);
             if v.is_empty() {
-                return Err(AppError::InvalidInput);
+                return Err(AppError::LanInput);
             }
             let code = protect(v)?;
             let typed = ws.text(WsField::LanEndpoint)?.to_owned();
@@ -475,13 +481,13 @@ fn inputs(c: &Controller, epoch: FormEpoch) -> Result<Inputs, AppError> {
                 // without an address is refused by the session (no peer).
                 Vec::new()
             } else {
-                vec![qv_core::parse_endpoint(&typed).map_err(|_| AppError::InvalidInput)?]
+                vec![qv_core::parse_endpoint(&typed).map_err(|_| AppError::LanInput)?]
             };
             if endpoints.is_empty()
                 && !qv_core::inspect_lan_qr(code.expose_secret())
                     .is_ok_and(|q| !q.endpoints.is_empty())
             {
-                return Err(AppError::InvalidInput);
+                return Err(AppError::LanInput);
             }
             Ok(Inputs { code, endpoints })
         })();
@@ -498,8 +504,8 @@ fn join_code(code: &SecretBytes) -> Result<JoinCode, AppError> {
     if let Ok(code) = JoinCode::from_qr(code.expose_secret()) {
         return Ok(code);
     }
-    let text = std::str::from_utf8(code.expose_secret()).map_err(|_| AppError::InvalidInput)?;
-    JoinCode::from_manual(text).map_err(|_| AppError::InvalidInput)
+    let text = std::str::from_utf8(code.expose_secret()).map_err(|_| AppError::LanInput)?;
+    JoinCode::from_manual(text).map_err(|_| AppError::LanInput)
 }
 
 /// Opens a one-use sync window and serves one sync or one new device.
@@ -595,7 +601,7 @@ pub(crate) fn join_new_device(
             std::str::from_utf8(endpoint)
                 .ok()
                 .and_then(|e| qv_core::parse_endpoint(e).ok())
-                .ok_or(AppError::InvalidInput)?,
+                .ok_or(AppError::LanInput)?,
         ]
     };
     let (bridge, cancel) = Bridge::start(c, LanRun::new(LanKind::Join))?;
@@ -653,6 +659,7 @@ impl Controller {
             endpoints: run.endpoints.clone(),
             seconds: run.seconds(),
             info: run.info.clone(),
+            sas: run.sas.clone(),
             question: run.question.clone(),
             done: run.done.clone(),
         })

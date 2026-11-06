@@ -4,12 +4,16 @@
 //! 0038 decision 3). They are untrusted hints for the other device, never
 //! authentication.
 //!
-//! No interface list is read. For each fixed probe destination an
-//! unconnected UDP socket is `connect`ed, which selects a route and sends no
-//! packet, and its local address is the one this device would use on that
-//! route. The probes cover the private IPv4 ranges, shared address space, a
-//! documentation address for the default route, and IPv6 unique-local and
-//! global routes. Loopback, link-local (no scope ID fits an endpoint),
+//! For each probe destination an unconnected UDP socket is `connect`ed,
+//! which selects a route and sends no packet, and its local address is the
+//! one this device would use on that route. The first probes are one address
+//! inside each directly attached IPv4 network of the main routing table
+//! (`/proc/net/route`, bounded; plan 0042): a VPN that routes everything else
+//! through its own table would otherwise hide the LAN address behind the
+//! tunnel's. Then fixed probes cover the private IPv4 ranges, shared address
+//! space, a documentation address for the default route, and IPv6
+//! unique-local and global routes. Where `/proc/net/route` is unreadable
+//! (Android restricts it), only the fixed probes run. Loopback, link-local (no scope ID fits an endpoint),
 //! unspecified and multicast results are dropped. An empty result means the
 //! user types the address.
 
@@ -61,9 +65,64 @@ fn filter(found: impl IntoIterator<Item = IpAddr>) -> Vec<IpAddr> {
     out
 }
 
-/// Up to 8 local unicast addresses, best first; empty when none is found.
+/// Largest `/proc/net/route` read; a longer table is truncated.
+const MAX_ROUTE_TABLE: u64 = 64 * 1024;
+
+/// One probe address inside each directly attached IPv4 network listed in a
+/// `/proc/net/route` table: up, no gateway, a prefix of 1–30 bits, not
+/// loopback. Fields are hex in the kernel's byte order.
+fn attached_probes(table: &str) -> Vec<IpAddr> {
+    let hex = |f: &str| u32::from_str_radix(f, 16).ok();
+    let mut out = Vec::new();
+    for line in table.lines().skip(1) {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        let (Some(iface), Some(dest), Some(gateway), Some(flags), Some(mask)) = (
+            f.first(),
+            f.get(1).and_then(|d| hex(d)),
+            f.get(2).and_then(|g| hex(g)),
+            f.get(3).and_then(|x| hex(x)),
+            f.get(7).and_then(|m| hex(m)),
+        ) else {
+            continue;
+        };
+        let network = u32::from_be_bytes(dest.to_ne_bytes());
+        let mask = u32::from_be_bytes(mask.to_ne_bytes());
+        let prefix = mask.leading_ones();
+        if *iface == "lo"
+            || gateway != 0
+            || flags & 1 == 0
+            || !(1..=30).contains(&prefix)
+            || mask.count_ones() != prefix
+        {
+            continue;
+        }
+        let probe = IpAddr::V4(Ipv4Addr::from((network & mask) | 1));
+        if !out.contains(&probe) && out.len() < MAX_ADDRESSES {
+            out.push(probe);
+        }
+    }
+    out
+}
+
+fn route_table() -> String {
+    use std::io::Read;
+    let mut text = String::new();
+    if let Ok(file) = std::fs::File::open("/proc/net/route") {
+        let _ = file.take(MAX_ROUTE_TABLE).read_to_string(&mut text);
+    }
+    text
+}
+
+/// Up to 8 local unicast addresses, best first (directly attached networks,
+/// then the fixed probes); empty when none is found.
 pub fn local_addresses() -> Vec<IpAddr> {
-    filter(PROBES.iter().filter_map(|p| route_source(*p)))
+    let attached = attached_probes(&route_table());
+    filter(
+        attached
+            .iter()
+            .chain(PROBES.iter())
+            .filter_map(|p| route_source(*p)),
+    )
 }
 
 #[cfg(test)]
@@ -95,6 +154,25 @@ mod tests {
         );
         let many = (1..=20).map(|i| v4(10, 0, 0, i));
         assert_eq!(filter(many).len(), MAX_ADDRESSES);
+    }
+
+    #[test]
+    fn net_attached_networks_come_from_the_main_route_table() {
+        // A VPN host: the main table keeps only the LAN as attached.
+        let table = "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n\
+            eth0\t00000000\t010FA8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n\
+            eth0\t000FA8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n\
+            eth0\t000FA8C0\t00000000\t0001\t0\t0\t100\t00FFFFFF\t0\t0\t0\n\
+            wg0\t0200020A\t00000000\t0001\t0\t0\t0\tFFFFFFFF\t0\t0\t0\n\
+            lo\t0000007F\t00000000\t0001\t0\t0\t0\t000000FF\t0\t0\t0\n\
+            eth1\t0000000A\t00000000\t0000\t0\t0\t0\t000000FF\t0\t0\t0\n\
+            eth2\t0000000A\t00000000\t0001\t0\t0\t0\t0000FF0F\t0\t0\t0\n\
+            bad line\n";
+        let v4 = |a, b, c, d| IpAddr::V4(Ipv4Addr::new(a, b, c, d));
+        // The default route (gateway), a /32 tunnel, loopback, a down route
+        // and a non-contiguous mask are skipped; duplicates collapse.
+        assert_eq!(attached_probes(table), vec![v4(192, 168, 15, 1)]);
+        assert!(attached_probes("").is_empty());
     }
 
     #[test]
