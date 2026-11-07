@@ -781,7 +781,8 @@ fn Locked(controller: Controller, revision: u64) -> Element {
             },
             if fixture && cfg!(target_os = "android") { p { class: "banner", "Synthetic validation build · isolated test vault only" } }
             if preview { p { class: "banner", "Read-only preview · vault actions are disabled. Do not enter real credentials." } }
-            div { class: "locked-body", key: "locked-{epoch.0}", {body} }
+            // A new epoch rebuilds the form, dropping any typed DOM value.
+            Remount { token: format!("locked-{}", epoch.0), class: "locked-body", {body} }
             // Only while a reduced status awaits acknowledgement (0009 §1.8);
             // afterwards Settings shows the mode, not a lasting chip.
             if view.ack_needed {
@@ -849,5 +850,90 @@ fn PhraseGrid(words: Vec<(usize, Zeroizing<String>)>, hidden: bool) -> Element {
         div { class: if hidden { "phrase mono blurred" } else { "phrase mono" }, "aria-hidden": if hidden { "true" } else { "false" },
             for (n, w) in words { span { small { "{n}" } b { class: "w", "{w.as_str()}" } } }
         }
+    }
+}
+
+/// A `div` rebuilt whenever `token` changes, so CSS entry animations such as
+/// `fade-in` replay. Dioxus ignores the key of a lone element; it applies
+/// only within a keyed list, hence the one-item list.
+#[component]
+pub(crate) fn Remount(token: String, class: &'static str, children: Element) -> Element {
+    rsx! {
+        for t in std::iter::once(token) {
+            div { key: "{t}", class, {children.clone()} }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use dioxus::dioxus_core::{Mutation, ScopeId};
+    use std::cell::RefCell;
+
+    thread_local! {
+        static TOKEN: RefCell<String> = RefCell::new("a".to_owned());
+    }
+    fn probe() -> Element {
+        let token = TOKEN.with(|t| t.borrow().clone());
+        rsx! { Remount { token, class: "fade-in", "page" } }
+    }
+    fn render(dom: &mut VirtualDom, token: &str) -> Vec<Mutation> {
+        TOKEN.with(|t| *t.borrow_mut() = token.to_owned());
+        dom.mark_dirty(ScopeId::APP);
+        dom.render_immediate_to_vec().edits
+    }
+    fn creates(edits: &[Mutation]) -> bool {
+        edits
+            .iter()
+            .any(|m| matches!(m, Mutation::LoadTemplate { .. }))
+    }
+
+    thread_local! {
+        static MOUNTS: RefCell<u32> = const { RefCell::new(0) };
+    }
+    #[component]
+    fn Stateful(label: String) -> Element {
+        use_hook(|| MOUNTS.with(|m| *m.borrow_mut() += 1));
+        rsx! { "{label}" }
+    }
+    fn keyed() -> Element {
+        let token = TOKEN.with(|t| t.borrow().clone());
+        rsx! {
+            for k in [token.clone()] {
+                Stateful { key: "{k}", label: token.clone() }
+            }
+        }
+    }
+
+    #[test]
+    fn keyed_component_gets_fresh_state_only_for_a_new_key() {
+        TOKEN.with(|t| *t.borrow_mut() = "a".to_owned());
+        let mut dom = VirtualDom::new(keyed);
+        dom.rebuild_to_vec();
+        let mounts = || MOUNTS.with(|m| *m.borrow());
+        assert_eq!(mounts(), 1);
+        render(&mut dom, "a");
+        assert_eq!(mounts(), 1);
+        render(&mut dom, "b");
+        assert_eq!(mounts(), 2);
+    }
+
+    #[test]
+    fn remount_rebuilds_only_when_the_token_changes() {
+        TOKEN.with(|t| *t.borrow_mut() = "a".to_owned());
+        let mut dom = VirtualDom::new(probe);
+        dom.rebuild_to_vec();
+        let same = render(&mut dom, "a");
+        assert!(!creates(&same), "{same:?}");
+        let changed = render(&mut dom, "b");
+        assert!(creates(&changed), "{changed:?}");
+        assert!(
+            changed
+                .iter()
+                .any(|m| matches!(m, Mutation::ReplaceWith { .. } | Mutation::Remove { .. })),
+            "{changed:?}"
+        );
     }
 }

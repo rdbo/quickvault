@@ -31,7 +31,7 @@ pub(crate) fn Page(
     busy: bool,
     report: Option<Report>,
 ) -> Element {
-    // Keyed by the screen so every page switch remounts it and fades in.
+    // Every page switch rebuilds the wrapper, so it fades in again.
     let key = match &screen {
         Screen::Settings(p) => format!("{}-Settings-{p:?}", epoch.0),
         s => format!("{}-{s:?}", epoch.0),
@@ -54,7 +54,7 @@ pub(crate) fn Page(
     };
     rsx! {
         section { class: "page",
-            div { class: "page-inner fade-in", key: "{key}",
+            super::Remount { token: key, class: "page-inner fade-in",
                 if let Some(r) = report { ReportCard { controller: controller.clone(), epoch, report: r } }
                 {body}
             }

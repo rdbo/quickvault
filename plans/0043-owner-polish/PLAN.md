@@ -28,9 +28,10 @@ Four owner notes (2026-11-06):
 1. **Fade.** `pages::Page` keyed its `.page-inner.fade-in` wrapper by the
    form epoch, which is constant for an unlocked session. A switch between
    two section pages reused the element, so the animation did not replay;
-   only a switch from the vault view (a new element) faded. The key now
-   includes the screen (and the Settings pane), so every page switch
-   remounts the wrapper. Devices' local dialog state already reset on a
+   only a switch from the vault view (a new element) faded. The token now
+   includes the screen (and the Settings pane), and the wrapper is
+   `ui::Remount`, a one-item keyed list (see the 2026-11-07 log: a key on a
+   lone element is ignored by Dioxus), so every page switch rebuilds it. Devices' local dialog state already reset on a
    switch (different component).
 2. **Icon.** `.brand .ico{color:var(--text3)}` overrode the tile's
    `color:var(--ink)`, painting a grey glyph on the accent tile. Replaced by
@@ -117,3 +118,34 @@ bar) and any spec text; the logo is presentation, not behaviour.
   builds; `aapt2` shows `icon='res/mipmap-anydpi-v26/ic_launcher.xml'` and
   the new foreground. The APK was not installed on a phone, and the
   `--features validation` desktop flow still needs an Xvfb session.
+- 2026-11-07: Owner: the fade still played only on the first switch to the
+  Generator. Cause: Dioxus applies keys only inside keyed lists, so the
+  lone keyed `div` was diffed in place — a probe test showed a key change
+  produced no DOM edits at all (`[]`). Fix: `ui::Remount { token, class }`
+  renders the wrapper in a one-item keyed list (the idiom the inputs
+  already use with `for g in [generation]`). New test
+  `ui::tests::remount_rebuilds_only_when_the_token_changes` (fails with the
+  lone-key version, passes now). Earlier "clippy passes" lines for UI code
+  were with default features, which do not compile `ui`; the
+  feature-enabled checks (as in CI) now run: `cargo clippy -p qv-app
+  --all-targets --features validation` clean, `cargo test -p qv-app
+  --features desktop` 72 passed. Not fixed, reported to the owner: the
+  same ignored lone key on `locked-body` (`key: "locked-{epoch.0}"`) and on
+  `Editor { key }` in `ui/editor.rs`.
+- 2026-11-07: Owner: "fix everything". The two other ignored lone keys:
+  - `locked-body` now uses `Remount` with token `locked-<epoch>`. The epoch
+    changes only on explicit actions (submit, lock, mode changes, the
+    invalid-input clear), never per keystroke or tick, so a new epoch
+    rebuilds the locked form and its DOM inputs in step with the cleared
+    protected inputs, as the key intended.
+  - `EditEntry` renders `Editor` in a one-item keyed list on the draft's
+    record ID, so opening another entry's draft resets the editor's local
+    popover, rename, add-field and notes state.
+  New test `ui::tests::keyed_component_gets_fresh_state_only_for_a_new_key`
+  (one mount with a lone keyed component, two with the list; checked both
+  ways). Checks: fmt, SPDX, `clippy -p qv-app --all-targets --features
+  validation` and default clippy clean; `cargo test -p qv-app --features
+  desktop` 73 passed, default 68 passed. Default-feature workspace code is
+  unchanged since the full run above (UI code compiles only with
+  `desktop`). Real-window validation still needs Xvfb.
+

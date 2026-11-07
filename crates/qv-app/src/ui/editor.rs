@@ -75,8 +75,13 @@ pub(crate) fn EditEntry(controller: Controller, epoch: FormEpoch, revision: u64)
     if form.start {
         return rsx! { StartStep { controller, epoch, revision, form } };
     }
-    let id = form.id.clone();
-    rsx! { Editor { key: "{id}", controller, epoch, revision, form } }
+    // Another entry's draft gets a fresh editor (local popover, rename and
+    // notes state); a lone key would be ignored, hence the one-item list.
+    rsx! {
+        for id in [form.id.clone()] {
+            Editor { key: "{id}", controller: controller.clone(), epoch, revision, form: form.clone() }
+        }
+    }
 }
 
 /// "What are you saving?": one box, a guess made on the device, type tiles.

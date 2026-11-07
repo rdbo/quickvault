@@ -14,7 +14,9 @@ Dates are ISO 8601. Newest first within each section.
     §1.1). `QVAULT_PATH`, the config file and the `.qvault` extension are
     unchanged.
   - App: every section page fades in when you switch to it, not only the
-    Generator.
+    Generator. Keys on lone elements are ignored by Dioxus, so the page
+    wrapper, the locked form (rebuilt on each new form epoch) and the entry
+    editor (fresh per draft) now use one-item keyed lists.
   - App: the title bar's lock icon uses the dark ink colour on the green
     tile instead of grey.
   - App: the locked screen shows the protection chip only while a reduced
