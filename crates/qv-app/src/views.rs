@@ -773,6 +773,8 @@ pub struct EntryFormView {
     pub removed: Option<Z>,
     /// The replacement whose eye is on (its control shows the typed text).
     pub showing: Option<u16>,
+    /// A save would pass the naming checks (`editor::ready_to_save`).
+    pub ready: bool,
 }
 fn text_of(f: &qv_core::Field) -> Z {
     Zeroizing::new(String::from_utf8_lossy(f.value.expose_secret()).into_owned())
@@ -884,6 +886,7 @@ pub(crate) fn entry_form(f: &crate::workspace::EntryForm) -> EntryFormView {
         new_kind: (FieldKind::Text, false),
         removed: f.removed.as_ref().map(|r| z(r.field.name.expose())),
         showing: None,
+        ready: crate::editor::ready_to_save(f),
         new: f.new,
         id: f.draft.id_hex(),
         title: z(e.title.expose()),

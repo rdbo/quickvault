@@ -34,7 +34,7 @@ const forms=new MutationObserver(records=>{
 });
 forms.observe(document,{subtree:true,childList:true,attributes:true,attributeFilter:["data-qv-epoch"]});
 document.addEventListener("click",event=>{
-    if(event.target instanceof Element&&event.target.closest("[data-qv-clear]"))clearControls();
+    if(event.target instanceof Element&&event.target.closest("[data-qv-clear='true']"))clearControls();
 },true);
 document.addEventListener("visibilitychange",()=>{
     if(document.hidden){clearControls();clearRevealed();}

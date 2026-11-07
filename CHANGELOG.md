@@ -36,6 +36,11 @@ Dates are ISO 8601. Newest first within each section.
   - App: the official logo (`LOGO.svg`) is the desktop window icon, the
     Android launcher icon (adaptive, with a monochrome layer), the title-bar
     mark, the first-run welcome image and the Settings → About header.
+  - App: creating or saving an item without a title no longer wipes the
+    password (or other protected value) you typed; the form stays as it
+    was so you only add the title.
+  - App: selecting an item no longer crashes when another item has the
+    same title and first field; list rows are keyed by record ID.
 - 2026-11-06: LAN sync without device links (spec 0014, accepted by the
   owner; plan 0042):
   - One device shows a one-use code (QR, or the 26-character code and an

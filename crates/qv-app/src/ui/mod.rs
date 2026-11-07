@@ -920,6 +920,47 @@ mod tests {
         assert_eq!(mounts(), 2);
     }
 
+    #[derive(Props, Clone, PartialEq)]
+    struct ListProbe {
+        controller: crate::controller::Controller,
+    }
+    fn list_probe(p: ListProbe) -> Element {
+        let c = p.controller;
+        let epoch = c.snapshot().epoch;
+        let screen = c.screen(epoch).unwrap();
+        let all = c
+            .read(epoch, crate::views::all_items)
+            .and_then(Result::ok)
+            .unwrap();
+        rsx! { items::ListPane { controller: c.clone(), epoch, revision: 0, list: crate::workspace::Screen::Browse(None), screen, all, busy: false } }
+    }
+
+    #[test]
+    fn items_with_the_same_title_and_subtitle_can_be_selected() {
+        let _k = crate::workspace_tests::KDF
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let env = crate::workspace_tests::Env::unlocked();
+        // Same title and first field (the username).
+        let first = env.add_entry("Bank", "one");
+        env.add_entry("Bank", "two");
+        env.c
+            .navigate(env.epoch(), crate::workspace::Screen::Browse(None));
+        let mut dom = VirtualDom::new_with_props(
+            list_probe,
+            ListProbe {
+                controller: env.c.clone(),
+            },
+        );
+        dom.rebuild_to_vec();
+        // Selecting one re-renders the list; duplicate row keys panicked
+        // in the keyed diff.
+        env.c
+            .navigate(env.epoch(), crate::workspace::Screen::Entry(first));
+        dom.mark_dirty(ScopeId::APP);
+        dom.render_immediate_to_vec();
+    }
+
     #[test]
     fn remount_rebuilds_only_when_the_token_changes() {
         TOKEN.with(|t| *t.borrow_mut() = "a".to_owned());

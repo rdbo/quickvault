@@ -213,3 +213,49 @@ bar) and any spec text; the logo is presentation, not behaviour.
   --features mobile --target aarch64-linux-android -D warnings` clean (it
   found the logo revision's `Logo` import unused on Android; now gated);
   `cargo test -p qv-app --features desktop` 74 passed, default 69 passed.
+- 2026-11-07: Owner: creating an item without a title wiped the typed
+  password, so it had to be typed again. Cause: both editor Save buttons
+  carried `data-qv-clear`, so `app.js` emptied every uncontrolled input
+  (protected replacements) on click, before Rust refused the save with
+  `NameRequired`; the draft still held the replacement, so the page also
+  misrepresented it as empty. Design (secret handling; owner-delegated):
+  clear after use, not after a refusal. `editor::ready_to_save` (past the
+  start step, a typed or automatic title, every field named) is now the
+  one check `SaveEntry` refuses on and is exposed as
+  `EntryFormView::ready`; the Save buttons render `data-qv-clear` as
+  `"true"` only when ready, and `app.js` clears only on `="true"` (every
+  other use is `"true"`, unchanged). A successful save still clears; a
+  refused one keeps the inputs, which the open form already holds in Rust
+  and DOM under the same 0008 §1.1/§4.4 limits as while typing. Race: a
+  click landing before the re-render that follows a title keystroke saves
+  without the click-time clear, as Ctrl S always has; the editor's
+  controls are then removed with the editor. No spec change (0008's
+  "clear controls after use and on lock" holds). New test
+  `editor_tests::a_save_refused_for_a_missing_title_keeps_the_typed_password`.
+  Needs the fresh review with the rest of this plan.
+
+  Checks: SPDX, fmt, default clippy, `clippy -p qv-app --all-targets
+  --features validation` and `check-matrix.sh` clean; `cargo test -p qv-app
+  --features desktop` 75 passed; `cargo test --locked --no-fail-fast` 906
+  passed, 2 ignored, 2 failed (the two Xvfb-dependent `qv-cli` clipboard
+  tests; Xvfb not installed — not a pass). Android clippy was not run (the
+  aarch64 std is not installed in this session); the real-window
+  validation flow still needs Xvfb.
+- 2026-11-07: Owner: the app crashed on clicking an item "with the same
+  name". Cause: `ListPane` keyed each row `"{title}-{subtitle}"`, so two
+  entries with the same title and first field had the same key; the next
+  re-render (selecting a row) hit dioxus-core's debug assertion "keyed
+  siblings must each have a unique key" (release builds would mis-diff
+  rows instead). Rows are now keyed by the record ID (`id_hex`), which is
+  unique in `views::all_items` (one row per entry; conflicts are a flag).
+  New test `ui::tests::items_with_the_same_title_and_subtitle_can_be_selected`
+  renders the real `ListPane` with two such entries and selects one: it
+  panicked with the old key and passes now. No other UI list is keyed by
+  data.
+
+  Checks: SPDX, fmt, default clippy, `clippy -p qv-app --all-targets
+  --features validation` and `check-matrix.sh` clean; `cargo test -p qv-app
+  --features desktop` 76 passed; `cargo test --locked --no-fail-fast` 906
+  passed, 2 ignored, 2 failed (the same two Xvfb-dependent `qv-cli`
+  clipboard tests; not a pass). Android clippy and the real-window flow
+  were not run (no aarch64 std, no Xvfb in this session).

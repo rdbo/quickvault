@@ -195,6 +195,31 @@ fn sites_and_networks_fill_their_fields_and_title_the_item() {
 }
 
 #[test]
+fn a_save_refused_for_a_missing_title_keeps_the_typed_password() {
+    let _k = lock();
+    let env = Env::unlocked();
+    // A login with no title and no website to take one from.
+    start(&env, "");
+    env.act(WsAction::StartAs(Some(ItemType::Login)));
+    let f = form(&env);
+    assert!(f.title.is_empty() && f.auto_title.is_none());
+    let pw = row(&f, "Password");
+    env.put(WsField::Replacement(pw), "typed-before-the-title");
+    // Not ready: the Save buttons do not clear the webview's inputs.
+    assert!(!form(&env).ready);
+    env.act(WsAction::SaveEntry);
+    assert_eq!(env.error(), Some(AppError::NameRequired));
+    assert_eq!(env.screen(), Screen::EditEntry);
+    let f = form(&env);
+    assert!(!f.ready && f.rows.iter().any(|r| r.index == pw && r.replaced));
+    // Once titled the save is ready (and clears); the password is kept.
+    env.put(WsField::Title, "Bank");
+    assert!(form(&env).ready);
+    let e = saved(&env);
+    assert_eq!(reveal(&env, e, "Password"), b"typed-before-the-title");
+}
+
+#[test]
 fn changing_the_type_keeps_filled_fields_with_their_replacements() {
     let _k = lock();
     let env = Env::unlocked();

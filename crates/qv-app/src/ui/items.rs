@@ -388,7 +388,7 @@ pub(crate) fn ListPane(
                 for (letter, items) in sections {
                     div { class: "sect", "{letter}" }
                     for (row, kind) in items {
-                        div { class: if current == Some(row.handle) { "row on" } else { "row" }, key: "{row.title.as_str()}-{row.subtitle.as_str()}",
+                        div { class: if current == Some(row.handle) { "row on" } else { "row" }, key: "{row.handle.id_hex()}",
                             button { class: "open item-open", "aria-label": "Open {row.title.as_str()}", disabled: form, onclick: pick(&controller, epoch, Screen::Entry(row.handle)) }
                             span { class: "tile {item_hue(row.colour, &row.handle.id_hex())}", "{initial(&row.title)}" }
                             span { class: "t", b { class: "row-title", "{row.title.as_str()}" }

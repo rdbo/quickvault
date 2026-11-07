@@ -188,6 +188,10 @@ fn Editor(controller: Controller, epoch: FormEpoch, revision: u64, form: EntryFo
     let groups = group_choices(&controller, epoch, form.group);
     let group = groups.iter().find(|g| g.0 == form.group).cloned();
     let save = act(&controller, epoch, WsAction::SaveEntry);
+    // A save refused for a missing title or field name keeps the typed
+    // (uncontrolled) values, such as a new password; app.js clears only on
+    // "true".
+    let clear = if form.ready { "true" } else { "false" };
     // Esc closes what is open before it reaches the root (which cancels).
     let keys = move |e: KeyboardEvent| {
         if e.key() == Key::Escape && (pop().is_some() || adding()) {
@@ -249,7 +253,7 @@ fn Editor(controller: Controller, epoch: FormEpoch, revision: u64, form: EntryFo
         div { class: "phone-bar",
             button { class: "icon-btn back", "aria-label": "Cancel", "data-qv-clear": "true", onclick: back(&controller, epoch), Svg { icon: Icon::Close, large: true } }
             b { class: "ie-pbar-t", "{heading}" }
-            button { class: "btn primary", "data-qv-clear": "true", onclick: act(&controller, epoch, WsAction::SaveEntry), "{verb}" }
+            button { class: "btn primary", "data-qv-clear": clear, onclick: act(&controller, epoch, WsAction::SaveEntry), "{verb}" }
         }
         div { class: if is_note { "detail-inner ie isnote fade-in" } else { "detail-inner ie fade-in" }, onkeydown: keys,
             div { class: "ie-head",
@@ -326,7 +330,7 @@ fn Editor(controller: Controller, epoch: FormEpoch, revision: u64, form: EntryFo
             div { class: "savebar desk-only",
                 span { "Esc cancels · Ctrl S saves" }
                 button { class: "btn subtle", "data-qv-clear": "true", onclick: back(&controller, epoch), "Cancel" }
-                button { class: "btn primary", id: "entry-save", "data-qv-clear": "true", onclick: save, if form.new { "Create item" } else { "Save changes" } }
+                button { class: "btn primary", id: "entry-save", "data-qv-clear": clear, onclick: save, if form.new { "Create item" } else { "Save changes" } }
             }
         }
     }

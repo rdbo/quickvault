@@ -718,6 +718,16 @@ pub(crate) fn auto_title(form: &EntryForm) -> Option<(String, &'static str)> {
         ItemType::Note | ItemType::Other => None,
     }
 }
+/// Whether a save passes the naming checks: past the start step, a title
+/// (typed or automatic) and a name on every field. The Save buttons clear
+/// the webview's inputs only when this holds, so a refused save keeps what
+/// was typed.
+pub(crate) fn ready_to_save(form: &EntryForm) -> bool {
+    let e = form.draft.entry();
+    !form.start
+        && (!e.title.expose().is_empty() || auto_title(form).is_some_and(|(t, _)| !t.is_empty()))
+        && e.fields.iter().all(|f| !f.name.expose().is_empty())
+}
 /// Find a field by name (case-insensitive).
 pub fn find(fields: &[Field], name: &str) -> Option<usize> {
     fields.iter().position(|f| same_slot(f.name.expose(), name))

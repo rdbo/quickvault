@@ -528,7 +528,7 @@ pub(crate) fn run(
             let form = c
                 .with_ws(epoch, |ws, _| -> Result<EntryForm, AppError> {
                     let form = ws.entry_form.as_mut().ok_or(AppError::InvalidInput)?;
-                    if form.start {
+                    if !crate::editor::ready_to_save(form) {
                         return Err(AppError::NameRequired);
                     }
                     if form.draft.entry().title.expose().is_empty()
@@ -536,12 +536,6 @@ pub(crate) fn run(
                     {
                         form.draft.entry_mut().title =
                             qv_core::Text::new(&title).map_err(|_| AppError::InvalidInput)?;
-                    }
-                    let entry = form.draft.entry();
-                    if entry.title.expose().is_empty()
-                        || entry.fields.iter().any(|f| f.name.expose().is_empty())
-                    {
-                        return Err(AppError::NameRequired);
                     }
                     let mut form = ws.entry_form.take().ok_or(AppError::InvalidInput)?;
                     let replacements = std::mem::take(&mut form.replacements);
