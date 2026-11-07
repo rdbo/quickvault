@@ -39,6 +39,9 @@ pub(crate) fn app() -> Element {
             let mut previous = None;
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(200));
+                if let Some(Ok(controller)) = ACTIVE.get() {
+                    controller.pump();
+                }
                 // Async startup failures must refresh the screen too.
                 let snapshot = ACTIVE.get().map(|result| {
                     result
@@ -436,10 +439,18 @@ fn Locked(controller: Controller, revision: u64) -> Element {
     // reports the missing portal and only hides the picker choices.
     let fallback = crate::documents::picker_missing() || fixture;
     let typed_path = fixture;
-    let quick = mode == Mode::Unlock && controller.0.services.keystore().binding().is_some();
+    // Quick unlock enrolled for the selected vault comes first (plan 0045).
+    let quick = mode == Mode::Unlock && controller.quick_ready();
+    let quick_label =
+        if controller.quick_policy() == Some(qv_core::platform::QuickPolicy::DeviceCredential) {
+            "Unlock with screen lock"
+        } else {
+            "Unlock with fingerprint"
+        };
     let os = controller.protection();
     let process_reduced = qv_core::harden().is_reduced();
     let reduced = os.is_reduced() || process_reduced;
+    let level = crate::prefs::level(&os, process_reduced);
     let err_view = rsx! {
         if let Some(e) = error { div { class: "err", role: "alert", Svg { icon: Icon::Warn } span { "{e.message()}" } } }
         else if let Some(n) = notice { p { class: "banner ok", role: "status", "{n}" } }
@@ -733,8 +744,13 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                         }
                     }
                 }
+                if quick {
+                    button { class: "btn primary quick-go", id: "quick-unlock", "data-qv-clear": "true", disabled: busy || preview, onclick: move |_| g2(Action::QuickUnlock), Svg { icon: Icon::Finger, large: true } "{quick_label}" }
+                    div { class: "or-line", span { "or use your master password" } }
+                }
                 div { class: if error.is_some() { "pw bad" } else { "pw" },
-                    input { id: "password", r#type: "password", placeholder: "Master password", "aria-label": "Master password", maxlength: 1024, autofocus: true, disabled: busy,
+                    // No keyboard under the fingerprint prompt.
+                    input { id: "password", r#type: "password", placeholder: "Master password", "aria-label": "Master password", maxlength: 1024, autofocus: !quick, disabled: busy,
                         autocomplete: "off", spellcheck: "false", autocapitalize: "off", autocorrect: "off",
                         oninput: { let c = controller.clone(); move |event: FormEvent| { let mut value = event.value(); c.input(epoch, InputField::Password, &mut value); } },
                         onkeydown: { let mut g = gate.clone(); move |e: KeyboardEvent| { if e.key() == Key::Enter && !preview { e.prevent_default(); g(Action::Unlock); } } }
@@ -744,9 +760,6 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                 if busy { p { class: "muted", "Opening…" } }
                 {err_view}
                 if typed_path { SecretInput { controller: controller.clone(), epoch, field: InputField::Path, label: "Vault file (full path)", id: "vault-path", secret: false, disabled: busy } }
-                if quick {
-                    button { class: "ghost", "data-qv-clear": "true", disabled: busy || preview, onclick: move |_| g2(Action::QuickUnlock), Svg { icon: Icon::Finger } "Unlock with fingerprint" }
-                }
                 if let Some(banner) = controller.autofill_banner() {
                     p { class: "banner ok", role: "status", "data-qv-autofill": "banner", "{banner}" }
                 }
@@ -761,7 +774,8 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                 button { class: "scrim", "aria-label": "Close", onclick: move |_| sheet.set(Sheet::None) }
                 div { class: "dialog", role: "dialog", "aria-modal": "true", "aria-label": "Device protection",
                     h3 { "Device protection" }
-                    p { if reduced { "Some protections are missing on this device. Read what they are before using a vault here." } else { "QuickVault checked how this device protects data at rest." } }
+                    div { class: "level {level.tone()}", id: "protection-level", Svg { icon: Icon::Shield } b { "{level.label()}" } span { "protection" } }
+                    p { if reduced { "QuickVault could not confirm everything below on this device. Read what it checked before using a vault here." } else { "QuickVault checked how this device protects data at rest." } }
                     div { class: "card", id: "protection-status",
                         ProtectionRow { label: "Disk encryption", evidence: os.storage }
                         ProtectionRow { label: "Swap", evidence: os.swap }
@@ -771,7 +785,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                         StatusRow { label: "Process and memory protection", ok: !process_reduced }
                     }
                     p { class: "hint", "Clearing an input cannot guarantee erasure of framework or operating-system copies. Storage, swap and hibernation protection depend on the operating system." }
-                    p { class: "hint", if os.quick_unlock { "Hardware quick unlock requires explicit enrollment in Settings." } else { "Quick unlock is unavailable on this device." } }
+                    p { class: "hint", if os.quick_unlock { "Fingerprint unlock turns on after you unlock with your master password." } else { "Quick unlock is unavailable on this device." } }
                     div { class: "actions",
                         if view.ack_needed {
                             button { class: "btn subtle", onclick: move |_| sheet.set(Sheet::None), "Not now" }
@@ -811,7 +825,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
             // afterwards Settings shows the mode, not a lasting chip.
             if view.ack_needed {
                 div { class: "locked-foot",
-                    button { class: "status-chip warn", id: "protection-chip", onclick: move |_| { after_ack.set(None); sheet.set(Sheet::Protection); }, Svg { icon: Icon::Shield } "Reduced protection · review" }
+                    button { class: "status-chip {level.tone()}", id: "protection-chip", onclick: move |_| { after_ack.set(None); sheet.set(Sheet::Protection); }, Svg { icon: Icon::Shield } "{level.label()} protection · review" }
                 }
             }
             if fixture { input { id: "validation-result", oninput: fixture_report(&controller) } }
@@ -975,7 +989,7 @@ mod tests {
             .read(epoch, crate::views::all_items)
             .and_then(Result::ok)
             .unwrap();
-        rsx! { items::ListPane { controller: c.clone(), epoch, revision: 0, list: crate::workspace::Screen::Browse(None), screen, all, busy: false } }
+        rsx! { items::ListPane { controller: c.clone(), epoch, revision: 0, list: crate::workspace::Screen::Browse(None), screen, all, busy: false, conflicts: 0 } }
     }
 
     #[test]

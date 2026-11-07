@@ -84,6 +84,19 @@ impl Core {
         self.quick_services()
             .is_ok_and(|s| s.keystore().binding().is_some())
     }
+    /// True while the live binding names the vault at `path`, judged from
+    /// its unverified public header (vault ID and key generation). Opening
+    /// still verifies everything; this only decides what to offer.
+    pub fn quick_ready_for(&self, path: &Path) -> bool {
+        let Some(binding) = self
+            .quick_services()
+            .ok()
+            .and_then(|s| s.keystore().binding())
+        else {
+            return false;
+        };
+        same_vault(path, binding)
+    }
     /// Explicit hardware-authenticated open; never falls back to recovery/password.
     pub fn unlock_quick(
         &self,
@@ -93,9 +106,15 @@ impl Core {
         self.platform_gate()?;
         let services = self.quick_services()?;
         let expected = services.keystore().binding().ok_or(CoreError::NotAllowed)?;
+        // Another vault: refuse before prompting, keeping the enrollment.
+        if !same_vault(path, expected) {
+            return Err(CoreError::NotAllowed);
+        }
         let token = cancel.cloned();
         let cancelled: qv_platform::Cancellation =
             Arc::new(move || token.as_ref().is_some_and(CancelToken::is_cancelled));
+        // The keystore counts attempts and destroys its own state on
+        // lockouts and lost keys; a dismissal keeps the enrollment.
         let phrase = services
             .keystore()
             .unlock_bound(expected, cancelled.clone())
@@ -124,11 +143,21 @@ impl Core {
             session.run_automatic_snapshot(cancel);
             Ok(session)
         })();
-        if result.is_err() {
+        // The phrase did not open this vault as bound: the state is stale.
+        if result
+            .as_ref()
+            .is_err_and(|e| !matches!(e, CoreError::Cancelled))
+        {
             let _ = services.keystore().invalidate();
         }
         result
     }
+}
+fn same_vault(path: &Path, binding: QuickBinding) -> bool {
+    qv_store::VaultFile::open(path).is_ok_and(|f| {
+        let h = f.header();
+        h.vault_id.0 == binding.vault && h.key_generation.0 == binding.generation
+    })
 }
 
 #[cfg(test)]
@@ -142,6 +171,7 @@ mod tests {
         Clipboard, Evidence, Keystore, Lifecycle, PlatformError, ProtectionStatus, SecureInput,
         Unavailable,
     };
+    use std::sync::atomic::Ordering;
     struct Native;
     impl AndroidKeystoreBackend for Native {
         fn validated(&self) -> bool {
@@ -249,5 +279,79 @@ mod tests {
         }
         assert!(core.unlock_quick(&env.path, None).is_err());
         assert!(!core.quick_ready());
+    }
+
+    /// Opens like `Native`, or reports a dismissal when `cancel` is set.
+    struct Dismissable(std::sync::atomic::AtomicBool);
+    impl AndroidKeystoreBackend for Dismissable {
+        fn validated(&self) -> bool {
+            true
+        }
+        fn seal(
+            &self,
+            b: QuickBinding,
+            p: QuickPolicy,
+            s: &SecretBytes,
+            c: qv_platform::Cancellation,
+        ) -> Result<SecretBytes, PlatformError> {
+            Native.seal(b, p, s, c)
+        }
+        fn open(
+            &self,
+            b: QuickBinding,
+            p: QuickPolicy,
+            s: &SecretBytes,
+            c: qv_platform::Cancellation,
+        ) -> Result<SecretBytes, PlatformError> {
+            if self.0.load(Ordering::SeqCst) {
+                return Err(PlatformError::Cancelled);
+            }
+            Native.open(b, p, s, c)
+        }
+        fn delete(&self, _: &SecretBytes) -> Result<(), PlatformError> {
+            Ok(())
+        }
+    }
+    // 0012 §1: Hardware assumptions
+    #[test]
+    fn dismissal_and_another_vault_keep_the_enrollment() {
+        let env = Env::new();
+        let _k = kdf();
+        let backend = Arc::new(Dismissable(std::sync::atomic::AtomicBool::new(true)));
+        let services = Arc::new(Platform(AndroidKeystore::new(backend.clone())));
+        let core = env.core().with_linux_platform(services, true);
+        let s = core.unlock(&env.path, &pw(PASSWORD), None).unwrap();
+        s.enroll_quick(&pw(PASSWORD), QuickPolicy::Class3, None)
+            .unwrap();
+        s.lock();
+        assert!(core.quick_ready_for(&env.path));
+        for _ in 0..4 {
+            assert!(matches!(
+                core.unlock_quick(&env.path, None),
+                Err(CoreError::Cancelled)
+            ));
+        }
+        assert!(core.quick_ready_for(&env.path));
+        // Another vault is refused before any prompt, keeping this one.
+        let other = env.dir.path().join("other.qvault");
+        core.create(&other, &pw(PASSWORD), "Other")
+            .unwrap()
+            .session
+            .lock();
+        assert!(!core.quick_ready_for(&other));
+        assert!(!core.quick_ready_for(&env.dir.path().join("missing.qvault")));
+        assert!(matches!(
+            core.unlock_quick(&other, None),
+            Err(CoreError::NotAllowed)
+        ));
+        assert!(core.quick_ready_for(&env.path));
+        backend.0.store(false, Ordering::SeqCst);
+        assert!(
+            core.unlock_quick(&env.path, None)
+                .unwrap()
+                .verify(None)
+                .unwrap()
+                .ok()
+        );
     }
 }

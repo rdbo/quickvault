@@ -1482,6 +1482,7 @@ fn protection_acknowledgement_is_explicit_remembered_and_status_bound() {
     Prefs {
         theme: Theme::Light,
         protection: Some("svwvhvl1c1p0".into()),
+        quick_off: false,
     }
     .save(&env.dir)
     .unwrap();
@@ -1876,4 +1877,170 @@ fn quick_operations_do_not_show_as_busy() {
     env.c.state().op_started = Some(Instant::now());
     assert_eq!(busy(&env), (true, true));
     env.c.0.working.store(false, Ordering::SeqCst);
+}
+
+/// A phone with quick unlock: the fake OS plus an in-process keystore whose
+/// prompt succeeds or is dismissed, and a settable foreground count.
+struct QuickPhone {
+    base: Platform,
+    keystore: AndroidKeystore,
+    entries: Arc<AtomicU64>,
+}
+struct Prompt {
+    dismiss: Arc<AtomicBool>,
+    opened: Arc<AtomicU64>,
+}
+impl AndroidKeystoreBackend for Prompt {
+    fn validated(&self) -> bool {
+        true
+    }
+    fn seal(
+        &self,
+        _: QuickBinding,
+        _: QuickPolicy,
+        s: &SecretBytes,
+        _: Cancellation,
+    ) -> Result<SecretBytes, PlatformError> {
+        SecretBytes::try_init(s.len(), |b| {
+            b.copy_from_slice(s.expose_secret());
+            Ok(())
+        })
+    }
+    fn open(
+        &self,
+        b: QuickBinding,
+        p: QuickPolicy,
+        s: &SecretBytes,
+        c: Cancellation,
+    ) -> Result<SecretBytes, PlatformError> {
+        self.opened.fetch_add(1, Ordering::SeqCst);
+        if self.dismiss.load(Ordering::SeqCst) {
+            return Err(PlatformError::Cancelled);
+        }
+        self.seal(b, p, s, c)
+    }
+    fn delete(&self, _: &SecretBytes) -> Result<(), PlatformError> {
+        Ok(())
+    }
+}
+impl PlatformServices for QuickPhone {
+    fn status(&self) -> ProtectionStatus {
+        ProtectionStatus {
+            storage: Evidence::Verified,
+            swap: Evidence::Verified,
+            hibernation: Evidence::Verified,
+            quick_unlock: true,
+            ..self.base.status()
+        }
+    }
+    fn lifecycle(&self) -> &dyn Lifecycle {
+        self.base.lifecycle()
+    }
+    fn clipboard(&self) -> &dyn Clipboard {
+        self.base.clipboard()
+    }
+    fn secure_input(&self) -> &dyn SecureInput {
+        &Unavailable
+    }
+    fn keystore(&self) -> &dyn Keystore {
+        &self.keystore
+    }
+    fn foreground_entries(&self) -> u64 {
+        self.entries.load(Ordering::SeqCst)
+    }
+}
+
+#[test]
+fn quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only() {
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = std::env::temp_dir().join(format!(
+        "qv-ws-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::SeqCst)
+    ));
+    private_dir(&dir).unwrap();
+    let os = Arc::new(Os::default());
+    let entries = Arc::new(AtomicU64::new(1));
+    let dismiss = Arc::new(AtomicBool::new(false));
+    let opened = Arc::new(AtomicU64::new(0));
+    let phone = QuickPhone {
+        base: Platform(os.clone()),
+        keystore: AndroidKeystore::new(Arc::new(Prompt {
+            dismiss: dismiss.clone(),
+            opened: opened.clone(),
+        })),
+        entries: entries.clone(),
+    };
+    let c = Controller::new(dir.clone(), Arc::new(phone)).unwrap();
+    let env = Env { c, os, dir };
+    assert!(!env.c.protection_ack_needed());
+    env.fill(InputField::Password, PASSWORD);
+    env.fill(InputField::Repeat, PASSWORD);
+    env.c.submit(env.epoch(), Action::Create, true).unwrap();
+    env.wait();
+    env.c.submit(env.epoch(), Action::SkipPhrase, true).unwrap();
+    env.wait();
+    // Creating offers nothing; nothing is enrolled.
+    env.c.pump();
+    env.wait();
+    assert!(!env.c.quick_ready());
+    // A password unlock offers it once, as the next operation.
+    env.c.lock();
+    env.unlock(PASSWORD);
+    assert_eq!(env.c.snapshot().phase, Phase::Unlocked);
+    env.c.pump();
+    env.wait();
+    assert_eq!(
+        env.notice(),
+        Some("Fingerprint unlock is on for this vault.")
+    );
+    assert_eq!(env.c.quick_policy(), Some(QuickPolicy::Class3));
+    // A lock in the foreground does not prompt. (The locked screen checks
+    // the vault's header, which the open session holds.)
+    env.c.lock();
+    assert!(env.c.quick_ready());
+    for _ in 0..3 {
+        env.c.pump();
+        env.wait();
+    }
+    assert_eq!(opened.load(Ordering::SeqCst), 0);
+    assert_eq!(env.c.snapshot().phase, Phase::Locked);
+    // Returning to the foreground prompts once, and opens the vault.
+    entries.fetch_add(1, Ordering::SeqCst);
+    env.c.pump();
+    env.wait();
+    assert_eq!(opened.load(Ordering::SeqCst), 1);
+    assert_eq!(env.c.snapshot().phase, Phase::Unlocked);
+    // A dismissal shows no error, keeps quick unlock, and is not repeated.
+    env.c.lock();
+    entries.fetch_add(1, Ordering::SeqCst);
+    dismiss.store(true, Ordering::SeqCst);
+    for _ in 0..3 {
+        env.c.pump();
+        env.wait();
+    }
+    assert_eq!(opened.load(Ordering::SeqCst), 2);
+    assert_eq!(env.c.snapshot().phase, Phase::Locked);
+    assert_eq!(env.c.snapshot().error, None);
+    assert!(env.c.quick_ready());
+    // Typing a password stops the automatic prompt.
+    entries.fetch_add(1, Ordering::SeqCst);
+    env.fill(InputField::Password, "typing");
+    env.c.pump();
+    env.wait();
+    assert_eq!(opened.load(Ordering::SeqCst), 2);
+    // Turning it off in Settings stops the offer after a password unlock.
+    env.c.lock();
+    dismiss.store(false, Ordering::SeqCst);
+    env.unlock(PASSWORD);
+    env.c
+        .navigate(env.epoch(), Screen::Settings(Pane::Password));
+    env.act(WsAction::DisableQuick);
+    assert_eq!(env.c.quick_policy(), None);
+    assert!(crate::prefs::Prefs::load(&env.dir).quick_off);
+    env.c.lock();
+    env.unlock(PASSWORD);
+    env.c.pump();
+    env.wait();
+    assert_eq!(env.c.quick_policy(), None);
 }

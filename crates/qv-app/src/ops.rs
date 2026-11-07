@@ -972,14 +972,16 @@ pub(crate) fn run(
         WsAction::ChangePassword => change_password(c, epoch),
         WsAction::EnrollQuick(policy) => {
             let pw = c.peek(epoch, |ws| password(ws, WsField::Password)).ok_or(AppError::InvalidInput)??;
-            c.run_op(epoch, None, move |s, token, _| {
+            c.run_op(epoch, None, move |s, token, c| {
                 s.enroll_quick(&pw, policy, Some(token))?;
-                Ok(on_ws(|ws| { ws.inputs.clear(); ws.notice = Some("Quick unlock enabled for this app process. Restart, reboot, expiry, three failures or credential changes require the master password."); }))
+                c.set_quick_off(false);
+                Ok(on_ws(|ws| { ws.inputs.clear(); ws.notice = Some("Quick unlock is on. A restart of the phone, seven days, three failed attempts or a password change ask for the master password again."); }))
             })
         }
-        WsAction::DisableQuick => c.run_op(epoch, None, move |s, _, _| {
+        WsAction::DisableQuick => c.run_op(epoch, None, move |s, _, c| {
             s.disable_quick()?;
-            Ok(on_ws(|ws| ws.notice = Some("Quick unlock disabled; the hardware key was removed.")))
+            c.set_quick_off(true);
+            Ok(on_ws(|ws| ws.notice = Some("Quick unlock is off; the hardware key was removed.")))
         }),
         WsAction::AutofillFill(key) => {
             let (native, requester, roles) = c.autofill_bound().ok_or(AppError::AutofillExpired)?;

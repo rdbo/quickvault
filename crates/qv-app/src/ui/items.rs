@@ -215,6 +215,7 @@ pub(crate) fn ListPane(
     screen: Screen,
     all: Vec<ItemRow>,
     busy: bool,
+    conflicts: usize,
 ) -> Element {
     let _ = revision;
     let mut menu = use_signal(|| false);
@@ -527,11 +528,13 @@ pub(crate) fn ListPane(
         }
     };
     rsx! {
-        section { class: if in_selection { "list selecting" } else { "list" }, "aria-label": "Items", onkeydown: keys,
+        // `fade-in` plays when the list mounts again after a tool page.
+        section { class: if in_selection { "list selecting fade-in" } else { "list fade-in" }, "aria-label": "Items", onkeydown: keys,
             div { class: "phone-head",
                 div { class: "ph-row",
                     h2 { "{title}" }
-                    if count > 0 && !in_selection { button { class: "link", id: "list-select-phone", disabled: form, onclick: start_selecting.clone(), "Select" } }
+                    // Android selects by holding a row (plan 0045).
+                    if count > 0 && !in_selection && !cfg!(target_os = "android") { button { class: "link", id: "list-select-phone", disabled: form, onclick: start_selecting.clone(), "Select" } }
                 }
             }
             if in_selection { {selbar} } else {
@@ -572,6 +575,13 @@ pub(crate) fn ListPane(
                             button { class: "chip", disabled: form, onclick: go(&controller, epoch, Screen::Browse(Some(g.handle))), Svg { icon: Icon::Folder } "{g.name.as_str()}" }
                         }
                     }
+                }
+            }
+            if conflicts > 0 && !in_selection {
+                button { class: "conflict-note", id: "list-conflicts", disabled: form, onclick: go(&controller, epoch, Screen::Conflicts),
+                    Svg { icon: Icon::Conflicts }
+                    span { class: "sp", if conflicts == 1 { "1 item has conflicting versions" } else { "{conflicts} items have conflicting versions" } }
+                    b { "Resolve" }
                 }
             }
             div { class: "rows", id: "rows",
@@ -862,7 +872,10 @@ fn EntryBody(
             }
         }
         if view.versions > 1 {
-            div { class: "banner", Svg { icon: Icon::Conflicts } span { "This entry has {view.versions} conflicting versions; one is shown. Resolve the conflict before copying or editing." } }
+            div { class: "banner", Svg { icon: Icon::Conflicts }
+                span { class: "sp", "This entry has {view.versions} conflicting versions; one is shown. Choose one before copying or editing." }
+                button { class: "btn", id: "entry-resolve", onclick: go(&controller, epoch, Screen::ConflictRecord(view.handle.id_hex())), "Compare and resolve" }
+            }
         }
         if let Some(x) = &view.expires { div { class: "banner", Svg { icon: Icon::Clock } span { "Expires {x}" } } }
         if let Some(c) = card { div { class: "ie-face", {super::editor::card_face(&c, tile)} } }

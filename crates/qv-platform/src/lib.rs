@@ -10,7 +10,7 @@ pub mod android;
 pub mod autofill;
 /// Bound, device-local Android quick-unlock policy.
 pub mod quick_unlock;
-pub use quick_unlock::{QuickBinding, QuickPolicy};
+pub use quick_unlock::{BootStamp, QuickBinding, QuickPolicy};
 
 use qv_crypto::SecretBytes;
 use std::sync::Arc;
@@ -44,6 +44,8 @@ pub enum PlatformError {
     Busy,
     /// An OS operation failed.
     Io,
+    /// Authentication failed for good, for example a biometric lockout.
+    Denied,
 }
 /// Whether a protection prerequisite has been established.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,6 +135,10 @@ pub trait Keystore: Send + Sync {
     fn binding(&self) -> Option<QuickBinding> {
         None
     }
+    /// The policy of the live binding, if any.
+    fn policy(&self) -> Option<QuickPolicy> {
+        None
+    }
     /// Enroll only following master-password reauthentication in core.
     fn enroll(
         &self,
@@ -176,6 +182,11 @@ pub trait PlatformServices: Send + Sync {
     fn secure_input(&self) -> &dyn SecureInput;
     /// Authenticated wrapping, or an explicitly unavailable backend.
     fn keystore(&self) -> &dyn Keystore;
+    /// How many times the app has come to the foreground (mobile); a change
+    /// lets the locked screen offer quick unlock again. Desktop: always 0.
+    fn foreground_entries(&self) -> u64 {
+        0
+    }
 }
 /// A fail-closed input/keystore/clipboard adapter for unsupported mechanisms.
 #[derive(Debug, Default)]

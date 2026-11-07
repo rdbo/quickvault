@@ -351,8 +351,14 @@ pub(crate) fn initialize() {
             #[cfg(not(feature = "validation"))]
             let quick: Arc<dyn qv_core::platform::AndroidKeystoreBackend> =
                 Arc::new(NativeKeystore);
+            let encryption =
+                call(|env, a| env.call_method(a, "qvStorageEncryption", "()I", &[])?.i())
+                    .unwrap_or(-1);
+            let initial_sdk =
+                call(|env, a| env.call_method(a, "qvInitialSdk", "()I", &[])?.i()).unwrap_or(0);
             let os = Arc::new(
                 AndroidPlatform::default()
+                    .with_storage(encryption, initial_sdk)
                     .with_clipboard(Arc::new(NativeClipboard))
                     .with_keystore(Arc::new(qv_core::platform::AndroidKeystore::new(quick))),
             );
@@ -508,7 +514,54 @@ impl qv_core::platform::AndroidKeystoreBackend for NativeKeystore {
         .map_err(|_| PlatformError::Io)?;
         if ok { Ok(()) } else { Err(PlatformError::Io) }
     }
+    fn boot(&self) -> Option<qv_core::platform::BootStamp> {
+        // Nothing persists before the private root exists.
+        ROOT.get()?;
+        let count = call(|env, a| env.call_method(a, "qvBootCount", "()I", &[])?.i()).ok()?;
+        let uptime = call(|env, a| env.call_method(a, "qvUptime", "()J", &[])?.j()).ok()?;
+        Some(qv_core::platform::BootStamp {
+            count: u32::try_from(count).ok()?,
+            uptime_ms: u64::try_from(uptime).ok()?,
+        })
+    }
+    fn load(&self) -> Option<Vec<u8>> {
+        let root = ROOT.get()?;
+        crate::prefs::read_private(&root.join(QUICK_STATE), qv_core::platform::QUICK_STATE_MAX)
+    }
+    fn save(&self, state: &[u8]) -> Result<(), PlatformError> {
+        let root = ROOT.get().ok_or(PlatformError::Unavailable)?;
+        crate::prefs::write_private(root, QUICK_STATE, QUICK_STATE_TEMP, state)
+            .map_err(|_| PlatformError::Io)
+    }
+    fn clear(&self) -> Result<(), PlatformError> {
+        let root = ROOT.get().ok_or(PlatformError::Unavailable)?;
+        match std::fs::remove_file(root.join(QUICK_STATE)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(PlatformError::Io),
+            _ => Ok(()),
+        }
+    }
+    fn retain(&self, keep: Option<(&qv_core::SecretBytes, u64)>) {
+        let _ = call(|env, a| {
+            let (array, enrolled) = match keep {
+                Some((envelope, at)) => (
+                    JObject::from(env.byte_array_from_slice(envelope.expose_secret())?),
+                    i64::try_from(at).unwrap_or(i64::MAX),
+                ),
+                None => (JObject::null(), 0),
+            };
+            env.call_method(
+                a,
+                "qvQuickRetain",
+                "([BJ)V",
+                &[JValue::Object(&array), JValue::Long(enrolled)],
+            )
+            .map(|_| ())
+        });
+    }
 }
+/// The quick-unlock policy state in the private no-backup root (0002 §5.4).
+const QUICK_STATE: &str = "quick-unlock";
+const QUICK_STATE_TEMP: &str = "quick-unlock.tmp";
 fn quick_operation(
     encrypt: bool,
     binding: qv_core::platform::QuickBinding,
@@ -596,10 +649,10 @@ fn quick_operation(
                         .i()
                 })
                 .unwrap_or(2);
-                return Err(if transient == 1 {
-                    PlatformError::Cancelled
-                } else {
-                    PlatformError::Unavailable
+                return Err(match transient {
+                    1 => PlatformError::Cancelled,
+                    3 => PlatformError::Denied,
+                    _ => PlatformError::Unavailable,
                 });
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -646,6 +699,21 @@ impl qv_core::platform::AndroidKeystoreBackend for FixtureKeystore {
     }
     fn delete(&self, s: &qv_core::SecretBytes) -> Result<(), PlatformError> {
         qv_core::platform::AndroidKeystoreBackend::delete(&NativeKeystore, s)
+    }
+    fn boot(&self) -> Option<qv_core::platform::BootStamp> {
+        qv_core::platform::AndroidKeystoreBackend::boot(&NativeKeystore)
+    }
+    fn load(&self) -> Option<Vec<u8>> {
+        qv_core::platform::AndroidKeystoreBackend::load(&NativeKeystore)
+    }
+    fn save(&self, state: &[u8]) -> Result<(), PlatformError> {
+        qv_core::platform::AndroidKeystoreBackend::save(&NativeKeystore, state)
+    }
+    fn clear(&self) -> Result<(), PlatformError> {
+        qv_core::platform::AndroidKeystoreBackend::clear(&NativeKeystore)
+    }
+    fn retain(&self, keep: Option<(&qv_core::SecretBytes, u64)>) {
+        qv_core::platform::AndroidKeystoreBackend::retain(&NativeKeystore, keep)
     }
 }
 

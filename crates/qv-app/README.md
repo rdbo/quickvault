@@ -83,18 +83,26 @@ Password → Autofill opens Android's autofill-service chooser.
 Android quick unlock (plan 0033) is on wherever the device supports it (owner
 decision 2026-11-07, plan 0044); a device whose keystore key fails the
 TEE/StrongBox and per-use authentication checks keeps password unlock.
-On an API 30+ device, Settings → Password offers password-reauthenticated
-Class 3 enrollment and a separate **device credential · reduced protection**
-action. The latter makes the device PIN/pattern/password a vault credential;
+On an API 30+ device, the first master-password unlock of a vault asks the
+system to turn on fingerprint (Class 3) unlock with that password (plan 0045);
+Settings → Password offers the same, a way to turn it off, and a separate
+**screen lock PIN or pattern (lower protection)** action. The latter makes the device PIN/pattern/password a vault credential;
 biometric unlock never silently falls back to it. Each operation needs native
 OS authentication. Hardware policy is checked before use (StrongBox preferred,
 TEE permitted; software keys refused).
 
-Quick unlock lasts only for the current app process. Restart/reboot, lost state,
-seven days (including deep sleep), three failed/cancelled attempts, password
-change or rotation require the master password again. Its encrypted envelope and
-trusted counter are held in memory; aliases are deleted on invalidation and stale
-QuickVault aliases cleaned on startup. Nothing enters vault exports, sync or backup.
+When enrolled, the locked screen offers quick unlock first and opens the
+prompt by itself at app start and on return to the foreground (not after a
+lock in the foreground); dismissing it leaves the password field. Quick unlock
+survives app restarts within one boot (plan 0045, 0002 §5.4): its hardware-key
+envelope, boot count, enrollment time and attempt counter are in
+`quick-unlock` in the private no-backup directory. A phone restart, seven days
+(including deep sleep), three failed attempts (lockouts or failed unwraps;
+dismissals do not count), a password change, rotation or an unreadable file
+require the master password again. Stale QuickVault aliases are deleted on
+startup. Nothing enters vault exports, sync or backup. A party able to write
+the app's private storage could reset the counter or age; per-use hardware
+authentication and the biometric lockout still apply.
 JNI/provider/JVM intermediates have bounded best-effort cleanup, like the other
 Android adapters. Physical validation and interactive commands are recorded in
 [plan 0033](../../plans/0033-android-quick-unlock/VALIDATION.md).
@@ -102,8 +110,8 @@ Android adapters. Physical validation and interactive commands are recorded in
 Android process lifetime (plan 0035): the Rust runtime starts once per process.
 Configuration changes (rotation, dark mode, font size, locale) are handled in
 place. When the activity is destroyed, for example by Back, the vault locks
-and the process ends; the next launch is a fresh process, so quick unlock and
-any pending autofill request need the master password or a new request.
+and the process ends; the next launch is a fresh process (quick unlock still
+works within the same boot; a pending autofill request needs a new request).
 
 App limits (plan 0031):
 - Single-line inputs accept 1 KiB and multi-line notes or protected values

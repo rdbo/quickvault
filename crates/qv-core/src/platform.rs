@@ -7,7 +7,9 @@ pub use qv_platform::android::{
     AndroidClipboardBackend, AndroidPlatform, AndroidState, BackgroundDeferral, ClipToken,
 };
 pub use qv_platform::autofill;
-pub use qv_platform::quick_unlock::{AndroidKeystore, AndroidKeystoreBackend};
+pub use qv_platform::quick_unlock::{
+    AndroidKeystore, AndroidKeystoreBackend, BootStamp, STATE_MAX as QUICK_STATE_MAX,
+};
 pub use qv_platform::{
     Cancellation, Clipboard, Evidence, InputPurpose, Keystore, Lifecycle, LockCallback, LockEvent,
     PlatformError, PlatformServices, ProtectionStatus, QuickBinding, QuickPolicy, SecureInput,
@@ -31,7 +33,9 @@ pub(crate) fn error(error: PlatformError) -> CoreError {
         PlatformError::Cancelled => CoreError::Cancelled,
         PlatformError::LimitExceeded => CoreError::LimitExceeded,
         PlatformError::InvalidInput => CoreError::InvalidInput,
-        PlatformError::Unavailable | PlatformError::Busy => CoreError::NotAllowed,
+        PlatformError::Unavailable | PlatformError::Busy | PlatformError::Denied => {
+            CoreError::NotAllowed
+        }
         PlatformError::Io => qv_store::StoreError::Io.into(),
     }
 }

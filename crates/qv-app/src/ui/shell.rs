@@ -378,7 +378,7 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
                 }
             }
             if vault_screen {
-                items::ListPane { controller: controller.clone(), epoch, revision, list: context.clone(), screen: screen.clone(), all: all.clone(), busy }
+                items::ListPane { controller: controller.clone(), epoch, revision, list: context.clone(), screen: screen.clone(), all: all.clone(), busy, conflicts }
                 items::Detail { controller: controller.clone(), epoch, revision, screen: screen.clone(), live, busy, report: report.clone() }
             } else {
                 pages::Page { controller: controller.clone(), epoch, revision, screen: screen.clone(), live, busy, report: report.clone() }
@@ -651,7 +651,7 @@ pub(crate) fn Confirm(
         ConfirmKind::OverBudget(n) => format!("The mandatory recovery snapshot needs {n} bytes and exceeds the snapshot budget. Allow it to exceed the budget? Nothing changes otherwise."),
         ConfirmKind::OldSnapshots(n) => format!("{n} local snapshots were taken before this password change and still open with the old password. Delete them? Copies elsewhere remain; deletion is not cryptographic erasure."),
         ConfirmKind::LinkApp => "Link this app to the entry? QuickVault verified the app's package and signing certificate, but cannot tell whether the app belongs to the service. Link only an app you trust.".to_owned(),
-        ConfirmKind::ReducedQuick => "Reduced protection: this makes your device PIN, pattern or password a vault credential. Enable this separate policy? Biometrics never fall back to it automatically.".to_owned(),
+        ConfirmKind::ReducedQuick => "Lower protection: your screen lock PIN, pattern or password would open this vault, so anyone who knows it could too. Use it instead of your fingerprint? Fingerprint unlock never falls back to it by itself.".to_owned(),
         ConfirmKind::WeakPassword => "This password is weak and could be guessed by an attacker who obtains your vault file. Use it anyway?".to_owned(),
     };
     let weak = kind == ConfirmKind::WeakPassword;

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The app's non-secret preferences file (0009 §1.8, plan 0040 R2): the theme
-//! and the protection status the user last acknowledged. Bounded, parsed
+//! The app's non-secret preferences file (0009 §1.8, plan 0040 R2): the theme,
+//! the protection status the user last acknowledged and whether quick unlock
+//! was turned off (plan 0045). Bounded, parsed
 //! strictly, never read through a link, written to a 0600 temporary file and
 //! renamed into place. Every failure falls back to the defaults.
 use qv_core::platform::{Evidence, ProtectionStatus};
@@ -52,6 +53,8 @@ pub struct Prefs {
     pub theme: Theme,
     /// The reduced-protection status the user acknowledged, if any.
     pub protection: Option<String>,
+    /// The user turned quick unlock off: no offer after a password unlock.
+    pub quick_off: bool,
 }
 impl Prefs {
     /// Parse bounded bytes; unknown keys and malformed lines are ignored.
@@ -73,6 +76,7 @@ impl Prefs {
                 Some(("protection", v)) if valid_fingerprint(v) => {
                     prefs.protection = Some(v.to_owned());
                 }
+                Some(("quick", "off")) => prefs.quick_off = true,
                 _ => {}
             }
         }
@@ -85,6 +89,9 @@ impl Prefs {
             out.push_str("protection=");
             out.push_str(p);
             out.push('\n');
+        }
+        if self.quick_off {
+            out.push_str("quick=off\n");
         }
         out
     }
@@ -163,6 +170,58 @@ pub fn fingerprint(status: &ProtectionStatus, process_reduced: bool) -> Option<S
         b(process_reduced)
     ))
 }
+/// How well this device protects a vault at rest and in use (0009 §1.8,
+/// plan 0045). Presentation only: the acknowledgement still follows
+/// [`ProtectionStatus::is_reduced`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Level {
+    /// A known storage gap (unencrypted disk).
+    VeryLow,
+    /// Storage not confirmed, or a known swap or hibernation gap.
+    Low,
+    /// Storage verified; swap or hibernation not confirmed.
+    Medium,
+    /// Storage, swap and hibernation verified; something else missing.
+    High,
+    /// Everything QuickVault checks is in place.
+    Maximum,
+}
+impl Level {
+    /// The visible name.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::VeryLow => "Very low",
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::High => "High",
+            Self::Maximum => "Maximum",
+        }
+    }
+    /// The CSS tone of its chip.
+    pub fn tone(self) -> &'static str {
+        match self {
+            Self::VeryLow | Self::Low => "bad",
+            Self::Medium => "warn",
+            Self::High | Self::Maximum => "ok",
+        }
+    }
+}
+/// The level of a protection status (see [`Level`]).
+pub fn level(status: &ProtectionStatus, process_reduced: bool) -> Level {
+    use Evidence::{KnownGap, Verified};
+    let disk = [status.storage, status.swap, status.hibernation];
+    if status.storage == KnownGap {
+        Level::VeryLow
+    } else if status.storage != Verified || disk.contains(&KnownGap) {
+        Level::Low
+    } else if disk.iter().any(|e| *e != Verified) {
+        Level::Medium
+    } else if !status.lifecycle || !status.clipboard || process_reduced {
+        Level::High
+    } else {
+        Level::Maximum
+    }
+}
 /// Whether the acknowledged fingerprint covers the current one. Where
 /// lifecycle monitoring is mandatory (every platform but Linux) the app does
 /// not run without it, so its bit is not compared: a status read before the
@@ -212,6 +271,77 @@ mod tests {
         assert_eq!(Prefs::parse(b"theme=\xff"), Prefs::default());
         let long = format!("protection={}", "a".repeat(MAX_FINGERPRINT + 1));
         assert_eq!(Prefs::parse(long.as_bytes()).protection, None);
+        // Quick unlock turned off: only the exact value counts.
+        let off = Prefs::parse(b"theme=dark\nquick=off\n");
+        assert!(off.quick_off);
+        assert_eq!(Prefs::parse(off.encode().as_bytes()), off);
+        assert!(!Prefs::parse(b"quick=on\nquick=OFF\nquick=off \n").quick_off);
+        assert!(!Prefs::parse(Prefs::default().encode().as_bytes()).quick_off);
+        // Every key at its longest still fits the bound.
+        let full = Prefs {
+            theme: Theme::System,
+            protection: Some("a".repeat(MAX_FINGERPRINT)),
+            quick_off: true,
+        };
+        assert!(full.encode().len() <= MAX_PREFS);
+        assert_eq!(Prefs::parse(full.encode().as_bytes()), full);
+    }
+    #[test]
+    fn protection_levels_follow_the_table() {
+        use Evidence::{KnownGap, Unknown, Verified};
+        let all = |storage, swap, hibernation| ProtectionStatus {
+            storage,
+            swap,
+            hibernation,
+            lifecycle: true,
+            clipboard: true,
+            quick_unlock: false,
+        };
+        let full = all(Verified, Verified, Verified);
+        assert_eq!(level(&full, false), Level::Maximum);
+        assert_eq!(level(&full, true), Level::High);
+        for missing in [
+            ProtectionStatus {
+                lifecycle: false,
+                ..full
+            },
+            ProtectionStatus {
+                clipboard: false,
+                ..full
+            },
+        ] {
+            assert_eq!(level(&missing, false), Level::High);
+        }
+        assert_eq!(
+            level(&all(Verified, Unknown, Verified), false),
+            Level::Medium
+        );
+        assert_eq!(
+            level(&all(Verified, Verified, Unknown), true),
+            Level::Medium
+        );
+        assert_eq!(level(&all(Verified, KnownGap, Verified), false), Level::Low);
+        assert_eq!(level(&all(Verified, Verified, KnownGap), false), Level::Low);
+        assert_eq!(level(&all(Unknown, Verified, Verified), false), Level::Low);
+        assert_eq!(level(&all(Unknown, Unknown, Unknown), false), Level::Low);
+        assert_eq!(
+            level(&all(KnownGap, Verified, Verified), false),
+            Level::VeryLow
+        );
+        assert_eq!(
+            level(&all(KnownGap, KnownGap, KnownGap), true),
+            Level::VeryLow
+        );
+        // Below High is exactly where the acknowledgement is asked for
+        // (lock detection aside, which caps at High).
+        for s in [Verified, Unknown, KnownGap] {
+            for w in [Verified, Unknown, KnownGap] {
+                let st = all(s, w, Verified);
+                assert_eq!(level(&st, false) < Level::High, st.is_reduced());
+            }
+        }
+        assert!(Level::Low < Level::Medium && Level::High < Level::Maximum);
+        assert_eq!(Level::VeryLow.label(), "Very low");
     }
     #[test]
     fn prefs_files_are_private_atomic_and_never_followed() {
@@ -221,6 +351,7 @@ mod tests {
         let p = Prefs {
             theme: Theme::System,
             protection: Some("suwuhul1c1p0".into()),
+            quick_off: true,
         };
         p.save(&dir).unwrap();
         assert_eq!(Prefs::load(&dir), p);

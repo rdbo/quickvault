@@ -9,6 +9,26 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-07: Owner feedback (plan 0045; specs 0002 §5.4, 0009 §1.8):
+  - Android: fingerprint unlock comes first. After you unlock with your
+    master password, the app asks the system to turn it on; then the locked
+    screen opens the fingerprint prompt by itself when the app starts or
+    returns. Dismissing it leaves the password field ready. It now survives
+    app restarts until the phone restarts (or seven days, three failed
+    attempts, a password change). Dismissing the prompt no longer counts as
+    a failed attempt or turns quick unlock off, and a finger that doesn't
+    match lets you try again.
+  - App: device protection is shown as a level (Maximum, High, Medium, Low,
+    Very low) with what is not confirmed, instead of "Reduced". Android now
+    reads the phone's encryption status, so a phone with file-based
+    encryption that launched with Android 11 or later shows Maximum.
+  - Android: hold an item to start selecting (no Select button there).
+  - App: conflicted items link to the comparison ("Compare and resolve"),
+    and item lists show how many items have conflicts with a Resolve link.
+  - Android: Back no longer leaves the last opened item highlighted.
+  - App: the item list fades in when you return from a tool page.
+  - App: the Devices page has two clear choices, "Show a code" and "Scan a
+    code" (or "Type a code").
 - 2026-11-07: Owner feedback batch (plan 0044; specs 0003 §6.4, 0009 §1.8):
   - Linux app: the system file chooser opens again. xdg-desktop-portal
     refused the hardened (non-dumpable) app process, so every pick failed

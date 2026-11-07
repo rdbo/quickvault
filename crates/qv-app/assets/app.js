@@ -94,5 +94,39 @@ function activity(){
     document.getElementById("qv-activity")?.dispatchEvent(new Event("input",{bubbles:true}));
 }
 for(const name of ["pointermove","wheel","scroll","touchstart"])document.addEventListener(name,activity,{capture:true,passive:true});
+// Touch: holding an item row for 450 ms selects it (0009 §1.8, plan 0045).
+// The hold becomes a Ctrl-click on the row's open button, the input that
+// starts a selection on desktop; the click after the release is swallowed.
+// A move over 10 px, a scroll or a cancelled touch ends the hold.
+let hold=null,heldAt=0;
+function endHold(){if(hold){clearTimeout(hold.timer);hold=null;}}
+document.addEventListener("pointerdown",event=>{
+    endHold();
+    if(event.pointerType!=="touch"||!(event.target instanceof Element))return;
+    const open=event.target.closest(".row")?.querySelector(":scope>.open");
+    if(!open||open.disabled||event.target.closest(".quick"))return;
+    hold={x:event.clientX,y:event.clientY,timer:setTimeout(()=>{
+        hold=null;heldAt=Date.now();
+        open.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,ctrlKey:true}));
+    },450)};
+},{capture:true,passive:true});
+document.addEventListener("pointermove",event=>{
+    if(hold&&Math.hypot(event.clientX-hold.x,event.clientY-hold.y)>10)endHold();
+},{capture:true,passive:true});
+for(const name of ["pointerup","pointercancel","scroll"])document.addEventListener(name,endHold,{capture:true,passive:true});
+document.addEventListener("click",event=>{
+    if(event.isTrusted&&heldAt&&Date.now()-heldAt<800){heldAt=0;event.preventDefault();event.stopImmediatePropagation();}
+},true);
+document.addEventListener("contextmenu",event=>{
+    if(heldAt||hold){event.preventDefault();event.stopImmediatePropagation();}
+},true);
+// Android Back is a synthetic Escape, which turns on keyboard focus rings:
+// on a touch screen, drop the focus it leaves on a button (plan 0045).
+const coarse=window.matchMedia("(pointer: coarse)");
+document.addEventListener("keyup",event=>{
+    if(event.key!=="Escape"||!coarse.matches)return;
+    const el=document.activeElement;
+    if(el instanceof HTMLButtonElement)el.blur();
+},true);
 // Clipboard commands must go from Rust to the OS with bounded ownership.
 for(const name of ["copy","cut"])document.addEventListener(name,event=>event.preventDefault());

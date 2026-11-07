@@ -61,6 +61,21 @@ class MainActivity : WryActivity() {
     fun qvQuickResult(id:Long):ByteArray? = quick.result(id)
     fun qvQuickFinish(id:Long,keep:Boolean) = quick.finish(id,keep)
     fun qvQuickDelete(envelope:ByteArray):Boolean = quick.delete(envelope)
+    fun qvQuickRetain(envelope:ByteArray?,enrolled:Long) = quick.retain(envelope,enrolled)
+    // The boot the quick-unlock state is bound to (0002 §5.4, plan 0045).
+    fun qvBootCount():Int = try { android.provider.Settings.Global.getInt(contentResolver,android.provider.Settings.Global.BOOT_COUNT) } catch (_:Exception) { -1 }
+    fun qvUptime():Long = android.os.SystemClock.elapsedRealtime()
+    // Storage evidence (0009 §1.8): DevicePolicyManager's encryption status
+    // and the API level the device launched with (0 when unknown).
+    fun qvStorageEncryption():Int = try { getSystemService(android.app.admin.DevicePolicyManager::class.java)?.storageEncryptionStatus ?: -1 } catch (_:Exception) { -1 }
+    // The launch API level is a build property (`Build.VERSION` does not
+    // expose it publicly); read it with the system getprop tool, bounded.
+    fun qvInitialSdk():Int = try {
+        val p=ProcessBuilder("/system/bin/getprop","ro.product.first_api_level").redirectErrorStream(true).start()
+        val out=p.inputStream.use { s -> ByteArray(16).let { b -> String(b,0,maxOf(0,s.read(b))) } }
+        p.waitFor(2,java.util.concurrent.TimeUnit.SECONDS); p.destroy()
+        out.trim().toIntOrNull()?.takeIf { it in 1..1000 } ?: 0
+    } catch (_:Exception) { 0 }
 
     // Autofill handoff (0009 §4.4): Rust polls the in-process registry; only
     // bounded metadata and the explicitly chosen values cross this boundary.
@@ -328,7 +343,8 @@ class MainActivity : WryActivity() {
 private class NativeQuickUnlock(private val activity: MainActivity) {
     private val store = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     private val random = java.security.SecureRandom()
-    private val device = ByteArray(16).also { random.nextBytes(it) }
+    // Random per installation: adopted from the retained envelope, if any.
+    private var device = ByteArray(16).also { random.nextBytes(it) }
     private val prefix = "qv.quick.v1."
     // On wherever the device can (owner decision 2026-11-07, plan 0044):
     // Android 11+, a strong biometric or a device credential, and a key that
@@ -339,7 +355,8 @@ private class NativeQuickUnlock(private val activity: MainActivity) {
     private var next = 0L
     private var current = 0L
     private var state = 2
-    @Volatile private var retryableAuthFailure = false
+    // 1 dismissed (not a failed attempt), 3 failed attempt (lockout), 2 other.
+    @Volatile private var failure = 2
     @Volatile private var tagRejected = false
     @Volatile private var invalidatedKey = false
     @Volatile private var stage = 0
@@ -348,7 +365,16 @@ private class NativeQuickUnlock(private val activity: MainActivity) {
     private var input: ByteArray? = null
     private var signal: android.os.CancellationSignal? = null
     private var created: String? = null
-    init { store.aliases().toList().filter { it.startsWith(prefix) }.forEach { store.deleteEntry(it) } }
+    // Rust calls `retain` once at startup with the persisted envelope (or
+    // none): that key stays, every other QuickVault key is deleted.
+    @Synchronized fun retain(envelope: ByteArray?, enrolled: Long) {
+        val keep = envelope?.takeIf { it.size in 63..1536 && it[0].toInt()==1 && it[1].toInt()==1 }?.let { e ->
+            device = e.copyOfRange(3,19)
+            alias(e).also { born[it]=enrolled }
+        }
+        // Keys this process created (in `born`) are live enrollments, not leftovers.
+        try { store.aliases().toList().filter { it.startsWith(prefix) && it != keep && it !in born }.forEach { store.deleteEntry(it) } } catch (_:Exception) {}
+    }
     fun available(): Boolean {
         if(android.os.Build.VERSION.SDK_INT < 30)return false
         val manager=activity.getSystemService(android.hardware.biometrics.BiometricManager::class.java)
@@ -394,7 +420,7 @@ private class NativeQuickUnlock(private val activity: MainActivity) {
             java.util.Arrays.fill(payload,0); return -1
         }
         output?.let { java.util.Arrays.fill(it,0) }; output=null
-        current=++next; val id=current; state=0;stage=10;keyEvidence="not-inspected";tagRejected=false;invalidatedKey=false;retryableAuthFailure=false
+        current=++next; val id=current; state=0;stage=10;keyEvidence="not-inspected";tagRejected=false;invalidatedKey=false;failure=2
         try {
             val header: ByteArray
             val key: javax.crypto.SecretKey
@@ -428,9 +454,9 @@ private class NativeQuickUnlock(private val activity: MainActivity) {
                 try {
                     val auth=if(policy==1)android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_STRONG else android.hardware.biometrics.BiometricManager.Authenticators.DEVICE_CREDENTIAL
                     val builder=android.hardware.biometrics.BiometricPrompt.Builder(activity)
-                        .setTitle(if(policy==1)"QuickVault biometric authentication" else "QuickVault device credential · reduced protection")
+                        .setTitle(when { encrypt && policy==1 -> "Turn on fingerprint unlock"; encrypt -> "Unlock QuickVault with your screen lock"; policy==1 -> "Unlock QuickVault"; else -> "Unlock QuickVault with your screen lock" })
                         .setAllowedAuthenticators(auth)
-                    if(policy==1)builder.setNegativeButton("Cancel",activity.mainExecutor){_,_-> authenticationFailure(id)}
+                    if(policy==1)builder.setNegativeButton(if(encrypt)"Not now" else "Use password",activity.mainExecutor){_,_-> ended(id,1)}
                     stage=50
                     builder.build().authenticate(android.hardware.biometrics.BiometricPrompt.CryptoObject(cipher),cancellation,activity.mainExecutor,
                         object:android.hardware.biometrics.BiometricPrompt.AuthenticationCallback(){
@@ -452,8 +478,9 @@ private class NativeQuickUnlock(private val activity: MainActivity) {
                                     } catch (error:Exception){ tagRejected=error is javax.crypto.AEADBadTagException;invalidatedKey=permanentlyInvalidated(error);fail(id) }
                                 }
                             }
-                            override fun onAuthenticationFailed(){ authenticationFailure(id) }
-                            override fun onAuthenticationError(code:Int,message:CharSequence){ authenticationFailure(id) }
+                            // A finger that does not match: the prompt lets the user try again.
+                            override fun onAuthenticationFailed(){}
+                            override fun onAuthenticationError(code:Int,message:CharSequence){ ended(id,errorKind(code)) }
                         })
                 } catch (_:Exception) { fail(id) }
             }
@@ -462,10 +489,18 @@ private class NativeQuickUnlock(private val activity: MainActivity) {
         return id
     }
     private fun permanentlyInvalidated(error:Throwable):Boolean = error is android.security.keystore.KeyPermanentlyInvalidatedException || error.cause is android.security.keystore.KeyPermanentlyInvalidatedException
-    @Synchronized fun failureKind(id:Long):Int = if(id==current && retryableAuthFailure)1 else 2
-    @Synchronized private fun authenticationFailure(id:Long) {
+    @Synchronized fun failureKind(id:Long):Int = if(id==current)failure else 2
+    // Dismissals are not failed attempts (0002 §5.4); lockouts and other
+    // authentication errors are.
+    private fun errorKind(code:Int):Int = when(code) {
+        android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_CANCELED,
+        android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED,
+        android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_TIMEOUT -> 1
+        else -> 3
+    }
+    @Synchronized private fun ended(id:Long,kind:Int) {
         if(current!=id || state!=0)return
-        retryableAuthFailure=true;fail(id)
+        failure=kind;fail(id)
     }
     @Synchronized private fun fail(id: Long) {
         if(current!=id)return

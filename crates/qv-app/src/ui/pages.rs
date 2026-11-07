@@ -237,19 +237,36 @@ fn Devices(controller: Controller, epoch: FormEpoch, revision: u64, busy: bool) 
     let scanned = controller.lan_scanned(epoch);
     let open = scanned || typing() == epoch;
     let close = move |_| typing.set(FormEpoch(u64::MAX));
+    let scan = cfg!(target_os = "android") && crate::qr::camera_available();
     rsx! {
-        Head { controller: controller.clone(), epoch, title: "Devices", lead: "Sync directly over your local network. No account, no server. Nothing syncs until you start it." }
-        div { class: "card",
-            div { class: "dev", div { class: "di", Svg { icon: Icon::Devices, large: true } }
-                div { class: "l", b { "Sync with another device" }
-                    span { "One device shows a code; the other scans or types it. Each code works once, and nothing about the other device is kept." }
+        Head { controller: controller.clone(), epoch, title: "Devices", lead: "" }
+        // One explanation, then the two ways to start (plan 0045): this
+        // device shows a code, or it scans (or types) the other one's.
+        div { class: "dev-hero",
+            div { class: "sync-orbit", "aria-hidden": "true",
+                span { class: "dev a", Svg { icon: Icon::Devices } }
+                span { class: "beam", i {} i {} i {} }
+                span { class: "dev b", Svg { icon: Icon::Devices } }
+            }
+            b { "Sync with another device" }
+            span { "Over your local network. No account, no server. One device shows a code, the other scans it. Each code works once." }
+        }
+        div { class: "choices dev-choices",
+            button { class: "choice", id: "show-code", disabled: busy, onclick: act(&controller, epoch, WsAction::LanOffer),
+                span { class: "ci", Svg { icon: Icon::Qr } } b { "Show a code" } span { "The other device scans or types it" }
+            }
+            if scan {
+                button { class: "choice", id: "scan-code", disabled: busy, "data-qv-clear": "true", onclick: { let c = controller.clone(); move |_| c.request_qr(epoch, crate::qr::QrTarget::Sync) },
+                    span { class: "ci", Svg { icon: Icon::Devices } } b { "Scan a code" } span { "Point the camera at the other device's code" }
+                }
+            } else {
+                button { class: "choice", id: "type-code", disabled: busy, onclick: move |_| typing.set(epoch),
+                    span { class: "ci", Svg { icon: Icon::Devices } } b { "Type a code" } span { "Enter the code and address the other device shows" }
                 }
             }
         }
-        div { class: "actions start",
-            button { class: "btn primary", id: "show-code", disabled: busy, onclick: act(&controller, epoch, WsAction::LanOffer), Svg { icon: Icon::Qr } "Show a code" }
-            ScanButton { controller: controller.clone(), epoch, target: crate::qr::QrTarget::Sync }
-            button { class: "btn", id: "type-code", disabled: busy, onclick: move |_| typing.set(epoch), Svg { icon: Icon::Devices } "Type a code" }
+        if scan {
+            p { class: "center", button { class: "link", id: "type-code", disabled: busy, onclick: move |_| typing.set(epoch), "Type a code instead" } }
         }
         if open {
             div { class: "layer",
@@ -798,7 +815,7 @@ fn ConflictRecord(
                 if !identical || i == 0 {
                     button { class: if i == 0 { "btn primary" } else { "btn" }, id: "keep-{h.label.to_ascii_lowercase()}",
                         onclick: act(&controller, epoch, WsAction::Resolve(record.clone(), h.version.clone())),
-                        if identical { "Keep it" } else { "Keep {h.label}" }
+                        if identical { "Keep it" } else { span { class: "keep", b { "Keep {h.label}" } small { "{h.modified}" } } }
                     }
                 }
             }
@@ -955,7 +972,13 @@ fn Settings(controller: Controller, epoch: FormEpoch, revision: u64, pane: Pane)
         Pane::Overview => {
             let theme = controller.theme();
             let os = controller.protection();
-            let reduced = os.is_reduced() || qv_core::harden().is_reduced();
+            let level = crate::prefs::level(&os, qv_core::harden().is_reduced());
+            let missing = protection_gaps(&os, qv_core::harden().is_reduced());
+            let detail = if missing.is_empty() {
+                "Encrypted storage, swap and hibernation, with screen-lock detection and clipboard clearing".to_owned()
+            } else {
+                format!("Not confirmed: {}", missing.join(", "))
+            };
             let idle_only = controller.snapshot().reduced_lifecycle;
             let open_vault = controller.open_vault();
             let folder_place = crate::vaults::shown_place(&controller.default_folder());
@@ -1005,11 +1028,11 @@ fn Settings(controller: Controller, epoch: FormEpoch, revision: u64, pane: Pane)
                     } else {
                         div { class: "set-row", id: "settings-autolock", span { class: "si", Svg { icon: Icon::Clock } } span { class: "l", b { "Auto-lock" } span { "After 1 minute without activity, and when the screen locks or the device sleeps" } } }
                     }
-                    div { class: "set-row", span { class: "si", Svg { icon: Icon::Shield } } span { class: "l", b { "Device protection" }
-                        span { if reduced { "Reduced protection, acknowledged on this device. Storage, swap or hibernation protection could not be established." } else { "Full: encrypted storage, swap and hibernation, with screen-lock detection" } } }
-                        span { class: if reduced { "r warn" } else { "r ok" }, if reduced { "Reduced" } else { "Full" } }
+                    div { class: "set-row", id: "settings-protection", span { class: "si", Svg { icon: Icon::Shield } } span { class: "l", b { "Device protection" }
+                        span { "{detail}" } }
+                        span { class: "r {level.tone()}", "{level.label()}" }
                     }
-                    {row(Icon::Finger, "Quick unlock and autofill", "Optional hardware unlock; autofill on supported phones", Screen::Settings(Pane::Password), "settings-quick")}
+                    {row(Icon::Finger, "Quick unlock and autofill", if controller.quick_policy().is_some() { "Fingerprint unlock is on" } else { "Fingerprint unlock; autofill on supported phones" }, Screen::Settings(Pane::Password), "settings-quick")}
                 }
                 div { class: "group-t", "MASTER PASSWORD AND RECOVERY" }
                 div { class: "card",
@@ -1095,22 +1118,47 @@ fn General(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
         }
     }
 }
+/// The checks behind a protection level that are not in place.
+fn protection_gaps(
+    os: &qv_core::platform::ProtectionStatus,
+    process_reduced: bool,
+) -> Vec<&'static str> {
+    use qv_core::platform::Evidence::Verified;
+    [
+        (os.storage == Verified, "disk encryption"),
+        (os.swap == Verified, "swap"),
+        (os.hibernation == Verified, "hibernation"),
+        (os.lifecycle, "screen-lock detection"),
+        (os.clipboard, "clipboard clearing"),
+        (!process_reduced, "memory protection"),
+    ]
+    .into_iter()
+    .filter(|(ok, _)| !ok)
+    .map(|(_, name)| name)
+    .collect()
+}
 #[component]
 fn QuickSettings(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
     let _ = revision;
     let available = controller.protection().quick_unlock;
+    let policy = controller.quick_policy();
     rsx! {
         div { class: "group-t", "QUICK UNLOCK" }
         div { class: "card card-pad",
-            p { class: "hint", "Opt-in hardware authentication for this app process. Restart, reboot, seven days, three failed attempts or a password or key change need the master password again." }
             if !available {
-                p { class: "hint", "Unavailable: this device has no validated quick-unlock backend. The master password still works." }
+                p { class: "hint", "Unavailable: this device has no supported fingerprint or screen lock for QuickVault. The master password still works." }
             } else {
-                Input { controller: controller.clone(), epoch, field: WsField::Password, label: "Master password to enroll quick unlock", kind: Kind::Secret, value: None, disabled: false }
+                match policy {
+                    Some(qv_core::platform::QuickPolicy::Class3) => rsx! { div { class: "banner ok", id: "quick-on", Svg { icon: Icon::Finger } span { "Fingerprint unlock is on. The locked screen asks for your fingerprint first." } } },
+                    Some(qv_core::platform::QuickPolicy::DeviceCredential) => rsx! { div { class: "banner ok", id: "quick-on", Svg { icon: Icon::Finger } span { "Screen-lock unlock is on (lower protection: your PIN or pattern opens this vault)." } } },
+                    None => rsx! { p { class: "hint", "Off. Enter your master password to turn on fingerprint unlock." } },
+                }
+                p { class: "hint", "Restarting the phone, seven days, three failed attempts or a password change ask for the master password again." }
+                Input { controller: controller.clone(), epoch, field: WsField::Password, label: "Master password", kind: Kind::Secret, value: None, disabled: false }
                 div { class: "actions start",
-                    button { class: "btn primary", "data-qv-clear": "true", onclick: act(&controller, epoch, WsAction::EnrollQuick(qv_core::platform::QuickPolicy::Class3)), Svg { icon: Icon::Finger } "Enable biometric quick unlock" }
-                    button { class: "btn", "data-qv-clear": "true", onclick: act(&controller, epoch, WsAction::EnrollQuick(qv_core::platform::QuickPolicy::DeviceCredential)), "Device credential (reduced protection)…" }
-                    button { class: "btn subtle", onclick: act(&controller, epoch, WsAction::DisableQuick), "Disable quick unlock" }
+                    button { class: "btn primary", "data-qv-clear": "true", onclick: act(&controller, epoch, WsAction::EnrollQuick(qv_core::platform::QuickPolicy::Class3)), Svg { icon: Icon::Finger } if policy.is_some() { "Turn on fingerprint unlock again" } else { "Turn on fingerprint unlock" } }
+                    button { class: "btn", "data-qv-clear": "true", onclick: act(&controller, epoch, WsAction::EnrollQuick(qv_core::platform::QuickPolicy::DeviceCredential)), "Use your screen lock PIN or pattern instead (lower protection)…" }
+                    if policy.is_some() { button { class: "btn subtle", id: "quick-off", onclick: act(&controller, epoch, WsAction::DisableQuick), "Turn off quick unlock" } }
                 }
             }
         }

@@ -121,6 +121,17 @@ kbd{font:11px system-ui,sans-serif;border:1px solid var(--line);border-bottom-wi
 .status-chip{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:5px 11px;font-size:12px;color:var(--text2)}
 .status-chip .ico{color:var(--accent);width:14px;height:14px}
 .status-chip.warn .ico{color:var(--warn)}
+.status-chip.bad .ico{color:var(--danger)}
+/* Plan 0045: quick unlock first, and the protection level. */
+.quick-go{width:100%;height:52px;justify-content:center;font-size:15px;border-radius:14px}
+.quick-go .ico{width:22px;height:22px}
+.or-line{width:100%;display:flex;align-items:center;gap:10px;color:var(--text3);font-size:12px}
+.or-line::before,.or-line::after{content:"";flex:1;height:1px;background:var(--line)}
+.level{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:12px;background:var(--soft);font-size:15px}
+.level .ico{color:var(--accent)}
+.level span{color:var(--text2)}
+.level.warn{background:var(--warn-soft)}.level.warn .ico{color:var(--warn)}
+.level.bad{background:var(--danger-soft)}.level.bad .ico{color:var(--danger)}
 .locked-foot{position:absolute;bottom:16px;left:0;right:0;display:flex;justify-content:center;gap:10px;flex-wrap:wrap;padding:0 16px}
 .err{width:100%;display:flex;gap:9px;align-items:flex-start;padding:10px 12px;border-radius:11px;background:var(--danger-soft);color:var(--text);font-size:12.5px;line-height:1.5}
 .err .ico{color:var(--danger);margin-top:1px}
@@ -173,7 +184,9 @@ kbd{font:11px system-ui,sans-serif;border:1px solid var(--line);border-bottom-wi
 .rows{flex:1;overflow-y:auto;padding:0 8px 12px}
 .sect{font-size:11px;font-weight:600;color:var(--text3);letter-spacing:.05em;padding:10px 8px 4px}
 .row{position:relative;display:flex;align-items:center;gap:11px;width:100%;padding:8px;border:0;border-radius:10px;background:none;text-align:left;margin-bottom:1px}
-.row:hover{background:var(--raised)}
+@media (hover:hover){.row:hover{background:var(--raised)}}
+/* Plan 0045: a held row selects; no text selection or touch callout. */
+.row{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .row.on{background:var(--soft)}
 .row .open{position:absolute;inset:0;border:0;background:none;border-radius:10px;z-index:0;width:100%}
 .row>*:not(.open){position:relative;z-index:1;pointer-events:none}
@@ -184,7 +197,8 @@ kbd{font:11px system-ui,sans-serif;border:1px solid var(--line);border-bottom-wi
 .row .t b{font-weight:560;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .t span{color:var(--text3);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .quick{display:none;gap:2px}
-.row:hover .quick,.row:focus-within .quick{display:flex}
+@media (hover:hover){.row:hover .quick{display:flex}}
+.row:focus-within .quick{display:flex}
 .quick button{width:28px;height:28px;border:0;border-radius:7px;background:var(--panel);color:var(--text2);display:grid;place-items:center;box-shadow:0 1px 2px rgba(0,0,0,.2)}
 .quick button:hover{color:var(--accent)}
 .empty{flex:1;display:grid;place-items:center;text-align:center;color:var(--text3);padding:30px}
@@ -799,3 +813,24 @@ button.set-row:hover:enabled{background:var(--raised)}
   .v-img img,.v-video video{max-height:calc(100vh - 200px)}
   .shelf-row{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+
+/* Plan 0045: list conflict notice and the Devices page. */
+.conflict-note{display:flex;align-items:center;gap:10px;margin:0 16px 10px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--warn-soft);color:var(--text);text-align:left;font-size:13px}
+.conflict-note .ico{color:var(--warn)}
+.conflict-note b{color:var(--warn);font-weight:650}
+.dev-hero{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:22px 18px;border:1px solid var(--line);border-radius:16px;background:var(--panel);margin-bottom:12px}
+.dev-hero b{font-size:16px;font-weight:650}
+.dev-hero>span{color:var(--text3);font-size:13px;max-width:420px}
+.dev-choices .choice{min-height:96px}
+.dev-choices .choice:disabled{opacity:.55}
+@container app (max-width: 640px){
+  .dev-choices{grid-template-columns:1fr}
+  .dev-choices .choice{display:grid;grid-template-columns:44px 1fr;column-gap:14px;row-gap:2px;align-items:center;min-height:0;padding:16px}
+  .dev-choices .choice .ci{width:44px;height:44px;border-radius:13px;grid-row:span 2}
+  .dev-choices .choice b{font-size:15px;align-self:end}
+  .dev-choices .choice span:not(.ci){align-self:start}
+}
+/* A still illustration here; the animated one is for a running sync. */
+.dev-hero .sync-orbit *{animation:none}
+.cmp-bar .keep{display:flex;flex-direction:column;align-items:center;line-height:1.2}
+.cmp-bar .keep small{font-size:11px;opacity:.75;font-weight:500}

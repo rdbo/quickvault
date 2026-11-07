@@ -47,6 +47,8 @@ struct State {
     holding: usize,
     /// Background expiry observed during a deferral (plan 0031 decision 1).
     deferred: bool,
+    /// Background-to-foreground transitions, the first one included.
+    entries: u64,
 }
 /// Android services. Quick unlock is unavailable; the clipboard needs a backend.
 #[derive(Clone, Default)]
@@ -54,6 +56,31 @@ pub struct AndroidPlatform {
     state: Arc<Mutex<State>>,
     backend: Option<Arc<dyn AndroidClipboardBackend>>,
     keystore: Option<Arc<dyn Keystore>>,
+    /// Storage and swap evidence from [`AndroidPlatform::with_storage`].
+    storage: Option<(Evidence, Evidence)>,
+}
+/// `DevicePolicyManager.ENCRYPTION_STATUS_ACTIVE_PER_USER`: file-based encryption.
+pub const ENCRYPTION_ACTIVE_PER_USER: i32 = 5;
+/// Storage and swap evidence from what Android reports (0009 §1.8, plan
+/// 0045): `encryption` is `DevicePolicyManager.getStorageEncryptionStatus()`,
+/// `initial_sdk` the API level the device launched with (0 if unknown).
+/// Swap is verified only with file-based encryption on a device that launched
+/// with Android 11 or later, where metadata encryption is required (any swap
+/// on flash is then encrypted; zram stays in RAM).
+pub fn storage_evidence(encryption: i32, initial_sdk: i32) -> (Evidence, Evidence) {
+    match encryption {
+        ENCRYPTION_ACTIVE_PER_USER => (
+            Evidence::Verified,
+            if initial_sdk >= 30 {
+                Evidence::Verified
+            } else {
+                Evidence::Unknown
+            },
+        ),
+        // ENCRYPTION_STATUS_UNSUPPORTED, ENCRYPTION_STATUS_INACTIVE.
+        0 | 1 => (Evidence::KnownGap, Evidence::Unknown),
+        _ => (Evidence::Unknown, Evidence::Unknown),
+    }
 }
 struct Guard {
     state: Weak<Mutex<State>>,
@@ -88,6 +115,11 @@ impl AndroidPlatform {
         self.keystore = Some(backend);
         self
     }
+    /// Record what the OS reports about storage encryption ([`storage_evidence`]).
+    pub fn with_storage(mut self, encryption: i32, initial_sdk: i32) -> Self {
+        self.storage = Some(storage_evidence(encryption, initial_sdk));
+        self
+    }
     /// Enable copying through a native clipboard backend.
     pub fn with_clipboard(mut self, backend: Arc<dyn AndroidClipboardBackend>) -> Self {
         self.backend = Some(backend);
@@ -102,6 +134,9 @@ impl AndroidPlatform {
             let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             let previous = state.observed;
             state.observed = observed;
+            if observed.foreground && !previous.foreground {
+                state.entries += 1;
+            }
             let mut event = lock_event(observed);
             if event == Some(LockEvent::BackgroundExpired) && state.holding > 0 {
                 state.deferred = true;
@@ -245,10 +280,18 @@ impl Lifecycle for AndroidPlatform {
 impl PlatformServices for AndroidPlatform {
     fn status(&self) -> ProtectionStatus {
         let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let (storage, swap) = self
+            .storage
+            .unwrap_or((Evidence::Unknown, Evidence::Unknown));
         ProtectionStatus {
-            storage: Evidence::Unknown,
-            swap: Evidence::Unknown,
-            hibernation: Evidence::Unknown,
+            storage,
+            swap,
+            // Android does not hibernate to storage.
+            hibernation: if self.storage.is_some() {
+                Evidence::Verified
+            } else {
+                Evidence::Unknown
+            },
             lifecycle: state.observed.monitoring && state.observed.secure_window,
             clipboard: self.backend.is_some(),
             quick_unlock: self.keystore.as_ref().is_some_and(|k| k.available()),
@@ -269,6 +312,9 @@ impl PlatformServices for AndroidPlatform {
     }
     fn keystore(&self) -> &dyn Keystore {
         self.keystore.as_deref().unwrap_or(&Unavailable)
+    }
+    fn foreground_entries(&self) -> u64 {
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).entries
     }
 }
 #[cfg(test)]
@@ -499,5 +545,45 @@ mod tests {
             ..visible()
         });
         assert_eq!(*events.lock().unwrap(), [LockEvent::ScreenLocked]);
+    }
+
+    #[test]
+    fn android_storage_evidence_follows_the_reported_encryption() {
+        use Evidence::{KnownGap, Unknown, Verified};
+        assert_eq!(storage_evidence(5, 35), (Verified, Verified));
+        assert_eq!(storage_evidence(5, 30), (Verified, Verified));
+        assert_eq!(storage_evidence(5, 29), (Verified, Unknown));
+        assert_eq!(storage_evidence(5, 0), (Verified, Unknown));
+        assert_eq!(storage_evidence(0, 35), (KnownGap, Unknown));
+        assert_eq!(storage_evidence(1, 35), (KnownGap, Unknown));
+        for other in [2, 3, 4, 6, -1] {
+            assert_eq!(storage_evidence(other, 35), (Unknown, Unknown));
+        }
+        let status = AndroidPlatform::default().with_storage(5, 35).status();
+        assert_eq!(
+            (status.storage, status.swap, status.hibernation),
+            (Verified, Verified, Verified)
+        );
+        let status = AndroidPlatform::default().status();
+        assert_eq!(
+            (status.storage, status.swap, status.hibernation),
+            (Unknown, Unknown, Unknown)
+        );
+    }
+
+    #[test]
+    fn android_foreground_entries_count_each_return() {
+        let os = AndroidPlatform::default();
+        assert_eq!(os.foreground_entries(), 0);
+        os.update(visible());
+        os.update(visible());
+        assert_eq!(os.foreground_entries(), 1);
+        os.update(AndroidState {
+            foreground: false,
+            ..visible()
+        });
+        assert_eq!(os.foreground_entries(), 1);
+        os.update(visible());
+        assert_eq!(os.foreground_entries(), 2);
     }
 }

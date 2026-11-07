@@ -227,6 +227,15 @@ and exported keychain storage must not be presented as equivalent protections.
 three failed attempts, password change, rotation or loss of trusted local
 policy state. Keep policy state outside the replaceable vault and bind it to
 generation. Destroy old slots/handles after invalidation.
+Policy state may survive an application restart in private, device-local,
+non-backed-up storage when it is bound to the current boot (Android: the boot
+count and the boot clock); a changed boot, a clock that went backwards, or
+unreadable or unknown state requires the master password and destroys the
+slot and its handles. A failed attempt is an attempt that ends in a
+biometric lockout or a failed unwrap; a prompt the user or the system
+dismisses is not one, and the platform prompt's own retries within one
+attempt are not counted separately. The attempt is recorded before the
+prompt opens, so an interrupted prompt counts (owner, 2026-11-07, plan 0045).
 
 ### 6. Hybrid asymmetric cryptography
 
@@ -294,6 +303,9 @@ password guessing and device compromise are separate from vault encryption.
 
 ## Changelog
 
+- 2026-11-07: §5.4: quick-unlock policy state may survive app restarts when
+  bound to the current boot; failed attempts are lockouts and failed unwraps,
+  not dismissals (owner request: fingerprint first, plan 0045).
 - 2026-11-06: Accepted 0014 (owner, plan 0042): the purpose label `lan-link`
   becomes `lan-proof`; §3.5 states that LAN sessions need a fresh code and a
   current-generation VK proof, and that no LAN approval is stored.

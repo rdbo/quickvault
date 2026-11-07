@@ -34,7 +34,10 @@ public final class QuickUnlockUiTest extends PlatformTest {
         return ((kotlin.Lazy<?>)field.get(activity)).getValue();
     }
     private boolean quickButton() throws Exception {
-        return "true".equals(js(os,view,"Array.from(document.querySelectorAll('button')).some(b=>b.textContent.startsWith('Unlock with fingerprint'))"));
+        return "true".equals(js(os,view,"!!document.getElementById('quick-unlock')"));
+    }
+    private void clickQuick() throws Exception {
+        assertEquals("Quick unlock offered first","true",js(os,view,"(()=>{const b=document.getElementById('quick-unlock');if(!b||b.disabled)return false;b.click();return true})()"));
     }
     private void launch(boolean fresh) throws Exception {
         os=getInstrumentation();
@@ -63,13 +66,13 @@ public final class QuickUnlockUiTest extends PlatformTest {
     private void enroll(int policy,String password) throws Exception {
         js(os,view,"window.qvDeviceFixture.nav('Settings')");awaitHeading(os,view,"Settings");click(os,view,"Quick unlock and autofill");
         awaitJs(os,view,"!!document.getElementById('ws-password')","quick enrollment reauth");input("ws-password",password);
-        click(os,view,policy==1?"Enable biometric quick unlock":"Device credential");
+        click(os,view,policy==1?"Turn on fingerprint unlock":"Use your screen lock PIN or pattern instead");
         if(policy==2)click(os,view,"Continue");
         // Human authenticates the real hardware operation.
-        awaitHardware("(document.querySelector('.notice')?.textContent||'').startsWith('Quick unlock enabled')","hardware enrollment completed");
+        awaitHardware("(document.querySelector('.notice')?.textContent||'').startsWith('Quick unlock is on')","hardware enrollment completed");
     }
     private void quickOpen() throws Exception {
-        awaitJs(os,view,"window.qvDeviceFixture.consent()","protection acknowledged");click(os,view,"Unlock with fingerprint");
+        awaitJs(os,view,"window.qvDeviceFixture.consent()","protection acknowledged");clickQuick();
         awaitHardware("!!document.querySelector('.shell') && !document.querySelector('.busy-toast')","hardware unlock completed");
     }
     private void passwordOpen(String password) throws Exception {
@@ -101,13 +104,15 @@ public final class QuickUnlockUiTest extends PlatformTest {
     private void cancellations() throws Exception {
         for(int attempt=1;attempt<=3;attempt++) {
             js(os,view,"window.qvCancelledEpoch=document.querySelector('[data-qv-epoch]').getAttribute('data-qv-epoch');true");
-            awaitJs(os,view,"window.qvDeviceFixture.consent()","protection acknowledged");click(os,view,"Unlock with fingerprint");cancelPrompt();
+            awaitJs(os,view,"window.qvDeviceFixture.consent()","protection acknowledged");clickQuick();cancelPrompt();
             awaitJs(os,view,"document.querySelector('[data-qv-epoch]').getAttribute('data-qv-epoch')!==window.qvCancelledEpoch && window.qvDeviceFixture.at('Welcome back') && !document.querySelector('#password').disabled && !document.querySelector('#unlock-submit').disabled && !document.querySelector('.shell')","cancelled attempt completed and remained locked");
-            assertEquals("Three failed/cancelled attempts require password",attempt<3,quickButton());
-            stage("cancelled attempt "+attempt+" counted; vault remains locked");
+            // A dismissal is not a failed attempt (0002 §5.4, plan 0045).
+            assertTrue("Dismissals keep quick unlock",quickButton());
+            assertTrue("No error after a dismissal","true".equals(js(os,view,"!document.querySelector('.err')")));
+            stage("dismissal "+attempt+" not counted; vault remains locked");
             Thread.sleep(1000);
         }
-        stage("three cancelled attempts revoked quick unlock");
+        stage("three dismissals kept quick unlock");
     }
     private void runPolicy(int policy,boolean cancellationOnly) throws Exception {
         launch(true);
@@ -131,6 +136,6 @@ public final class QuickUnlockUiTest extends PlatformTest {
     }
     public void testBiometricAppEnrollUnlockAndPasswordChange() throws Exception {runPolicy(1,false);}
     public void testCredentialAppEnrollUnlockAndPasswordChange() throws Exception {runPolicy(2,false);}
-    public void testBiometricAppThreeCancellations() throws Exception {runPolicy(1,true);}
-    public void testCredentialAppThreeCancellations() throws Exception {runPolicy(2,true);}
+    public void testBiometricAppDismissalsKeepQuickUnlock() throws Exception {runPolicy(1,true);}
+    public void testCredentialAppDismissalsKeepQuickUnlock() throws Exception {runPolicy(2,true);}
 }

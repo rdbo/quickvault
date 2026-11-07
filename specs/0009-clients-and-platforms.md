@@ -100,7 +100,8 @@ release, but no longer gates the feature.
 - **Preferences.** The app keeps one non-secret preferences file in its
   private state directory:
   - the theme (dark, light or follow the system);
-  - the protection status the user last acknowledged.
+  - the protection status the user last acknowledged;
+  - `quick=off` once the user turned quick unlock off (no vault data).
 
   It is bounded (at most 256 bytes), parsed strictly, written to a mode-0600
   temporary file and renamed into place, and never followed through a link.
@@ -124,6 +125,19 @@ release, but no longer gates the feature.
 
     It is not a permanent banner. Nothing claims OS-triggered locking while
     it is unavailable.
+  - The status is presented as a level (owner, 2026-11-07; plan 0045), with
+    the checks behind it; the acknowledgement rule above is unchanged:
+    *Maximum*: storage, swap and hibernation verified, with lock detection,
+    clipboard clearing and process/memory protection; *High*: those three
+    verified, something else missing; *Medium*: storage verified, swap or
+    hibernation not confirmed; *Low*: storage not confirmed, or a known swap
+    or hibernation gap; *Very low*: a known storage gap.
+  - Android evidence: storage is verified when the OS reports file-based
+    encryption active (`ENCRYPTION_STATUS_ACTIVE_PER_USER`) and a known gap
+    when it reports none; swap is verified when storage is and the device
+    launched with Android 11 or later (metadata encryption is then required,
+    and zram stays in RAM); hibernation is verified (Android does not
+    hibernate to storage). Anything else is unknown.
 - **Files without typed paths.** Vault files, attachments, archives and
   snapshot-restore targets are chosen through the system picker: the Android
   Storage Access Framework, or the Linux xdg-desktop-portal FileChooser.
@@ -206,10 +220,11 @@ release, but no longer gates the feature.
 - **Item list actions** (owner, 2026-11-07; plan 0044). A right click on an
   item row opens its menu (open, copy the first field or the password,
   colour, move, select, move to the trash) without opening the item.
-  Multi-select: Ctrl/⌘-click toggles a row, Shift-click selects a range, and
-  a Select button in the list header (on every platform; Android has no long
-  press) shows check circles and a selection bar with select all, colour,
-  move and trash. Escape or Back leaves the selection. Each batch action is
+  Multi-select: Ctrl/⌘-click toggles a row, Shift-click selects a range, a
+  Select button in the list header (desktop) and, on touch screens, holding
+  a row for about half a second (Android has no Select button; owner,
+  2026-11-07, plan 0045) show check circles and a selection bar with select
+  all, colour, move and trash; a tap then toggles a row. Escape or Back leaves the selection. Each batch action is
   one transaction (all or nothing); trashing offers Undo. Groups are not
   batch-selectable.
 - **Sync receipt** (owner, 2026-11-07; plan 0044). A running sync shows its
@@ -227,7 +242,20 @@ release, but no longer gates the feature.
   appear once; different ones side by side. Protected values are compared on
   the device and shown as same/different, revealed per version under 0008
   §4. Versions with no visible difference say so. Resolving still chooses one
-  complete version (0005 §2.5).
+  complete version (0005 §2.5). A conflicted entry's page and every item list
+  with conflicts link to the comparison (plan 0045).
+- **Quick unlock first** (owner, 2026-11-07; plan 0045). Where quick unlock
+  is enrolled for the selected vault, the locked screen offers it first: the
+  system prompt opens by itself when the app starts or returns to the
+  foreground (not after a manual lock), and the master password field below
+  stays usable, unfocused, after a dismissal. After a master-password unlock
+  on a device that supports it, with no enrollment for that vault and quick
+  unlock not turned off, the app asks the system to enroll biometric quick
+  unlock with that password; dismissing skips it until the next password
+  unlock. The device-credential policy is offered only in Settings.
+- **Devices page.** Two large choices, "Show a code" and "Scan a code" (or
+  "Type a code" without a camera), stacked on phones; typing a code stays
+  available as a link (plan 0045).
 - **Attachment previews** (owner, 2026-11-07; plan 0044). The item page shows
   the entry's attachments as a shelf with an add tile. Opening one previews
   it in a full-window viewer under 0003 §6.4: images (fit or actual size,
@@ -398,6 +426,10 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-07: §1.8: quick unlock first on the locked screen and offered
+  after a password unlock; protection levels and Android evidence; long press
+  selects on touch screens; conflict links; Devices layout; `quick=off`
+  preference (owner feedback, plan 0045; details owner-delegated). Still Draft.
 - 2026-11-07: §4.4: autofill is on wherever Android supports it instead of
   only on recorded validated devices (owner decision, plan 0044).
 - 2026-11-07: §1.8: Linux file picking goes through a helper process,

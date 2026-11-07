@@ -95,6 +95,10 @@ pub enum AppError {
     /// A LAN code or address that cannot be used (missing, malformed, or a
     /// typed code without an address).
     LanInput,
+    /// Quick unlock failed; it may still work (plan 0045).
+    QuickFailed,
+    /// Quick unlock failed and is off until a password unlock.
+    QuickEnded,
 }
 impl AppError {
     /// Fixed user-facing text.
@@ -168,6 +172,12 @@ impl AppError {
             }
             Self::PreviewUnavailable => {
                 "This file can't be previewed. Save a copy to open it elsewhere."
+            }
+            Self::QuickFailed => {
+                "Fingerprint unlock didn't work. Try again, or use your master password."
+            }
+            Self::QuickEnded => {
+                "Fingerprint unlock is off until you unlock with your master password."
             }
         }
     }
@@ -419,6 +429,9 @@ pub(crate) struct State {
     /// The running or finished LAN operation (see [`crate::lan`]).
     pub(crate) lan: Option<crate::lan::LanRun>,
     pub(crate) scan: Option<crate::qr::Scan>,
+    /// The password just used to unlock, kept only until the quick-unlock
+    /// offer runs as the next operation (0009 §1.8, plan 0045).
+    quick_offer: Option<MasterPassword>,
 }
 impl State {
     fn clear_inputs(&mut self) {
@@ -458,6 +471,7 @@ impl State {
         self.epoch = self.epoch.wrapping_add(1);
         self.clear_inputs();
         self.phrase = None;
+        self.quick_offer = None;
         self.weak_until = None;
         self.fair_warning = false;
         if let Some(session) = self.session.take() {
@@ -504,6 +518,10 @@ pub(crate) struct Inner {
     /// Display-only cache of `protection_ack_needed` for the polled snapshot;
     /// the consent gate itself always checks the current status.
     ack_cache: Mutex<Option<(Instant, bool)>>,
+    /// The foreground entry the locked screen last offered quick unlock for,
+    /// and the one during which a vault was last opened (plan 0045).
+    quick_prompted: AtomicU64,
+    quick_opened: AtomicU64,
     #[cfg(feature = "validation")]
     preview: AtomicBool,
     #[cfg(feature = "validation")]
@@ -526,7 +544,15 @@ impl Drop for Worker {
 }
 enum Opened {
     Created(qv_core::Created, [usize; 3], PathBuf),
-    Session(Session, PathBuf, bool, Option<crate::views::AboutView>),
+    /// The session, its path, opened with the phrase, its header and the
+    /// password kept for the quick-unlock offer.
+    Session(
+        Session,
+        PathBuf,
+        bool,
+        Option<crate::views::AboutView>,
+        Option<MasterPassword>,
+    ),
     Resume(PathBuf, Resume),
 }
 impl Controller {
@@ -570,6 +596,7 @@ impl Controller {
                 autofill: None,
                 lan: None,
                 scan: None,
+                quick_offer: None,
             }),
             working: AtomicBool::new(false),
             released: AtomicU64::new(0),
@@ -579,6 +606,8 @@ impl Controller {
             vaults: Mutex::new(crate::vaults::VaultList::load(&base)),
             selected: Mutex::new(None),
             ack_cache: Mutex::new(None),
+            quick_prompted: AtomicU64::new(0),
+            quick_opened: AtomicU64::new(0),
             #[cfg(feature = "validation")]
             preview: AtomicBool::new(false),
             #[cfg(feature = "validation")]
@@ -979,6 +1008,92 @@ impl Controller {
                 let needed = self.protection_ack_needed();
                 *cache = Some((Instant::now(), needed));
                 needed
+            }
+        }
+    }
+    /// Record whether the user turned quick unlock off (plan 0045).
+    pub(crate) fn set_quick_off(&self, off: bool) {
+        let mut prefs = self.prefs();
+        if prefs.quick_off != off {
+            prefs.quick_off = off;
+            let _ = prefs.save(&self.0.base);
+        }
+    }
+    /// Quick unlock is enrolled for the vault the locked screen opens.
+    pub fn quick_ready(&self) -> bool {
+        let Some(vault) = self.selected_vault().filter(|v| v.exists) else {
+            return false;
+        };
+        self.core().is_ok_and(|c| c.quick_ready_for(&vault.path))
+    }
+    /// The enrolled quick-unlock policy, while one is live.
+    pub fn quick_policy(&self) -> Option<qv_core::platform::QuickPolicy> {
+        self.0.services.keystore().policy()
+    }
+    /// Background work the polled UI drives (plan 0045): open the fingerprint
+    /// prompt once when the locked screen appears at start or after a return
+    /// to the foreground (never after a lock in the foreground), and run the
+    /// pending quick-unlock offer once the vault is open.
+    pub fn pump(&self) {
+        if self.0.working.load(Ordering::SeqCst) {
+            return;
+        }
+        let entries = self.0.services.foreground_entries();
+        let (epoch, offer) = {
+            let mut s = self.state();
+            let offer = if s.phase == Phase::Unlocked {
+                s.quick_offer.take()
+            } else {
+                None
+            };
+            let idle = s.phase == Phase::Locked
+                && s.mode == Mode::Unlock
+                && s.resume.is_none()
+                && s.lan.is_none()
+                && s.inputs.iter().all(|v| v.is_empty());
+            (
+                idle.then_some(FormEpoch(s.epoch)),
+                (offer, FormEpoch(s.epoch)),
+            )
+        };
+        if let (Some(pw), epoch) = offer {
+            let _ = self.run_op(epoch, None, move |s, token, c| {
+                let done = s.enroll_quick(&pw, qv_core::platform::QuickPolicy::Class3, Some(token));
+                drop(pw);
+                let notice = match &done {
+                    Ok(()) => Some("Fingerprint unlock is on for this vault."),
+                    Err(CoreError::Cancelled) => None,
+                    Err(_) => Some(
+                        "Fingerprint unlock could not be turned on. You can try again in Settings.",
+                    ),
+                };
+                if done.is_ok() {
+                    c.set_quick_off(false);
+                }
+                Ok(crate::workspace::on_ws(move |ws| {
+                    if notice.is_some() {
+                        ws.notice = notice;
+                    }
+                }))
+            });
+            return;
+        }
+        let Some(epoch) = epoch else {
+            return;
+        };
+        if entries == 0
+            || entries == self.0.quick_prompted.load(Ordering::SeqCst)
+            || entries == self.0.quick_opened.load(Ordering::SeqCst)
+            || !self.consent()
+            || !self.quick_ready()
+        {
+            return;
+        }
+        self.0.quick_prompted.store(entries, Ordering::SeqCst);
+        if let Err(error) = self.submit(epoch, Action::QuickUnlock, true) {
+            let mut s = self.state();
+            if s.epoch == epoch.0 {
+                s.error = Some(error);
             }
         }
     }
@@ -1558,7 +1673,7 @@ impl Controller {
                 &values[InputField::LanCode.index()],
                 values[InputField::LanEndpoint.index()].expose_secret(),
             )?;
-            return Ok(Opened::Session(session, path, false, None));
+            return Ok(Opened::Session(session, path, false, None, None));
         }
         if !matches!(action, Action::Create | Action::ConfirmWeak)
             && core.rotation_pending(&path).unwrap_or(false)
@@ -1593,12 +1708,13 @@ impl Controller {
                     })?;
                 Ok(Opened::Created(created, positions, path))
             }
-            Action::QuickUnlock => Ok(Opened::Session(
-                core.unlock_quick(&path, Some(token))?,
-                path,
-                false,
-                about,
-            )),
+            Action::QuickUnlock => match core.unlock_quick(&path, Some(token)) {
+                Ok(session) => Ok(Opened::Session(session, path, false, about, None)),
+                // A dismissal shows nothing: the password field is ready.
+                Err(CoreError::Cancelled) => Err(AppError::Core(CoreError::Cancelled)),
+                Err(_) if core.quick_ready_for(&path) => Err(AppError::QuickFailed),
+                Err(_) => Err(AppError::QuickEnded),
+            },
             Action::Unlock | Action::RecoverPassword => {
                 let password =
                     MasterPassword::from_utf8(values[InputField::Password.index()].expose_secret())
@@ -1608,7 +1724,21 @@ impl Controller {
                 } else {
                     core.unlock(&path, &password, Some(token))?
                 };
-                Ok(Opened::Session(session, path, false, about))
+                // Offer quick unlock with this password where the device
+                // has it, the user did not turn it off and this vault has
+                // no enrollment yet (0009 §1.8, plan 0045).
+                let offer = matches!(action, Action::Unlock)
+                    && !self.prefs().quick_off
+                    && self.0.services.status().quick_unlock
+                    && !core.quick_ready()
+                    && session.is_read_only().is_ok_and(|ro| !ro);
+                Ok(Opened::Session(
+                    session,
+                    path,
+                    false,
+                    about,
+                    offer.then_some(password),
+                ))
             }
             Action::Recover => {
                 let session = core
@@ -1618,7 +1748,7 @@ impl Controller {
                         Some(token),
                     )?
                     .0;
-                Ok(Opened::Session(session, path, true, about))
+                Ok(Opened::Session(session, path, true, about, None))
             }
             _ => Err(AppError::InvalidInput),
         }
@@ -1631,7 +1761,7 @@ impl Controller {
         }
         let opened = match &result {
             Ok(Opened::Created(c, _, path)) => Some((path.clone(), &c.session)),
-            Ok(Opened::Session(session, path, _, _)) => Some((path.clone(), session)),
+            Ok(Opened::Session(session, path, ..)) => Some((path.clone(), session)),
             _ => None,
         };
         if let Some((path, session)) = opened {
@@ -1656,7 +1786,11 @@ impl Controller {
                 s.phase = Phase::Phrase;
                 s.status = "Write down your recovery phrase";
             }
-            Ok(Opened::Session(session, path, phrase, about)) => {
+            Ok(Opened::Session(session, path, phrase, about, offer)) => {
+                self.0
+                    .quick_opened
+                    .store(self.0.services.foreground_entries(), Ordering::SeqCst);
+                s.quick_offer = offer;
                 s.vault_path = Some(path);
                 s.about = about;
                 s.recovered_with_phrase = phrase;
@@ -1683,7 +1817,9 @@ impl Controller {
             Err(e) => {
                 s.phase = Phase::Locked;
                 s.status = "Locked";
-                s.error = Some(e);
+                // Only quick unlock reports a dismissal here (an unlock
+                // cancelled by a lock never completes).
+                s.error = (e != AppError::Core(CoreError::Cancelled)).then_some(e);
             }
         }
     }
