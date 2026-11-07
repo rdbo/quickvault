@@ -87,10 +87,11 @@ the scan ends in the background; screen lock never waits.
 Binary pairing payloads and QR modules use protected Rust buffers. Wipe exposed
 JVM/native adapter and decoder buffers promptly; OS/camera/JVM/library scratch
 copies follow 0008's documented best-effort cleanup limits. No QR payload or
-image enters logs, errors, argv, saved state or clipboard. Camera support is
-optional and remains disabled in ordinary packages until physical-device
-permission/lifecycle/cleanup validation passes (0012 §3); explicitly marked
-validation packages may exercise the implemented path.
+image enters logs, errors, argv, saved state or clipboard. Camera hardware is
+optional. Camera scanning is enabled in ordinary packages by default (owner
+decision 2026-11-07); a package may be built without it. Physical-device
+permission/lifecycle/cleanup validation (0012 §3) is still required before
+release, but no longer gates the feature.
 
 1.8. **App shell and preferences.**
 - **Window.** The desktop app draws its own title bar without OS decorations:
@@ -345,6 +346,9 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-07: §1.7 camera scanning is on by default in ordinary packages
+  instead of disabled until device validation; validation is still a
+  release requirement (owner decision, plan 0043). Still Draft.
 - 2026-11-07: §1.8 vault list: switching vaults from the title bar or
   Settings locks the open vault first and is refused while a form holds
   unsaved input (owner request; UX owner-delegated, plan 0043). Still Draft.

@@ -19,8 +19,9 @@ screen's protection chip only while an acknowledgement is pending.
 0011 §1.1 names the binary `qv` (owner, 2026-11-06, plan 0043).
 
 0009 §1.7 specifies the owner-delegated bounded Android LAN QR camera profile
-(2026-11-03, plan 0039), approved for implementation; its overall Draft status
-and actual-device release requirements are unchanged.
+(2026-11-03, plan 0039), approved for implementation; camera scanning is on
+by default in ordinary packages (owner, 2026-11-07, plan 0043). Its overall
+Draft status and actual-device release requirements are unchanged.
 
 Owner-approved 2026-11-01 amendment to Draft 0008 §1.4 and 0009 §5: Linux
 OS lock/sleep monitoring is optional and disclosed when unavailable; manual

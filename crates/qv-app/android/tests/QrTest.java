@@ -37,7 +37,7 @@ public class QrTest extends InstrumentationTestCase {
         fail("Optical fixture stage: "+label);
     }
     private void opticalScan(Instrumentation ins,MainActivity main) throws Exception {
-        assertTrue("Optical fixture requires the marked validation build",main.qvQrValidation());
+        assertTrue("Optical fixture requires a camera-enabled package",main.qvQrCamera());
         android.webkit.WebView[] found=new android.webkit.WebView[1];
         ins.runOnMainSync(()->found[0]=find(main.getWindow().getDecorView()));
         android.webkit.WebView view=found[0];assertNotNull("Shared app webview",view);
@@ -95,7 +95,7 @@ public class QrTest extends InstrumentationTestCase {
         } finally {if(frame!=null)Arrays.fill(frame,(byte)0);}
     }
     private void liveCamera(Instrumentation ins,MainActivity main) throws Exception {
-        assertTrue("Only marked validation packages may exercise capture",main.qvQrValidation());
+        assertTrue("Live capture requires a camera-enabled package",main.qvQrCamera());
         long ready=android.os.SystemClock.elapsedRealtime()+15000;
         while((main.qvStatus()&15)!=15 && android.os.SystemClock.elapsedRealtime()<ready)Thread.sleep(50);
         assertEquals("Unlocked foreground hardened window",15,main.qvStatus()&15);
@@ -183,8 +183,8 @@ public class QrTest extends InstrumentationTestCase {
         try {
             assertEquals("Startup never opens capture",1,main.qvQrState(1));
             assertNull("Stale request has no frame",main.qvQrFrame(Long.MAX_VALUE));
-            if(!main.qvQrValidation()) {
-                assertFalse("Unvalidated production camera stays closed",main.qvQrAvailable());
+            if(!main.qvQrCamera()) {
+                assertFalse("A package built without the camera keeps it closed",main.qvQrAvailable());
                 assertEquals(0,main.qvQrStart());
             }
             main.qvQrFinish(Long.MAX_VALUE); // a stale completion is harmless

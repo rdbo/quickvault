@@ -253,9 +253,8 @@ modules and retained payloads are protected; exposed decoder/JVM buffers wipe.
 Camera/provider/JVM/decoder stack and renderer copies still have best-effort
 cleanup limits (0008); do not claim complete erasure.
 
-The ordinary APK's QR camera gate remains closed pending physical validation.
-`QV_APP_QR_CAMERA=1` opens it in an ordinary package for the owner's own
-testing (owner decision 2026-11-06); the default build stays closed.
+QR camera scanning is on in every APK by default (owner decision
+2026-11-07). `QV_APP_QR_CAMERA=0` builds an ordinary package without it.
 Build a marked validation APK with `QV_APP_DEVICE_VALIDATION=1`; then select
 that same variant when running its focused adapter instrumentation:
 

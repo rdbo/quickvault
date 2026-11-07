@@ -872,8 +872,8 @@ release; it is not weakened.
   0039 step 6: real Linux/phone pairing from QR and typed code, new-device
   join and link, address-QR sync in both directions, Internet blocked with no
   account, and interruption/retry at the transfer, commit and acknowledgement
-  boundaries. Then decide whether to open the ordinary-package camera gate
-  (enable it only after those pass), and record the permission-prompt lock
+  boundaries. (The ordinary-package camera is already on by default: owner
+  decision 2026-11-07, plan 0043; these checks remain release evidence.) Record the permission-prompt lock
   behaviour (0039 review finding 2). Extended LAN fuzzing. Packaging, signed artifacts,
   checksums, and the reproducible-build status. Fold in the D12 review findings.
 - **Specs:** 0012 §1 (milestone-2 rows), §3.

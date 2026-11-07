@@ -41,6 +41,9 @@ Dates are ISO 8601. Newest first within each section.
     was so you only add the title.
   - App: selecting an item no longer crashes when another item has the
     same title and first field; list rows are keyed by record ID.
+  - Android: QR camera scanning is on in every APK by default instead of
+    being disabled until device validation (spec 0009 §1.7, owner
+    decision). `QV_APP_QR_CAMERA=0` builds a package without it.
 - 2026-11-06: LAN sync without device links (spec 0014, accepted by the
   owner; plan 0042):
   - One device shows a one-use code (QR, or the 26-character code and an

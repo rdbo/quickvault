@@ -259,3 +259,16 @@ bar) and any spec text; the logo is presentation, not behaviour.
   passed, 2 ignored, 2 failed (the same two Xvfb-dependent `qv-cli`
   clipboard tests; not a pass). Android clippy and the real-window flow
   were not run (no aarch64 std, no Xvfb in this session).
+- 2026-11-07: Owner decision: the Android QR camera is enabled by default,
+  not opt-in ("why would I wanna build an android app that uses the camera
+  without camera capabilities enabled"). The phone build of this session
+  was made without `QV_APP_QR_CAMERA=1`, so scanning showed as unavailable.
+  `NativeQrCamera.QR_VALIDATION = false` → `QR_CAMERA = true`
+  (`qvQrValidation` → `qvQrCamera`); `build-android.sh` now turns it off
+  only for `QV_APP_QR_CAMERA=0` (never in validation packages) and prints
+  the camera state. `QrTest` messages follow; its closed-camera check still
+  runs for an opted-out package. Spec 0009 §1.7 amended (physical-device
+  validation stays a release requirement, no longer a feature gate); specs
+  index, `ARCHITECTURE.md` §3, app README and roadmap 2.11 updated. The
+  autofill (`VALIDATION`) and quick-unlock (`validatedFingerprints`) device
+  gates are unchanged; reported to the owner.

@@ -43,7 +43,7 @@ typealias BuildConfig = org.quickvault.app.BuildConfig
 class MainActivity : WryActivity() {
     private val qr by lazy { NativeQrCamera(this) }
     fun qvQrAvailable(): Boolean = qr.available()
-    fun qvQrValidation(): Boolean = NativeQrCamera.QR_VALIDATION
+    fun qvQrCamera(): Boolean = NativeQrCamera.QR_CAMERA
     fun qvQrStart(): Long = qr.start()
     fun qvQrState(id: Long): Int = qr.state(id)
     fun qvQrFrame(id: Long): ByteArray? = qr.takeFrame(id)
@@ -687,7 +687,8 @@ class AutofillAuthActivity : Activity() {
 /** In-memory Camera2 adapter. No bitmap file, external activity or webview camera. */
 class NativeQrCamera(private val activity: MainActivity) {
     companion object {
-        const val QR_VALIDATION = false
+        /** On by default (owner 2026-11-07); `QV_APP_QR_CAMERA=0` builds a package without it. */
+        const val QR_CAMERA = true
         const val PERMISSION = 0x5143
         const val MAX_AXIS = 1024
         const val MAX_PIXELS = 786432
@@ -720,7 +721,7 @@ class NativeQrCamera(private val activity: MainActivity) {
     private var reader:android.media.ImageReader?=null
     private var surface:android.view.Surface?=null
     private var thread:android.os.HandlerThread?=null
-    fun available():Boolean = QR_VALIDATION && try {
+    fun available():Boolean = QR_CAMERA && try {
         activity.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_ANY) &&
             activity.getSystemService(android.hardware.camera2.CameraManager::class.java).cameraIdList.isNotEmpty()
     } catch(_:Exception) {false}
