@@ -148,4 +148,24 @@ bar) and any spec text; the logo is presentation, not behaviour.
   desktop` 73 passed, default 68 passed. Default-feature workspace code is
   unchanged since the full run above (UI code compiles only with
   `desktop`). Real-window validation still needs Xvfb.
+- 2026-11-07: Owner (screenshot): the group form's colour block looked
+  unstyled, and asked for a "change color" entry. Cause: the shared
+  `swatches` markup's label, divider and "Automatic" row are styled only
+  under `.menu` (the item editor's popover); in the group form's
+  `.card.ie-colours` they fell back to browser defaults. The `.menu .mi`,
+  `.sub`, `hr` and `.label` rules now also cover `.ie-colours`. The group
+  actions menu gains "Change colour" (opens the same group form), the form
+  title reads "Edit group" for an existing group, and the swatches are a
+  labelled `group` (not `menu`) outside a popover. Mock render with
+  `app.css` checked in both themes. fmt, SPDX, clippy (default and
+  `--features validation`) clean; `cargo test -p qv-app --features
+  desktop` 73 passed.
+- 2026-11-07: Owner: visible text should be American English. Changed the
+  app's "Colour"/"COLOUR"/"Change colour"/"Choose a colour" to "color" and
+  "Recognised" to "Recognized". "Cancelled" is kept (accepted US usage).
+  Internal names (DOM ids, CSS classes, the `colour` field of 0003 §5.5)
+  and project docs are unchanged.
 
+- 2026-11-07: Owner: "Color" was uppercase beside the sentence-case "Name".
+  In a form card the label now reads "Color" in the `.ed label` style;
+  the item editor popover keeps its "COLOR" menu heading.

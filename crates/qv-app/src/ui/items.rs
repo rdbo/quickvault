@@ -354,6 +354,7 @@ pub(crate) fn ListPane(
                             div { class: "menu pop end", role: "menu",
                                 button { class: "mi", onclick: { let mut f = act(&controller, epoch, WsAction::NewGroup(g)); move |e| { menu.set(false); f(e) } }, Svg { icon: Icon::Folder } "New subgroup" }
                                 button { class: "mi", onclick: { let mut f = act(&controller, epoch, WsAction::RenameGroup(g)); move |e| { menu.set(false); f(e) } }, Svg { icon: Icon::Edit } "Rename group" }
+                                button { class: "mi", id: "group-colour", onclick: { let mut f = act(&controller, epoch, WsAction::RenameGroup(g)); move |e| { menu.set(false); f(e) } }, Svg { icon: Icon::Palette } "Change color" }
                                 button { class: "mi", onclick: { let mut f = go(&controller, epoch, Screen::Move(ItemHandle::Group(g), None)); move |e| { menu.set(false); f(e) } }, Svg { icon: Icon::Move } "Move group" }
                                 hr {}
                                 button { class: "mi danger", onclick: { let mut f = act(&controller, epoch, WsAction::Delete(ItemHandle::Group(g))); move |e| { menu.set(false); f(e) } }, Svg { icon: Icon::Trash } "Delete group" }

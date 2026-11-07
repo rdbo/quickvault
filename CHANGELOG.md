@@ -22,6 +22,10 @@ Dates are ISO 8601. Newest first within each section.
   - App: the locked screen shows the protection chip only while a reduced
     protection status awaits acknowledgement; Settings → Security still
     shows the mode (spec 0009 §1.8).
+  - App: the group form's color picker is styled like the rest of the
+    app (it showed browser-default controls); the group menu has "Change
+    color", and the form is titled "Edit group". Visible app text uses
+    American spelling ("color", "Recognized").
   - App: the official logo (`LOGO.svg`) is the desktop window icon, the
     Android launcher icon (adaptive, with a monochrome layer), the title-bar
     mark, the first-run welcome image and the Settings → About header.

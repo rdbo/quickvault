@@ -137,7 +137,7 @@ fn StartStep(
                     }
                 }
             }
-            div { class: "ie-offline", Svg { icon: Icon::Shield } "Recognised on this device. Nothing is looked up online." }
+            div { class: "ie-offline", Svg { icon: Icon::Shield } "Recognized on this device. Nothing is looked up online." }
         }
     }
 }
@@ -254,7 +254,7 @@ fn Editor(controller: Controller, epoch: FormEpoch, revision: u64, form: EntryFo
         div { class: if is_note { "detail-inner ie isnote fade-in" } else { "detail-inner ie fade-in" }, onkeydown: keys,
             div { class: "ie-head",
                 div { class: "pop-anchor",
-                    button { class: "tile ie-tile {hue}", id: "item-colour", "aria-label": "Choose a colour", title: "Colour",
+                    button { class: "tile ie-tile {hue}", id: "item-colour", "aria-label": "Choose a color", title: "Color",
                         onclick: move |_| pop.set(if pop() == Some(Pop::Colour) { None } else { Some(Pop::Colour) }),
                         Svg { icon: kind_icon(kind.hint()), large: true }
                     }
@@ -354,12 +354,14 @@ fn swatches(
             c.act(epoch, WsAction::SetHue(n));
         }
     };
+    // A popover is a menu; inside a form the swatches are a labelled group.
+    let popover = class.contains("menu");
     rsx! {
-        div { class, role: "menu",
-            div { class: "label", "COLOUR" }
+        div { class, role: if popover { "menu" } else { "group" }, "aria-label": "Color",
+            div { class: "label", if popover { "COLOR" } else { "Color" } }
             div { class: "ie-swatches",
                 for n in 0..HUES {
-                    button { class: if current == Some(n) { format!("on {}", hue_class(n)) } else { hue_class(n).to_owned() }, id: "colour-{n}", "aria-label": "Colour {n + 1}", "aria-pressed": if current == Some(n) { "true" } else { "false" }, onclick: pick(Some(n)) }
+                    button { class: if current == Some(n) { format!("on {}", hue_class(n)) } else { hue_class(n).to_owned() }, id: "colour-{n}", "aria-label": "Color {n + 1}", "aria-pressed": if current == Some(n) { "true" } else { "false" }, onclick: pick(Some(n)) }
                 }
             }
             hr {}
@@ -769,7 +771,7 @@ pub(crate) fn EditGroup(controller: Controller, epoch: FormEpoch, revision: u64)
         div { class: "phone-bar", button { class: "icon-btn back", "aria-label": "Cancel", onclick: back(&controller, epoch), Svg { icon: Icon::Close, large: true } } }
         div { class: "detail-inner fade-in",
             div { class: "hero", span { class: "tile {hue}", Svg { icon: Icon::Folder, large: true } }
-                h1 { if form.new { "New group" } else { "Rename group" } }
+                h1 { if form.new { "New group" } else { "Edit group" } }
             }
             div { class: "card", div { class: "ed",
                 label { r#for: "ws-group-name", "Name" }
