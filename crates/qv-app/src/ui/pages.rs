@@ -785,6 +785,10 @@ fn Settings(controller: Controller, epoch: FormEpoch, revision: u64, pane: Pane)
                     if let Some(v) = open_vault.as_ref() {
                         div { class: "set-row", id: "settings-file", span { class: "si", Svg { icon: Icon::File } } span { class: "l", b { "Vault file" } span { "{v.file} in {v.place}" } } }
                     }
+                    button { class: "set-row", id: "settings-switch",
+                        onclick: { let c = controller.clone(); move |_| { c.switch_vault(epoch, crate::controller::SwitchTo::Mode(crate::controller::Mode::Unlock)); } },
+                        span { class: "si", Svg { icon: Icon::Lock } } span { class: "l", b { "Switch vault" } span { "Locks this vault; open, create or join another from the lock screen" } } Svg { icon: Icon::Right }
+                    }
                     div { class: "set-row", id: "settings-folder", span { class: "si", Svg { icon: Icon::Folder } } span { class: "l", b { "Folder for new vaults" } span { "{folder_place}" } }
                         if cfg!(target_os = "linux") && !crate::documents::picker_missing() {
                             button { class: "btn", id: "settings-folder-change", onclick: pick_folder, "Change…" }

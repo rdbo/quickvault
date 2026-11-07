@@ -234,6 +234,14 @@ pub enum Mode {
     /// Join a vault from another device over the LAN (0013 §10).
     Join,
 }
+/// Where switching vaults leads after the open vault is locked.
+#[derive(Clone, PartialEq)]
+pub enum SwitchTo {
+    /// The locked screen, on this listed vault.
+    Vault(PathBuf),
+    /// The locked screen in this mode (create, join), or on the same vault.
+    Mode(Mode),
+}
 /// Locked-screen confirmations shown as a notice (the other statuses only
 /// name the current step, which the screen itself already shows).
 const QR_SCANNED: &str = "Code scanned. Type the other device's address and choose Join.";
@@ -1029,6 +1037,40 @@ impl Controller {
             s.mode = mode;
             s.active = Instant::now();
         }
+    }
+    /// Lock the unlocked vault and open the locked screen on another listed
+    /// vault, or in another mode (0009 §1.8 vault switching). Only one vault
+    /// is open at a time. Refused from a stale screen, while work runs, and
+    /// while a form holds unsaved input, so switching never discards edits.
+    pub fn switch_vault(&self, epoch: FormEpoch, to: SwitchTo) -> bool {
+        if let SwitchTo::Vault(path) = &to
+            && !self.vaults().iter().any(|v| &v.path == path)
+        {
+            return false;
+        }
+        {
+            let mut s = self.state();
+            let editing = s.workspace.as_ref().is_some_and(|w| w.screen.is_form());
+            if s.epoch != epoch.0
+                || s.phase != Phase::Unlocked
+                || editing
+                || self.0.working.load(Ordering::SeqCst)
+            {
+                return false;
+            }
+            s.invalidate();
+            if let SwitchTo::Mode(mode) = to {
+                s.mode = mode;
+                return true;
+            }
+        }
+        if let SwitchTo::Vault(path) = to {
+            // Taken after the state lock is released, as in `select_vault`.
+            *self.0.selected.lock().unwrap_or_else(|p| p.into_inner()) = Some(path);
+            let mut s = self.state();
+            s.revision = s.revision.wrapping_add(1);
+        }
+        true
     }
     /// Transfer bounded framework input to protected Rust storage and clear the
     /// mutable intermediary even for invalid or stale input.

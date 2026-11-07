@@ -1477,6 +1477,55 @@ fn create_named(env: &Env, name: &str) -> Result<(), AppError> {
 }
 
 #[test]
+fn switching_vaults_locks_first_and_never_discards_a_form() {
+    use crate::controller::{Mode, SwitchTo};
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::new();
+    create_named(&env, "Personal").unwrap();
+    env.c.lock();
+    create_named(&env, "Work").unwrap();
+    let folder = env.dir.join("vaults");
+    let personal = SwitchTo::Vault(folder.join("Personal.qvault"));
+    assert_eq!(env.c.open_vault().unwrap().name, "Work");
+
+    // Refused: an unlisted path, a stale screen, an open form.
+    let elsewhere = SwitchTo::Vault(env.dir.join("elsewhere.qvault"));
+    assert!(!env.c.switch_vault(env.epoch(), elsewhere));
+    let stale = FormEpoch(env.epoch().0.wrapping_sub(1));
+    assert!(!env.c.switch_vault(stale, personal.clone()));
+    let root = env.read(|s| s.root());
+    env.act(WsAction::NewGroup(root));
+    env.put(WsField::GroupName, "Unsaved");
+    assert!(env.screen().is_form());
+    assert!(!env.c.switch_vault(env.epoch(), personal.clone()));
+    assert!(
+        !env.c
+            .switch_vault(env.epoch(), SwitchTo::Mode(Mode::Create))
+    );
+    assert_eq!(env.c.snapshot().phase, Phase::Unlocked);
+    assert_eq!(env.screen(), Screen::EditGroup);
+    env.c.back(env.epoch());
+
+    // Another vault: locked, and the locked screen opens on it.
+    assert!(env.c.switch_vault(env.epoch(), personal.clone()));
+    let v = env.c.snapshot();
+    assert_eq!((v.phase, v.mode), (Phase::Locked, Mode::Unlock));
+    assert_eq!(env.c.selected_vault().unwrap().name, "Personal");
+    // Only from an unlocked vault.
+    assert!(!env.c.switch_vault(env.epoch(), personal));
+    env.unlock(PASSWORD);
+    assert_eq!(env.c.open_vault().unwrap().name, "Personal");
+
+    // Create: locked, in create mode.
+    assert!(
+        env.c
+            .switch_vault(env.epoch(), SwitchTo::Mode(Mode::Create))
+    );
+    let v = env.c.snapshot();
+    assert_eq!((v.phase, v.mode), (Phase::Locked, Mode::Create));
+}
+
+#[test]
 fn vaults_are_created_by_name_listed_selected_and_imported_in_place() {
     let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
     let env = Env::new();

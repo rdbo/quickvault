@@ -187,4 +187,29 @@ bar) and any spec text; the logo is presentation, not behaviour.
   Amex `3782 822463 10005`; blur → empty, masked shown; refocus → mirrored
   again; `clearControls` → empty. Needs the fresh review with the rest of
   this plan.
+- 2026-11-07: Owner: the title-bar vault name should switch to another
+  vault or create one; "lock and go home?" left to us. Decision
+  (owner-delegated UX): one session at a time, so every choice locks first
+  and lands on the locked screen with the chosen vault selected (password
+  focused) or in Create/Join mode, which is where the password is typed
+  anyway. Refused while a form holds unsaved input (`Screen::is_form`): the
+  choices are disabled with "Save or cancel your changes to switch
+  vaults." The lock button stays immediate. Phones have no title bar:
+  Settings → Vault → "Switch vault" (all platforms) locks to the locked
+  screen, whose vault menu offers the rest. Code:
+  `Controller::switch_vault(epoch, SwitchTo::{Vault(path), Mode(mode)})`
+  (listed paths only, current epoch, `Phase::Unlocked`, no running work,
+  no open form; selection set after the state lock is released, as in
+  `select_vault`); `shell::VaultSwitcher` (desktop only) under a
+  `pop-anchor` that stops drag/maximize and closes on Escape or the scrim.
+  Test `switching_vaults_locks_first_and_never_discards_a_form` (unlisted,
+  stale, open form, from locked: refused and still unlocked/unchanged;
+  another vault: locked, selected, then unlocks it; Create: locked in
+  create mode). Mock render of the menu in both themes checked. Spec 0009
+  §1.8 amended.
 
+  Checks: fmt, SPDX, default clippy, `clippy -p qv-app --all-targets
+  --features validation` and, new for this plan, `clippy -p qv-app
+  --features mobile --target aarch64-linux-android -D warnings` clean (it
+  found the logo revision's `Logo` import unused on Android; now gated);
+  `cargo test -p qv-app --features desktop` 74 passed, default 69 passed.

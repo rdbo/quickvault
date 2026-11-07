@@ -162,6 +162,13 @@ validation packages may exercise the implemented path.
     directly in the default folder (at most 64, links skipped).
   - **Opening:** every listed path still passes 0011 §4's checks when opened.
     The list only removes paths when the user asks, and never deletes files.
+  - **Switching (owner, 2026-11-07):** one vault is open at a time. On the
+    desktop the title bar's vault name opens a switcher: the listed vaults
+    (the open one marked), "Create a new vault" and "Join from another
+    device". Settings has "Switch vault" on every platform. Every choice
+    locks the open vault first, then opens the locked screen on the chosen
+    vault or in the chosen mode. While a form holds unsaved input the
+    choices are disabled and say why; switching never discards input.
 - **Item editor.** A new item starts from one box, "What are you saving?".
   - The guess runs on the device. Nothing is looked up online.
   - The box is a protected input, since people paste card numbers into it.
@@ -338,6 +345,9 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-07: §1.8 vault list: switching vaults from the title bar or
+  Settings locks the open vault first and is refused while a form holds
+  unsaved input (owner request; UX owner-delegated, plan 0043). Still Draft.
 - 2026-11-07: §1.8 item editor: while the card-number input has focus, the
   card preview mirrors the typed digits in place (a page-script copy of the
   input, wiped on blur, lock and hiding); otherwise it shows only the last

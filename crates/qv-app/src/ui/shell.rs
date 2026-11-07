@@ -4,9 +4,13 @@
 //! no OS decorations, 0009 §1.8), sidebar, phone tabs, command bar, toasts
 //! and confirmations. Layout comes from CSS container queries over one DOM.
 use super::ShellView;
-use super::icons::{Icon, Logo, Svg, initial, item_hue, kind_icon};
+#[cfg(not(target_os = "android"))]
+use super::icons::Logo;
+use super::icons::{Icon, Svg, initial, item_hue, kind_icon};
 use super::{items, pages};
 use crate::controller::{AppError, Controller, FormEpoch};
+#[cfg(not(target_os = "android"))]
+use crate::controller::{Mode, SwitchTo};
 use crate::prefs::Theme;
 use crate::views;
 use crate::workspace::{ConfirmKind, Pane, Report, Screen, WsAction, WsField};
@@ -44,6 +48,7 @@ pub(crate) fn TitleBar(
     }
     #[cfg(not(target_os = "android"))]
     {
+        let mut switcher = use_signal(|| false);
         let window = dioxus_desktop::use_window();
         let drag = {
             let w = window.clone();
@@ -66,10 +71,19 @@ pub(crate) fn TitleBar(
         let offset = 66.0 - 66.0 * (idle_left.min(60) as f64) / 60.0;
         rsx! {
             div { class: "titlebar", onmousedown: drag.clone(), ondoubleclick: maximize.clone(),
-                if unlocked {
-                    div { class: "brand",
-                        Logo { class: "logo-bar" }
-                        b { "{vault.clone().unwrap_or_default()}" }
+                if unlocked && let Some(c) = controller.clone() {
+                    // The vault name opens the vault switcher (0009 §1.8). It
+                    // must not start a window drag or maximize.
+                    div { class: "pop-anchor", onmousedown: |e| e.stop_propagation(), ondoubleclick: |e| e.stop_propagation(),
+                        onkeydown: move |e: KeyboardEvent| { if e.key() == Key::Escape && switcher() { e.stop_propagation(); switcher.set(false); } },
+                        button { class: "brand", id: "vault-switch", title: "Switch vault", disabled: busy, "aria-haspopup": "menu",
+                            "aria-expanded": if switcher() { "true" } else { "false" },
+                            onclick: move |_| switcher.set(!switcher()),
+                            Logo { class: "logo-bar" }
+                            b { "{vault.clone().unwrap_or_default()}" }
+                            Svg { icon: Icon::ChevronDown }
+                        }
+                        if switcher() && !busy { VaultSwitcher { controller: c, epoch, open: switcher } }
                     }
                 } else {
                     div { class: "brand", Logo { class: "logo-bar" } b { "QuickVault" } }
@@ -109,6 +123,54 @@ pub(crate) fn TitleBar(
                     button { class: "close", "aria-label": "Close", title: "Close", onclick: { let w = window.clone(); move |_| w.close() }, Svg { icon: Icon::Close } }
                 }
             }
+        }
+    }
+}
+
+/// The vault switcher under the title bar's vault name (0009 §1.8; phones
+/// use Settings' "Switch vault"): one vault is open at a time, so every
+/// choice locks this one first and opens the locked screen on the choice.
+/// While a form holds unsaved input the choices are disabled instead.
+#[cfg(not(target_os = "android"))]
+#[component]
+pub(crate) fn VaultSwitcher(
+    controller: Controller,
+    epoch: FormEpoch,
+    open: Signal<bool>,
+) -> Element {
+    let vaults = controller.vaults();
+    let current = controller.open_vault().map(|v| v.path);
+    let editing = controller.screen(epoch).is_some_and(|s| s.is_form());
+    let mut close = move || open.set(false);
+    let switch = |to: SwitchTo| {
+        let c = controller.clone();
+        move |_| {
+            open.set(false);
+            c.switch_vault(epoch, to.clone());
+        }
+    };
+    rsx! {
+        button { class: "pop-scrim", "aria-label": "Close menu", tabindex: "-1", onclick: move |_| close() }
+        div { class: "menu pop switcher", role: "menu", "aria-label": "Vaults",
+            div { class: "label", "VAULTS" }
+            for v in vaults {
+                if current.as_ref() == Some(&v.path) {
+                    button { class: "mi on", role: "menuitemradio", "aria-checked": "true", onclick: move |_| close(),
+                        Svg { icon: Icon::Lock }
+                        span { class: "vault-mi", b { "{v.name}" } small { "Open · {v.place}" } }
+                        span { class: "sub", Svg { icon: Icon::Check } }
+                    }
+                } else {
+                    button { class: "mi", role: "menuitemradio", "aria-checked": "false", disabled: editing, onclick: switch(SwitchTo::Vault(v.path.clone())),
+                        Svg { icon: Icon::Lock }
+                        span { class: "vault-mi", b { "{v.name}" } small { if v.exists { "{v.place}" } else { "Not found · {v.place}" } } }
+                    }
+                }
+            }
+            hr {}
+            button { class: "mi", id: "switch-create", disabled: editing, onclick: switch(SwitchTo::Mode(Mode::Create)), Svg { icon: Icon::Plus } "Create a new vault" }
+            button { class: "mi", id: "switch-join", disabled: editing, onclick: switch(SwitchTo::Mode(Mode::Join)), Svg { icon: Icon::Qr } "Join from another device" }
+            p { class: "note", if editing { "Save or cancel your changes to switch vaults." } else { "Switching locks this vault." } }
         }
     }
 }
