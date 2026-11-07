@@ -23,6 +23,7 @@
 //! until its absolute expiry. Prompts and initiated operations use the normal
 //! inactivity timeout. Callback waits enforce it even without renderer polling.
 
+use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -32,7 +33,7 @@ use qv_core::{
     PAIRING_WINDOW_MAX, Sas, SecretBytes, Served, Session, SyncOptions, SyncReport,
     SyncWindowOptions,
 };
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::controller::{AppError, Controller, FormEpoch, State};
 use crate::workspace::{Apply, WsField, protect};
@@ -73,13 +74,174 @@ pub enum Question {
     },
 }
 
-/// A finished operation: fixed lines and an optional error.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A finished operation: fixed lines, a sync round's receipt and an
+/// optional error (0009 §1.8 sync receipt, plan 0044).
+#[derive(Clone, PartialEq, Eq)]
 pub struct LanDone {
     /// Result lines (fixed text and counts).
     pub lines: Vec<String>,
     /// The failure, if it failed.
     pub error: Option<AppError>,
+    /// The sync round, when one ran.
+    pub round: Option<Round>,
+    /// When it finished, for the clean receipt's auto-close.
+    pub at: Instant,
+    /// The user clicked or focused the receipt: it stays.
+    pub kept: bool,
+}
+impl LanDone {
+    fn new(lines: Vec<String>, error: Option<AppError>, round: Option<Round>) -> Self {
+        Self {
+            lines,
+            error,
+            round,
+            at: Instant::now(),
+            kept: false,
+        }
+    }
+    /// A clean outcome closes by itself: no error, no conflict, receipt
+    /// confirmed, not kept.
+    pub fn closes_itself(&self) -> bool {
+        self.error.is_none()
+            && !self.kept
+            && self
+                .round
+                .as_ref()
+                .is_none_or(|r| r.conflicts == 0 && r.peer_confirmed)
+    }
+    /// Whole seconds before a clean receipt closes, or `None` if it stays.
+    pub fn closes_in(&self) -> Option<u64> {
+        self.closes_itself().then(|| {
+            let left = Duration::from_secs(RECEIPT_SECONDS).saturating_sub(self.at.elapsed());
+            left.as_secs() + u64::from(left.subsec_nanos() > 0)
+        })
+    }
+}
+// Change titles are vault data: Debug shows counts only.
+impl std::fmt::Debug for LanDone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LanDone")
+            .field("lines", &self.lines)
+            .field("error", &self.error)
+            .field(
+                "round",
+                &self
+                    .round
+                    .as_ref()
+                    .map(|r| (r.received, r.conflicts, r.peer_confirmed, r.changes.counts)),
+            )
+            .finish_non_exhaustive()
+    }
+}
+/// A clean receipt closes itself after this long (0009 §1.8).
+pub const RECEIPT_SECONDS: u64 = 6;
+/// At most this many items of each kind are listed on a receipt.
+pub const RECEIPT_LIST: usize = 50;
+
+/// One sync round as the receipt shows it (0005 §6.5's separate facts).
+#[derive(Clone, PartialEq, Eq)]
+pub struct Round {
+    /// This device committed the other device's changes.
+    pub received: bool,
+    /// Unresolved conflicts after the round.
+    pub conflicts: usize,
+    /// The other device confirmed receipt.
+    pub peer_confirmed: bool,
+    /// What changed here, from item summaries before and after.
+    pub changes: Changes,
+}
+/// An item named on a receipt.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Change {
+    /// The entry, if it can still be opened (not for trashed ones).
+    pub entry: Option<qv_core::EntryHandle>,
+    /// Its title.
+    pub title: Zeroizing<String>,
+}
+/// Entries added, changed and moved to the trash by a round, each list
+/// bounded by [`RECEIPT_LIST`]; `counts` holds the full numbers.
+#[derive(Clone, PartialEq, Eq, Default)]
+pub struct Changes {
+    /// New entries.
+    pub added: Vec<Change>,
+    /// Entries with a new version (or a new conflict).
+    pub updated: Vec<Change>,
+    /// Entries now in the trash.
+    pub trashed: Vec<Change>,
+    /// Added, updated and trashed counts.
+    pub counts: [usize; 3],
+}
+impl Changes {
+    /// Every change counted.
+    pub fn total(&self) -> usize {
+        self.counts.iter().sum()
+    }
+}
+/// Live entries by record ID: handle, modification time, conflict, title.
+pub(crate) type Summary = BTreeMap<String, (qv_core::EntryHandle, i64, bool, Zeroizing<String>)>;
+/// Reads the live entries' summaries; a failure yields `None` (the receipt
+/// then shows no list rather than a wrong one).
+pub(crate) fn summary(s: &Session) -> Option<Summary> {
+    let items = crate::views::all_items(s).ok()?;
+    Some(
+        items
+            .into_iter()
+            .map(|i| {
+                (
+                    i.row.handle.id_hex(),
+                    (i.row.handle, i.modified, i.row.conflict, i.row.title),
+                )
+            })
+            .collect(),
+    )
+}
+/// Classifies what changed between two summaries.
+pub(crate) fn changes(before: &Summary, after: &Summary) -> Changes {
+    let mut out = Changes::default();
+    let mut push = |list: usize, change: Change| {
+        out.counts[list] += 1;
+        let v = match list {
+            0 => &mut out.added,
+            1 => &mut out.updated,
+            _ => &mut out.trashed,
+        };
+        if v.len() < RECEIPT_LIST {
+            v.push(change);
+        }
+    };
+    for (id, (h, modified, conflict, title)) in after {
+        match before.get(id) {
+            None => push(
+                0,
+                Change {
+                    entry: Some(*h),
+                    title: title.clone(),
+                },
+            ),
+            Some((_, m, c, _)) if m != modified || c != conflict => {
+                push(
+                    1,
+                    Change {
+                        entry: Some(*h),
+                        title: title.clone(),
+                    },
+                );
+            }
+            Some(_) => {}
+        }
+    }
+    for (id, (_, _, _, title)) in before {
+        if !after.contains_key(id) {
+            push(
+                2,
+                Change {
+                    entry: None,
+                    title: title.clone(),
+                },
+            );
+        }
+    }
+    out
 }
 
 #[derive(Default)]
@@ -168,6 +330,10 @@ impl LanRun {
     }
 
     /// Seconds left before the window closes by itself; 0 when none.
+    /// Seconds before its clean receipt closes, if it has one that would.
+    pub(crate) fn receipt_closes_in(&self) -> Option<u64> {
+        self.done.as_ref().and_then(LanDone::closes_in)
+    }
     pub(crate) fn seconds(&self) -> u64 {
         self.expires.map_or(0, |t| {
             if self.done.is_some() {
@@ -199,6 +365,8 @@ pub struct LanView {
     pub question: Option<Question>,
     /// The outcome once finished.
     pub done: Option<LanDone>,
+    /// Seconds before a clean receipt closes, while it would.
+    pub closes_in: Option<u64>,
 }
 
 /// Only tests listen on and dial loopback (0013 §1.4); the app never does.
@@ -426,10 +594,32 @@ fn round_lines(r: &SyncReport, lines: &mut Vec<String>) {
 /// Keep local acceptance visible even when completion or acknowledgement failed.
 pub(crate) fn round_done(r: &SyncReport, mut lines: Vec<String>) -> LanDone {
     round_lines(r, &mut lines);
-    LanDone {
+    LanDone::new(
         lines,
-        error: r.completion_error.map(AppError::from),
+        r.completion_error.map(AppError::from),
+        Some(Round {
+            received: r.local == LocalAcceptance::Committed,
+            conflicts: r.conflicts,
+            peer_confirmed: r.peer_confirmed,
+            changes: Changes::default(),
+        }),
+    )
+}
+/// [`round_done`] with the change list, when both summaries were read and
+/// this device committed something.
+fn round_receipt(
+    s: &Session,
+    r: &SyncReport,
+    lines: Vec<String>,
+    before: Option<Summary>,
+) -> LanDone {
+    let mut done = round_done(r, lines);
+    if let (Some(round), true) = (done.round.as_mut(), r.local == LocalAcceptance::Committed)
+        && let (Some(before), Some(after)) = (before, summary(s))
+    {
+        round.changes = changes(&before, &after);
     }
+    done
 }
 
 /// The finishing effect: stores the outcome, ends the run's secrets.
@@ -445,6 +635,7 @@ fn finish(generation: u64, done: LanDone) -> Apply {
             run.typed = None;
             run.sas = None;
             run.expires = None;
+            run.info = None;
             run.done = Some(done);
         }
         s.revision = s.revision.wrapping_add(1);
@@ -454,10 +645,7 @@ fn finish(generation: u64, done: LanDone) -> Apply {
 fn outcome(result: Result<LanDone, AppError>) -> LanDone {
     match result {
         Ok(done) => done,
-        Err(error) => LanDone {
-            lines: Vec::new(),
-            error: Some(error),
-        },
+        Err(error) => LanDone::new(Vec::new(), Some(error), None),
     }
 }
 
@@ -534,18 +722,22 @@ pub(crate) fn offer(c: &Controller, epoch: FormEpoch) -> Result<(), AppError> {
         run.expires = Some(window.expires_at());
         let (mut bridge, cancel) = Bridge::start(ctl, run)?;
         let generation = bridge.generation;
+        let before = summary(s);
         let result = window
             .run(s, &mut bridge, Some(&cancel))
             .map_err(AppError::from)
             .map(|served| match served {
-                Served::Synced(r) => {
-                    round_done(&r, vec!["Synced with a device that holds this vault.".to_owned()])
-                }
+                Served::Synced(r) => round_receipt(
+                    s,
+                    &r,
+                    vec!["Synced with a device that holds this vault.".to_owned()],
+                    before,
+                ),
                 Served::Joined {
                     peer_confirmed,
                     failure,
-                } => LanDone {
-                    lines: vec![
+                } => LanDone::new(
+                    vec![
                         if peer_confirmed {
                             "A new device joined this vault."
                         } else {
@@ -553,8 +745,9 @@ pub(crate) fn offer(c: &Controller, epoch: FormEpoch) -> Result<(), AppError> {
                         }
                         .to_owned(),
                     ],
-                    error: failure.map(|e| AppError::from(qv_core::CoreError::Lan(e))),
-                },
+                    failure.map(|e| AppError::from(qv_core::CoreError::Lan(e))),
+                    None,
+                ),
             });
         Ok(finish(generation, outcome(result)))
     })
@@ -567,6 +760,7 @@ pub(crate) fn sync(c: &Controller, epoch: FormEpoch) -> Result<(), AppError> {
     c.run_op(epoch, None, move |s, _, ctl| {
         let (bridge, cancel) = Bridge::start(ctl, LanRun::new(LanKind::Sync))?;
         bridge.update(|r| r.info = Some("Syncing…".to_owned()));
+        let before = summary(s);
         let result = s
             .sync_with_code(
                 code,
@@ -578,7 +772,7 @@ pub(crate) fn sync(c: &Controller, epoch: FormEpoch) -> Result<(), AppError> {
                 Some(&cancel),
             )
             .map_err(AppError::from)
-            .map(|r| round_done(&r, Vec::new()));
+            .map(|r| round_receipt(s, &r, Vec::new(), before));
         Ok(finish(bridge.generation, outcome(result)))
     })
 }
@@ -662,6 +856,7 @@ impl Controller {
             sas: run.sas.clone(),
             question: run.question.clone(),
             done: run.done.clone(),
+            closes_in: run.done.as_ref().and_then(LanDone::closes_in),
         })
     }
 
@@ -734,6 +929,21 @@ impl Controller {
         {
             run.close();
             run.info = Some("Cancelling…".to_owned());
+            s.revision = s.revision.wrapping_add(1);
+        }
+    }
+
+    /// Keeps a receipt the user clicked or focused (no auto-close).
+    pub fn lan_keep(&self, epoch: FormEpoch) {
+        let mut s = self.state();
+        if s.epoch != epoch.0 {
+            return;
+        }
+        s.active = Instant::now();
+        if let Some(done) = s.lan.as_mut().and_then(|r| r.done.as_mut())
+            && !done.kept
+        {
+            done.kept = true;
             s.revision = s.revision.wrapping_add(1);
         }
     }

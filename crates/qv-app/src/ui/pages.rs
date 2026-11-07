@@ -8,7 +8,7 @@ use super::items::{Input, Kind};
 use super::shell::{ReportCard, Unreadable, act, go};
 use crate::controller::{Controller, FormEpoch};
 use crate::prefs::Theme;
-use crate::views::{self, FieldRow, kind_name};
+use crate::views;
 use crate::workspace::{
     CopyKey, GenFlag, GenMode, Live, Pane, Report, RevealKey, Screen, WsAction, WsField,
 };
@@ -284,10 +284,14 @@ pub(crate) fn LanPanel(
     seconds: u64,
 ) -> Element {
     let _ = (revision, seconds);
+    let expanded = use_signal(|| false);
     let Some(v) = controller.lan_view(epoch) else {
         return rsx! {};
     };
     use crate::lan::{LanKind, Question};
+    if let Some(done) = v.done.as_ref() {
+        return receipt(&controller, epoch, v.kind, done, v.closes_in, expanded);
+    }
     let title = match v.kind {
         LanKind::Window => "Scan or type this code on the other device",
         LanKind::Sync => "Syncing with another device",
@@ -305,10 +309,6 @@ pub(crate) fn LanPanel(
         let c = controller.clone();
         move |_| c.lan_cancel(epoch)
     };
-    let dismiss = {
-        let c = controller.clone();
-        move |_| c.lan_dismiss(epoch)
-    };
     let typed = {
         let c = controller.clone();
         move |event: FormEvent| {
@@ -320,7 +320,13 @@ pub(crate) fn LanPanel(
         div { class: "layer",
             div { class: "scrim" }
             div { class: "dialog wide lan", role: "region", "aria-label": "Local network",
-                if v.done.is_none() && v.question.is_none() && v.qr.is_none() && code.is_none() { div { class: "prog", b {} } }
+                if v.question.is_none() && v.qr.is_none() && code.is_none() {
+                    div { class: "sync-orbit", "aria-hidden": "true",
+                        span { class: "dev a", Svg { icon: Icon::Devices } }
+                        span { class: "beam", i {} i {} i {} }
+                        span { class: "dev b", Svg { icon: Icon::Devices } }
+                    }
+                }
                 h3 { "{title}" }
                 if let Some(symbol) = v.qr.as_ref() { { qr_image(symbol) } }
                 if let Some(code) = code {
@@ -378,13 +384,176 @@ pub(crate) fn LanPanel(
                     },
                     None => rsx! {},
                 }
-                if let Some(done) = v.done.as_ref() {
-                    div { class: "lan-done", for line in done.lines.iter() { p { "{line}" } } }
-                    if let Some(e) = done.error { p { class: "banner bad error", role: "alert", "{e.message()}" } }
-                    div { class: "actions", button { class: "btn primary", id: "lan-dismiss", onclick: dismiss, "Dismiss" } }
-                } else if v.question.is_none() {
+                if v.question.is_none() {
                     div { class: "actions", button { class: "btn subtle", id: "lan-cancel", onclick: cancel, "Cancel" } }
                 }
+            }
+        }
+    }
+}
+
+/// The finished operation as a receipt docked at the bottom, not a modal
+/// (0009 §1.8, plan 0044): what happened, what changed here (openable), the
+/// other device's confirmation, and the one next step. A clean receipt
+/// closes itself; a click or focus keeps it.
+fn receipt(
+    controller: &Controller,
+    epoch: FormEpoch,
+    kind: crate::lan::LanKind,
+    done: &crate::lan::LanDone,
+    closes_in: Option<u64>,
+    mut expanded: Signal<bool>,
+) -> Element {
+    use crate::lan::LanKind;
+    let round = done.round.as_ref();
+    let conflicts = round.map_or(0, |r| r.conflicts);
+    let confirmed = round.is_none_or(|r| r.peer_confirmed);
+    let tone = if done.error.is_some() {
+        "bad"
+    } else if conflicts > 0 || !confirmed {
+        "warn"
+    } else {
+        "ok"
+    };
+    let plural = |n: usize, one: &str, many: &str| {
+        if n == 1 {
+            format!("1 {one}")
+        } else {
+            format!("{n} {many}")
+        }
+    };
+    let title = match (round, done.error) {
+        (None, Some(_)) if kind == LanKind::Join => "Joining didn't finish".to_owned(),
+        (None, Some(_)) => "Sync didn't finish".to_owned(),
+        (None, None) => done
+            .lines
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "Done".to_owned()),
+        (Some(_), Some(_)) => "Synced, with a problem".to_owned(),
+        (Some(r), None) if r.conflicts > 0 => format!(
+            "{} your choice",
+            plural(r.conflicts, "item needs", "items need")
+        ),
+        (Some(r), None) if r.received && r.changes.total() > 0 => format!(
+            "Received {}",
+            plural(r.changes.total(), "change", "changes")
+        ),
+        (Some(r), None) if r.received => "Received changes".to_owned(),
+        (Some(_), None) => "Up to date".to_owned(),
+    };
+    let sub = match (round, done.error) {
+        (_, Some(e)) => e.message().to_owned(),
+        (Some(r), None) if !r.peer_confirmed => {
+            "The other device didn't confirm receipt. Sync again later to be sure.".to_owned()
+        }
+        (Some(r), None) if r.conflicts > 0 => {
+            "Both devices changed the same items. Pick what to keep.".to_owned()
+        }
+        (Some(_), None) => "Both devices now hold the same vault.".to_owned(),
+        (None, None) => done.lines.get(1).cloned().unwrap_or_default(),
+    };
+    let icon = match tone {
+        "bad" => Icon::Warn,
+        "warn" if conflicts > 0 => Icon::Conflicts,
+        "warn" => Icon::Warn,
+        _ => Icon::Check,
+    };
+    let changes = round.map(|r| r.changes.clone()).unwrap_or_default();
+    let listed: Vec<(&'static str, crate::lan::Change)> = changes
+        .added
+        .iter()
+        .map(|c| ("new", c.clone()))
+        .chain(changes.updated.iter().map(|c| ("changed", c.clone())))
+        .chain(changes.trashed.iter().map(|c| ("trash", c.clone())))
+        .collect();
+    let shown = if expanded() {
+        listed.len()
+    } else {
+        listed.len().min(3)
+    };
+    let more = changes.total().saturating_sub(shown);
+    let keep = {
+        let c = controller.clone();
+        move |_| c.lan_keep(epoch)
+    };
+    let keep_focus = {
+        let c = controller.clone();
+        move |_| c.lan_keep(epoch)
+    };
+    let close = {
+        let c = controller.clone();
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            c.lan_dismiss(epoch);
+        }
+    };
+    let resolve = {
+        let c = controller.clone();
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            // One conflicted record opens its comparison directly.
+            let only = c
+                .read(epoch, views::conflicts)
+                .and_then(Result::ok)
+                .and_then(|rows| (rows.len() == 1).then(|| rows[0].record.clone()));
+            c.navigate(
+                epoch,
+                only.map_or(Screen::Conflicts, Screen::ConflictRecord),
+            );
+            c.lan_dismiss(epoch);
+        }
+    };
+    // The countdown ring: a 2π·9 ≈ 56.5 circumference, emptied over 6 s.
+    let ring = closes_in.map(|left| {
+        let total = crate::lan::RECEIPT_SECONDS as f64;
+        format!(
+            "{:.1}",
+            56.5 * (1.0 - (left as f64 / total).clamp(0.0, 1.0))
+        )
+    });
+    rsx! {
+        div { class: "receipt {tone}", id: "lan-receipt", role: "status", "aria-live": "polite", tabindex: "0", onclick: keep, onfocus: keep_focus,
+            div { class: "r-mark", Svg { icon, large: true } }
+            div { class: "r-body",
+                b { class: "r-title", id: "lan-receipt-title", "{title}" }
+                if !sub.is_empty() { span { class: "r-sub", "{sub}" } }
+                if changes.total() > 0 {
+                    div { class: "r-chips",
+                        if changes.counts[0] > 0 { span { class: "r-chip new", "+{changes.counts[0]} new" } }
+                        if changes.counts[1] > 0 { span { class: "r-chip changed", "{changes.counts[1]} changed" } }
+                        if changes.counts[2] > 0 { span { class: "r-chip trash", "{changes.counts[2]} to trash" } }
+                    }
+                    ul { class: "r-list",
+                        for (mark, ch) in listed.into_iter().take(shown) {
+                            li { class: "r-item {mark}",
+                                if let Some(h) = ch.entry {
+                                    button { class: "r-open", onclick: { let c = controller.clone(); move |e: MouseEvent| { e.stop_propagation(); c.lan_keep(epoch); c.navigate(epoch, Screen::Entry(h)); } },
+                                        i {} span { "{ch.title.as_str()}" } Svg { icon: Icon::Right }
+                                    }
+                                } else {
+                                    span { class: "r-open static", i {} span { "{ch.title.as_str()}" } }
+                                }
+                            }
+                        }
+                    }
+                    if more > 0 && !expanded() {
+                        button { class: "link r-more", onclick: move |e: MouseEvent| { e.stop_propagation(); expanded.set(true); }, "and {more} more" }
+                    }
+                }
+                if conflicts > 0 {
+                    div { class: "r-actions",
+                        button { class: "btn primary", id: "lan-resolve", onclick: resolve, Svg { icon: Icon::Conflicts } "Resolve now" }
+                    }
+                }
+            }
+            button { class: "r-close", id: "lan-dismiss", "aria-label": "Close", title: "Close", onclick: close,
+                if let Some(offset) = ring {
+                    svg { class: "r-ring", view_box: "0 0 22 22", width: "26", height: "26", "aria-hidden": "true",
+                        circle { cx: "11", cy: "11", r: "9", fill: "none", stroke_width: "2", stroke_dasharray: "56.5", stroke_dashoffset: "{offset}" }
+                    }
+                }
+                Svg { icon: Icon::Close }
             }
         }
     }
@@ -547,57 +716,125 @@ fn ConflictRecord(
     live: Live,
 ) -> Element {
     let _ = (revision, live);
-    let versions = match controller.read(epoch, |s| views::conflict_record(s, &record)) {
+    let view = match controller.read(epoch, |s| views::conflict_compare(s, &record)) {
         Some(Ok(v)) => v,
         other => return rsx! { Unreadable { error: other.and_then(Result::err) } },
     };
-    let needs_password = versions.iter().any(|v| v.needs_password);
+    let identical = view.identical();
+    let n = view.heads.len();
+    let cols = match n {
+        0..=2 => "cols-2",
+        3 => "cols-3",
+        _ => "cols-4",
+    };
+    let diff: Vec<views::CompareRow> = view.rows.iter().filter(|r| !r.same).cloned().collect();
+    let same: Vec<views::CompareRow> = view.rows.iter().filter(|r| r.same).cloned().collect();
+    let heads = view.heads.clone();
+    let all_same = diff.is_empty();
+    let lead = if identical {
+        format!(
+            "“{}” has {n} versions with the same content. Keep either one.",
+            view.name.as_str()
+        )
+    } else {
+        format!(
+            "“{}” was changed on more than one device. Only the differences are shown side by side; keep the version you want.",
+            view.name.as_str()
+        )
+    };
     rsx! {
-        Head { controller: controller.clone(), epoch, title: "Choose a version", lead: "The chosen version becomes the record's only current version.", nested: true }
-        if needs_password {
+        Head { controller: controller.clone(), epoch, title: "Compare versions", lead, nested: true }
+        if identical {
+            div { class: "banner ok", Svg { icon: Icon::Check } span { "Nothing you can see differs. The versions differ only in internal details, such as when they were saved." } }
+        }
+        if view.needs_password {
             Input { controller: controller.clone(), epoch, field: WsField::Password, label: "The chosen password slot's master password", kind: Kind::Secret, value: None, disabled: false }
         }
-        for v in versions {
-            div { class: "card mb",
-                div { class: "card-h", "{v.state} · modified {v.modified}" }
-                if v.unknown { p { class: "hint card-text", "Unknown optional values are present and will be preserved." } }
-                for (label, value) in v.details.iter().cloned() {
-                    div { class: "fld", div { class: "body", span { class: "k", "{label}" } pre { class: "v field-value", "{value.as_str()}" } } }
+        div { class: "cmp {cols}", role: "table", "aria-label": "Versions compared",
+            div { class: "cmp-row cmp-heads", role: "row",
+                span { class: "k", role: "columnheader", "{view.kind}" }
+                for h in heads.iter() {
+                    div { class: "cmp-col v{h.label.to_ascii_lowercase()}", role: "columnheader",
+                        b { span { class: "vl", "{h.label}" } "Version {h.label}" }
+                        span { "{h.state} · {h.modified}" }
+                    }
                 }
-                for f in v.fields.iter().cloned() {
-                    ConflictField { controller: controller.clone(), epoch, record: record.clone(), version: v.version.clone(), field: f }
+            }
+            if !diff.is_empty() {
+                div { class: "cmp-sect", "DIFFERENT" }
+            }
+            for row in diff {
+                div { class: "cmp-row diff", role: "row",
+                    span { class: "k", role: "rowheader", "{row.label.as_str()}" }
+                    for (i, cell) in row.cells.iter().cloned().enumerate() {
+                        {cmp_cell(&controller, epoch, &record, heads.get(i).map(|h| h.version.clone()).unwrap_or_default(), cell)}
+                    }
                 }
-                div { class: "actions card-actions", button { class: "btn primary", onclick: act(&controller, epoch, WsAction::Resolve(record.clone(), v.version.clone())), "Choose this version" } }
+            }
+        }
+        if !same.is_empty() {
+            details { class: "cmp-same", open: all_same,
+                summary { Svg { icon: Icon::Check } "Same in every version · {same.len()}" }
+                div { class: "cmp-same-list",
+                    for row in same {
+                        div { class: "fld",
+                            div { class: "body",
+                                span { class: "k", "{row.label.as_str()}" }
+                                match row.cells.first() {
+                                    Some(views::Cell::Text(v)) if v.is_empty() => rsx! { span { class: "v muted", "Empty" } },
+                                    Some(views::Cell::Text(v)) => rsx! { pre { class: "v field-value", "{v.as_str()}" } },
+                                    Some(views::Cell::Masked(_)) => rsx! { span { class: "v muted", "Same protected value" } },
+                                    _ => rsx! { span { class: "v muted", "Not set" } },
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        div { class: "cmp-bar", role: "group", "aria-label": "Choose a version",
+            span { class: "hint", if identical { "Keep one to end the conflict." } else { "The version you keep becomes the item." } }
+            for (i, h) in view.heads.iter().enumerate() {
+                if !identical || i == 0 {
+                    button { class: if i == 0 { "btn primary" } else { "btn" }, id: "keep-{h.label.to_ascii_lowercase()}",
+                        onclick: act(&controller, epoch, WsAction::Resolve(record.clone(), h.version.clone())),
+                        if identical { "Keep it" } else { "Keep {h.label}" }
+                    }
+                }
             }
         }
     }
 }
-#[component]
-fn ConflictField(
-    controller: Controller,
+/// One comparison cell; a protected one reveals only that version's value.
+fn cmp_cell(
+    controller: &Controller,
     epoch: FormEpoch,
-    record: String,
+    record: &str,
     version: String,
-    field: FieldRow,
+    cell: views::Cell,
 ) -> Element {
-    let key = RevealKey::Conflict(record, version, field.id);
-    let shown = controller
-        .revealed(epoch, &key)
-        .map(|v| Zeroizing::new(String::from_utf8_lossy(v.expose_secret()).into_owned()));
-    rsx! {
-        div { class: "fld",
-            div { class: "body",
-                span { class: "k", "{field.name.as_str()}" small { "{kind_name(field.kind)}" } }
-                if let Some(v) = &field.value { pre { class: "v field-value", "{v.as_str()}" } }
-                else if let Some(s) = &shown { pre { class: "v field-value revealed", "{s.as_str()}" } }
-                else { span { class: "v masked field-value", "••••••••" } }
-            }
-            if field.protected {
-                div { class: "acts",
+    match cell {
+        views::Cell::Text(v) if v.is_empty() => {
+            rsx! { div { class: "cmp-cell", role: "cell", span { class: "muted", "Empty" } } }
+        }
+        views::Cell::Text(v) => {
+            rsx! { div { class: "cmp-cell", role: "cell", pre { class: "field-value", "{v.as_str()}" } } }
+        }
+        views::Cell::Missing => {
+            rsx! { div { class: "cmp-cell", role: "cell", span { class: "muted", "Not in this version" } } }
+        }
+        views::Cell::Masked(field) => {
+            let key = RevealKey::Conflict(record.to_owned(), version, field);
+            let shown = controller
+                .revealed(epoch, &key)
+                .map(|v| Zeroizing::new(String::from_utf8_lossy(v.expose_secret()).into_owned()));
+            rsx! {
+                div { class: "cmp-cell masked", role: "cell",
+                    if let Some(s) = &shown { pre { class: "field-value revealed", "{s.as_str()}" } } else { span { class: "masked field-value", "••••••••" } }
                     if shown.is_some() {
-                        button { class: "icon-btn", "aria-label": "Hide", onclick: act(&controller, epoch, WsAction::Hide), Svg { icon: Icon::EyeOff } }
+                        button { class: "icon-btn", "aria-label": "Hide", onclick: act(controller, epoch, WsAction::Hide), Svg { icon: Icon::EyeOff } }
                     } else {
-                        button { class: "icon-btn", "aria-label": "Reveal for 30 seconds", onclick: act(&controller, epoch, WsAction::Reveal(key.clone())), Svg { icon: Icon::Eye } }
+                        button { class: "icon-btn", "aria-label": "Reveal for 30 seconds", onclick: act(controller, epoch, WsAction::Reveal(key.clone())), Svg { icon: Icon::Eye } }
                     }
                 }
             }

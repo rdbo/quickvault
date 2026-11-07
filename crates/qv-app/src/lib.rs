@@ -13,7 +13,10 @@ pub mod lan;
 #[cfg(test)]
 mod lan_tests;
 mod ops;
+#[cfg(all(feature = "desktop", target_os = "linux"))]
+pub mod picker;
 pub mod prefs;
+pub mod preview;
 pub mod qr;
 #[cfg(feature = "desktop")]
 mod runtime;

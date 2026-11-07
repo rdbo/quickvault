@@ -234,7 +234,7 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
         .unwrap_or(Screen::Browse(None));
     let vault_screen = screen.is_list() || screen.is_vault_detail();
     let (notice, error, report) = controller.status(epoch).unwrap_or((None, None, None));
-    let undo = controller.peek(epoch, |ws| ws.undo).flatten();
+    let undo = controller.peek(epoch, |ws| ws.undo.clone()).flatten();
     let pending = controller.pending(epoch);
     let busy = view.busy;
     let live = view.live;
@@ -400,6 +400,11 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
         }
         pages::LanPanel { controller: controller.clone(), epoch, revision, seconds: view.lan_seconds }
         if view.scanning { pages::ScanPanel { controller: controller.clone(), epoch } }
+        if let Some(p) = controller.peek(epoch, |ws| ws.preview.clone()).flatten() {
+            for k in [p.handle.version_hex()] {
+                super::items::Viewer { key: "{k}", controller: controller.clone(), epoch, preview: p.clone() }
+            }
+        }
         if let Some(kind) = pending.filter(|_| !busy) {
             Confirm { controller: controller.clone(), epoch, kind, seconds: live.weak_seconds }
         }
@@ -417,7 +422,7 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
                 }
                 if let Some(n) = notice {
                     div { class: "toast", role: "status", Svg { icon: Icon::Check } span { class: "notice", "{n}" }
-                        if let Some(item) = undo { button { id: "toast-undo", onclick: act(&controller, epoch, WsAction::Restore(item)), "Undo" } }
+                        if let Some(u) = undo { button { id: "toast-undo", onclick: act(&controller, epoch, u.action()), "Undo" } }
                         button { "aria-label": "Dismiss", onclick: act(&controller, epoch, WsAction::Dismiss), Svg { icon: Icon::Close } }
                     }
                 }

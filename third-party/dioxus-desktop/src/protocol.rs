@@ -290,6 +290,7 @@ pub(crate) fn hardened_handler(
     );
     let mut status = StatusCode::OK;
     let mut mime = "text/plain";
+    let mut range: Option<String> = None;
     let body: Vec<u8> = if base != "dioxus://index.html/"
         || (if path == "/__events" || path == "//__events" {
             request.method() != wry::http::Method::POST
@@ -335,12 +336,44 @@ pub(crate) fn hardened_handler(
     } else if let Some((content_type, bytes)) = policy.assets.get(path) {
         mime = content_type;
         bytes.to_vec()
+    } else if let (true, Some(provider)) = (
+        path.starts_with(crate::hardened::PREVIEW_PREFIX),
+        policy.preview.as_ref(),
+    ) {
+        // In-memory preview content only (QuickVault plan 0044).
+        let asked = request.headers().get("range").and_then(|v| v.to_str().ok());
+        match provider(path, asked) {
+            Some(served) => {
+                mime = served.mime;
+                if served.partial() && !served.body.is_empty() {
+                    status = StatusCode::PARTIAL_CONTENT;
+                    range = Some(format!(
+                        "bytes {}-{}/{}",
+                        served.start,
+                        served.start + served.body.len() as u64 - 1,
+                        served.total
+                    ));
+                }
+                served.body
+            }
+            None => {
+                status = StatusCode::NOT_FOUND;
+                b"Not found".to_vec()
+            }
+        }
     } else {
         status = StatusCode::NOT_FOUND;
         b"Not found".to_vec()
     };
+    let mut response = Response::builder();
+    if let Some(range) = range {
+        response = response.header("Content-Range", range);
+    }
+    if path.starts_with(crate::hardened::PREVIEW_PREFIX) {
+        response = response.header("Accept-Ranges", "bytes");
+    }
     responder.respond(
-        Response::builder()
+        response
             .status(status)
             .header("Content-Type", mime)
             .header(

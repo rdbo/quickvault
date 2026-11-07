@@ -77,7 +77,7 @@ pub(crate) fn pick_path(
     let _ = std::thread::Builder::new()
         .name("qv-picker".into())
         .spawn(move || {
-            match qv_core::platform::portal::pick(title, &kind) {
+            match crate::picker::pick(title, &kind) {
                 Ok(Some(path)) => match path.into_os_string().into_string() {
                     Ok(mut text) => {
                         match to {

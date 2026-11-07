@@ -15,6 +15,9 @@ use std::sync::{
 use std::time::{Duration, Instant};
 use zeroize::Zeroize;
 
+/// A workspace operation shows as busy only after running this long.
+pub const BUSY_SHOWN_AFTER: Duration = Duration::from_millis(300);
+
 /// One bounded input control. Values never enter application String state.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum InputField {
@@ -77,8 +80,10 @@ pub enum AppError {
     RotationPending,
     /// The native autofill request is no longer waiting.
     AutofillExpired,
-    /// No desktop file dialog answered; the typed path field is shown instead.
+    /// No desktop file dialog answered (the portal is missing).
     NoFilePicker,
+    /// An attachment could not be decrypted and verified for a preview.
+    PreviewUnavailable,
     /// An item needs a title and every field a name before it is saved.
     NameRequired,
     /// A vault name that cannot be a file name (0009 §1.8).
@@ -159,7 +164,10 @@ impl AppError {
                 "Type the code the other device shows, and its address as ip:port (for example 192.168.1.20:41234)."
             }
             Self::NoFilePicker => {
-                "No file dialog is available on this desktop. Type the full path of the file instead."
+                "No file chooser is available on this desktop. It needs xdg-desktop-portal with a backend such as xdg-desktop-portal-gtk."
+            }
+            Self::PreviewUnavailable => {
+                "This file can't be previewed. Save a copy to open it elsewhere."
             }
         }
     }
@@ -257,12 +265,19 @@ pub struct FormEpoch(pub u64);
 pub struct View {
     /// Current generation.
     pub epoch: FormEpoch,
+    /// Seconds before a clean sync receipt closes (plan 0044).
+    pub receipt: Option<u64>,
     /// Current screen.
     pub phase: Phase,
     /// Selected foundation workflow.
     pub mode: Mode,
     /// One operation may run, even if a cancelled KDF is still finishing.
     pub busy: bool,
+    /// Whether the unlocked UI shows that work is running: only once an
+    /// operation has run for [`BUSY_SHOWN_AFTER`], so a quick one (a colour
+    /// change) does not flash the whole window (plan 0044). The locked
+    /// screens use `busy`.
+    pub busy_shown: bool,
     /// Fixed status text.
     pub status: &'static str,
     /// A data-free failure.
@@ -378,6 +393,8 @@ pub(crate) struct State {
     pub(crate) lock_gen: u64,
     /// A vault worker for this lock generation has not reported yet.
     pub(crate) op_running: bool,
+    /// When the current workspace operation started.
+    pub(crate) op_started: Option<Instant>,
     /// The open vault's path, for operations that reopen it (snapshot restore).
     pub(crate) vault_path: Option<PathBuf>,
     /// The vault was opened with the recovery phrase; offer a new password.
@@ -412,6 +429,7 @@ impl State {
         }
     }
     pub(crate) fn invalidate(&mut self) {
+        crate::preview::close();
         if let Some(scan) = self.scan.take() {
             scan.cancel.cancel();
         }
@@ -538,6 +556,7 @@ impl Controller {
                 suggestion_until: None,
                 lock_gen: 0,
                 op_running: false,
+                op_started: None,
                 vault_path: None,
                 recovered_with_phrase: false,
                 workspace: None,
@@ -929,7 +948,11 @@ impl Controller {
     /// (0008 §1.3, 0009 §1.8). Create, unlock and recover need it first.
     pub fn protection_ack_needed(&self) -> bool {
         let current = crate::prefs::fingerprint(&self.protection(), qv_core::harden().is_reduced());
-        current.is_some() && current != self.prefs().protection
+        !crate::prefs::acknowledged(
+            current.as_deref(),
+            self.prefs().protection.as_deref(),
+            cfg!(not(target_os = "linux")),
+        )
     }
     /// Whether vault use is acknowledged for the current protection status.
     pub fn consent(&self) -> bool {
@@ -965,6 +988,12 @@ impl Controller {
         status.lifecycle &= self.0.monitoring.load(Ordering::SeqCst);
         status
     }
+    /// See [`View::busy_shown`].
+    pub(crate) fn busy_shown_in(&self, s: &State) -> bool {
+        self.0.working.load(Ordering::SeqCst)
+            && (s.phase != Phase::Unlocked
+                || s.op_started.is_none_or(|t| t.elapsed() >= BUSY_SHOWN_AFTER))
+    }
     /// Snapshot polls core locking as well as local inactivity, so OS callbacks
     /// and session auto-locks destroy renderer-visible state without user action.
     pub fn snapshot(&self) -> View {
@@ -989,18 +1018,32 @@ impl Controller {
         {
             s.invalidate();
         }
+        // A clean sync receipt closes by itself (0009 §1.8, plan 0044); the
+        // countdown is part of the view so the ring redraws each second.
+        let receipt = s
+            .lan
+            .as_ref()
+            .and_then(crate::lan::LanRun::receipt_closes_in);
+        if receipt == Some(0)
+            && let Some(mut run) = s.lan.take()
+        {
+            run.close();
+            s.revision = s.revision.wrapping_add(1);
+        }
         let remaining = s
             .weak_until
             .map(|t| t.saturating_duration_since(Instant::now()))
             .unwrap_or_default();
         let (revision, live) = crate::workspace::live(&mut s);
         View {
+            receipt,
             revision: revision.wrapping_add(self.0.released.load(Ordering::SeqCst)),
             live,
             epoch: FormEpoch(s.epoch),
             phase: s.phase,
             mode: s.mode,
             busy: self.0.working.load(Ordering::SeqCst),
+            busy_shown: self.busy_shown_in(&s),
             status: s.status,
             error: s.error,
             weak_seconds: remaining.as_secs() + u64::from(remaining.subsec_nanos() > 0),

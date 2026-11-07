@@ -17,6 +17,55 @@ use std::sync::{
 pub struct HardenedWebview {
     /// Absolute local route → (MIME type, compiled bytes).
     pub assets: BTreeMap<&'static str, (&'static str, &'static [u8])>,
+    /// In-memory content for `/preview/…` routes (QuickVault plan 0044):
+    /// called with the path and the `Range` header; `None` is 404. Never a
+    /// file, never cached (`no-store`).
+    pub preview: Option<Preview>,
+}
+/// The preview provider: path and optional `Range` header in, content out.
+pub type Preview = std::sync::Arc<dyn Fn(&str, Option<&str>) -> Option<Served> + Send + Sync>;
+/// The route prefix the provider answers.
+pub const PREVIEW_PREFIX: &str = "/preview/";
+/// One preview response: the exact MIME type, the full length, and the
+/// bytes from `start` (all of them unless a range was served).
+pub struct Served {
+    /// Exact content type (sniffed by the provider, never guessed here).
+    pub mime: &'static str,
+    /// Full content length.
+    pub total: u64,
+    /// Offset of `body` in the content.
+    pub start: u64,
+    /// The served bytes.
+    pub body: Vec<u8>,
+}
+impl Served {
+    /// Whether this is a partial (206) response.
+    pub fn partial(&self) -> bool {
+        self.start != 0 || (self.body.len() as u64) != self.total
+    }
+}
+/// Parses a single `bytes=a-b`, `bytes=a-` or `bytes=-n` range against
+/// `total` into inclusive offsets; anything else (several ranges, garbage,
+/// out of bounds) is `None`, which serves the whole content.
+pub fn byte_range(header: &str, total: u64) -> Option<(u64, u64)> {
+    let spec = header.trim().strip_prefix("bytes=")?;
+    if spec.contains(',') || total == 0 {
+        return None;
+    }
+    let (a, b) = spec.split_once('-')?;
+    let (a, b) = (a.trim(), b.trim());
+    let (start, end) = if a.is_empty() {
+        let n: u64 = b.parse().ok()?;
+        if n == 0 {
+            return None;
+        }
+        (total.saturating_sub(n), total - 1)
+    } else {
+        let start: u64 = a.parse().ok()?;
+        let end = if b.is_empty() { total - 1 } else { b.parse::<u64>().ok()?.min(total - 1) };
+        (start, end)
+    };
+    (start <= end && start < total).then_some((start, end))
 }
 /// Maximum native IPC or decoded synchronous-event body.
 pub const MAX_INPUT: usize = 64 * 1024;
@@ -39,7 +88,7 @@ pub fn navigation(uri: &str, loaded: &AtomicBool) -> bool {
 pub fn csp(edits: &str) -> String {
     // edits is constructed by the framework from its own listener, not IPC.
     let endpoint = edits.split('/').take(3).collect::<Vec<_>>().join("/");
-    format!("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self' {endpoint}; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'")
+    format!("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; font-src 'self'; connect-src 'self' {endpoint}; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'")
 }
 
 // Reject duplicate object keys at every level instead of silently taking the last.
@@ -109,7 +158,7 @@ pub(crate) fn event(value: Value) -> Option<dioxus_html::HtmlEvent> {
     if obj.len() != 4
         || !matches!(
             obj.get("name")?.as_str()?,
-            "click" | "input" | "change" | "keydown" | "keyup" | "focus" | "blur"
+            "click" | "contextmenu" | "input" | "change" | "keydown" | "keyup" | "focus" | "blur"
         )
     {
         return None;
@@ -188,6 +237,41 @@ fn admit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hardened_preview_ranges_and_csp() {
+        assert_eq!(byte_range("bytes=0-9", 100), Some((0, 9)));
+        assert_eq!(byte_range("bytes=90-", 100), Some((90, 99)));
+        assert_eq!(byte_range("bytes=-10", 100), Some((90, 99)));
+        assert_eq!(byte_range("bytes=50-500", 100), Some((50, 99)));
+        for bad in ["bytes=100-", "bytes=9-1", "bytes=0-1,4-5", "items=0-1", "bytes=-0", "bytes=a-b", "bytes=-"] {
+            assert_eq!(byte_range(bad, 100), None, "{bad}");
+        }
+        assert_eq!(byte_range("bytes=0-1", 0), None);
+        let full = Served { mime: "image/png", total: 3, start: 0, body: vec![1, 2, 3] };
+        assert!(!full.partial());
+        let part = Served { mime: "image/png", total: 3, start: 1, body: vec![2] };
+        assert!(part.partial());
+        let policy = csp("/edits");
+        assert!(policy.contains("media-src 'self';") && policy.contains("img-src 'self';"));
+        assert!(policy.contains("script-src 'self';") && !policy.contains("data:") && !policy.contains("blob:"));
+    }
+    #[test]
+    fn hardened_events_are_an_allow_list() {
+        // Plan 0044: a right click reaches the app like a click; hover,
+        // pointer, drag and media events stay out.
+        let mouse = |name: &str| {
+            serde_json::json!({"name": name, "element": 1, "bubbles": true, "data": {
+                "alt_key": false, "ctrl_key": true, "meta_key": false, "shift_key": false,
+                "button": 2, "buttons": 2, "client_x": 1.0, "client_y": 2.0,
+                "offset_x": 1.0, "offset_y": 2.0, "page_x": 1.0, "page_y": 2.0,
+                "screen_x": 1.0, "screen_y": 2.0}})
+        };
+        assert!(event(mouse("click")).is_some());
+        assert!(event(mouse("contextmenu")).is_some());
+        for name in ["mouseenter", "mousemove", "pointerdown", "dragstart", "play", "wheel"] {
+            assert!(event(mouse(name)).is_none(), "{name}");
+        }
+    }
     #[test]
     fn hardened_navigation_only_exact_initial_document() {
         let loaded = AtomicBool::new(false);

@@ -606,8 +606,126 @@ pub(crate) fn run(
             Ok(on_ws(move |ws| {
                 ws.screen = ws.list_context();
                 ws.notice = Some("Moved to the trash.");
-                ws.undo = Some(item);
+                ws.undo = Some(crate::workspace::Undo::Item(item));
             }))
+        }),
+        WsAction::TrashMany(entries) => c.run_op(epoch, None, move |s, _, _| {
+            s.delete_entries(&entries)?;
+            Ok(on_ws(move |ws| {
+                if let Screen::Entry(e) = ws.screen
+                    && entries.contains(&e)
+                {
+                    ws.screen = ws.list_context();
+                }
+                ws.notice = Some(if entries.len() == 1 {
+                    "Moved to the trash."
+                } else {
+                    "Moved the selected items to the trash."
+                });
+                ws.undo = Some(crate::workspace::Undo::Entries(entries));
+            }))
+        }),
+        WsAction::Preview(handle) => {
+            let entry = c
+                .peek(epoch, |ws| match ws.screen {
+                    Screen::Entry(e) | Screen::Attachments(e) => Some(e),
+                    _ => None,
+                })
+                .flatten()
+                .ok_or(AppError::InvalidInput)?;
+            c.run_op(epoch, None, move |s, token, _| {
+                let rows = crate::views::attachments(s, entry)?;
+                let index = rows
+                    .iter()
+                    .position(|r| r.handle == handle)
+                    .ok_or(AppError::InvalidInput)?;
+                let row = &rows[index];
+                if row.conflicted {
+                    return Err(AppError::Conflict);
+                }
+                let mut sink = crate::preview::Bounded::new(row.size)?;
+                // Only Ok confirms the verified content hash (0003 §6.4).
+                s.save_attachment(handle, &mut sink, Some(token))
+                    .map_err(|e| match e {
+                        qv_core::CoreError::Cancelled => AppError::from(e),
+                        _ => AppError::PreviewUnavailable,
+                    })?;
+                let bytes = sink.finish()?;
+                let (name, size, count) = (row.name.clone(), row.size, rows.len());
+                // Registered when applied, so a lock in between drops (and
+                // wipes) the content instead of leaving it served.
+                Ok(on_ws(move |ws| match crate::preview::open(bytes) {
+                    Ok(o) => {
+                        ws.preview = Some(crate::preview::PreviewView {
+                            handle,
+                            entry,
+                            name,
+                            size,
+                            kind: o.kind,
+                            mime: o.mime,
+                            src: o.src,
+                            text: o.text,
+                            cut: o.cut,
+                            index,
+                            count,
+                        });
+                    }
+                    Err(e) => ws.error = Some(e),
+                }))
+            })
+        }
+        WsAction::PreviewStep(step) => {
+            let (entry, index) = c
+                .peek(epoch, |ws| ws.preview.as_ref().map(|p| (p.entry, p.index)))
+                .flatten()
+                .ok_or(AppError::InvalidInput)?;
+            let rows = c
+                .read(epoch, |s| crate::views::attachments(s, entry))
+                .ok_or(AppError::InvalidInput)??;
+            if rows.is_empty() {
+                return Err(AppError::InvalidInput);
+            }
+            let n = rows.len();
+            let next = (index + n).wrapping_add_signed(isize::from(step)) % n;
+            run(c, epoch, WsAction::Preview(rows[next].handle), over_budget)
+        }
+        WsAction::ClosePreview => c
+            .with_ws(epoch, |ws, _| {
+                ws.preview = None;
+                crate::preview::close();
+            })
+            .ok_or(AppError::InvalidInput),
+        WsAction::RestoreMany(entries) => c.run_op(epoch, None, move |s, _, _| {
+            s.restore_entries(&entries)?;
+            Ok(on_ws(|ws| {
+                ws.undo = None;
+                ws.notice = Some("Restored from the trash.");
+            }))
+        }),
+        WsAction::MoveMany(entries, group) => c.run_op(epoch, None, move |s, _, _| {
+            s.move_entries(&entries, group)?;
+            Ok(on_ws(|ws| ws.notice = Some("Moved.")))
+        }),
+        WsAction::ColourMany(entries, pick) => c.run_op(epoch, None, move |s, _, _| {
+            match pick {
+                Some(n) => {
+                    let token = crate::editor::pick_colour(None, Some(n))?
+                        .ok_or(AppError::InvalidInput)?;
+                    s.set_entry_icons(&entries, Some(&token))?;
+                }
+                // Automatic removes only colour tokens; other icons stay
+                // (as `editor::pick_colour`).
+                None => {
+                    let coloured: Vec<qv_core::EntryHandle> = crate::views::all_items(s)?
+                        .into_iter()
+                        .filter(|i| i.row.colour.is_some() && entries.contains(&i.row.handle))
+                        .map(|i| i.row.handle)
+                        .collect();
+                    s.set_entry_icons(&coloured, None)?;
+                }
+            }
+            // The new tile colour is the feedback; no toast.
+            Ok(on_ws(|_| {}))
         }),
         WsAction::Restore(item) => c.run_op(epoch, None, move |s, _, _| {
             s.restore(item)?;

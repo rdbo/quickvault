@@ -137,7 +137,7 @@ mod strength;
 mod testutil;
 mod views;
 
-pub use edit::{EntryDraft, GroupDraft, PurgeReport};
+pub use edit::{EntryDraft, GroupDraft, MAX_BATCH, PurgeReport};
 pub use error::CoreError;
 pub use rotation::{ROTATION_CONFIRMATIONS, Rotation, RotationError, RotationOutcome};
 pub use session::{CancelToken, EntryHandle, FieldHandle, GroupHandle, ItemHandle, Session};

@@ -163,6 +163,24 @@ pub fn fingerprint(status: &ProtectionStatus, process_reduced: bool) -> Option<S
         b(process_reduced)
     ))
 }
+/// Whether the acknowledged fingerprint covers the current one. Where
+/// lifecycle monitoring is mandatory (every platform but Linux) the app does
+/// not run without it, so its bit is not compared: a status read before the
+/// first native report must not ask again (plan 0044 note 9).
+pub fn acknowledged(current: Option<&str>, saved: Option<&str>, lifecycle_required: bool) -> bool {
+    let norm = |v: &str| {
+        if lifecycle_required {
+            v.replace("l0", "l1")
+        } else {
+            v.to_owned()
+        }
+    };
+    match (current, saved) {
+        (None, _) => true,
+        (Some(c), Some(s)) => norm(c) == norm(s),
+        (Some(_), None) => false,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -236,5 +254,26 @@ mod tests {
         let b = fingerprint(&status(Evidence::Unknown, false), false).unwrap();
         assert_ne!(a, b);
         assert!(valid_fingerprint(&a));
+    }
+    #[test]
+    fn acknowledgement_ignores_lifecycle_only_where_it_is_required() {
+        let on = fingerprint(&status(Evidence::Unknown, true), false).unwrap();
+        let off = fingerprint(&status(Evidence::Unknown, false), false).unwrap();
+        let other = fingerprint(&status(Evidence::KnownGap, true), false).unwrap();
+        assert!(acknowledged(None, None, false));
+        assert!(!acknowledged(Some(&on), None, true));
+        assert!(acknowledged(Some(&on), Some(&on), false));
+        // Linux: a lost lifecycle is a changed status.
+        assert!(!acknowledged(Some(&off), Some(&on), false));
+        // Android: a transient reading before the first report is not.
+        assert!(acknowledged(Some(&off), Some(&on), true));
+        assert!(acknowledged(Some(&on), Some(&off), true));
+        assert!(!acknowledged(Some(&other), Some(&on), true));
+        // The owner's saved value on the phone.
+        assert!(acknowledged(
+            Some("suwuhul0c1p0"),
+            Some("suwuhul1c1p0"),
+            true
+        ));
     }
 }

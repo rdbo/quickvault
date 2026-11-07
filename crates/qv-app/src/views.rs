@@ -176,6 +176,8 @@ pub struct ItemRow {
     pub path: Vec<GroupHandle>,
     /// The top-level group's name, or empty.
     pub top_name: Z,
+    /// Last modification (ms since the epoch; display and sync receipts).
+    pub modified: i64,
 }
 /// The groups directly under the root, for the sidebar.
 pub fn top_groups(s: &Session) -> Result<Vec<GroupRow>, CoreError> {
@@ -221,6 +223,7 @@ fn item(e: &qv_core::EntrySummary, path: Vec<GroupHandle>, top_name: Z) -> ItemR
         kind: Zeroizing::new(e.type_hint.expose().to_lowercase()),
         path,
         top_name,
+        modified: e.modified_at.0,
     }
 }
 /// The first non-protected and first protected field handles of an entry,
@@ -585,6 +588,241 @@ pub fn conflict_record(s: &Session, record: &str) -> Result<Vec<VersionView>, Co
     }
     Ok(out)
 }
+/// One version's column head in a conflict comparison (plan 0044).
+#[derive(Clone, PartialEq)]
+pub struct CompareHead {
+    /// Full version ID (for Resolve).
+    pub version: String,
+    /// Its letter: A, B, …
+    pub label: char,
+    /// When it was modified.
+    pub modified: String,
+    /// Live, in the trash or permanently deleted.
+    pub state: &'static str,
+}
+/// One value in a comparison row.
+#[derive(Clone, PartialEq)]
+pub enum Cell {
+    /// Shown text.
+    Text(Z),
+    /// A protected value, revealed only per version (0008 §4).
+    Masked(FieldId),
+    /// This version has no such value.
+    Missing,
+}
+/// One property across every version.
+#[derive(Clone, PartialEq)]
+pub struct CompareRow {
+    /// Property or field name.
+    pub label: Z,
+    /// Every version holds the same value (protected values compared here,
+    /// never shown).
+    pub same: bool,
+    /// One cell per version, in head order.
+    pub cells: Vec<Cell>,
+}
+/// A conflicted record as one comparison: equal values once, differences
+/// side by side (0009 §1.8 conflict comparison).
+#[derive(Clone, PartialEq)]
+pub struct CompareView {
+    /// What the record is called (the first version's title or name).
+    pub name: Z,
+    /// Its kind label.
+    pub kind: &'static str,
+    /// The versions.
+    pub heads: Vec<CompareHead>,
+    /// Every compared property.
+    pub rows: Vec<CompareRow>,
+    /// Choosing a version needs its master password (password slots).
+    pub needs_password: bool,
+}
+impl CompareView {
+    /// No visible property differs.
+    pub fn identical(&self) -> bool {
+        self.rows.iter().all(|r| r.same)
+    }
+}
+/// Build the comparison of one conflicted record.
+pub fn conflict_compare(s: &Session, record: &str) -> Result<CompareView, CoreError> {
+    use ctutils::CtEq;
+    let [r] = s.conflict_matches(record)?[..] else {
+        return Err(CoreError::NotFound);
+    };
+    let id = r.id_hex();
+    let kind = s
+        .conflict_records()?
+        .iter()
+        .find(|c| c.handle.id_hex() == id)
+        .map_or("Item", |c| kind_label(c.kind));
+    let handles = s.conflict_versions(r)?;
+    let mut heads = Vec::new();
+    // Per version: labelled texts, then fields as (id, name, text or the
+    // protected handle).
+    type FieldCell = (FieldId, Z, Result<Z, FieldHandle>);
+    let mut texts: Vec<Vec<(&'static str, Z)>> = Vec::new();
+    let mut fields: Vec<Vec<FieldCell>> = Vec::new();
+    let mut needs_password = false;
+    let group_name = |g: Option<GroupHandle>| -> Z {
+        match g {
+            None => z("Recovered items (group missing)"),
+            Some(g) => browse(s, Some(g))
+                .ok()
+                .and_then(|b| b.crumbs.last().map(|c| c.1.clone()))
+                .map_or_else(
+                    || z("No group"),
+                    |n| if n.is_empty() { z("No group") } else { n },
+                ),
+        }
+    };
+    for (i, h) in handles.iter().enumerate() {
+        let v = s.conflict_version(h)?;
+        let mut t = Vec::new();
+        let mut f = Vec::new();
+        match &v.details {
+            ConflictDetails::Entry { detail, .. } => {
+                t.push(("Title", z(detail.title.expose())));
+                t.push(("Type", z(detail.type_hint.expose())));
+                t.push(("Group", group_name(detail.group)));
+                t.push((
+                    "Color",
+                    z(
+                        &crate::editor::colour(detail.icon.as_ref().map(Text::expose))
+                            .map_or("Automatic".to_owned(), |n| format!("Color {}", n + 1)),
+                    ),
+                ));
+                t.push((
+                    "Expires",
+                    z(&detail.expires_at.map_or("Never".to_owned(), date)),
+                ));
+                t.push((
+                    "Notes",
+                    detail
+                        .notes
+                        .as_ref()
+                        .map_or_else(|| z(""), |n| z(n.expose())),
+                ));
+                for d in &detail.fields {
+                    let value = match (&d.value, d.protected) {
+                        (Some(v), false) => Ok(Zeroizing::new(
+                            String::from_utf8_lossy(v.expose_secret()).into_owned(),
+                        )),
+                        _ => Err(d.handle),
+                    };
+                    f.push((d.handle.field_id(), z(d.name.expose()), value));
+                }
+            }
+            _ => {
+                // Other kinds: the same labelled details as the version list.
+                let listed = conflict_record(s, record)?;
+                let one = listed.into_iter().nth(i).ok_or(CoreError::NotFound)?;
+                needs_password |= one.needs_password;
+                t = one.details;
+            }
+        }
+        heads.push(CompareHead {
+            version: h.version_hex(),
+            label: char::from(b'A' + u8::try_from(i.min(25)).unwrap_or(25)),
+            modified: date(v.modified_at),
+            state: match v.state {
+                Deletion::Live => "Live",
+                Deletion::SoftDeleted => "In trash",
+                Deletion::Final => "Permanently deleted",
+            },
+        });
+        texts.push(t);
+        fields.push(f);
+    }
+    let mut rows = Vec::new();
+    // Labelled texts, in first-seen order.
+    let mut labels: Vec<&'static str> = Vec::new();
+    for t in &texts {
+        for (l, _) in t {
+            if !labels.contains(l) {
+                labels.push(l);
+            }
+        }
+    }
+    for label in labels {
+        let cells: Vec<Cell> = texts
+            .iter()
+            .map(|t| {
+                t.iter()
+                    .find(|(l, _)| *l == label)
+                    .map_or(Cell::Missing, |(_, v)| Cell::Text(v.clone()))
+            })
+            .collect();
+        // Empty notes everywhere are not worth a row.
+        if label == "Notes"
+            && cells
+                .iter()
+                .all(|c| matches!(c, Cell::Text(v) if v.is_empty()))
+        {
+            continue;
+        }
+        let same = cells.windows(2).all(|w| w[0] == w[1]);
+        rows.push(CompareRow {
+            label: z(label),
+            same,
+            cells,
+        });
+    }
+    // Fields by stable field ID, in first-seen order.
+    let mut ids: Vec<(FieldId, Z)> = Vec::new();
+    for f in &fields {
+        for (id, name, _) in f {
+            if !ids.iter().any(|(i, _)| i == id) {
+                ids.push((*id, name.clone()));
+            }
+        }
+    }
+    for (id, name) in ids {
+        let mut cells = Vec::new();
+        let mut secrets = Vec::new();
+        for f in &fields {
+            match f.iter().find(|(i, _, _)| *i == id) {
+                None => {
+                    cells.push(Cell::Missing);
+                    secrets.push(None);
+                }
+                Some((_, _, Ok(v))) => {
+                    cells.push(Cell::Text(v.clone()));
+                    secrets.push(None);
+                }
+                Some((_, _, Err(h))) => {
+                    cells.push(Cell::Masked(id));
+                    secrets.push(Some(s.reveal(*h)?));
+                }
+            }
+        }
+        // Protected values are compared here and never leave this function.
+        let same = cells.windows(2).all(|w| w[0] == w[1])
+            && secrets.windows(2).all(|w| match (&w[0], &w[1]) {
+                (Some(a), Some(b)) => a.expose_secret().ct_eq(b.expose_secret()).to_bool(),
+                (None, None) => true,
+                _ => false,
+            });
+        rows.push(CompareRow {
+            label: name,
+            same,
+            cells,
+        });
+    }
+    let name = texts
+        .first()
+        .and_then(|t| {
+            t.iter()
+                .find(|(l, _)| matches!(*l, "Title" | "Name" | "Vault name"))
+                .map(|(_, v)| v.clone())
+        })
+        .unwrap_or_else(|| z(kind));
+    Ok(CompareView {
+        name,
+        kind,
+        heads,
+        rows,
+        needs_password,
+    })
+}
 /// An attachment row (no content or hash).
 #[derive(Clone, PartialEq)]
 pub struct AttachmentRow {
@@ -600,17 +838,27 @@ pub struct AttachmentRow {
     pub conflicted: bool,
 }
 /// Read an entry's attachments.
+/// Ordered by name (case-insensitive), so the shelf and the viewer's steps
+/// are stable.
 pub fn attachments(s: &Session, e: EntryHandle) -> Result<Vec<AttachmentRow>, CoreError> {
-    Ok(s.attachments(e)?
+    let mut keyed: Vec<(Z, AttachmentRow)> = s
+        .attachments(e)?
         .iter()
-        .map(|a| AttachmentRow {
-            handle: a.handle,
-            name: z(a.name.expose()),
-            mime: z(a.mime.expose()),
-            size: a.size,
-            conflicted: a.conflicted,
+        .map(|a| {
+            (
+                Zeroizing::new(a.name.expose().to_lowercase()),
+                AttachmentRow {
+                    handle: a.handle,
+                    name: z(a.name.expose()),
+                    mime: z(a.mime.expose()),
+                    size: a.size,
+                    conflicted: a.conflicted,
+                },
+            )
         })
-        .collect())
+        .collect();
+    keyed.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+    Ok(keyed.into_iter().map(|k| k.1).collect())
 }
 /// A local snapshot row.
 #[derive(Clone, PartialEq)]

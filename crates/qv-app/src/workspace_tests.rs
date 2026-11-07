@@ -669,6 +669,42 @@ fn records_history_snapshot_restore_archive_merge_conflict_resolve_verify() {
     let row = rows.iter().find(|r| r.kind == "Entry").unwrap().clone();
     let versions = env.read(|s| views::conflict_record(s, &row.record));
     assert_eq!(versions.len(), 2);
+    // The comparison (plan 0044): only the title differs; the unchanged
+    // password is compared on the device and never shown.
+    let cmp = env.read(|s| views::conflict_compare(s, &row.record));
+    assert_eq!(cmp.heads.len(), 2);
+    assert_eq!(cmp.kind, "Entry");
+    assert!(!cmp.identical());
+    let title = cmp.rows.iter().find(|r| *r.label == "Title").unwrap();
+    assert!(!title.same);
+    let mut titles: Vec<String> = title
+        .cells
+        .iter()
+        .map(|c| match c {
+            views::Cell::Text(t) => t.to_string(),
+            _ => String::new(),
+        })
+        .collect();
+    titles.sort();
+    assert_eq!(titles, ["local title", "remote title"]);
+    let pw = cmp
+        .rows
+        .iter()
+        .find(|r| crate::editor::same_slot(&r.label, "password"))
+        .unwrap();
+    assert!(pw.same && pw.cells.iter().all(|c| matches!(c, views::Cell::Masked(_))));
+    for r in ["Group", "Color", "Type", "Username"] {
+        assert!(
+            cmp.rows
+                .iter()
+                .any(|x| crate::editor::same_slot(&x.label, r) && x.same),
+            "{r}"
+        );
+    }
+    assert!(cmp.rows.iter().all(|r| r.cells.iter().all(|c| match c {
+        views::Cell::Text(t) => !t.contains(SECRET),
+        _ => true,
+    })));
     let pick = versions
         .iter()
         .find(|v| v.details.iter().any(|(_, t)| **t == "remote title"))
@@ -1654,4 +1690,190 @@ fn the_vault_name_is_the_stored_one_and_files_are_never_renamed() {
     env.c.lock();
     let v = env.c.selected_vault().unwrap();
     assert_eq!((v.name.as_str(), v.file.as_str()), ("Home", "Spare.qvault"));
+}
+
+#[test]
+fn selected_entries_are_trashed_restored_moved_and_coloured_together() {
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::unlocked();
+    let a = env.add_entry("Alpha", "one");
+    let b = env.add_entry("Beta", "two");
+    let c = env.add_entry("Gamma", "three");
+    env.c.navigate(env.epoch(), Screen::Entry(a));
+    // Trash two at once: the open one closes, Undo puts both back.
+    env.act(WsAction::TrashMany(vec![a, b]));
+    assert_eq!(env.error(), None);
+    assert_eq!(env.screen(), Screen::Browse(None));
+    let undo = env.c.peek(env.epoch(), |ws| ws.undo.clone()).flatten();
+    assert_eq!(undo, Some(crate::workspace::Undo::Entries(vec![a, b])));
+    assert_eq!(env.read(views::trash).items.len(), 2);
+    env.act(undo.unwrap().action());
+    assert_eq!(env.error(), None);
+    assert!(env.read(views::trash).items.is_empty());
+    // A refused batch changes nothing (one entry already in the trash).
+    env.act(WsAction::Delete(qv_core::ItemHandle::Entry(c)));
+    env.act(WsAction::TrashMany(vec![a, c]));
+    assert!(env.error().is_some());
+    assert_eq!(env.read(views::trash).items.len(), 1);
+    env.act(WsAction::Dismiss);
+    // Move both into a group.
+    let root = env.read(|s| s.root());
+    let g = env.read(|s| {
+        let d = s.new_group(root, "Work")?;
+        s.save_group(d)
+    });
+    env.act(WsAction::MoveMany(vec![a, b], g));
+    assert_eq!(env.error(), None);
+    assert_eq!(env.read(|s| s.list(g)).entries.len(), 2);
+    // Colour both; Automatic clears only colour tokens.
+    env.act(WsAction::ColourMany(vec![a, b], Some(4)));
+    assert_eq!(env.error(), None);
+    let colours = |env: &Env| -> Vec<Option<u8>> {
+        env.read(views::all_items)
+            .into_iter()
+            .filter(|i| i.row.handle == a || i.row.handle == b)
+            .map(|i| i.row.colour)
+            .collect()
+    };
+    assert_eq!(colours(&env), [Some(4), Some(4)]);
+    env.act(WsAction::ColourMany(vec![a], None));
+    let mut now = colours(&env);
+    now.sort();
+    assert_eq!(now, [None, Some(4)]);
+    env.act(WsAction::ColourMany(vec![a], Some(12)));
+    assert_eq!(env.error(), Some(AppError::InvalidInput));
+    // A stale epoch does nothing.
+    let old = env.epoch();
+    env.c.lock();
+    env.c.act(old, WsAction::TrashMany(vec![b]));
+    env.unlock(PASSWORD);
+    assert!(env.read(views::trash).items.len() == 1);
+}
+
+#[test]
+fn attachments_preview_from_memory_and_close_with_their_screen() {
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::unlocked();
+    let e = env.add_entry("Files", "pw");
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend_from_slice(&[9; 40]);
+    let add = |name: &str, bytes: &[u8]| {
+        env.read(|s| s.add_attachment(e, name, "application/octet-stream", &mut &bytes[..], None))
+    };
+    add("a-photo.png", &png);
+    add("b-notes.txt", "line one\nline two".as_bytes());
+    add("c-doc.pdf", b"%PDF-1.7 whatever");
+    let rows = env.read(|s| views::attachments(s, e));
+    assert_eq!(rows.len(), 3);
+    let handle = |name: &str| rows.iter().find(|r| *r.name == name).unwrap().handle;
+    let preview = |env: &Env| env.c.peek(env.epoch(), |ws| ws.preview.clone()).flatten();
+    // Not from a list or other screen: there is no open entry.
+    env.c.navigate(env.epoch(), Screen::Browse(None));
+    env.act(WsAction::Preview(handle("a-photo.png")));
+    assert_eq!(env.error(), Some(AppError::InvalidInput));
+    env.act(WsAction::Dismiss);
+    // An image is served from memory at its route, exactly.
+    env.c.navigate(env.epoch(), Screen::Entry(e));
+    env.act(WsAction::Preview(handle("a-photo.png")));
+    assert_eq!(env.error(), None);
+    let p = preview(&env).unwrap();
+    assert_eq!(p.kind, crate::preview::Kind::Image);
+    assert_eq!(
+        (p.mime, p.size, p.count),
+        ("image/png", png.len() as u64, 3)
+    );
+    let route = format!("/{}", p.src.clone().unwrap());
+    assert_eq!(crate::preview::content(&route, None).unwrap().3, png);
+    // Next: text renders as text and serves nothing.
+    env.act(WsAction::PreviewStep(1));
+    let p = preview(&env).unwrap();
+    assert_eq!(p.kind, crate::preview::Kind::Text);
+    assert_eq!(
+        p.text.as_deref().map(String::as_str),
+        Some("line one\nline two")
+    );
+    assert!(p.src.is_none() && crate::preview::content(&route, None).is_none());
+    // Next: a PDF is never rendered.
+    env.act(WsAction::PreviewStep(1));
+    let p = preview(&env).unwrap();
+    assert_eq!(p.kind, crate::preview::Kind::Unsupported);
+    assert!(p.src.is_none() && p.text.is_none());
+    // And around to the first again.
+    env.act(WsAction::PreviewStep(1));
+    assert_eq!(preview(&env).unwrap().index, 0);
+    assert!(crate::preview::active());
+    // Closing wipes it.
+    env.act(WsAction::ClosePreview);
+    assert!(preview(&env).is_none() && !crate::preview::active());
+    // Navigating away wipes it.
+    env.act(WsAction::Preview(handle("a-photo.png")));
+    assert!(crate::preview::active());
+    env.c.navigate(env.epoch(), Screen::Browse(None));
+    assert!(preview(&env).is_none() && !crate::preview::active());
+    // Locking wipes it.
+    env.c.navigate(env.epoch(), Screen::Entry(e));
+    env.act(WsAction::Preview(handle("a-photo.png")));
+    assert!(crate::preview::active());
+    env.c.lock();
+    assert!(!crate::preview::active());
+}
+
+#[test]
+fn escape_ends_the_list_selection_before_going_back() {
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::unlocked();
+    let a = env.add_entry("Alpha", "one");
+    env.c.navigate(env.epoch(), Screen::Entry(a));
+    let picked = std::collections::BTreeSet::from([a.id_hex()]);
+    env.c.set_selection(env.epoch(), Some(picked.clone()));
+    assert_eq!(env.c.selection(env.epoch()), Some(picked));
+    // Escape (also Android Back) ends the selection and stays on the screen.
+    assert!(
+        env.c
+            .shortcut(env.epoch(), crate::workspace::Shortcut::Escape)
+    );
+    assert_eq!(env.c.selection(env.epoch()), None);
+    assert_eq!(env.screen(), Screen::Entry(a));
+    // Then it goes back as before.
+    assert!(
+        env.c
+            .shortcut(env.epoch(), crate::workspace::Shortcut::Escape)
+    );
+    assert_ne!(env.screen(), Screen::Entry(a));
+    // Navigating away ends a selection; a stale epoch cannot set one.
+    env.c.set_selection(env.epoch(), Some(Default::default()));
+    env.c.navigate(env.epoch(), Screen::Trash);
+    assert_eq!(env.c.selection(env.epoch()), None);
+    let old = env.epoch();
+    env.c.navigate(env.epoch(), Screen::Browse(None));
+    env.c.set_selection(old, Some(Default::default()));
+    assert_eq!(env.c.selection(env.epoch()), None);
+}
+
+#[test]
+fn quick_operations_do_not_show_as_busy() {
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::unlocked();
+    let busy = |env: &Env| (env.c.snapshot().busy, env.c.snapshot().busy_shown);
+    assert_eq!(busy(&env), (false, false));
+    // A just-started operation is busy, but the UI does not show it yet.
+    env.c.0.working.store(true, Ordering::SeqCst);
+    env.c.state().op_started = Some(Instant::now());
+    assert_eq!(busy(&env), (true, false));
+    // A click meanwhile is dropped quietly, not reported.
+    env.c.act(env.epoch(), WsAction::Search);
+    assert_eq!(env.error(), None);
+    // After the threshold it shows, and refusals are reported again.
+    env.c.state().op_started = Instant::now().checked_sub(crate::controller::BUSY_SHOWN_AFTER);
+    assert_eq!(busy(&env), (true, true));
+    env.c.act(env.epoch(), WsAction::Search);
+    assert_eq!(env.error(), Some(AppError::Busy));
+    env.c.0.working.store(false, Ordering::SeqCst);
+    assert_eq!(busy(&env), (false, false));
+    // The locked screens show work at once.
+    env.c.lock();
+    env.c.0.working.store(true, Ordering::SeqCst);
+    env.c.state().op_started = Some(Instant::now());
+    assert_eq!(busy(&env), (true, true));
+    env.c.0.working.store(false, Ordering::SeqCst);
 }

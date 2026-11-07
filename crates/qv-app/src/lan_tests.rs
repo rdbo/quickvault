@@ -189,6 +189,14 @@ fn lan_app_new_device_join_then_sync_with_a_typed_code() {
         "This device accepted the other device's changes."
     );
     assert!(done.lines[2].contains("confirmed"));
+    // The receipt names what arrived here, and closes itself (clean).
+    let round = done.round.clone().unwrap();
+    assert!(round.received && round.peer_confirmed && round.conflicts == 0);
+    assert_eq!(round.changes.counts, [1, 0, 0]);
+    assert_eq!(round.changes.added[0].title.as_str(), "Bank");
+    assert!(round.changes.added[0].entry.is_some());
+    assert!(done.closes_itself());
+    assert!(!format!("{done:?}").contains("Bank"));
     a.wait();
     let a_done = until(&a, "the window outcome", |v| v.done.clone());
     assert_eq!(
@@ -196,6 +204,14 @@ fn lan_app_new_device_join_then_sync_with_a_typed_code() {
         "Synced with a device that holds this vault."
     );
     assert_eq!(a_done.lines[1], "Nothing new from the other device.");
+    let a_round = a_done.round.clone().unwrap();
+    assert!(!a_round.received && a_round.changes.total() == 0);
+    // Keeping the receipt stops the countdown; closing it clears the run.
+    b.c.lan_keep(b.epoch());
+    assert!(until(&b, "kept", |v| v.done.as_ref().map(|d| d.kept)));
+    assert_eq!(b.c.lan_view(b.epoch()).and_then(|v| v.closes_in), None);
+    b.c.lan_dismiss(b.epoch());
+    assert!(b.c.lan_view(b.epoch()).is_none());
     let mut t = titles(&b);
     t.sort();
     assert_eq!(t, ["Bank", "Mail"]);
@@ -345,4 +361,64 @@ fn lan_app_scanned_codes_start_the_join_and_the_sync() {
     let ws = s.workspace.as_ref().unwrap();
     assert!(ws.input(WsField::LanCode).is_empty());
     assert!(!ws.lan_scanned);
+}
+
+#[test]
+fn lan_receipt_lists_changes_and_closes_only_when_clean() {
+    let _k = kdf();
+    let env = Env::unlocked();
+    let keep = env.add_entry("Keep", "1");
+    let edit = env.add_entry("Edit", "2");
+    let gone = env.add_entry("Gone", "3");
+    let before = env.read(|s| Ok(crate::lan::summary(s).unwrap()));
+    // Edit one, trash one, add one, with a later clock.
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    env.act(WsAction::EditEntry(edit));
+    env.put(WsField::Title, "Edited");
+    env.act(WsAction::SaveEntry);
+    env.act(WsAction::TrashMany(vec![gone]));
+    env.add_entry("New", "4");
+    let after = env.read(|s| Ok(crate::lan::summary(s).unwrap()));
+    let c = crate::lan::changes(&before, &after);
+    assert_eq!(c.counts, [1, 1, 1]);
+    assert_eq!(c.added[0].title.as_str(), "New");
+    assert_eq!(c.updated[0].title.as_str(), "Edited");
+    assert_eq!(c.updated[0].entry, Some(edit));
+    assert_eq!(c.trashed[0].title.as_str(), "Gone");
+    assert_eq!(c.trashed[0].entry, None);
+    assert!(
+        c.added
+            .iter()
+            .chain(&c.updated)
+            .all(|x| x.entry != Some(keep))
+    );
+    // Nothing changed: an empty list.
+    assert_eq!(crate::lan::changes(&after, &after).total(), 0);
+    // Clean receipts close; conflicts, a missing confirmation or an error stay.
+    let report = |conflicts, peer_confirmed| qv_core::SyncReport {
+        local: qv_core::LocalAcceptance::Committed,
+        conflicts,
+        peer_confirmed,
+        completion_error: None,
+    };
+    let clean = crate::lan::round_done(&report(0, true), Vec::new());
+    assert!(clean.closes_itself());
+    assert!(
+        clean
+            .closes_in()
+            .is_some_and(|s| s <= crate::lan::RECEIPT_SECONDS)
+    );
+    let mut old = clean.clone();
+    old.at = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(7))
+        .unwrap();
+    assert_eq!(old.closes_in(), Some(0));
+    assert!(!crate::lan::round_done(&report(2, true), Vec::new()).closes_itself());
+    assert!(!crate::lan::round_done(&report(0, false), Vec::new()).closes_itself());
+    let mut failed = clean.clone();
+    failed.error = Some(AppError::Unavailable);
+    assert!(!failed.closes_itself());
+    let mut kept = clean;
+    kept.kept = true;
+    assert_eq!(kept.closes_in(), None);
 }

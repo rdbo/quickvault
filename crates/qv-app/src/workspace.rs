@@ -313,6 +313,23 @@ pub enum GenFlag {
     /// Append one digit.
     AppendDigit,
 }
+/// What the toast's Undo puts back.
+#[derive(Clone, PartialEq, Debug)]
+pub enum Undo {
+    /// One item.
+    Item(ItemHandle),
+    /// A batch of entries trashed together (plan 0044).
+    Entries(Vec<EntryHandle>),
+}
+impl Undo {
+    /// The action that undoes it.
+    pub fn action(&self) -> WsAction {
+        match self {
+            Self::Item(i) => WsAction::Restore(*i),
+            Self::Entries(e) => WsAction::RestoreMany(e.clone()),
+        }
+    }
+}
 /// Typed, allowlisted unlocked actions.
 #[derive(Clone)]
 pub enum WsAction {
@@ -367,6 +384,20 @@ pub enum WsAction {
     Delete(ItemHandle),
     /// Restore an item from the trash.
     Restore(ItemHandle),
+    /// Move selected entries to the trash, in one transaction (plan 0044).
+    TrashMany(Vec<EntryHandle>),
+    /// Restore entries trashed together (the batch Undo).
+    RestoreMany(Vec<EntryHandle>),
+    /// Move selected entries into a group.
+    MoveMany(Vec<EntryHandle>, GroupHandle),
+    /// Set the selected entries' colour (`None`: automatic).
+    ColourMany(Vec<EntryHandle>, Option<u8>),
+    /// Preview an attachment of the open entry in the app (0003 §6.4).
+    Preview(AttachmentHandle),
+    /// Preview the previous (-1) or next (+1) attachment of the entry.
+    PreviewStep(i8),
+    /// Close the preview, wiping its content.
+    ClosePreview,
     /// Permanently delete all non-conflicted trash.
     EmptyTrash,
     /// Permanently delete trash past its retention.
@@ -587,8 +618,13 @@ pub struct Workspace {
     pub(crate) notice: Option<&'static str>,
     pub(crate) error: Option<AppError>,
     pub(crate) report: Option<Report>,
-    /// The item just moved to the trash, until the next navigation (Undo).
-    pub(crate) undo: Option<qv_core::ItemHandle>,
+    /// What was just moved to the trash, until the next navigation (Undo).
+    pub(crate) undo: Option<Undo>,
+    /// The open attachment preview (0003 §6.4).
+    pub(crate) preview: Option<crate::preview::PreviewView>,
+    /// The list's multi-selection (record IDs), `None` when not selecting.
+    /// Kept here so Escape and Android Back can end it (plan 0044).
+    pub(crate) selection: Option<std::collections::BTreeSet<String>>,
     pub(crate) phrase: Option<PhraseView>,
     pub(crate) old_snapshots: Vec<String>,
     pub(crate) searched: bool,
@@ -690,6 +726,8 @@ impl Workspace {
             error: None,
             report: None,
             undo: None,
+            preview: None,
+            selection: None,
             phrase: None,
             old_snapshots: Vec::new(),
             searched: false,
@@ -711,6 +749,11 @@ impl Workspace {
         self.phrase.is_some()
     }
     fn clear_transient(&mut self) {
+        self.selection = None;
+        // An open preview's plaintext never outlives its screen (plan 0044).
+        if self.preview.take().is_some() {
+            crate::preview::close();
+        }
         self.inputs.clear();
         self.lan_scanned = false;
         self.generated = None;
@@ -905,6 +948,26 @@ impl Controller {
         }
         s.workspace.as_ref().map(f)
     }
+    /// The list's multi-selection, if selecting.
+    pub fn selection(&self, epoch: FormEpoch) -> Option<std::collections::BTreeSet<String>> {
+        self.peek(epoch, |ws| ws.selection.clone()).flatten()
+    }
+    /// Start, change (`Some`) or end (`None`) the list's multi-selection.
+    pub fn set_selection(
+        &self,
+        epoch: FormEpoch,
+        selection: Option<std::collections::BTreeSet<String>>,
+    ) {
+        let mut s = self.state();
+        if s.epoch != epoch.0 || s.phase != Phase::Unlocked {
+            return;
+        }
+        if let Some(ws) = s.workspace.as_mut() {
+            ws.selection = selection;
+        }
+        s.active = Instant::now();
+        s.revision = s.revision.wrapping_add(1);
+    }
     /// Navigate; forms, reveals and pending confirmations are discarded and the
     /// form epoch advances so late input for the old screen is ignored.
     pub fn navigate(&self, epoch: FormEpoch, to: Screen) {
@@ -1018,6 +1081,10 @@ impl Controller {
                 if self.pending(epoch).is_some() {
                     self.act(epoch, WsAction::Answer(false));
                     true
+                } else if self.selection(epoch).is_some() {
+                    // Escape and Android Back leave the multi-selection first.
+                    self.set_selection(epoch, None);
+                    true
                 } else if screen != Screen::Browse(None) {
                     self.back(epoch);
                     true
@@ -1110,6 +1177,11 @@ impl Controller {
     /// Dispatch a typed unlocked action; refusals are shown on the screen.
     pub fn act(&self, epoch: FormEpoch, action: WsAction) {
         if let Err(error) = self.dispatch(epoch, action, false, false) {
+            // A click during a quick operation that does not show as busy
+            // yet is dropped quietly rather than reported.
+            if error == AppError::Busy && !self.busy_shown_in(&self.state()) {
+                return;
+            }
             self.with_ws(epoch, |ws, _| ws.error = Some(error));
         }
     }
@@ -1235,6 +1307,7 @@ impl Controller {
         let token = s.cancel.clone();
         let generation = s.lock_gen;
         s.op_running = true;
+        s.op_started = Some(Instant::now());
         s.active = Instant::now();
         s.revision = s.revision.wrapping_add(1);
         if let Some(ws) = s.workspace.as_mut() {

@@ -129,7 +129,17 @@ release, but no longer gates the feature.
   Storage Access Framework, or the Linux xdg-desktop-portal FileChooser.
   - Only local `file:` results are accepted.
   - 0011 §4's no-follow and ownership rules still apply to the chosen path.
-  - A path field appears only when no picker is available.
+  - Linux: the portal refuses callers that are not dumpable, and the app is
+    non-dumpable (0008 §1.1). The app therefore asks through a short-lived
+    helper: its own binary re-executed in a picker mode, which holds no vault
+    data and opens no vault. The request (kind, title, suggested name) goes
+    over stdin, never argv; the bounded answer comes back over stdout and is
+    checked like a portal answer (owner report, 2026-11-07; plan 0044).
+  - The locked screen never shows a typed vault path: the vault list and the
+    default folder cover create, unlock, recover and join, and a failed
+    picker reports the missing desktop portal instead (owner, 2026-11-07).
+    Only validation fixtures type a private path. Inside an unlocked vault, a
+    path field appears only when no picker is available.
 - **Inactivity.** The 60-second inactivity lock counts any use of the window
   as activity: keys, clicks, typing, pointer movement, scrolling and touch.
   Pointer movement and scrolling are reported at most once a second, without
@@ -193,6 +203,47 @@ release, but no longer gates the feature.
   - A Wi‑Fi item's page can show a `WIFI:` join QR code. It contains the
     password, so it is an explicit 30-second reveal under 0008 §4.
   - Tiles show the colour token of 0003 §5.5.
+- **Item list actions** (owner, 2026-11-07; plan 0044). A right click on an
+  item row opens its menu (open, copy the first field or the password,
+  colour, move, select, move to the trash) without opening the item.
+  Multi-select: Ctrl/⌘-click toggles a row, Shift-click selects a range, and
+  a Select button in the list header (on every platform; Android has no long
+  press) shows check circles and a selection bar with select all, colour,
+  move and trash. Escape or Back leaves the selection. Each batch action is
+  one transaction (all or nothing); trashing offers Undo. Groups are not
+  batch-selectable.
+- **Sync receipt** (owner, 2026-11-07; plan 0044). A running sync shows its
+  progress. When it ends, the result becomes a receipt docked at the bottom
+  of the window, not a modal: up to date, or what this device received
+  (added, changed and trashed items, each openable), whether the other device
+  confirmed receipt, and any error, keeping 0005 §6.5's separate facts. A
+  clean result closes by itself after 6 seconds unless it is clicked or
+  focused (the webview bridge forwards no hover events). Conflicts keep it open with an action that opens their
+  comparison. The change list is computed on this device from item
+  summaries before and after the round; nothing extra is exchanged.
+- **Conflict comparison** (owner, 2026-11-07; plan 0044). A conflicted record
+  is shown as one comparison: a column per version (time and state) and a
+  row per property, including colour, group, type and expiry. Equal values
+  appear once; different ones side by side. Protected values are compared on
+  the device and shown as same/different, revealed per version under 0008
+  §4. Versions with no visible difference say so. Resolving still chooses one
+  complete version (0005 §2.5).
+- **Attachment previews** (owner, 2026-11-07; plan 0044). The item page shows
+  the entry's attachments as a shelf with an add tile. Opening one previews
+  it in a full-window viewer under 0003 §6.4: images (fit or actual size,
+  panning), audio and video (player), text (reader). Other types offer only
+  saving a copy. The decrypted bytes stay in protected memory and reach the
+  webview only from an unguessable one-time route on the app's own origin,
+  never through a file; closing, navigating away, lock and hiding the window
+  wipe them. Images and media load only from the app's origin (CSP
+  `img-src`/`media-src 'self'`).
+- **Android shell** (owner, 2026-11-07; plan 0044). The app's content stays
+  clear of the status bar, display cutout, navigation bar and keyboard; the
+  system bars use the theme's colours. Back does what Escape does (closes a
+  menu or viewer, leaves a selection, cancels a form, goes up one screen,
+  leaves create/recover/join). Where nothing is left to go back to, the first
+  Back says that another Back closes QuickVault, and only a second Back within
+  2 seconds closes it.
 
 ### 2. Platform priority
 
@@ -346,6 +397,12 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-07: §1.8: Linux file picking goes through a helper process,
+  because xdg-desktop-portal refuses the non-dumpable app (plan 0044).
+- 2026-11-07: §1.8: no typed vault path on the locked screen; item list
+  actions and multi-select; sync receipt; conflict comparison; attachment
+  previews (0003 §6.4); Android shell insets and Back (owner feedback, plan
+  0044; details owner-delegated). Still Draft.
 - 2026-11-07: §1.7 camera scanning is on by default in ordinary packages
   instead of disabled until device validation; validation is still a
   release requirement (owner decision, plan 0043). Still Draft.

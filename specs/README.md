@@ -18,6 +18,10 @@ screen's protection chip only while an acknowledgement is pending.
 
 0011 §1.1 names the binary `qv` (owner, 2026-11-06, plan 0043).
 
+0009 §1.8 adds item list actions, the sync receipt, the conflict comparison,
+attachment previews and the Android shell, and 0003 §6.4 allows memory-only
+in-app previews of sniffed types (owner, 2026-11-07, plan 0044).
+
 0009 §1.7 specifies the owner-delegated bounded Android LAN QR camera profile
 (2026-11-03, plan 0039), approved for implementation; camera scanning is on
 by default in ordinary packages (owner, 2026-11-07, plan 0043). Its overall

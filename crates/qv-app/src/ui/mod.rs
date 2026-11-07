@@ -176,14 +176,20 @@ fn Root(controller: Controller, revision: u64) -> Element {
                 event.prevent_default();
                 return;
             }
-            if let Some(shortcut) = Shortcut::from_key(&key, ctrl)
-                && shortcut != Shortcut::Search
-                && c.shortcut(epoch, shortcut)
-            {
+            let handled = Shortcut::from_key(&key, ctrl)
+                .is_some_and(|s| s != Shortcut::Search && c.shortcut(epoch, s));
+            if handled {
                 event.prevent_default();
+            } else if key == "Escape" && cfg!(target_os = "android") {
+                // Android Back arrives as Escape; nothing took it, so the
+                // activity asks for a second Back before closing (plan 0044).
+                #[cfg(target_os = "android")]
+                crate::android::back_at_root();
             }
         }
     };
+    #[cfg(target_os = "android")]
+    crate::android::sync_theme(view.theme);
     let name = if unlocked {
         controller
             .read(epoch, crate::views::overview)
@@ -197,7 +203,7 @@ fn Root(controller: Controller, revision: u64) -> Element {
             onclick: { let seen = seen.clone(); move |_| { seen(); redraw.now() } },
             oninput: move |_| redraw.now(),
             shell::TitleBar {
-                controller: Some(controller.clone()), epoch, unlocked, idle_left: view.idle_left, busy: view.busy,
+                controller: Some(controller.clone()), epoch, unlocked, idle_left: view.idle_left, busy: if unlocked { view.busy_shown } else { view.busy },
                 palette: unlocked.then_some(palette), vault: name, idle_only: view.reduced_lifecycle,
             }
             if unlocked {
@@ -233,7 +239,7 @@ impl From<&View> for ShellView {
             revision: v.revision,
             live: v.live,
             lan_seconds: v.lan_seconds,
-            busy: v.busy,
+            busy: v.busy_shown,
             scanning: v.scanning,
             reduced_lifecycle: v.reduced_lifecycle,
         }
@@ -422,8 +428,11 @@ fn Locked(controller: Controller, revision: u64) -> Element {
         }
     };
     let can_pick = cfg!(target_os = "linux");
-    // Validation fixtures keep their synthetic vaults at a typed private path.
+    // Validation fixtures keep their synthetic vaults at a typed private path;
+    // nothing else types a vault path here (0009 §1.8): a failed picker
+    // reports the missing portal and only hides the picker choices.
     let fallback = crate::documents::picker_missing() || fixture;
+    let typed_path = fixture;
     let quick = mode == Mode::Unlock && controller.0.services.keystore().binding().is_some();
     let os = controller.protection();
     let process_reduced = qv_core::harden().is_reduced();
@@ -570,7 +579,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                 div { hidden: wizard_step != 0,
                     h2 { "Name your vault" }
                     SecretInput { controller: controller.clone(), epoch, field: InputField::Name, label: "Vault name", id: "vault-name", secret: false, disabled: busy, autofocus: true, placeholder: "Personal" }
-                    div { class: "banner ok",
+                    div { class: "banner ok", hidden: cfg!(target_os = "android"),
                         Svg { icon: Icon::Folder }
                         span { class: "sp", id: "create-place",
                             if let Some(file) = picked.as_ref() { "Saves as {file}" } else { "Saves in {folder_place}" }
@@ -588,7 +597,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                             }
                         }
                     }
-                    if fallback { SecretInput { controller: controller.clone(), epoch, field: InputField::Path, label: "Vault file (full path)", id: "vault-path", secret: false, disabled: busy } }
+                    if typed_path { SecretInput { controller: controller.clone(), epoch, field: InputField::Path, label: "Vault file (full path)", id: "vault-path", secret: false, disabled: busy } }
                     if wizard_step == 0 { {err_view.clone()} }
                     div { class: "actions",
                         button { class: "btn subtle", onclick: to_mode(Mode::Unlock), "Cancel" }
@@ -643,7 +652,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                 p { "Type your 24 recovery words, separated by spaces. You can choose a new master password once the vault is open." }
                 VaultLine { picked: picked.clone(), can_pick, onpick: pick_vault.clone() }
                 SecretInput { controller: controller.clone(), epoch, field: InputField::Phrase, label: "Recovery phrase · 24 words", id: "phrase", secret: true, disabled: busy, autofocus: true }
-                if fallback { SecretInput { controller: controller.clone(), epoch, field: InputField::Path, label: "Vault file (full path)", id: "vault-path", secret: false, disabled: busy } }
+                if typed_path { SecretInput { controller: controller.clone(), epoch, field: InputField::Path, label: "Vault file (full path)", id: "vault-path", secret: false, disabled: busy } }
                 {err_view}
                 div { class: "actions",
                     button { class: "btn subtle", onclick: to_mode(Mode::Unlock), "Back" }
@@ -691,7 +700,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                     button { class: "choice", id: "welcome-recover", onclick: to_mode(Mode::Recover), span { class: "ci", Svg { icon: Icon::Key } } b { "Recover with your phrase" } span { "Use your 24 recovery words" } }
                 }
                 {err_view}
-                if fallback { SecretInput { controller: controller.clone(), epoch, field: InputField::Path, label: "Vault file (full path)", id: "vault-path", secret: false, disabled: busy } }
+                if typed_path { SecretInput { controller: controller.clone(), epoch, field: InputField::Path, label: "Vault file (full path)", id: "vault-path", secret: false, disabled: busy } }
             }
         }
     } else {
@@ -707,8 +716,11 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                     }
                     if sheet() == Sheet::VaultMenu { {vault_menu} }
                 }
-                div { class: "vault-meta", id: "vault-place",
-                    if picked.is_some() { "Vault file" } else if let Some(v) = selected.as_ref() { "{v.place}" } else { "" }
+                // Android keeps vaults in the app's private folder: no place to show.
+                if !cfg!(target_os = "android") {
+                    div { class: "vault-meta", id: "vault-place",
+                        if picked.is_some() { "Vault file" } else if let Some(v) = selected.as_ref() { "{v.place}" } else { "" }
+                    }
                 }
                 if let (None, Some(v)) = (picked.as_ref(), selected.as_ref().filter(|v| !v.exists)) {
                     div { class: "banner bad", role: "status", Svg { icon: Icon::Warn }
@@ -728,7 +740,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                 }
                 if busy { p { class: "muted", "Opening…" } }
                 {err_view}
-                if fallback { SecretInput { controller: controller.clone(), epoch, field: InputField::Path, label: "Vault file (full path)", id: "vault-path", secret: false, disabled: busy } }
+                if typed_path { SecretInput { controller: controller.clone(), epoch, field: InputField::Path, label: "Vault file (full path)", id: "vault-path", secret: false, disabled: busy } }
                 if quick {
                     button { class: "ghost", "data-qv-clear": "true", disabled: busy || preview, onclick: move |_| g2(Action::QuickUnlock), Svg { icon: Icon::Finger } "Unlock with fingerprint" }
                 }
@@ -772,11 +784,20 @@ fn Locked(controller: Controller, revision: u64) -> Element {
     rsx! {
         div { class: "locked",
             // Esc closes an open menu or sheet before anything else.
-            onkeydown: move |e: KeyboardEvent| {
-                if e.key() == Key::Escape && sheet() != Sheet::None {
-                    e.stop_propagation();
-                    e.prevent_default();
-                    sheet.set(Sheet::None);
+            onkeydown: {
+                let c = controller.clone();
+                move |e: KeyboardEvent| {
+                    if e.key() == Key::Escape && sheet() != Sheet::None {
+                        e.stop_propagation();
+                        e.prevent_default();
+                        sheet.set(Sheet::None);
+                    } else if e.key() == Key::Escape && mode != Mode::Unlock && !busy {
+                        // Create, Recover and Join step back to the vault
+                        // (also Android Back, plan 0044).
+                        e.stop_propagation();
+                        e.prevent_default();
+                        c.select_mode(epoch, Mode::Unlock);
+                    }
                 }
             },
             if fixture && cfg!(target_os = "android") { p { class: "banner", "Synthetic validation build · isolated test vault only" } }

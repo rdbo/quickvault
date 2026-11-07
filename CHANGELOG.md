@@ -9,6 +9,38 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-07: Owner feedback batch (plan 0044; specs 0003 §6.4, 0009 §1.8):
+  - Linux app: the system file chooser opens again. xdg-desktop-portal
+    refused the hardened (non-dumpable) app process, so every pick failed
+    and path fields appeared; picks now go through a short-lived helper
+    process that holds no vault data.
+  - App: the locked screen no longer shows a "Vault file (full path)" field;
+    a desktop without a file-chooser portal says so instead. Android hides
+    the internal vault folder line.
+  - App: right-click an item in the list for its menu (copy, color, move,
+    select, trash). Select several items (Ctrl/⌘-click, Shift-click or the
+    Select button) and trash, move or recolor them at once; batch trash has
+    Undo. Each batch is one transaction. Escape (or Android Back) leaves the selection.
+  - App: the sync result is a receipt docked at the bottom instead of a
+    modal: up to date, or what this device received (each item opens), the
+    other device's confirmation, and "Resolve now" for conflicts. A clean
+    result closes by itself after 6 seconds; it no longer says "Syncing"
+    when finished.
+  - App: conflict resolution compares versions side by side, showing equal
+    values once and only the differences as choices (including color,
+    group and expiry); protected values are compared on the device.
+  - App: attachments show as a shelf on the item page and open in a
+    full-window viewer: images, audio, video and text, decrypted only into
+    memory and never written to disk unless you save a copy. A click on the dark area around the content closes it.
+  - Android: the app no longer draws under the status bar; the system bars
+    follow the theme. Back goes back one level and closes the app only after
+    a second Back at the top level.
+  - App: quick vault operations (such as changing an item's color) no
+    longer flash the whole window as busy; the busy state appears only if
+    an operation takes longer than 300 ms.
+  - App: no white focus ring around the window after unlocking; the reduced
+    protection acknowledgement no longer reappears because of a transient
+    lifecycle reading on Android.
 - 2026-11-06: Owner follow-ups (plan 0043):
   - The command-line client is now `qv` instead of `qvault` (spec 0011
     §1.1). `QVAULT_PATH`, the config file and the `.qvault` extension are

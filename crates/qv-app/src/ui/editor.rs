@@ -144,7 +144,7 @@ fn StartStep(
 
 /// The groups an entry can be saved in: the root, the top-level groups and
 /// the entry's own group if it is nested deeper.
-fn group_choices(
+pub(crate) fn group_choices(
     controller: &Controller,
     epoch: FormEpoch,
     current: GroupHandle,

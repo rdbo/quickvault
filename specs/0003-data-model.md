@@ -132,6 +132,22 @@ raise the client's local safety budget (0004). Filename/MIME are untrusted
 metadata: sanitize explicit save paths, do not execute/open attachments or fetch
 external resources automatically.
 
+6.4. **In-app preview** (owner request, 2026-11-07). On the user's explicit
+action, a client may show an attachment inside the app. It decrypts the
+complete content into protected memory and accepts it only after the content
+hash verifies. The type is identified from the content's bytes, never from
+the stored MIME or name, and only an allow-list is rendered:
+- images: PNG, JPEG, GIF, WebP;
+- audio: MP3, Ogg, WAV, FLAC, MP4 audio (M4A/AAC);
+- video: MP4, WebM;
+- UTF-8 text without NUL bytes, shown as text (never as markup).
+
+SVG, HTML, PDF, scripts and every other type are not rendered. The plaintext
+never touches the disk unless the user saves a copy: no temporary or cache
+file, no external app, no network fetch. Webview decoders still parse
+untrusted bytes, a residual risk; framework and decoder copies follow 0008's
+best-effort cleanup limits.
+
 ### 7. Tags
 
 Not in v1. Nested groups cover organization. The CBOR model leaves room to add
@@ -160,3 +176,6 @@ Not in v1. Nested groups cover organization. The CBOR model leaves room to add
 - 2026-10-15: Security review: unlinkable object envelopes; padded final chunk.
 - 2026-11-05: §4/§5 icon note and 5.5: the app colour token `hue:<0–11>`
   (plan 0040, owner request for chosen colours; owner-delegated format).
+- 2026-11-07: §6.4 in-app preview of an allow-list of sniffed types,
+  decrypted only into memory (owner request, plan 0044; details
+  owner-delegated).

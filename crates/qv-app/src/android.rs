@@ -820,6 +820,28 @@ fn stopped(env: &mut JNIEnv<'_>, activity: &GlobalRef) {
     let _ = env.exception_clear();
 }
 
+/// The system bars follow the app theme (plan 0044): the activity paints the
+/// inset padding with the theme background and picks the bar icon colour.
+/// Called on every render; JNI runs only when the theme changes.
+pub(crate) fn sync_theme(theme: crate::prefs::Theme) {
+    static SENT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(u8::MAX);
+    let mode = match theme {
+        crate::prefs::Theme::Dark => 0u8,
+        crate::prefs::Theme::Light => 1,
+        crate::prefs::Theme::System => 2,
+    };
+    if SENT.swap(mode, std::sync::atomic::Ordering::SeqCst) != mode {
+        let _ = call(|env, a| {
+            env.call_method(a, "qvTheme", "(I)V", &[JValue::Int(i32::from(mode))])
+                .map(|_| ())
+        });
+    }
+}
+/// Back reached the app's top level with nothing to close: the activity
+/// shows "Press back again" and closes on a second Back within 2 seconds.
+pub(crate) fn back_at_root() {
+    let _ = call(|env, a| env.call_method(a, "qvBackAtRoot", "()V", &[]).map(|_| ()));
+}
 /// Native camera capability, including the independent physical-device gate.
 pub(crate) fn qr_available() -> bool {
     call(|env, a| env.call_method(a, "qvQrAvailable", "()Z", &[])?.z()).unwrap_or(false)

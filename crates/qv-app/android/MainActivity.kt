@@ -137,6 +137,60 @@ class MainActivity : WryActivity() {
             }
         }
         handler.post(harden)
+        // Plan 0044: edge-to-edge is enforced from targetSdk 35, so pad the
+        // content by the system bars, cutout and keyboard; the padding shows
+        // the theme background (qvTheme).
+        val content = findViewById<View>(android.R.id.content)
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
+            val types = androidx.core.view.WindowInsetsCompat.Type.systemBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout()
+            val bars = insets.getInsets(types)
+            val ime = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())
+            v.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
+            androidx.core.view.WindowInsetsCompat.CONSUMED
+        }
+        applyTheme()
+        // Back does what Escape does in the app; Rust answers qvBackAtRoot
+        // when nothing was left to close.
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                val view = findWebview(window.decorView) ?: return
+                val now = SystemClock.uptimeMillis()
+                view.requestFocus()
+                view.dispatchKeyEvent(android.view.KeyEvent(now, now, android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ESCAPE, 0))
+                view.dispatchKeyEvent(android.view.KeyEvent(now, now, android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_ESCAPE, 0))
+            }
+        })
+    }
+    @Volatile private var themeMode = 0
+    private var rootBackAt = 0L
+    /** 0 dark, 1 light, 2 follow the system (crate::prefs::Theme). */
+    fun qvTheme(mode: Int) = runOnUiThread { themeMode = mode; applyTheme() }
+    private fun applyTheme() {
+        val systemNight = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val night = when (themeMode) { 1 -> false; 2 -> systemNight; else -> true }
+        // app.css --bg for each theme.
+        val bg = if (night) 0xFF0E1113.toInt() else 0xFFF3F5F6.toInt()
+        window.decorView.setBackgroundColor(bg)
+        findViewById<View>(android.R.id.content)?.setBackgroundColor(bg)
+        if (android.os.Build.VERSION.SDK_INT < 35) {
+            @Suppress("DEPRECATION")
+            window.statusBarColor = bg
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = bg
+        }
+        val bars = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+        bars.isAppearanceLightStatusBars = !night
+        bars.isAppearanceLightNavigationBars = !night
+    }
+    fun qvBackAtRoot() = runOnUiThread {
+        val now = SystemClock.elapsedRealtime()
+        if (rootBackAt != 0L && now - rootBackAt <= 2000) {
+            rootBackAt = 0L
+            finish()
+        } else {
+            rootBackAt = now
+            android.widget.Toast.makeText(this, "Press back again to close QuickVault", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
     private fun findWebview(view: View): WebView? {
         if (view is WebView) return view

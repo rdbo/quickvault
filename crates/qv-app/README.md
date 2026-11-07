@@ -25,10 +25,19 @@ Other details:
   directory (`src/prefs.rs`).
 - The Android build patches the generated AppTheme to AppCompat DayNight, so
   "system" follows the device.
+- Android shell (plan 0044): the activity pads the content by the status
+  bar, cutout, navigation bar and keyboard insets and paints that padding
+  with the theme background (`qvTheme`). Back is sent to the page as Escape,
+  so it closes menus, previews and forms and goes up a screen; at the top
+  level the first Back shows "Press back again to close QuickVault" and a
+  second within 2 seconds closes it (`qvBackAtRoot`).
+- Attachment previews (plan 0044, 0003 §6.4) decrypt into memory only; the
+  webview loads media from a one-time `/preview/<token>` route.
 - Files come from the system picker: the xdg-desktop-portal on Linux
   (`qv-platform` `linux::portal`) and the Storage Access Framework on Android.
-  A typed path appears only when no picker is available, and in validation
-  fixtures.
+  The locked screen never shows a typed vault path (validation fixtures
+  excepted); inside a vault a typed path appears only when no picker is
+  available.
 - Vaults (`src/vaults.rs`, plan 0041) are created by name in a default
   folder (`~/.local/share/quickvault/vaults` on Linux, changeable; the
   private folder on Android). The lock screen lists remembered vaults and

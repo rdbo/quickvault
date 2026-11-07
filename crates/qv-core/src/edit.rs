@@ -424,6 +424,51 @@ fn set_deleted(
     commit(ctx, changes)
 }
 
+/// The most handles one batch call accepts (plan 0044).
+pub const MAX_BATCH: usize = 4096;
+
+/// Distinct live entries of this session, checked before any write.
+fn live_entries(ctx: &Ctx<'_>, entries: &[EntryHandle]) -> Result<Vec<RecordId>, CoreError> {
+    if entries.len() > MAX_BATCH {
+        return Err(CoreError::LimitExceeded);
+    }
+    let mut ids = BTreeSet::new();
+    for h in entries {
+        ctx.own(h.session)?;
+        if !record(&ctx.open.index, h.record, RecordKind::Entry)?
+            .status
+            .live
+        {
+            return Err(CoreError::NotAllowed);
+        }
+        ids.insert(h.record);
+    }
+    Ok(ids.into_iter().collect())
+}
+
+/// Applies `edit` to each live entry and commits the changed ones together.
+fn edit_entries(
+    ctx: &mut Ctx<'_>,
+    entries: &[EntryHandle],
+    edit: impl Fn(&mut Entry) -> bool,
+) -> Result<(), CoreError> {
+    let ids = live_entries(ctx, entries)?;
+    let now = ctx.now();
+    let mut changes = Vec::with_capacity(ids.len());
+    for id in ids {
+        ctx.check_cancel()?;
+        let (_, mut e, ext) = load_entry(ctx, id)?;
+        if e.deleted_at.is_some() {
+            return Err(CoreError::NotAllowed);
+        }
+        if edit(&mut e) {
+            e.modified_at = now;
+            changes.push(entry_change(id, e, ext));
+        }
+    }
+    commit(ctx, changes)
+}
+
 fn trashed_info(ctx: &Ctx<'_>, item: ItemHandle) -> Result<(RecordId, RecordKind), CoreError> {
     ctx.own(item.tag())?;
     let (id, kind) = match item {
@@ -753,6 +798,90 @@ impl Session {
                 .ok_or(CoreError::Conflict)?;
             let (groups, entries) = deleted_with(ctx, id, at);
             set_deleted(ctx, &groups, &entries, None)
+        })
+    }
+
+    /// Moves live entries to the trash in one transaction (plan 0044). Every
+    /// handle is checked before anything is written; one that is foreign,
+    /// not an entry or not live fails the whole call. At most
+    /// [`MAX_BATCH`] handles ([`CoreError::LimitExceeded`]); none is a no-op.
+    pub fn delete_entries(&self, entries: &[EntryHandle]) -> Result<(), CoreError> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        self.mutate(|ctx| {
+            let ids = live_entries(ctx, entries)?;
+            let now = ctx.now();
+            set_deleted(ctx, &[], &ids, Some(now))
+        })
+    }
+
+    /// Restores trashed entries in one transaction (the batch Undo); the
+    /// same all-or-nothing checks as [`Session::delete_entries`].
+    pub fn restore_entries(&self, entries: &[EntryHandle]) -> Result<(), CoreError> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        if entries.len() > MAX_BATCH {
+            return Err(CoreError::LimitExceeded);
+        }
+        self.mutate(|ctx| {
+            let mut ids = BTreeSet::new();
+            for &h in entries {
+                ids.insert(trashed_info(ctx, ItemHandle::Entry(h))?.0);
+            }
+            let ids: Vec<RecordId> = ids.into_iter().collect();
+            set_deleted(ctx, &[], &ids, None)
+        })
+    }
+
+    /// Moves live entries into a live group: one new version per entry that
+    /// is elsewhere, all in one transaction.
+    pub fn move_entries(&self, entries: &[EntryHandle], to: GroupHandle) -> Result<(), CoreError> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        self.mutate(|ctx| {
+            ctx.own(to.session)?;
+            if !live_group(ctx, to.record) {
+                return Err(CoreError::NotAllowed);
+            }
+            edit_entries(ctx, entries, |e| {
+                let changed = e.group != to.record;
+                e.group = to.record;
+                changed
+            })
+        })
+    }
+
+    /// Sets (`Some`) or clears (`None`) the icon of live entries, the colour
+    /// token of 0003 §5.5, in one transaction; entries that already hold it
+    /// get no new version.
+    pub fn set_entry_icons(
+        &self,
+        entries: &[EntryHandle],
+        icon: Option<&str>,
+    ) -> Result<(), CoreError> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        if let Some(i) = icon {
+            Text::new(i).map_err(input)?;
+        }
+        self.mutate(|ctx| {
+            edit_entries(ctx, entries, |e| {
+                if e.icon.as_ref().map(Text::expose) == icon {
+                    return false;
+                }
+                // Validated above; a failure leaves the entry unchanged.
+                match icon.map(Text::new).transpose() {
+                    Ok(next) => {
+                        e.icon = next;
+                        true
+                    }
+                    Err(_) => false,
+                }
+            })
         })
     }
 
@@ -1126,6 +1255,97 @@ mod trash_tests {
 
     use super::*;
     use crate::testutil::{Env, add_entry, add_group, err, seq};
+
+    #[test]
+    fn batch_entry_operations_are_all_or_nothing() {
+        let env = Env::new();
+        let s = env.unlock();
+        let root = s.root().unwrap();
+        let g = add_group(&s, root, "G");
+        let a = add_entry(&s, root, "a");
+        let b = add_entry(&s, root, "b");
+        let c = add_entry(&s, root, "c");
+        // Empty lists change nothing and write nothing.
+        let before = seq(&s);
+        s.delete_entries(&[]).unwrap();
+        s.restore_entries(&[]).unwrap();
+        s.move_entries(&[], g).unwrap();
+        s.set_entry_icons(&[], None).unwrap();
+        assert_eq!(seq(&s), before);
+        // Over the limit: refused before reading.
+        assert_eq!(
+            err(s.delete_entries(&vec![a; MAX_BATCH + 1])),
+            CoreError::LimitExceeded
+        );
+        // One trashed handle in the list fails the whole call.
+        s.delete(ItemHandle::Entry(c), false).unwrap();
+        let before = seq(&s);
+        assert_eq!(err(s.delete_entries(&[a, b, c])), CoreError::NotAllowed);
+        assert_eq!(err(s.move_entries(&[a, c], g)), CoreError::NotAllowed);
+        assert_eq!(seq(&s), before);
+        assert_eq!(trash_names(&s), ["c"]);
+        // A foreign session's handle fails it too.
+        let other = Env::new();
+        let o = other.unlock();
+        let foreign = add_entry(&o, o.root().unwrap(), "x");
+        assert_eq!(err(s.delete_entries(&[a, foreign])), CoreError::StaleHandle);
+        assert_eq!(seq(&s), before);
+        let live = add_entry(&s, root, "live");
+        let before = seq(&s);
+        // Batch trash is one transaction (duplicates collapse); restore too.
+        s.delete_entries(&[a, b, a]).unwrap();
+        assert_eq!(seq(&s), before + 1);
+        assert_eq!(trash_names(&s), ["a", "b", "c"]);
+        assert_eq!(err(s.restore_entries(&[a, live])), CoreError::NotAllowed);
+        s.restore_entries(&[a, b]).unwrap();
+        assert_eq!(seq(&s), before + 2);
+        assert_eq!(trash_names(&s), ["c"]);
+        // Move: one transaction; an entry already there gets no version.
+        s.move_entries(&[a, b], g).unwrap();
+        assert_eq!(seq(&s), before + 3);
+        assert_eq!(s.list(g).unwrap().entries.len(), 2);
+        let modified = |s: &Session| {
+            s.list(g)
+                .unwrap()
+                .entries
+                .iter()
+                .map(|e| e.modified_at)
+                .collect::<Vec<_>>()
+        };
+        let at = modified(&s);
+        env.time
+            .set(env.time.0.load(std::sync::atomic::Ordering::SeqCst) + 5000);
+        s.move_entries(&[a, b], g).unwrap();
+        assert_eq!(modified(&s), at);
+        // Into a trashed group: refused.
+        let gone = add_group(&s, root, "Gone");
+        s.delete(ItemHandle::Group(gone), false).unwrap();
+        let before = seq(&s);
+        assert_eq!(err(s.move_entries(&[a], gone)), CoreError::NotAllowed);
+        assert_eq!(seq(&s), before);
+        // Icons: set on both, then clearing only touches entries with one.
+        s.set_entry_icons(&[a, b], Some("hue:3")).unwrap();
+        assert!(
+            s.list(g)
+                .unwrap()
+                .entries
+                .iter()
+                .all(|e| e.icon.as_ref().map(Text::expose) == Some("hue:3"))
+        );
+        let at = modified(&s);
+        s.set_entry_icons(&[a, b], Some("hue:3")).unwrap();
+        assert_eq!(modified(&s), at);
+        s.set_entry_icons(&[a], None).unwrap();
+        assert_eq!(
+            s.list(g)
+                .unwrap()
+                .entries
+                .iter()
+                .filter(|e| e.icon.is_none())
+                .count(),
+            1
+        );
+    }
 
     const DAY: i64 = 86_400_000;
 

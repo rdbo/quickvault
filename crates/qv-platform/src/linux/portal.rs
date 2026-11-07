@@ -177,6 +177,22 @@ mod tests {
         let long = format!("file:///{}", "a".repeat(MAX_PICKED + 1));
         assert_eq!(uri_to_path(&long), None);
     }
+    /// Against a real or mock portal on the bus in `QV_TEST_PORTAL_BUS`
+    /// (skipped when unset): a pick must answer, not hang.
+    #[test]
+    fn portal_pick_answers_on_a_live_bus() {
+        let Ok(address) = std::env::var("QV_TEST_PORTAL_BUS") else {
+            return;
+        };
+        for kind in [Pick::Open, Pick::Save("x.qvault".into()), Pick::Open] {
+            let builder = zbus::connection::Builder::address(address.as_str());
+            let result = future::block_on(future::or(choose(builder, "Open", &kind), async {
+                async_io::Timer::after(Duration::from_secs(15)).await;
+                Err(PlatformError::Cancelled)
+            }));
+            assert_eq!(result, Ok(Some(PathBuf::from("/tmp/picked file.qvault"))));
+        }
+    }
     #[test]
     fn portal_without_a_session_bus_is_unavailable() {
         // Point the session bus at a socket that does not exist.

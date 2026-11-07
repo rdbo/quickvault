@@ -10,6 +10,12 @@ use std::sync::Arc;
 
 /// Launch the shared Android/Linux UI with required platform services.
 pub fn run() -> ! {
+    // The file-picker helper (plan 0044): answer and exit before hardening,
+    // the instance lock or any vault access.
+    #[cfg(target_os = "linux")]
+    if let Some(code) = crate::picker::helper() {
+        std::process::exit(code);
+    }
     qv_core::harden();
     #[cfg(target_os = "linux")]
     let guard = match linux_setup(state_root().map_err(|_| AppError::PrivateStorage)) {
@@ -78,6 +84,8 @@ fn launch(title: &'static str, script: &'static [u8]) -> ! {
         ("text/css", include_bytes!("../assets/app.css")),
     );
     policy.assets.insert("/app.js", ("text/javascript", script));
+    // Attachment previews: from memory only (0003 §6.4, plan 0044).
+    policy.preview = Some(std::sync::Arc::new(crate::preview::serve));
     let (width, height) = window_size();
     let config = dioxus_desktop::Config::new()
         .with_window(

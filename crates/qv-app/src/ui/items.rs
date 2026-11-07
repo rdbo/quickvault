@@ -3,13 +3,14 @@
 //! Vault items: the list beside the detail, the entry card (click a field to
 //! copy, 30 s reveals), in-place editing, move, history and attachments.
 //! Protected values appear only through a reveal; forms never prefill them.
-use super::icons::{Icon, Svg, initial, item_hue, kind_icon};
+use super::icons::{Icon, Svg, hue_class, initial, item_hue, kind_icon};
 use super::shell::{ReportCard, Unreadable, act, go, kind_label};
 use crate::controller::{Controller, FormEpoch};
 use crate::views::{self, EntryView, FieldRow, ItemRow, kind_name};
 use crate::workspace::{CopyKey, Live, Report, RevealKey, Screen, WsAction, WsField};
 use dioxus::prelude::*;
-use qv_core::{FieldKind, ItemHandle};
+use qv_core::{EntryHandle, FieldKind, ItemHandle};
+use std::collections::BTreeSet;
 use zeroize::Zeroizing;
 
 const MASK: &str = "••••••••";
@@ -21,10 +22,6 @@ fn text(v: Option<qv_core::SecretBytes>) -> Zeroizing<String> {
         v.map(|v| String::from_utf8_lossy(v.expose_secret()).into_owned())
             .unwrap_or_default(),
     )
-}
-fn pick(c: &Controller, e: FormEpoch, s: Screen) -> impl FnMut(MouseEvent) + 'static {
-    let c = c.clone();
-    move |_| c.select(e, s.clone())
 }
 fn back(c: &Controller, e: FormEpoch) -> impl FnMut(MouseEvent) + 'static {
     let c = c.clone();
@@ -221,6 +218,10 @@ pub(crate) fn ListPane(
 ) -> Element {
     let _ = revision;
     let mut menu = use_signal(|| false);
+    // Plan 0044: multi-select (record ids) and the open row menu.
+    let mut anchor = use_signal(|| None::<String>);
+    let mut row_menu = use_signal(|| None::<String>);
+    let mut bar_pop = use_signal(|| None::<BarPop>);
     let form = screen.is_form() || busy;
     let current = match &screen {
         Screen::Entry(e)
@@ -338,9 +339,195 @@ pub(crate) fn ListPane(
         Screen::Browse(Some(g)) => Some(*g),
         _ => None,
     };
+    // Shown rows in display order; the selection only counts what is shown.
+    let order: Vec<(String, EntryHandle)> = sections
+        .iter()
+        .flat_map(|(_, v)| v.iter().map(|(r, _)| (r.handle.id_hex(), r.handle)))
+        .collect();
+    // The multi-selection lives in the workspace, so Escape and Android Back
+    // can end it from anywhere (plan 0044).
+    let selection = controller.selection(epoch);
+    let chosen = selection.clone().unwrap_or_default();
+    let picked: Vec<EntryHandle> = order
+        .iter()
+        .filter(|(id, _)| chosen.contains(id))
+        .map(|(_, h)| *h)
+        .collect();
+    let in_selection = selection.is_some() && !form;
+    let click = {
+        let c = controller.clone();
+        let order = order.clone();
+        move |id: String, h: EntryHandle| {
+            let c = c.clone();
+            let order = order.clone();
+            move |e: MouseEvent| {
+                let m = e.modifiers();
+                let from = anchor();
+                let current = c.selection(epoch);
+                if m.shift() && (current.is_some() || from.is_some()) {
+                    let mut set = current.unwrap_or_default();
+                    let at = |x: &str| order.iter().position(|(i, _)| i == x);
+                    if let (Some(a), Some(b)) = (from.as_deref().and_then(at), at(&id)) {
+                        let (lo, hi) = (a.min(b), a.max(b));
+                        for (i, _) in &order[lo..=hi] {
+                            set.insert(i.clone());
+                        }
+                    } else {
+                        set.insert(id.clone());
+                    }
+                    c.set_selection(epoch, Some(set));
+                } else if current.is_some() || m.ctrl() || m.meta() {
+                    let mut set = current.clone().unwrap_or_default();
+                    if !set.remove(&id) {
+                        set.insert(id.clone());
+                    }
+                    anchor.set(Some(id.clone()));
+                    // Ctrl-clicking the last one off ends a Ctrl-started selection.
+                    let keep = !set.is_empty() || current.is_some() && !(m.ctrl() || m.meta());
+                    c.set_selection(epoch, keep.then_some(set));
+                } else {
+                    anchor.set(Some(id.clone()));
+                    c.select(epoch, Screen::Entry(h));
+                }
+            }
+        }
+    };
+    let leave = {
+        let c = controller.clone();
+        move || {
+            bar_pop.set(None);
+            c.set_selection(epoch, None);
+        }
+    };
+    // Escape closes the row menu or a bar popover here; ending the selection
+    // is the root shortcut's job (it works wherever focus is).
+    let keys = {
+        let order = order.clone();
+        let c = controller.clone();
+        move |e: KeyboardEvent| {
+            let ctrl = e.modifiers().ctrl() || e.modifiers().meta();
+            if e.key() == Key::Escape && (row_menu().is_some() || bar_pop().is_some()) {
+                e.stop_propagation();
+                e.prevent_default();
+                if row_menu().is_some() {
+                    row_menu.set(None);
+                } else {
+                    bar_pop.set(None);
+                }
+            } else if c.selection(epoch).is_some()
+                && ctrl
+                && matches!(e.key(), Key::Character(ref k) if k == "a" || k == "A")
+            {
+                e.stop_propagation();
+                e.prevent_default();
+                c.set_selection(epoch, Some(order.iter().map(|(i, _)| i.clone()).collect()));
+            }
+        }
+    };
+    // Move targets, read only while selecting.
+    let groups = if in_selection {
+        group
+            .or_else(|| controller.read(epoch, |s| s.root()).and_then(Result::ok))
+            .map(|g| super::editor::group_choices(&controller, epoch, g))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let start_selecting = {
+        let c = controller.clone();
+        move |_| {
+            row_menu.set(None);
+            c.set_selection(epoch, Some(BTreeSet::new()));
+        }
+    };
+    let selbar = {
+        let all_ids: BTreeSet<String> = order.iter().map(|(i, _)| i.clone()).collect();
+        let all_on = !all_ids.is_empty() && picked.len() == all_ids.len();
+        let n = picked.len();
+        let none = n == 0;
+        let batch = |a: fn(Vec<EntryHandle>) -> WsAction| {
+            let c = controller.clone();
+            let picked = picked.clone();
+            let mut leave = leave.clone();
+            move |_| {
+                c.act(epoch, a(picked.clone()));
+                leave();
+            }
+        };
+        let colour = |n: Option<u8>| {
+            let c = controller.clone();
+            let picked = picked.clone();
+            let mut leave = leave.clone();
+            move |_| {
+                c.act(epoch, WsAction::ColourMany(picked.clone(), n));
+                leave();
+            }
+        };
+        let move_to = |g: qv_core::GroupHandle| {
+            let c = controller.clone();
+            let picked = picked.clone();
+            let mut leave = leave.clone();
+            move |_| {
+                c.act(epoch, WsAction::MoveMany(picked.clone(), g));
+                leave();
+            }
+        };
+        let mut leave_btn = leave.clone();
+        rsx! {
+            div { class: "selbar", role: "toolbar", "aria-label": "Selection",
+                button { class: "icon-btn", id: "sel-exit", "aria-label": "Leave selection", title: "Leave selection (Esc)", onclick: move |_| leave_btn(), Svg { icon: Icon::Close } }
+                b { class: "sel-n", if none { "Select items" } else { "{n} selected" } }
+                button { class: if all_on { "icon-btn on" } else { "icon-btn" }, id: "sel-all", title: if all_on { "Clear the selection" } else { "Select all (Ctrl A)" }, "aria-label": if all_on { "Clear the selection" } else { "Select all" },
+                    onclick: { let c = controller.clone(); move |_| c.set_selection(epoch, Some(if all_on { BTreeSet::new() } else { all_ids.clone() })) },
+                    Svg { icon: Icon::All }
+                }
+                div { class: "pop-anchor",
+                    button { class: "icon-btn", id: "sel-colour", "aria-label": "Color", title: "Color", disabled: none,
+                        onclick: move |_| bar_pop.set(if bar_pop() == Some(BarPop::Colour) { None } else { Some(BarPop::Colour) }),
+                        Svg { icon: Icon::Palette }
+                    }
+                    if bar_pop() == Some(BarPop::Colour) {
+                        button { class: "pop-scrim", "aria-label": "Close menu", tabindex: "-1", onclick: move |_| bar_pop.set(None) }
+                        div { class: "menu pop end", role: "menu", "aria-label": "Color",
+                            div { class: "label", "COLOR" }
+                            div { class: "ie-swatches",
+                                for h in 0..crate::editor::HUES {
+                                    button { class: hue_class(h), id: "sel-colour-{h}", "aria-label": "Color {h + 1}", onclick: colour(Some(h)) }
+                                }
+                            }
+                            hr {}
+                            button { class: "mi", id: "sel-colour-auto", onclick: colour(None), Svg { icon: Icon::Refresh } "Automatic" }
+                        }
+                    }
+                }
+                div { class: "pop-anchor",
+                    button { class: "icon-btn", id: "sel-move", "aria-label": "Move", title: "Move to a group", disabled: none,
+                        onclick: move |_| bar_pop.set(if bar_pop() == Some(BarPop::Move) { None } else { Some(BarPop::Move) }),
+                        Svg { icon: Icon::Move }
+                    }
+                    if bar_pop() == Some(BarPop::Move) {
+                        button { class: "pop-scrim", "aria-label": "Close menu", tabindex: "-1", onclick: move |_| bar_pop.set(None) }
+                        div { class: "menu pop end", role: "menu",
+                            div { class: "label", "MOVE TO" }
+                            for (g, name, h) in groups.clone() {
+                                button { class: "mi", role: "menuitem", onclick: move_to(g), span { class: "ie-dot {h}" } "{name}" }
+                            }
+                        }
+                    }
+                }
+                button { class: "icon-btn danger", id: "sel-trash", "aria-label": "Move to the trash", title: "Move to the trash", disabled: none, onclick: batch(WsAction::TrashMany), Svg { icon: Icon::Trash } }
+            }
+        }
+    };
     rsx! {
-        section { class: "list", "aria-label": "Items",
-            div { class: "phone-head", h2 { "{title}" } }
+        section { class: if in_selection { "list selecting" } else { "list" }, "aria-label": "Items", onkeydown: keys,
+            div { class: "phone-head",
+                div { class: "ph-row",
+                    h2 { "{title}" }
+                    if count > 0 && !in_selection { button { class: "link", id: "list-select-phone", disabled: form, onclick: start_selecting.clone(), "Select" } }
+                }
+            }
+            if in_selection { {selbar} } else {
             div { class: "list-head",
                 h2 { "{title}" } span { class: "count", "{count}" } span { class: "sp" }
                 if let Some(g) = group {
@@ -362,7 +549,9 @@ pub(crate) fn ListPane(
                         }
                     }
                 }
+                if count > 0 { button { class: "icon-btn", id: "list-select", "aria-label": "Select items", title: "Select items (Ctrl-click, Shift-click)", disabled: form, onclick: start_selecting, Svg { icon: Icon::Check } } }
                 button { class: "icon-btn acc", id: "list-new", "aria-label": "New item", title: "New item (Ctrl N)", disabled: form, onclick: new_entry, Svg { icon: Icon::Plus } }
+            }
             }
             label { class: "filter", Svg { icon: Icon::Search }
                 Input { controller: controller.clone(), epoch, field: WsField::Query, label: if list == Screen::Search { "Search the vault".to_owned() } else { format!("Filter {}", title.to_lowercase()) },
@@ -388,16 +577,63 @@ pub(crate) fn ListPane(
                 for (letter, items) in sections {
                     div { class: "sect", "{letter}" }
                     for (row, kind) in items {
-                        div { class: if current == Some(row.handle) { "row on" } else { "row" }, key: "{row.handle.id_hex()}",
-                            button { class: "open item-open", "aria-label": "Open {row.title.as_str()}", disabled: form, onclick: pick(&controller, epoch, Screen::Entry(row.handle)) }
-                            span { class: "tile {item_hue(row.colour, &row.handle.id_hex())}", "{initial(&row.title)}" }
+                        {
+                            let id = row.handle.id_hex();
+                            let on = chosen.contains(&id);
+                            let menu_open = row_menu().as_deref() == Some(id.as_str());
+                            let h = row.handle;
+                            let class = match (in_selection && on, current == Some(h) && !in_selection) {
+                                (true, _) => "row sel",
+                                (false, true) => "row on",
+                                _ => "row",
+                            };
+                            let label = if in_selection { format!("Select {}", row.title.as_str()) } else { format!("Open {}", row.title.as_str()) };
+                            rsx! {
+                        div { class, key: "{id}",
+                            oncontextmenu: { let id = id.clone(); move |e: MouseEvent| { e.prevent_default(); if !form && !in_selection { row_menu.set(Some(id.clone())); } } },
+                            button { class: "open item-open", "aria-label": "{label}", "aria-pressed": if in_selection { if on { "true" } else { "false" } } else { "" }, disabled: form, onclick: click(id.clone(), h) }
+                            if in_selection {
+                                span { class: if on { "tile check on" } else { "tile check" }, Svg { icon: Icon::Check, large: true } }
+                            } else {
+                                span { class: "tile {item_hue(row.colour, &id)}", "{initial(&row.title)}" }
+                            }
                             span { class: "t", b { class: "row-title", "{row.title.as_str()}" }
                                 span { if row.subtitle.is_empty() { "{kind_label(&kind)}" } else { "{row.subtitle.as_str()}" } }
                             }
                             if row.conflict { span { class: "cbadge", "conflict" } }
+                            if !in_selection {
                             span { class: "quick",
                                 if !row.subtitle.is_empty() { button { "aria-label": "Copy the first field", title: "Copy {row.subtitle.as_str()}", disabled: form, onclick: quick(row.handle, false), Svg { icon: Icon::User } } }
                                 button { "aria-label": "Copy the protected field", title: "Copy password", disabled: form, onclick: quick(row.handle, true), Svg { icon: Icon::Key } }
+                            }
+                            }
+                            if menu_open {
+                                button { class: "pop-scrim", "aria-label": "Close menu", tabindex: "-1", onclick: move |_| row_menu.set(None),
+                                    // A right click elsewhere closes this menu (it must not reopen it).
+                                    oncontextmenu: move |e: MouseEvent| { e.prevent_default(); e.stop_propagation(); row_menu.set(None); } }
+                                div { class: "row-menu",
+                                    div { class: "menu pop end", role: "menu", "aria-label": "{row.title.as_str()}",
+                                        button { class: "mi", role: "menuitem", id: "row-open", onclick: { let c = controller.clone(); move |_| { row_menu.set(None); c.select(epoch, Screen::Entry(h)); } }, Svg { icon: Icon::Right } "Open" }
+                                        if !row.subtitle.is_empty() { button { class: "mi", role: "menuitem", onclick: { let f = quick(h, false); move |e| { row_menu.set(None); f(e) } }, Svg { icon: Icon::User } "Copy {row.subtitle.as_str()}" } }
+                                        button { class: "mi", role: "menuitem", id: "row-copy-password", onclick: { let f = quick(h, true); move |e| { row_menu.set(None); f(e) } }, Svg { icon: Icon::Key } "Copy password" }
+                                        hr {}
+                                        div { class: "label", "COLOR" }
+                                        div { class: "ie-swatches",
+                                            for n in 0..crate::editor::HUES {
+                                                button { class: if row.colour == Some(n) { format!("on {}", hue_class(n)) } else { hue_class(n).to_owned() }, "aria-label": "Color {n + 1}",
+                                                    onclick: { let c = controller.clone(); move |_| { row_menu.set(None); c.act(epoch, WsAction::ColourMany(vec![h], Some(n))); } } }
+                                            }
+                                        }
+                                        button { class: "mi", role: "menuitem", onclick: { let c = controller.clone(); move |_| { row_menu.set(None); c.act(epoch, WsAction::ColourMany(vec![h], None)); } }, Svg { icon: Icon::Refresh } "Automatic color" }
+                                        hr {}
+                                        button { class: "mi", role: "menuitem", onclick: { let c = controller.clone(); move |_| { row_menu.set(None); c.navigate(epoch, Screen::Move(ItemHandle::Entry(h), None)); } }, Svg { icon: Icon::Move } "Move to group…" }
+                                        button { class: "mi", role: "menuitem", id: "row-select", onclick: { let id = id.clone(); let c = controller.clone(); move |_| { row_menu.set(None); anchor.set(Some(id.clone())); c.set_selection(epoch, Some(BTreeSet::from([id.clone()]))); } }, Svg { icon: Icon::Check } "Select" }
+                                        hr {}
+                                        button { class: "mi danger", role: "menuitem", id: "row-trash", onclick: { let c = controller.clone(); move |_| { row_menu.set(None); c.act(epoch, WsAction::TrashMany(vec![h])); } }, Svg { icon: Icon::Trash } "Move to trash" }
+                                    }
+                                }
+                            }
+                        }
                             }
                         }
                     }
@@ -408,6 +644,12 @@ pub(crate) fn ListPane(
             }
         }
     }
+}
+/// The selection bar's open popover.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BarPop {
+    Colour,
+    Move,
 }
 #[component]
 fn RecoveredLink(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
@@ -746,10 +988,28 @@ fn EntryScreen(
                 }
             }
             EntryBody { controller: controller.clone(), epoch, revision, view: view.clone(), history: None, live }
-            if !files.is_empty() {
-                div { class: "card",
-                    div { class: "card-h", "ATTACHMENTS" button { class: "link", onclick: go(&controller, epoch, Screen::Attachments(entry)), "Manage" } }
-                    div { class: "files", for a in files { span { class: "file", Svg { icon: Icon::File } b { "{a.name.as_str()}" } small { "{a.size} bytes" } } } }
+            // The attachment shelf (plan 0044): open one to preview it here.
+            if editable || !files.is_empty() {
+                div { class: "shelf",
+                    div { class: "shelf-h", span { "FILES" } if !files.is_empty() { button { class: "link", onclick: go(&controller, epoch, Screen::Attachments(entry)), "Manage" } } }
+                    div { class: "shelf-row",
+                        for a in files {
+                            button { class: "shelf-tile {file_tone(&a.name, &a.mime)}", disabled: a.conflicted, title: "{a.name.as_str()}",
+                                "aria-label": "Preview {a.name.as_str()}",
+                                onclick: act(&controller, epoch, WsAction::Preview(a.handle)),
+                                span { class: "st-glyph", Svg { icon: file_icon(&a.name, &a.mime), large: true } }
+                                b { "{a.name.as_str()}" }
+                                small { if a.conflicted { "conflict" } else { "{human_size(a.size)}" } }
+                            }
+                        }
+                        if editable {
+                            button { class: "shelf-tile add", id: "shelf-add", onclick: go(&controller, epoch, Screen::Attachments(entry)),
+                                span { class: "st-glyph", Svg { icon: Icon::Plus, large: true } }
+                                b { "Add a file" }
+                                small { "Up to 10 MiB" }
+                            }
+                        }
+                    }
                 }
             }
             div { class: "foot",
@@ -888,6 +1148,7 @@ fn Attachments(
                     div { class: "dev",
                         div { class: "di", Svg { icon: Icon::File, large: true } }
                         div { class: "l", b { "{a.name.as_str()}" } span { "{a.mime.as_str()} · {a.size} bytes" if a.conflicted { " · conflict" } } }
+                        button { class: "btn", disabled: a.conflicted, onclick: act(&controller, epoch, WsAction::Preview(a.handle)), Svg { icon: Icon::Eye } "Preview" }
                         SaveAttachment { controller: controller.clone(), epoch, handle: a.handle, name: a.name.to_string(), disabled: a.conflicted }
                         button { class: "btn subtle", "aria-label": "Remove {a.name.as_str()}", disabled: a.conflicted, onclick: act(&controller, epoch, WsAction::RemoveAttachment(a.handle)), Svg { icon: Icon::Trash } }
                     }
@@ -899,6 +1160,207 @@ fn Attachments(
                 Input { controller: controller.clone(), epoch, field: WsField::AttachName, label: "Name", kind: Kind::Line, value: None, disabled: false }
                 Input { controller: controller.clone(), epoch, field: WsField::AttachMime, label: "MIME type", kind: Kind::Line, value: None, disabled: false }
             }
+        }
+    }
+}
+/// A size for people: bytes, KB or MB.
+pub(crate) fn human_size(n: u64) -> String {
+    match n {
+        0..1_000 => format!("{n} bytes"),
+        1_000..1_000_000 => format!("{:.0} KB", n as f64 / 1_000.0),
+        _ => format!("{:.1} MB", n as f64 / 1_000_000.0),
+    }
+}
+/// The shelf's colour family for a file, from its untrusted name and type
+/// (decoration only; previews never trust these).
+fn file_tone(name: &str, mime: &str) -> &'static str {
+    match file_family(name, mime) {
+        Family::Image => "img",
+        Family::Audio => "aud",
+        Family::Video => "vid",
+        Family::Text => "txt",
+        Family::Other => "oth",
+    }
+}
+fn file_icon(name: &str, mime: &str) -> Icon {
+    match file_family(name, mime) {
+        Family::Text => Icon::Note,
+        _ => Icon::File,
+    }
+}
+enum Family {
+    Image,
+    Audio,
+    Video,
+    Text,
+    Other,
+}
+fn file_family(name: &str, mime: &str) -> Family {
+    let ext = name
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    let m = mime.to_ascii_lowercase();
+    if m.starts_with("image/") || matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp") {
+        Family::Image
+    } else if m.starts_with("audio/")
+        || matches!(ext.as_str(), "mp3" | "ogg" | "wav" | "flac" | "m4a")
+    {
+        Family::Audio
+    } else if m.starts_with("video/") || matches!(ext.as_str(), "mp4" | "webm") {
+        Family::Video
+    } else if m.starts_with("text/")
+        || matches!(ext.as_str(), "txt" | "md" | "csv" | "json" | "log")
+    {
+        Family::Text
+    } else {
+        Family::Other
+    }
+}
+
+/// The full-window attachment viewer (0003 §6.4, 0009 §1.8; plan 0044).
+/// Media load from the in-memory route; text renders as text. Escape or
+/// Back closes it and wipes the content; arrows step through the entry's
+/// files.
+#[component]
+pub(crate) fn Viewer(
+    controller: Controller,
+    epoch: FormEpoch,
+    preview: crate::preview::PreviewView,
+) -> Element {
+    use crate::preview::Kind;
+    let mut actual = use_signal(|| false);
+    let mut wrap = use_signal(|| true);
+    let p = preview;
+    let many = p.count > 1;
+    let keys = {
+        let c = controller.clone();
+        move |e: KeyboardEvent| match e.key() {
+            Key::Escape => {
+                e.stop_propagation();
+                e.prevent_default();
+                c.act(epoch, WsAction::ClosePreview);
+            }
+            Key::ArrowLeft if many => {
+                e.stop_propagation();
+                c.act(epoch, WsAction::PreviewStep(-1));
+            }
+            Key::ArrowRight if many => {
+                e.stop_propagation();
+                c.act(epoch, WsAction::PreviewStep(1));
+            }
+            _ => {}
+        }
+    };
+    let kind_name = match p.kind {
+        Kind::Image => "Image",
+        Kind::Audio => "Audio",
+        Kind::Video => "Video",
+        Kind::Text => "Text",
+        Kind::Unsupported => "File",
+    };
+    let lines = p.text.as_ref().map_or(0, |t| t.lines().count());
+    let save = {
+        #[cfg(target_os = "linux")]
+        let direct = !crate::documents::picker_missing();
+        #[cfg(not(target_os = "linux"))]
+        let direct = false;
+        let c = controller.clone();
+        let handle = p.handle;
+        let entry = p.entry;
+        let name = p.name.to_string();
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            if direct {
+                #[cfg(target_os = "linux")]
+                crate::documents::pick_path(
+                    &c,
+                    epoch,
+                    crate::documents::PathFor::Workspace,
+                    qv_core::platform::portal::Pick::Save(name.clone()),
+                    "Save a copy of the attachment",
+                    Some(WsAction::SaveAttachment(handle)),
+                );
+            } else {
+                // Android and portal-less desktops save from the files screen.
+                c.navigate(epoch, Screen::Attachments(entry));
+            }
+            let _ = (&name, handle);
+        }
+    };
+    let tone = file_tone(&p.name, p.mime);
+    let step = |d: i8| {
+        let c = controller.clone();
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            c.act(epoch, WsAction::PreviewStep(d));
+        }
+    };
+    rsx! {
+        // A click anywhere on the dark backdrop (title strip, stage, footer)
+        // closes the preview; the content and the controls keep their clicks.
+        div { class: "viewer v-{tone}", role: "dialog", "aria-modal": "true", "aria-label": "Preview of {p.name.as_str()}", tabindex: "-1", autofocus: true, onkeydown: keys,
+            onclick: act(&controller, epoch, WsAction::ClosePreview),
+            div { class: "v-top",
+                span { class: "v-badge", Svg { icon: file_icon(&p.name, p.mime) } }
+                div { class: "v-title", b { "{p.name.as_str()}" } span { "{kind_name} · {human_size(p.size)}" if many { " · {p.index + 1} of {p.count}" } } }
+                span { class: "sp" }
+                if p.kind == Kind::Image {
+                    button { class: "v-btn", id: "viewer-zoom", title: if actual() { "Fit to window" } else { "Actual size" }, onclick: move |e: MouseEvent| { e.stop_propagation(); actual.set(!actual()) },
+                        if actual() { "Fit" } else { "1:1" }
+                    }
+                }
+                if p.kind == Kind::Text {
+                    button { class: if wrap() { "v-btn on" } else { "v-btn" }, id: "viewer-wrap", "aria-pressed": if wrap() { "true" } else { "false" }, onclick: move |e: MouseEvent| { e.stop_propagation(); wrap.set(!wrap()) }, "Wrap" }
+                }
+                button { class: "v-btn", id: "viewer-save", onclick: save, Svg { icon: Icon::Archive } span { class: "v-lbl", "Save a copy" } }
+                button { class: "v-btn icon", id: "viewer-close", "aria-label": "Close preview", title: "Close (Esc)", onclick: act(&controller, epoch, WsAction::ClosePreview), Svg { icon: Icon::Close, large: true } }
+            }
+            div { class: "v-stage",
+                if many {
+                    button { class: "v-nav prev", "aria-label": "Previous file", onclick: step(-1), Svg { icon: Icon::Back, large: true } }
+                }
+                match (p.kind, p.src.clone(), p.text.clone()) {
+                    (Kind::Image, Some(src), _) => rsx! {
+                        div { class: if actual() { "v-img actual" } else { "v-img" },
+                            img { src: "{src}", alt: "{p.name.as_str()}", draggable: "false", onclick: move |e: MouseEvent| { e.stop_propagation(); actual.set(!actual()) } }
+                        }
+                    },
+                    (Kind::Audio, Some(src), _) => rsx! {
+                        div { class: "v-audio", onclick: |e: MouseEvent| e.stop_propagation(),
+                            div { class: "v-disc", div { class: "v-disc-label", Svg { icon: Icon::File, large: true } } }
+                            div { class: "v-eq", "aria-hidden": "true", for _ in 0..24 { i {} } }
+                            b { class: "v-track", "{p.name.as_str()}" }
+                            audio { src: "{src}", controls: true, preload: "metadata" }
+                        }
+                    },
+                    (Kind::Video, Some(src), _) => rsx! {
+                        div { class: "v-video", onclick: |e: MouseEvent| e.stop_propagation(), video { src: "{src}", controls: true, preload: "metadata", "playsinline": "true" } }
+                    },
+                    (Kind::Text, _, Some(text)) => rsx! {
+                        div { class: "v-text", onclick: |e: MouseEvent| e.stop_propagation(),
+                            div { class: "v-text-meta", span { "{lines} lines" } if p.cut { span { class: "v-cut", "Showing the first 1 MB" } } }
+                            pre { class: if wrap() { "v-pre wrap" } else { "v-pre" }, "{text.as_str()}" }
+                        }
+                    },
+                    _ => rsx! {
+                        div { class: "v-none", onclick: |e: MouseEvent| e.stop_propagation(),
+                            div { class: "v-none-glyph", Svg { icon: Icon::File, large: true } }
+                            b { "No preview for this kind of file" }
+                            span { "QuickVault shows images, audio, video and text. Other files never open here; save a copy to use them in another app." }
+                        }
+                    },
+                }
+                if many {
+                    button { class: "v-nav next", "aria-label": "Next file", onclick: step(1), Svg { icon: Icon::Right, large: true } }
+                }
+            }
+            if many {
+                div { class: "v-dots", "aria-hidden": "true",
+                    for i in 0..p.count.min(12) { i { class: if i == p.index { "on" } else { "" } } }
+                }
+            }
+            div { class: "v-foot", Svg { icon: Icon::Shield } "Decrypted in memory only. Nothing is written to disk unless you save a copy." }
         }
     }
 }

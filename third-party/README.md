@@ -45,6 +45,15 @@ Upstream license files are unchanged.
 
 Unmodified upstream unsafe is retained; product code adds none.
 
+- Plan 0044 (owner feedback), in hardened.rs/protocol.rs: the native event
+  allow-list also admits `contextmenu` (mouse data like `click`; hover,
+  pointer, drag, wheel and media events stay refused); an optional in-memory
+  `preview` provider answers `/preview/…` routes (GET only, same document
+  base, no query/body, single `bytes=` range → 206 with `Content-Range`,
+  `no-store`, `nosniff`, provider-chosen exact MIME; unknown → 404); the CSP
+  adds `media-src 'self'` (no `data:`/`blob:`). Tests
+  `hardened_events_are_an_allow_list`, `hardened_preview_ranges_and_csp`.
+
 - Plan 0033 device follow-up: edits.rs stores protocol connection metadata
   independently of the renderer's RefCell. CSP/bootstrap metadata reads no
   longer borrow the mutable render queue on Android request threads; the same

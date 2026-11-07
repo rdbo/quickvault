@@ -82,3 +82,4 @@ plan, or a new plan that names the one it supersedes.
 | [0041](0041-vault-list/PLAN.md) | Vault list, default folder and name-only create (owner follow-up to 2.10a) | Implemented — fresh review and owner acceptance pending |
 | [0042](0042-lan-one-scan-sync/PLAN.md) | One-scan LAN sync, no device links (owner direction; spec 0014) | Implemented — fresh review, phone run and D12 pending |
 | [0043](0043-owner-polish/PLAN.md) | Page fade, title-bar icon contrast, protection chip, `qv` binary (owner follow-ups) | Implemented — fresh review pending |
+| [0044](0044-owner-feedback-batch/PLAN.md) | List selection, sync receipt, conflict compare, in-app attachment previews, Android shell (owner feedback batch) | Implemented — fresh review and device check pending |
