@@ -609,3 +609,26 @@ used by `qv-app`/`qv-crypto`.)
   root; the zoom, wrap and save buttons (and, as before, the content and
   arrows) stop propagation. fmt, clippy (validation, Android) clean;
   `cargo test -p qv-app --features desktop` 87 passed.
+- 2026-11-07: Owner: a colour change (and closing a preview) still
+  re-rendered the whole screen. Cause: `Controller::read` refuses reads while
+  an operation owns the vault (so a long one cannot freeze the UI on the
+  session lock), and `run_op` bumped the revision at the start, so the shell
+  redrew exactly then: the list read as empty, the item page as "Loading…",
+  and both rebuilt (fade-in replayed) when the result landed. The 300 ms
+  busy delay did not cover this. Fix: `run_op` no longer bumps the revision
+  at the start (one redraw when the result lands; slow operations still
+  show via `busy_shown`); `ui::use_last` keeps each screen's last successful
+  read (shell items, overview, groups, recovered count; the list's group
+  listing; the item page's entry and attachments) while reads are refused,
+  so screens that redraw during a slow operation keep their content.
+  Closing a preview runs no operation; the only full-window change is
+  removing the viewer, whose `backdrop-filter` blur layer is now a plain
+  near-opaque backdrop (a blur layer's teardown can repaint the page under
+  it in WebKit) — not confirmed on the owner's machine. Test
+  `screens_keep_their_last_data_while_reads_are_refused` (no edits while a
+  read is refused; in-place text update after).
+- 2026-11-07: Owner: the title-bar vault name still flickered (shifting the
+  command bar). The root component's overview read was not cached. Now
+  `use_last` also covers the title-bar name, the sidebar's root group and
+  the list's recovered-items count; the only uncached unlocked read left is
+  the command palette's search, rendered only while the palette is open.

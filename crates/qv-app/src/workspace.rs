@@ -1309,7 +1309,10 @@ impl Controller {
         s.op_running = true;
         s.op_started = Some(Instant::now());
         s.active = Instant::now();
-        s.revision = s.revision.wrapping_add(1);
+        // No revision bump here: screens redraw when the result lands, so a
+        // quick operation causes one redraw with fresh data instead of a
+        // redraw while reads are refused (plan 0044). Slow ones show as busy
+        // through `View::busy_shown`.
         if let Some(ws) = s.workspace.as_mut() {
             ws.error = None;
             ws.notice = None;

@@ -230,6 +230,15 @@ pub(crate) fn ListPane(
         | Screen::Attachments(e) => Some(*e),
         _ => None,
     };
+    // The open group's listing, kept while an operation owns the vault.
+    let group_listing = super::use_last(match &list {
+        Screen::Browse(Some(g)) => controller
+            .read(epoch, |s| views::browse(s, Some(*g)))
+            .map(|r| r.map(Some)),
+        _ => Some(Ok(None)),
+    })
+    .and_then(Result::ok)
+    .flatten();
     let query = controller
         .peek(epoch, |ws| {
             String::from_utf8_lossy(ws.input(WsField::Query)).into_owned()
@@ -240,9 +249,7 @@ pub(crate) fn ListPane(
     let mut group_view = None;
     let (title, rows): (String, Vec<(views::EntryRow, Zeroizing<String>)>) = match &list {
         Screen::Browse(Some(g)) => {
-            let v = controller
-                .read(epoch, |s| views::browse(s, Some(*g)))
-                .and_then(Result::ok);
+            let v = group_listing.clone();
             let name = v
                 .as_ref()
                 .and_then(|v| v.crumbs.last().map(|c| c.1.to_string()))
@@ -654,10 +661,9 @@ enum BarPop {
 #[component]
 fn RecoveredLink(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
     let _ = revision;
-    let n = controller
-        .read(epoch, views::recovered)
+    let n = super::use_last(controller.read(epoch, |s| views::recovered(s).map(|r| r.len())))
         .and_then(Result::ok)
-        .map_or(0, |r| r.len());
+        .unwrap_or(0);
     rsx! {
         if n > 0 { button { class: "link m8", onclick: go(&controller, epoch, Screen::Recovered), "Recovered items whose group is missing ({n})" } }
     }
@@ -940,14 +946,15 @@ fn EntryScreen(
     // Which ⋯ opened the menu (0 phone bar, 1 desktop toolbar); it opens
     // under that button (a bottom sheet on phones).
     let mut menu = use_signal(|| None::<u8>);
-    let view = match controller.read(epoch, |s| views::entry(s, entry)) {
-        Some(Ok(v)) => v,
+    // Kept while an operation owns the vault, so the page does not blank.
+    let read = super::use_last(controller.read(epoch, |s| {
+        Ok((views::entry(s, entry)?, views::attachments(s, entry)?))
+    }));
+    let (view, files) = match read {
+        Some(Ok((v, f))) if v.handle == entry => (v, f),
+        Some(Ok(_)) => return rsx! { Unreadable { error: None } },
         other => return rsx! { Unreadable { error: other.and_then(Result::err) } },
     };
-    let files = controller
-        .read(epoch, |s| views::attachments(s, entry))
-        .and_then(Result::ok)
-        .unwrap_or_default();
     let item = ItemHandle::Entry(entry);
     let editable = !view.deleted && view.versions == 1;
     let open_menu =

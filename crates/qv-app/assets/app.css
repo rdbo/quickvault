@@ -746,7 +746,8 @@ button.set-row:hover:enabled{background:var(--raised)}
 .shelf-tile.txt{--t:hsl(200,75%,58%)}
 .shelf-tile.add{--t:var(--accent);border-style:dashed;background:transparent}
 .shelf-tile:disabled{opacity:.55}
-.viewer{--t:var(--accent);position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;background:rgba(6,8,9,.86);backdrop-filter:blur(18px) saturate(1.2);-webkit-backdrop-filter:blur(18px) saturate(1.2);color:#eef2f3;animation:viewerIn .22s ease-out;outline:none}
+/* No backdrop-filter: tearing down a full-window blur layer repaints the page under it on close. */
+.viewer{--t:var(--accent);position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;background:rgba(6,8,9,.94);color:#eef2f3;animation:viewerIn .22s ease-out;outline:none}
 .viewer.v-img{--t:hsl(330,70%,62%)}.viewer.v-aud{--t:hsl(265,70%,68%)}.viewer.v-vid{--t:hsl(18,85%,60%)}.viewer.v-txt{--t:hsl(200,75%,58%)}
 .v-top{display:flex;align-items:center;gap:10px;padding:14px 16px;flex:none}
 .v-badge{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;background:color-mix(in srgb,var(--t) 22%,transparent);color:var(--t);flex:none}

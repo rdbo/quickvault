@@ -216,19 +216,18 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
         return rsx! {};
     };
     let fixture = super::is_fixture(&controller);
-    let all = controller
-        .read(epoch, views::all_items)
+    // The last data stays on screen while an operation owns the vault.
+    let all = super::use_last(controller.read(epoch, views::all_items))
         .and_then(Result::ok)
         .unwrap_or_default();
-    let overview = controller.read(epoch, views::overview).and_then(Result::ok);
-    let groups = controller
-        .read(epoch, views::top_groups)
+    let overview = super::use_last(controller.read(epoch, views::overview)).and_then(Result::ok);
+    let groups = super::use_last(controller.read(epoch, views::top_groups))
         .and_then(Result::ok)
         .unwrap_or_default();
-    let recovered = controller
-        .read(epoch, views::recovered)
-        .and_then(Result::ok)
-        .map_or(0, |r| r.len());
+    let recovered =
+        super::use_last(controller.read(epoch, |s| views::recovered(s).map(|r| r.len())))
+            .and_then(Result::ok)
+            .unwrap_or(0);
     let context = controller
         .list_context(epoch)
         .unwrap_or(Screen::Browse(None));
@@ -259,7 +258,7 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
     kinds.sort_by(|a, b| (rank(&a.0), a.0.as_str()).cmp(&(rank(&b.0), b.0.as_str())));
     let in_group =
         |g: qv_core::GroupHandle| all.iter().filter(|i| i.path.first() == Some(&g)).count();
-    let root = controller.read(epoch, |s| s.root()).and_then(Result::ok);
+    let root = super::use_last(controller.read(epoch, |s| s.root())).and_then(Result::ok);
     let new_in = match &context {
         Screen::Browse(Some(g)) => Some(*g),
         _ => root,

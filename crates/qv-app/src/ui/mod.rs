@@ -190,14 +190,17 @@ fn Root(controller: Controller, revision: u64) -> Element {
     };
     #[cfg(target_os = "android")]
     crate::android::sync_theme(view.theme);
-    let name = if unlocked {
-        controller
-            .read(epoch, crate::views::overview)
-            .and_then(Result::ok)
-            .map(|o| o.name.to_string())
+    // The title bar's vault name, kept while an operation owns the vault so
+    // it does not blank and shift the command bar (plan 0044).
+    let name = use_last(if unlocked {
+        controller.read(epoch, |s| {
+            crate::views::overview(s).map(|o| Some(o.name.to_string()))
+        })
     } else {
-        None
-    };
+        Some(Ok(None))
+    })
+    .and_then(Result::ok)
+    .flatten();
     rsx! {
         div { class: "qv", "data-mode": view.theme.name(), "data-qv-epoch": "{epoch.0}", tabindex: "-1", onkeydown: keys,
             onclick: { let seen = seen.clone(); move |_| { seen(); redraw.now() } },
@@ -864,6 +867,25 @@ fn WordInput(
     }
 }
 
+/// The last successful read of a screen's data. Reads are refused while an
+/// operation owns the vault; showing the last data meanwhile keeps a screen
+/// from blanking and then rebuilding (plan 0044). Errors pass through. The
+/// copy lives as long as the component (it is dropped, and zeroized, when
+/// the vault view unmounts on lock).
+pub(crate) fn use_last<T: Clone + 'static>(
+    fresh: Option<Result<T, AppError>>,
+) -> Option<Result<T, AppError>> {
+    let cache = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(None::<T>)));
+    match fresh {
+        Some(Ok(v)) => {
+            *cache.borrow_mut() = Some(v.clone());
+            Some(Ok(v))
+        }
+        None => cache.borrow().clone().map(Ok),
+        other => other,
+    }
+}
+
 /// Numbered recovery words; the `.phrase` class lets cleanup clear them.
 #[component]
 fn PhraseGrid(words: Vec<(usize, Zeroizing<String>)>, hidden: bool) -> Element {
@@ -980,6 +1002,52 @@ mod tests {
             .navigate(env.epoch(), crate::workspace::Screen::Entry(first));
         dom.mark_dirty(ScopeId::APP);
         dom.render_immediate_to_vec();
+    }
+
+    thread_local! {
+        static FRESH: RefCell<Option<Result<String, AppError>>> = const { RefCell::new(None) };
+    }
+    fn cached() -> Element {
+        let shown = use_last(FRESH.with(|f| f.borrow().clone()));
+        match shown {
+            Some(Ok(v)) => rsx! { p { "{v}" } },
+            Some(Err(_)) => rsx! { p { "error" } },
+            None => rsx! { p { "Loading…" } },
+        }
+    }
+    /// Dynamic text the edits write.
+    fn texts(edits: &[Mutation]) -> Vec<String> {
+        edits
+            .iter()
+            .filter_map(|m| match m {
+                Mutation::CreateTextNode { value, .. } | Mutation::SetText { value, .. } => {
+                    Some(value.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn screens_keep_their_last_data_while_reads_are_refused() {
+        FRESH.with(|f| *f.borrow_mut() = Some(Ok("Bank".to_owned())));
+        let mut dom = VirtualDom::new(cached);
+        assert_eq!(texts(&dom.rebuild_to_vec().edits), ["Bank"]);
+        // An operation owns the vault: the read is refused (None). Nothing
+        // changes on screen: no "Loading…", no rebuilt template.
+        FRESH.with(|f| *f.borrow_mut() = None);
+        dom.mark_dirty(ScopeId::APP);
+        let edits = dom.render_immediate_to_vec().edits;
+        assert!(edits.is_empty(), "{edits:?}");
+        // Fresh data updates the text in place; an error still shows.
+        FRESH.with(|f| *f.borrow_mut() = Some(Ok("Mail".to_owned())));
+        dom.mark_dirty(ScopeId::APP);
+        let edits = dom.render_immediate_to_vec().edits;
+        assert_eq!(texts(&edits), ["Mail"]);
+        assert!(!creates(&edits), "{edits:?}");
+        FRESH.with(|f| *f.borrow_mut() = Some(Err(AppError::Unavailable)));
+        dom.mark_dirty(ScopeId::APP);
+        assert!(creates(&dom.render_immediate_to_vec().edits));
     }
 
     #[test]
