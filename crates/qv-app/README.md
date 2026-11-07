@@ -61,8 +61,10 @@ Validation: [2.4](../../plans/0030-app-foundation/VALIDATION.md),
 [2.5](../../plans/0031-app-vault-workflows/VALIDATION.md),
 [2.7](../../plans/0034-android-autofill/VALIDATION.md).
 
-Android autofill (plan 0034, 0009 §4.4) is implemented behind its own
-device-validation gate; no device or browser is enabled yet. The service only
+Android autofill (plan 0034, 0009 §4.4) is on wherever Android supports it
+(Android 11+, owner decision 2026-11-07); pick QuickVault as the autofill
+service in Settings → Password → Autofill. Browsers stay off until their
+signer digests are allowlisted (below). The service only
 hands off: it returns a generic "Unlock QuickVault to fill" entry. The shared
 app then shows the requester, needs unlock and an explicit choice (each
 conflicting version is listed separately), and returns only the chosen
@@ -78,9 +80,10 @@ The chosen values pass through JNI/JVM arrays (zeroed after use),
 copies, as for the other Android adapters. On an enabled device, Settings →
 Password → Autofill opens Android's autofill-service chooser.
 
-Android quick unlock (plan 0033) is implemented behind a device-validation gate.
-No device is enabled yet. Unsupported/unvalidated devices keep password unlock.
-On a validated API 30+ device, Settings → Password offers password-reauthenticated
+Android quick unlock (plan 0033) is on wherever the device supports it (owner
+decision 2026-11-07, plan 0044); a device whose keystore key fails the
+TEE/StrongBox and per-use authentication checks keeps password unlock.
+On an API 30+ device, Settings → Password offers password-reauthenticated
 Class 3 enrollment and a separate **device credential · reduced protection**
 action. The latter makes the device PIN/pattern/password a vault credential;
 biometric unlock never silently falls back to it. Each operation needs native

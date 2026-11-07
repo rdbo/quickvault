@@ -338,8 +338,9 @@ on titles, labels, activity names or URL substrings.
   fields. The handoff activity re-reads the requester's signing digests before
   returning the dataset. A lock after the request is bound to an unlocked
   session cancels it.
-- *Gate:* autofill answers no request on devices without recorded
-  validation (0012 §3).
+- *Availability:* autofill is on wherever Android supports it (Android 11+,
+  once the user picks QuickVault as the autofill service); 0012 §3's device
+  validation is release evidence, not a gate (owner decision, 2026-11-07).
 
 ### 5. Desktop specifics
 
@@ -397,6 +398,8 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-07: §4.4: autofill is on wherever Android supports it instead of
+  only on recorded validated devices (owner decision, plan 0044).
 - 2026-11-07: §1.8: Linux file picking goes through a helper process,
   because xdg-desktop-portal refuses the non-dumpable app (plan 0044).
 - 2026-11-07: §1.8: no typed vault path on the locked screen; item list

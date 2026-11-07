@@ -242,7 +242,15 @@ public class PlatformTest extends InstrumentationTestCase {
             // or the production app's ordinary screen-lock behavior.
             instrumentation.runOnMainSync(()->activity.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
             MainActivity main=(MainActivity)activity;
-            assertFalse("No unvalidated hardware backend is enabled",main.qvQuickAvailable());
+            // On wherever the device can (plan 0044): Android 11+ with a strong
+            // biometric or a device credential.
+            boolean capable=false;
+            if(android.os.Build.VERSION.SDK_INT>=30){
+                android.hardware.biometrics.BiometricManager bm=main.getSystemService(android.hardware.biometrics.BiometricManager.class);
+                capable=bm.canAuthenticate(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_STRONG)==android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS
+                    || bm.canAuthenticate(android.hardware.biometrics.BiometricManager.Authenticators.DEVICE_CREDENTIAL)==android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS;
+            }
+            assertEquals("Quick unlock follows the device's capability",capable,main.qvQuickAvailable());
             long unlockedDeadline=System.currentTimeMillis()+30000;
             while((main.qvStatus()&2)==0 && System.currentTimeMillis()<unlockedDeadline)Thread.sleep(100);
             assertEquals("Unlock the test phone before running instrumentation",2,main.qvStatus()&2);

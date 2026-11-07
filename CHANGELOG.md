@@ -32,6 +32,10 @@ Dates are ISO 8601. Newest first within each section.
   - App: attachments show as a shelf on the item page and open in a
     full-window viewer: images, audio, video and text, decrypted only into
     memory and never written to disk unless you save a copy. A click on the dark area around the content closes it.
+  - Android: fingerprint quick unlock and autofill are on wherever the
+    device supports them, instead of off until a device was validated
+    (specs 0012 §3, 0009 §4.4). Devices without the required secure hardware
+    keep password unlock.
   - Android: the app no longer draws under the status bar; the system bars
     follow the theme. Back goes back one level and closes the app only after
     a second Back at the top level.

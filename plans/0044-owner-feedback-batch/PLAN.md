@@ -403,6 +403,18 @@ used by `qv-app`/`qv-crypto`.)
   started by a non-dumpable parent, gets answers from the real portal.
 - **Verify:** `cargo test --locked -p qv-app --features desktop picker`.
 
+### Step 12 — Android quick unlock and autofill on by default
+
+- [x] **Do:** remove the empty `validatedFingerprints` gates from
+  `NativeQuickUnlock.available` and `AutofillGate`, and the build script's
+  autofill toggle (it now refuses a source that still has a device gate);
+  `PlatformTest` expects availability to follow the device's capability;
+  0012 §3 and 0009 §4.4 amended; README, ARCHITECTURE, CHANGELOG.
+- **Files:** `crates/qv-app/android/{MainActivity.kt,tests/PlatformTest.java}`,
+  `crates/qv-app/scripts/build-android.sh`, specs 0012/0009, docs.
+- **Done when:** APK builds; on the owner's phone Settings offers quick unlock.
+- **Verify:** `sh crates/qv-app/scripts/build-android.sh`.
+
 ## Test plan
 
 - Final verification: all `AGENTS.md` gates, plus `cargo clippy -p qv-app
@@ -632,3 +644,14 @@ used by `qv-app`/`qv-crypto`.)
   `use_last` also covers the title-bar name, the sidebar's root group and
   the list's recovered-items count; the only uncached unlocked read left is
   the command palette's search, rendered only while the palette is open.
+- 2026-11-07: Step 12 (owner decision: "Features should be on by default …
+  If the device is not capable … it just won't use the feature"). Quick
+  unlock keeps every capability check: Android 11+, a strong biometric or
+  device credential, and `validate` (TEE/StrongBox key with hardware-enforced
+  per-use authentication, Class 3 invalidated on enrollment); a failing key
+  aborts enrollment. Autofill keeps exact matching, unlock and explicit
+  choice; the browser allowlist stays empty (website autofill in browsers
+  needs recorded browser signer digests), so autofill works for native apps
+  linked with "Link this app". The owner also reported the protection chip
+  was on the locked screen (the build predating Step 2's fix); to confirm on
+  the phone after installing.

@@ -124,7 +124,11 @@ development, before investing in the full UI; it does not replace each target's
 release evidence. A shared codebase or successful cross-compilation alone does
 not demonstrate input cleanup, lifecycle, keystore or autofill correctness.
 Android's offline release is independent of the remote service and later iOS
-support. Keep unvalidated optional quick unlock/autofill disabled.
+support. Optional features are on wherever the device supports them (owner
+decision 2026-11-07): Android quick unlock and autofill are offered when the
+device's capabilities and the backend's own checks (0002 §5.2, 0009 §4.4)
+allow, and are simply unavailable otherwise. Physical-device validation of
+them remains release evidence; it no longer switches them off.
 
 Record pinned dependencies, applicable audit reports, known limitations and test
 results with each release. Supply chain: commit `Cargo.lock`; build with
@@ -151,6 +155,9 @@ implementation evidence, not claims that this repository already has them.
 
 ## Changelog
 
+- 2026-11-07: §3: optional Android quick unlock and autofill are on wherever
+  the device supports them instead of disabled until validated; validation
+  stays release evidence (owner decision, plan 0044).
 - 2026-11-06: Accepted 0014 (owner, plan 0042): the account-free LAN row
   syncs with a one-use code instead of linking; the revocation row notes there
   is no stored LAN peer state.

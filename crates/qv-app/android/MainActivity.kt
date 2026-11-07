@@ -330,8 +330,11 @@ private class NativeQuickUnlock(private val activity: MainActivity) {
     private val random = java.security.SecureRandom()
     private val device = ByteArray(16).also { random.nextBytes(it) }
     private val prefix = "qv.quick.v1."
-    // No device is enabled without the physical validation matrix in plan 0033.
-    private val validatedFingerprints = emptySet<String>()
+    // On wherever the device can (owner decision 2026-11-07, plan 0044):
+    // Android 11+, a strong biometric or a device credential, and a key that
+    // passes `validate` (generated in TEE/StrongBox hardware that enforces
+    // per-use authentication); otherwise enrolling fails and nothing is
+    // offered. Physical-device validation stays release evidence (0012 §3).
     private val born = mutableMapOf<String,Long>()
     private var next = 0L
     private var current = 0L
@@ -347,7 +350,7 @@ private class NativeQuickUnlock(private val activity: MainActivity) {
     private var created: String? = null
     init { store.aliases().toList().filter { it.startsWith(prefix) }.forEach { store.deleteEntry(it) } }
     fun available(): Boolean {
-        if(android.os.Build.VERSION.SDK_INT < 30 || !validatedFingerprints.contains(android.os.Build.FINGERPRINT))return false
+        if(android.os.Build.VERSION.SDK_INT < 30)return false
         val manager=activity.getSystemService(android.hardware.biometrics.BiometricManager::class.java)
         return manager.canAuthenticate(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_STRONG)==android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS || manager.canAuthenticate(android.hardware.biometrics.BiometricManager.Authenticators.DEVICE_CREDENTIAL)==android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS
     }
@@ -490,15 +493,13 @@ private class NativeQuickUnlock(private val activity: MainActivity) {
 // CLI compiles only the configured main-activity source in its own build.
 
 /**
- * Autofill answers no request unless this device's build is recorded as
- * validated (plan 0034 VALIDATION.md). The build script sets VALIDATION only
- * for the explicitly marked, fixture-restricted device-validation build.
+ * Autofill is on wherever Android supports it (owner decision 2026-11-07,
+ * plan 0044): Android 11+, once the user picks QuickVault as the autofill
+ * service. Exact matching, unlock and explicit choice stay in Rust (0009
+ * §4.4); physical-device validation stays release evidence (0012 §3).
  */
 object AutofillGate {
-    const val VALIDATION = false
-    private val validatedFingerprints = emptySet<String>()
-    fun enabled(): Boolean = android.os.Build.VERSION.SDK_INT >= 30 &&
-        (VALIDATION || validatedFingerprints.contains(android.os.Build.FINGERPRINT))
+    fun enabled(): Boolean = android.os.Build.VERSION.SDK_INT >= 30
 }
 
 /** Thin OS glue (0009 §4.4): detect fields and hand off. Matching is Rust's. */

@@ -80,13 +80,12 @@ for target,name in icons.items():
     if not (res/target).is_file():
         raise SystemExit('Unexpected upstream launcher icon template; review it before packaging')
     shutil.copyfile(root/'android/res'/name,res/target)
-# Autofill gate (plan 0034): only the marked validation build opens it.
+# Autofill and quick unlock are on wherever the device supports them (owner
+# decision 2026-11-07, plan 0044); no build switch.
 main_activity=destination/'app/src/main/kotlin/dev/dioxus/main/MainActivity.kt'
 source=main_activity.read_text()
-if source.count('const val VALIDATION = false')!=1:
-    raise SystemExit('Unexpected autofill gate source')
-if os.environ.get('QV_APP_DEVICE_VALIDATION')=='1':
-    main_activity.write_text(source.replace('const val VALIDATION = false','const val VALIDATION = true'))
+if 'validatedFingerprints' in source:
+    raise SystemExit('Unexpected device gate in MainActivity; review it before packaging')
 if source.count('const val QR_CAMERA = true')!=1:
     raise SystemExit('Unexpected QR camera source')
 # QR camera scanning (0009 §1.7) is on in every package by default (owner
