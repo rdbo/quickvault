@@ -518,6 +518,9 @@ button.set-row:hover:enabled{background:var(--raised)}
 .ie-card .emv{width:38px;height:28px;border-radius:6px;background:linear-gradient(135deg,#e8d28c,#b8964a);opacity:.9}
 .ie-card .ie-brand{font-weight:800;font-style:italic;letter-spacing:.02em;font-size:17px}
 .ie-card .num{font:500 19px ui-monospace,"JetBrains Mono","DejaVu Sans Mono",monospace;letter-spacing:.08em;text-shadow:0 1px 1px rgba(0,0,0,.3)}
+/* app.js fills `.live` only while the card-number input has focus. */
+.ie-card .num.live:empty{display:none}
+.ie-card .num.live:not(:empty)+.num{display:none}
 .ie-card .row2{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;text-transform:uppercase;letter-spacing:.08em}
 .ie-card .row2 small{display:block;opacity:.7;font-size:9.5px}
 .ie-card .row2 b{display:block;font-size:13px;letter-spacing:.06em;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

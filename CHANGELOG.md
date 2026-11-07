@@ -26,6 +26,9 @@ Dates are ISO 8601. Newest first within each section.
     app (it showed browser-default controls); the group menu has "Change
     color", and the form is titled "Edit group". Visible app text uses
     American spelling ("color", "Recognized").
+  - App: while you type a card number, the card preview shows the digits
+    in their places instead of pushing them into the last group; when the
+    field loses focus it shows only the last four again (spec 0009 §1.8).
   - App: the official logo (`LOGO.svg`) is the desktop window icon, the
     Android launcher icon (adaptive, with a monochrome layer), the title-bar
     mark, the first-run welcome image and the Settings → About header.

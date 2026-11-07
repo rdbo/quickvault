@@ -371,7 +371,9 @@ fn swatches(
 }
 
 /// A payment card's face: brand, masked number with its last four, name
-/// and expiry (never the number, 0009 §1.8).
+/// and expiry (never the number, 0009 §1.8). While the card-number input
+/// has focus, app.js mirrors that input's own digits into the empty `live`
+/// line, which then hides the masked one; Rust never renders them.
 pub(crate) fn card_face(card: &CardFace, hue: &'static str) -> Element {
     let number = format!(
         "•••• •••• •••• {}",
@@ -380,6 +382,7 @@ pub(crate) fn card_face(card: &CardFace, hue: &'static str) -> Element {
     rsx! {
         div { class: "ie-card {hue}", role: "img", "aria-label": "Card preview",
             div { class: "row1", span { class: "emv" } span { class: "ie-brand", "{card.info.brand.unwrap_or(\"\")}" } }
+            div { class: "num live", "aria-hidden": "true" }
             div { class: "num", "{number}" }
             div { class: "row2",
                 div { class: "min0", small { "Card holder" } b { if card.name.is_empty() { "Your name" } else { "{card.name.as_str()}" } } }

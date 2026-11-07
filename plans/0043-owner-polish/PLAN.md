@@ -169,3 +169,22 @@ bar) and any spec text; the logo is presentation, not behaviour.
 - 2026-11-07: Owner: "Color" was uppercase beside the sentence-case "Name".
   In a form card the label now reads "Color" in the `.ed label` style;
   the item editor popover keeps its "COLOR" menu heading.
+- 2026-11-07: Owner (screenshot): typing a card number put the first digits
+  in the preview's last group; show all typed digits while typing, only the
+  last four otherwise. The earlier fix covered the input, not the preview,
+  which Rust renders from brand/last-four only. Design (secret handling,
+  minimal exposure): no new Rust-to-UI flow of the number. `card_face` adds
+  an empty `.num.live` line Rust never fills; `app.js` fills it from the
+  focused `data-qv-format="card"` input on focusin/input (grouped like the
+  input, remaining positions as dots, Amex 15) and empties it on focusout
+  and in `clearControls` (epoch change/lock, `data-qv-clear`, window
+  hidden). CSS hides the masked line while `.live` is non-empty. The extra
+  copy is one more webview text node of digits already in the input's DOM
+  value, under the same 0008 §1.1/§4.4 best-effort cleanup limits. Spec
+  0009 §1.8 amended (owner request). Headless Chromium run of the real
+  `app.js` on the editor markup: focus empty → masked line; "1" →
+  `1••• •••• •••• ••••`; "123456" → `1234 56•• •••• ••••`; 16 digits;
+  Amex `3782 822463 10005`; blur → empty, masked shown; refocus → mirrored
+  again; `clearControls` → empty. Needs the fresh review with the rest of
+  this plan.
+

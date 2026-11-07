@@ -173,6 +173,12 @@ validation packages may exercise the implemented path.
   - Values derived from protected fields are limited to:
     - a card number's brand, last four digits and validity;
     - whether a protected field has a saved value.
+  - While the card-number input has focus, the card preview shows the
+    digits typed so far in their places, the rest as dots, so it follows the
+    typing. The page script copies them from that input, never from Rust.
+    The copy is wiped when focus leaves, on lock and when the window is
+    hidden; the preview then shows only the last four digits again (owner,
+    2026-11-07).
   - Typed passwords get no strength meter in the item editor. Generated ones
     show the generator's exact entropy, and "Use it" moves the value into
     the field in Rust.
@@ -332,6 +338,10 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-07: §1.8 item editor: while the card-number input has focus, the
+  card preview mirrors the typed digits in place (a page-script copy of the
+  input, wiped on blur, lock and hiding); otherwise it shows only the last
+  four (owner request, plan 0043). Still Draft.
 - 2026-11-06: §1.8: the locked screen's protection chip shows only while a
   reduced status awaits acknowledgement; the acknowledged mode stays in
   security settings (owner request, plan 0043). Still Draft.

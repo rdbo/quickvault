@@ -8,6 +8,7 @@ function clearControls(){
         if(input.getAttribute("data-qv-controlled")==="true")continue;
         input.value="";
     }
+    clearCardMirror();
 }
 function clearRevealed(){
     for(const node of document.querySelectorAll(".phrase,.revealed"))node.textContent="";
@@ -47,9 +48,32 @@ function groupCard(digits){
     for(const n of sizes){if(at>=digits.length)break;parts.push(digits.slice(at,at+n));at+=n;}
     return parts.join(" ");
 }
+// While the card-number input has focus, the editor's card preview shows
+// the same typed digits in place, the rest as dots. The copy comes from the
+// input, never from Rust, and is wiped on blur, lock and hiding (0009 §1.8).
+function cardMirror(el){
+    return el.closest(".ie")?.querySelector(".ie-card .num.live")??null;
+}
+function clearCardMirror(){
+    for(const node of document.querySelectorAll(".ie-card .num.live"))node.textContent="";
+}
+function showCardMirror(el){
+    const live=cardMirror(el);
+    if(!live)return;
+    const digits=el.value.replace(/\D/g,"").slice(0,19);
+    if(!digits){live.textContent="";return;}
+    const total=Math.max(/^3[47]/.test(digits)?15:16,digits.length);
+    live.textContent=groupCard(digits.padEnd(total,"\u2022"));
+}
+function isCardInput(el){
+    return el instanceof HTMLInputElement&&el.getAttribute("data-qv-format")==="card";
+}
+document.addEventListener("focusin",event=>{if(isCardInput(event.target))showCardMirror(event.target);});
+document.addEventListener("focusout",event=>{if(isCardInput(event.target))clearCardMirror();});
 document.addEventListener("input",event=>{
     const el=event.target;
-    if(!(el instanceof HTMLInputElement)||el.getAttribute("data-qv-format")!=="card")return;
+    if(!isCardInput(el))return;
+    showCardMirror(el);
     const before=el.value.slice(0,el.selectionStart??el.value.length).replace(/\D/g,"").length;
     const formatted=groupCard(el.value.replace(/\D/g,"").slice(0,19));
     if(formatted===el.value)return;
