@@ -14,7 +14,7 @@ use qv_core::{AnchorDir, Core, CoreConfig, SnapshotPolicy};
 use crate::config::{self, Config};
 use crate::exit::CliError;
 
-/// The environment variables qvault reads. `QVAULT_PATH` names a path,
+/// The environment variables qv reads. `QVAULT_PATH` names a path,
 /// which is not a secret; no secret is ever read from the environment
 /// (0011 §3.1).
 #[derive(Clone, Debug, Default)]

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault ls [<group>] [-r]` (spec 0011 §4 *Browsing*; 0003 §4).
+//! `qv ls [<group>] [-r]` (spec 0011 §4 *Browsing*; 0003 §4).
 //!
 //! One line per item, with full paths (paste-able as addresses): a group
 //! as `path/`, an entry as `path  username  url`. The username is the first

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault snapshot ls` and the `trash empty` recovery-snapshot ordering
+//! `qv snapshot ls` and the `trash empty` recovery-snapshot ordering
 //! (0011 §4–5, 0007 §3).
 #![cfg(any(target_os = "linux", target_os = "android"))]
 #![allow(clippy::unwrap_used, clippy::panic)]
@@ -15,7 +15,7 @@ fn run(h: &Home, extra: &[&str]) -> Output {
     let vault = arg(&h.vault());
     let mut a = vec!["--password-stdin", "-v", &vault];
     a.extend_from_slice(extra);
-    piped(h.qvault(a), format!("{PASSWORD}\n").as_bytes())
+    piped(h.qv(a), format!("{PASSWORD}\n").as_bytes())
 }
 
 fn trashed_entry(s: &Session) -> ItemHandle {
@@ -217,13 +217,13 @@ fn snapshot_restore_creates_a_new_baseline_and_preserves_active_vault() {
         assert_eq!(std::fs::read(p).unwrap(), bytes);
     }
     let o = piped(
-        h.qvault(["--password-stdin", "-v", &path, "--json", "verify"]),
+        h.qv(["--password-stdin", "-v", &path, "--json", "verify"]),
         format!("{PASSWORD}\n").as_bytes(),
     );
     assert_eq!(o.code, 0, "{}", o.stderr);
     assert!(o.stdout.contains("\"local_seq\":1") && o.stdout.contains("\"anchor\":\"verified\""));
     let o = piped(
-        h.qvault(["--password-stdin", "-v", &path, "search", "Snapshot entry"]),
+        h.qv(["--password-stdin", "-v", &path, "search", "Snapshot entry"]),
         format!("{PASSWORD}\n").as_bytes(),
     );
     assert_eq!(o.code, 0, "{}", o.stderr);
@@ -246,7 +246,7 @@ fn snapshot_restore_preflight_and_addressing_errors() {
     ] {
         let mut a = vec!["--password-stdin"];
         a.extend(args);
-        let o = piped(h.qvault(a), b"");
+        let o = piped(h.qv(a), b"");
         assert_eq!(o.code, 2, "{}", o.stderr);
     }
     assert_eq!(run(&h, &["snapshot", "ls"]).code, 0);

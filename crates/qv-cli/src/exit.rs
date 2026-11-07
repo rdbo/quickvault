@@ -133,16 +133,16 @@ fn hint(e: CoreError) -> Option<&'static str> {
     match e {
         CoreError::Store(StoreError::NoAnchor) => Some(
             "this device has no record of the vault's last state (it was copied here, or the \
-             state directory was lost); use explicit `qvault recover <path>` with your recovery phrase to accept a baseline",
+             state directory was lost); use explicit `qv recover <path>` with your recovery phrase to accept a baseline",
         ),
         CoreError::Store(StoreError::Rollback) => Some(
             "the vault is older than this device last saw it, or was replaced: it may have been \
              rolled back; nothing was changed",
         ),
-        CoreError::Store(StoreError::Locked) => Some("another qvault process has it open"),
+        CoreError::Store(StoreError::Locked) => Some("another qv process has it open"),
         CoreError::Conflict => Some(
             "the entry has conflicting versions; choosing one needs conflict resolution, which \
-             qvault does not offer yet",
+             qv does not offer yet",
         ),
         CoreError::AnchorLocation => Some("move the vault out of the QuickVault state directory"),
         _ => None,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault lan open|sync|join` end to end (spec 0011 *LAN command contracts*,
+//! `qv lan open|sync|join` end to end (spec 0011 *LAN command contracts*,
 //! 0013; plans 0038 step 8, 0042 step 7). The other device runs in the test
 //! process through qv-core. Sessions with a CLI process use this host's
 //! first non-loopback address, because the CLI never allows loopback
@@ -25,7 +25,7 @@ fn lan_addr() -> IpAddr {
         .into_iter()
         .next()
         .unwrap_or_else(|| {
-            panic!("the qvault lan tests need a non-loopback local address on this host")
+            panic!("the qv lan tests need a non-loopback local address on this host")
         })
 }
 
@@ -33,7 +33,7 @@ fn run(h: &Home, extra: &[&str]) -> Output {
     let vault = arg(&h.vault());
     let mut args = vec!["--password-stdin", "-v", &vault];
     args.extend_from_slice(extra);
-    piped(h.qvault(args), format!("{PASSWORD}\n").as_bytes())
+    piped(h.qv(args), format!("{PASSWORD}\n").as_bytes())
 }
 
 struct Yes(Option<String>);
@@ -137,7 +137,7 @@ fn lan_cli_open_serves_one_sync_and_shows_the_code_only_on_the_alternate_screen(
     add_entry(&b, "made on b");
     a.lock();
     let ip = lan_addr();
-    let mut p = Interactive::spawn(a_home.qvault([
+    let mut p = Interactive::spawn(a_home.qv([
         "-v",
         &arg(&a_home.vault()),
         "lan",
@@ -204,7 +204,7 @@ fn lan_cli_sync_prompts_for_the_code_and_prints_the_sync_lines() {
     let endpoint = SocketAddr::new(ip, c.port).to_string();
     std::thread::scope(|s| {
         let h = s.spawn(|| w.run(&a, &mut Yes(None), None).unwrap());
-        let mut p = Interactive::spawn(b_home.qvault([
+        let mut p = Interactive::spawn(b_home.qv([
             "-v",
             &arg(&b_home.vault()),
             "lan",
@@ -254,7 +254,7 @@ fn lan_cli_usage_and_exit_codes() {
     let (a, _b) = joined(&a_home, &b_home);
     a.lock();
     // No device answers (loopback is never allowed): 10.
-    let mut p = Interactive::spawn(a_home.qvault([
+    let mut p = Interactive::spawn(a_home.qv([
         "-v",
         &arg(&a_home.vault()),
         "lan",
@@ -285,7 +285,7 @@ fn lan_cli_join_new_device_prompts_for_code_vault_and_password() {
     let endpoint = SocketAddr::new(ip, c.port).to_string();
     // An existing destination is refused before connecting.
     std::fs::write(&dest, b"x").unwrap();
-    let p = Interactive::spawn(b_home.qvault([
+    let p = Interactive::spawn(b_home.qv([
         "lan",
         "join",
         "--new",
@@ -299,7 +299,7 @@ fn lan_cli_join_new_device_prompts_for_code_vault_and_password() {
     let mut yes = Yes(None);
     std::thread::scope(|s| {
         let h = s.spawn(|| w.run(&a, &mut yes, None).unwrap());
-        let mut p = Interactive::spawn(b_home.qvault([
+        let mut p = Interactive::spawn(b_home.qv([
             "lan",
             "join",
             "--new",

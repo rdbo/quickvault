@@ -84,7 +84,7 @@ pub(crate) struct Kek(SecretArray<32>);
 
 /// The exact Argon2 parameters of a password-kdf profile.
 /// The public Argon2id parameters of a password-kdf profile (shown by
-/// `qvault info`; they are not secret).
+/// `qv info`; they are not secret).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Argon2Params {
     /// Memory in KiB.

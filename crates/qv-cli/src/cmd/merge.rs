@@ -16,7 +16,7 @@ pub(crate) fn run(ctx: &Ctx, args: &ArgMatches) -> Result<(), CliError> {
     let over_budget = args.get_flag("allow-over-budget");
     if over_budget {
         crate::out::eprint(
-            "qvault: the necessary recovery copy may exceed ordinary snapshot budgets\n",
+            "qv: the necessary recovery copy may exceed ordinary snapshot budgets\n",
         );
     }
     let session = ctx.unlock()?;

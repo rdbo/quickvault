@@ -139,6 +139,21 @@ impl Icon {
     }
 }
 
+/// The official mark (repository `LOGO.svg`): a vault shaped like a Q, with
+/// a keyhole, on a charcoal tile. Its colours are fixed in both themes.
+const LOGO_MARK: &str = "M208 96H288C349.856 96 400 146.144 400 208V288C400 312.65 392.04 335.44 378.55 353.93L420 395.38L379.38 436L337.93 394.55C319.44 408.04 296.65 416 272 416H208C146.144 416 96 365.856 96 304V208C96 146.144 146.144 96 208 96ZM248 164C215.967 164 190 189.967 190 222C190 248.461 207.723 270.785 231.947 277.751L218 316H250L238 348H290L304 310H273L284.907 266.746C297.79 256.109 306 240.013 306 222C306 189.967 280.033 164 248 164Z";
+
+/// The QuickVault logo. Decorative: the name is always shown next to it.
+#[component]
+pub(crate) fn Logo(class: &'static str) -> Element {
+    rsx! {
+        svg { class: "logo {class}", view_box: "0 0 512 512", "aria-hidden": "true", "focusable": "false",
+            rect { width: "512", height: "512", rx: "112", fill: "#0E1113" }
+            path { fill: "#43D4A4", fill_rule: "evenodd", d: LOGO_MARK }
+        }
+    }
+}
+
 /// A decorative icon; the surrounding control carries the accessible name.
 #[component]
 pub(crate) fn Svg(icon: Icon, #[props(default)] large: bool) -> Element {

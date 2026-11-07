@@ -11,7 +11,7 @@ mod shell;
 use crate::controller::{Action, AppError, Controller, FormEpoch, InputField, Mode, Phase, View};
 use crate::workspace::Shortcut;
 use dioxus::prelude::*;
-use icons::{Icon, Svg};
+use icons::{Icon, Logo, Svg};
 use std::sync::OnceLock;
 use zeroize::Zeroizing;
 
@@ -681,7 +681,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
     } else if first_run && !busy {
         rsx! {
             div { class: "welcome fade-in",
-                Safe { opening: false }
+                Logo { class: "logo-hero" }
                 h1 { "Welcome to QuickVault" }
                 p { "Your passwords stay encrypted on this device. No account, no server." }
                 div { class: "choices",
@@ -738,13 +738,6 @@ fn Locked(controller: Controller, revision: u64) -> Element {
             }
         }
     };
-    let chip_text = if view.ack_needed {
-        "Reduced protection · review"
-    } else if reduced {
-        "Reduced protection · acknowledged"
-    } else {
-        "Full protection on this device"
-    };
     let sheet_view = match sheet() {
         Sheet::None => rsx! {},
         Sheet::VaultMenu | Sheet::SaveMenu => rsx! {},
@@ -789,8 +782,12 @@ fn Locked(controller: Controller, revision: u64) -> Element {
             if fixture && cfg!(target_os = "android") { p { class: "banner", "Synthetic validation build · isolated test vault only" } }
             if preview { p { class: "banner", "Read-only preview · vault actions are disabled. Do not enter real credentials." } }
             div { class: "locked-body", key: "locked-{epoch.0}", {body} }
-            div { class: "locked-foot",
-                button { class: if view.ack_needed { "status-chip warn" } else { "status-chip" }, id: "protection-chip", onclick: move |_| { after_ack.set(None); sheet.set(Sheet::Protection); }, Svg { icon: Icon::Shield } "{chip_text}" }
+            // Only while a reduced status awaits acknowledgement (0009 §1.8);
+            // afterwards Settings shows the mode, not a lasting chip.
+            if view.ack_needed {
+                div { class: "locked-foot",
+                    button { class: "status-chip warn", id: "protection-chip", onclick: move |_| { after_ack.set(None); sheet.set(Sheet::Protection); }, Svg { icon: Icon::Shield } "Reduced protection · review" }
+                }
             }
             if fixture { input { id: "validation-result", oninput: fixture_report(&controller) } }
         }

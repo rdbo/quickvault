@@ -10,7 +10,7 @@ fn run(h: &Home, args: &[&str]) -> Output {
     let vault = arg(&h.vault());
     let mut a = vec!["--password-stdin", "-v", &vault];
     a.extend_from_slice(args);
-    piped(h.qvault(a), format!("{PASSWORD}\n").as_bytes())
+    piped(h.qv(a), format!("{PASSWORD}\n").as_bytes())
 }
 fn entry(s: &Session, title: &str) -> ItemHandle {
     ItemHandle::Entry(
@@ -56,7 +56,7 @@ fn trash_scoping_ambiguity_escaping_restore_and_permanent_deletion() {
     assert_eq!(s.overview().unwrap().local_seq, seq);
     drop(s);
     let vault = arg(&h.vault());
-    let mut p = Interactive::spawn(h.qvault(["-v", &vault, "trash", "empty"]));
+    let mut p = Interactive::spawn(h.qv(["-v", &vault, "trash", "empty"]));
     p.expect("Master password: ");
     p.line(PASSWORD);
     p.expect("[y/N] ");

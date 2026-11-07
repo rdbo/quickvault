@@ -133,7 +133,7 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
             }
             if s.expired_trash()?.clock_anomaly {
                 crate::out::eprint(
-                    "qvault: warning: vault dates are ahead of this clock; check it before deletion\n",
+                    "qv: warning: vault dates are ahead of this clock; check it before deletion\n",
                 );
             }
             if !ctx.yes
@@ -150,7 +150,7 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
                 Ok(snapshot) => snapshot,
                 Err(CoreError::SnapshotOverBudget { needed }) => {
                     crate::out::eprint(&format!(
-                        "qvault: the recovery snapshot needs {needed} bytes and does not fit the \
+                        "qv: the recovery snapshot needs {needed} bytes and does not fit the \
                          snapshot budget\n"
                     ));
                     if !term::stdio_tty()?.confirm(
@@ -187,7 +187,7 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
             }
             if report.skipped_conflicts != 0 {
                 crate::out::eprint(&format!(
-                    "qvault: {} conflicted item(s) kept in trash\n",
+                    "qv: {} conflicted item(s) kept in trash\n",
                     report.skipped_conflicts
                 ));
             }

@@ -19,7 +19,7 @@
 //! |-----|------|---------|
 //! | `default_vault` | string, absolute path | the vault used when neither `--vault` nor `QVAULT_PATH` is given |
 //! | `clipboard_timeout` | integer, 1–300 | seconds before `copy` clears the clipboard (phase 1.10c) |
-//! | `color` | `"auto"` or `"never"` | colour output; qvault emits no colour yet, so both behave the same |
+//! | `color` | `"auto"` or `"never"` | colour output; qv emits no colour yet, so both behave the same |
 
 use std::io::Read;
 use std::path::{Path, PathBuf};

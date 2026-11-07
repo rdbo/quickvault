@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! End-to-end harness: runs the `qvault` binary in a private home, through
+//! End-to-end harness: runs the `qv` binary in a private home, through
 //! a PTY (an interactive terminal) or through pipes.
 //!
 //! Child processes run one at a time (each unlock runs Argon2id with
@@ -140,13 +140,13 @@ impl Home {
             .unwrap()
     }
 
-    /// `qvault` with only this home's environment.
-    pub fn qvault<I, S>(&self, args: I) -> Command
+    /// `qv` with only this home's environment.
+    pub fn qv<I, S>(&self, args: I) -> Command
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let mut c = Command::new(env!("CARGO_BIN_EXE_qvault"));
+        let mut c = Command::new(env!("CARGO_BIN_EXE_qv"));
         c.args(args)
             .env_clear()
             .env("HOME", &self.root)
@@ -196,7 +196,7 @@ pub fn piped(mut cmd: Command, stdin: &[u8]) -> Output {
     }
 }
 
-/// A `qvault` process on a PTY.
+/// A `qv` process on a PTY.
 pub struct Interactive {
     child: Child,
     master: OwnedFd,

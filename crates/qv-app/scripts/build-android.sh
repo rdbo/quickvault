@@ -70,6 +70,16 @@ shutil.copyfile(root/'android/tests/AndroidManifest.xml',destination/'app/src/an
 # disallowing cleartext to remote hosts. The custom manifest references it.
 shutil.copyfile(root/'android/network_security_config.xml',
                 destination/'app/src/main/res/xml/network_security_config.xml')
+# The launcher icon from LOGO.svg (plan 0043), replacing the template's
+# adaptive icon files in place; refuse a changed template layout.
+res=destination/'app/src/main/res'
+icons={'mipmap-anydpi-v26/ic_launcher.xml':'ic_launcher.xml',
+       'drawable/ic_launcher_background.xml':'ic_launcher_background.xml',
+       'drawable-v24/ic_launcher_foreground.xml':'ic_launcher_foreground.xml'}
+for target,name in icons.items():
+    if not (res/target).is_file():
+        raise SystemExit('Unexpected upstream launcher icon template; review it before packaging')
+    shutil.copyfile(root/'android/res'/name,res/target)
 # Autofill gate (plan 0034): only the marked validation build opens it.
 main_activity=destination/'app/src/main/kotlin/dev/dioxus/main/MainActivity.kt'
 source=main_activity.read_text()

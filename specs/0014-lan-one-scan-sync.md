@@ -208,15 +208,15 @@ endpoint) ends the scan with an error.
 
 ### 7. CLI (amends 0011's LAN command contracts)
 
-- `qvault lan open [--port <n>] [--minutes <1-10>]`: unlock, open a sync
+- `qv lan open [--port <n>] [--minutes <1-10>]`: unlock, open a sync
   window, and show the manual code, endpoints and time left on the
   alternate screen. A new-device hello asks the 0011 comparison question
   (`Do both devices show <code>? [y/N]`). It prints the sync lines (sync
   mode) or `joined` and the peer receipt (new-device mode). Exit 10 if
   the window closes without a session.
-- `qvault lan sync --endpoint <ip:port> [--endpoint …]`: prompt for the
+- `qv lan sync --endpoint <ip:port> [--endpoint …]`: prompt for the
   code (no echo), unlock, run one sync-mode session, print the sync lines.
-- `qvault lan join --endpoint <ip:port> [--endpoint …] --new <path>`:
+- `qv lan join --endpoint <ip:port> [--endpoint …] --new <path>`:
   new-device mode as today, without `--label` or `paired:` output.
 - `lan pair`, `lan receive`, `lan links` and `lan unlink` are removed.
 

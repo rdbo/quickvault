@@ -13,7 +13,10 @@ device links with one-use sync codes; its amendments are applied to 0013,
 editor profile (2026-11-05, plan 0040), approved for implementation. 0003 §5.5
 adds the app colour token in the existing `icon` text. Its vault-list bullet (plan
 0041) covers name-only create, import in place and the lock screen's copy of
-vault names.
+vault names. The owner's 2026-11-06 amendment (plan 0043) shows the locked
+screen's protection chip only while an acknowledgement is pending.
+
+0011 §1.1 names the binary `qv` (owner, 2026-11-06, plan 0043).
 
 0009 §1.7 specifies the owner-delegated bounded Android LAN QR camera profile
 (2026-11-03, plan 0039), approved for implementation; its overall Draft status
@@ -92,7 +95,7 @@ clarifications to 0013 §1.3, §7.1 and §8.3, and the development
 endpoints (`lan_hint`) from 0013 §9.2: there is no device identity to remember
 them for. Plan 0038 (2026-11-03, owner-delegated) adds the
 address-only receive-window code (0013 §8.5), the initiator's single-link
-rule (§5.1) and the `Want` count bound (§7.4), and specifies the `qvault lan`
+rule (§5.1) and the `Want` count bound (§7.4), and specifies the `qv lan`
 commands and exit code 10 in 0011.
 
 The Android-priority follow-up brings Android and Linux into initial shared-core

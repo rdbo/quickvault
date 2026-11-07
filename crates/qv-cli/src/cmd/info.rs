@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault info [--full]` (spec 0011 §4, §1.4).
+//! `qv info [--full]` (spec 0011 §4, §1.4).
 //!
 //! Without `--full`, no password is asked: the header is read but not
 //! authenticated, and the output says so. `--full` unlocks (verifying the

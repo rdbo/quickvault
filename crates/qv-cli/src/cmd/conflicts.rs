@@ -489,11 +489,11 @@ fn resolve_in(ctx: &Ctx, args: &ArgMatches, s: &Session) -> Result<(), CliError>
     };
     let v = s.conflict_version(h)?;
     crate::out::eprint(
-        "qvault: this creates a new complete version covering all inspected heads; unseen edits may still conflict\n",
+        "qv: this creates a new complete version covering all inspected heads; unseen edits may still conflict\n",
     );
     if v.state == Deletion::Final {
         crate::out::eprint(
-            "qvault: choosing permanent deletion removes payload/history; independent copies may remain\n",
+            "qv: choosing permanent deletion removes payload/history; independent copies may remain\n",
         );
     }
     if !ctx.yes && !crate::term::stdio_tty()?.confirm("Create this complete-version resolution?")? {

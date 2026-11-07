@@ -12,7 +12,7 @@ fn run(h: &Home, extra: &[&str]) -> Output {
     let v = arg(&h.vault());
     let mut args = vec!["--password-stdin", "-v", &v];
     args.extend_from_slice(extra);
-    piped(h.qvault(args), format!("{PASSWORD}\n").as_bytes())
+    piped(h.qv(args), format!("{PASSWORD}\n").as_bytes())
 }
 fn edit(s: &Session, e: qv_core::EntryHandle, title: &str, password: &str) {
     let mut d = s.edit_entry(e).unwrap();
@@ -186,7 +186,7 @@ fn conflicts_cli_all_kinds_masking_selection_and_selected_slot_password_proof() 
     let missing_tty = run(&h, &["--yes", "resolve", &target, "--version", &version]);
     assert_eq!(missing_tty.code, 2, "{}", missing_tty.stderr);
     for (password, expected) in [("wrong selected password", 3), (REMOTE, 0)] {
-        let mut p = Interactive::spawn(h.qvault([
+        let mut p = Interactive::spawn(h.qv([
             "-v",
             &arg(&h.vault()),
             "--yes",

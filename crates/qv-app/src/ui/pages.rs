@@ -3,7 +3,7 @@
 //! Sections beside the vault: generator, devices and LAN sync, trash,
 //! conflicts, snapshots, archives, settings and autofill. File choices use
 //! the system picker; a typed path appears only when no picker is available.
-use super::icons::{Icon, Svg, id_hue, initial};
+use super::icons::{Icon, Logo, Svg, id_hue, initial};
 use super::items::{Input, Kind};
 use super::shell::{ReportCard, Unreadable, act, go};
 use crate::controller::{Controller, FormEpoch};
@@ -31,6 +31,11 @@ pub(crate) fn Page(
     busy: bool,
     report: Option<Report>,
 ) -> Element {
+    // Keyed by the screen so every page switch remounts it and fades in.
+    let key = match &screen {
+        Screen::Settings(p) => format!("{}-Settings-{p:?}", epoch.0),
+        s => format!("{}-{s:?}", epoch.0),
+    };
     let c = controller.clone();
     let body = match screen {
         Screen::Generator => rsx! { Generator { controller: c, epoch, revision } },
@@ -49,7 +54,7 @@ pub(crate) fn Page(
     };
     rsx! {
         section { class: "page",
-            div { class: "page-inner fade-in", key: "{epoch.0}",
+            div { class: "page-inner fade-in", key: "{key}",
                 if let Some(r) = report { ReportCard { controller: controller.clone(), epoch, report: r } }
                 {body}
             }
@@ -940,6 +945,7 @@ fn About(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
     let _ = revision;
     let about = controller.about(epoch);
     let overview = controller.read(epoch, views::overview).and_then(Result::ok);
+    let version = env!("CARGO_PKG_VERSION");
     rsx! {
         if let Some(o) = overview {
             div { class: "group-t", "CONTENTS (VERIFIED)" }
@@ -955,7 +961,9 @@ fn About(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
         } else {
             p { class: "muted", "Header details appear after the next unlock." }
         }
-        p { class: "hint mt", "QuickVault · offline-first, end-to-end encrypted · AGPL-3.0-or-later" }
+        div { class: "about-brand mt", Logo { class: "logo-about" }
+            span { b { "QuickVault" } span { class: "hint", "Version {version} · offline-first, end-to-end encrypted · AGPL-3.0-or-later" } }
+        }
     }
 }
 #[component]

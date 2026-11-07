@@ -9,6 +9,20 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-06: Owner follow-ups (plan 0043):
+  - The command-line client is now `qv` instead of `qvault` (spec 0011
+    §1.1). `QVAULT_PATH`, the config file and the `.qvault` extension are
+    unchanged.
+  - App: every section page fades in when you switch to it, not only the
+    Generator.
+  - App: the title bar's lock icon uses the dark ink colour on the green
+    tile instead of grey.
+  - App: the locked screen shows the protection chip only while a reduced
+    protection status awaits acknowledgement; Settings → Security still
+    shows the mode (spec 0009 §1.8).
+  - App: the official logo (`LOGO.svg`) is the desktop window icon, the
+    Android launcher icon (adaptive, with a monochrome layer), the title-bar
+    mark, the first-run welcome image and the Settings → About header.
 - 2026-11-06: LAN sync without device links (spec 0014, accepted by the
   owner; plan 0042):
   - One device shows a one-use code (QR, or the 26-character code and an

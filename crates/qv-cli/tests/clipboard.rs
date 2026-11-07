@@ -234,7 +234,7 @@ struct Run {
 impl Run {
     fn start(home: &Home, display: &Display, args: &[&str], password: bool) -> Self {
         let mut child = home
-            .qvault(args)
+            .qv(args)
             .env("DISPLAY", &display.name)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -518,11 +518,11 @@ fn copy_preflight_rejects_before_unlock() {
         vec!["copy", "Mail", "--timeout", "0"],
         vec!["copy", "Mail", "--timeout", "301"],
     ] {
-        let out = common::piped(h.qvault(args), b"");
+        let out = common::piped(h.qv(args), b"");
         assert_eq!(out.code, 2, "{}", out.stderr);
         assert!(!out.stderr.contains("Master password"));
     }
-    let out = common::piped(h.qvault(["generate", "--copy"]), b"");
+    let out = common::piped(h.qv(["generate", "--copy"]), b"");
     assert_eq!(out.code, 1);
     assert!(out.stdout.is_empty());
     assert!(!out.stderr.contains("panicked"));

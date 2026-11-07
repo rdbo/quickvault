@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault recovery rotate` end to end through a PTY (plan 0023 step 8;
+//! `qv recovery rotate` end to end through a PTY (plan 0023 step 8;
 //! 0011 §4, §5.5, §6; 0012 §1 rows "Rotation/purge ambiguity" and
 //! old-generation archives).
 #![cfg(any(target_os = "linux", target_os = "android"))]
@@ -30,7 +30,7 @@ fn run(h: &Home, password: &str, args: &[&str]) -> common::Output {
     let v = arg(&h.vault());
     all.push(&v);
     all.extend_from_slice(args);
-    piped(h.qvault(all), format!("{password}\n").as_bytes())
+    piped(h.qv(all), format!("{password}\n").as_bytes())
 }
 
 /// Every file under `dir`, recursively, with its bytes.
@@ -117,7 +117,7 @@ fn up_to_phrase(h: &Home, yes: bool) -> (Interactive, Vec<String>, usize) {
         args.push("--yes");
     }
     args.extend(["recovery", "rotate"]);
-    let mut p = Interactive::spawn(h.qvault(args));
+    let mut p = Interactive::spawn(h.qv(args));
     p.expect("Master password: ");
     p.line(PASSWORD);
     let at = p.expect("Type rotate to continue: ");
@@ -205,19 +205,15 @@ fn rotation_refusals_change_nothing() {
     // Non-interactive forms are usage errors before any prompt.
     assert_eq!(run(&h, PASSWORD, &["recovery", "rotate"]).code, 2);
     let json = piped(
-        h.qvault(["--json", "-v", &arg(&h.vault()), "recovery", "rotate"]),
+        h.qv(["--json", "-v", &arg(&h.vault()), "recovery", "rotate"]),
         b"",
     );
     assert_eq!(json.code, 2, "{}", json.stderr);
-    let piped_stdin = piped(
-        h.qvault(["-v", &arg(&h.vault()), "recovery", "rotate"]),
-        b"",
-    );
+    let piped_stdin = piped(h.qv(["-v", &arg(&h.vault()), "recovery", "rotate"]), b"");
     assert_eq!(piped_stdin.code, 2, "{}", piped_stdin.stderr);
 
     // A wrong typed confirmation, even with --yes.
-    let mut p =
-        Interactive::spawn(h.qvault(["-v", &arg(&h.vault()), "--yes", "recovery", "rotate"]));
+    let mut p = Interactive::spawn(h.qv(["-v", &arg(&h.vault()), "--yes", "recovery", "rotate"]));
     p.expect("Master password: ");
     p.line(PASSWORD);
     p.expect("Type rotate to continue: ");
@@ -246,7 +242,7 @@ fn rotation_refusals_change_nothing() {
 
 /// Resumes an interrupted rotation in `h` with `choice`.
 fn resume(h: &Home, choice: &str) -> (i32, String) {
-    let mut p = Interactive::spawn(h.qvault(["-v", &arg(&h.vault()), "recovery", "rotate"]));
+    let mut p = Interactive::spawn(h.qv(["-v", &arg(&h.vault()), "recovery", "rotate"]));
     let at = p.expect("An interrupted key rotation was found for this vault.");
     let at = p.expect_from(at, "New master password (chosen for the rotation): ");
     p.line(NEW);

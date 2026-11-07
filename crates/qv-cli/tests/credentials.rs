@@ -20,7 +20,7 @@ fn create(h: &Home) -> RecoveryPhrase {
 }
 fn snapshot(h: &Home) {
     let o = piped(
-        h.qvault(["--password-stdin", "-v", &arg(&h.vault()), "snapshot", "ls"]),
+        h.qv(["--password-stdin", "-v", &arg(&h.vault()), "snapshot", "ls"]),
         format!("{PASSWORD}\n").as_bytes(),
     );
     assert_eq!(o.code, 0, "{}", o.stderr);
@@ -45,7 +45,7 @@ fn credentials_passwd_reauthenticates_and_yes_does_not_delete_without_consent() 
     let _phrase = create(&h);
     snapshot(&h);
     let snapshots = std::fs::read_dir(h.snapshots()).unwrap().count();
-    let mut p = Interactive::spawn(h.qvault(["-v", &arg(&h.vault()), "--yes", "passwd"]));
+    let mut p = Interactive::spawn(h.qv(["-v", &arg(&h.vault()), "--yes", "passwd"]));
     p.expect("Master password: ");
     p.line(PASSWORD);
     choose(&mut p);
@@ -63,7 +63,7 @@ fn credentials_passwd_reauthenticates_and_yes_does_not_delete_without_consent() 
 fn credentials_recovery_show_is_alternate_screen_and_reauthenticates() {
     let h = Home::new();
     let phrase = create(&h);
-    let mut p = Interactive::spawn(h.qvault(["-v", &arg(&h.vault()), "recovery", "show"]));
+    let mut p = Interactive::spawn(h.qv(["-v", &arg(&h.vault()), "recovery", "show"]));
     p.expect("Master password: ");
     p.line(PASSWORD);
     p.expect("Press any key");
@@ -75,7 +75,7 @@ fn credentials_recovery_show_is_alternate_screen_and_reauthenticates() {
     for word in phrase.expose_secret().split(' ') {
         assert!(text[alt..].contains(word));
     }
-    let mut p = Interactive::spawn(h.qvault(["-v", &arg(&h.vault()), "recovery", "show"]));
+    let mut p = Interactive::spawn(h.qv(["-v", &arg(&h.vault()), "recovery", "show"]));
     p.expect("Master password: ");
     p.line("incorrect password");
     let (code, text) = p.finish();
@@ -92,7 +92,7 @@ fn credentials_recover_missing_anchor_requires_consent_and_offers_snapshot_delet
     }
     let before = std::fs::read(h.vault()).unwrap();
     // Declining the baseline changes neither the vault nor its missing anchor.
-    let mut p = Interactive::spawn(h.qvault(["recover", &arg(&h.vault())]));
+    let mut p = Interactive::spawn(h.qv(["recover", &arg(&h.vault())]));
     p.expect("Recovery phrase (24 words): ");
     p.line(phrase.expose_secret());
     choose(&mut p);
@@ -102,7 +102,7 @@ fn credentials_recover_missing_anchor_requires_consent_and_offers_snapshot_delet
     assert_eq!(code, 1, "{text}");
     assert_eq!(std::fs::read(h.vault()).unwrap(), before);
     assert_eq!(std::fs::read_dir(h.anchors()).unwrap().count(), 0);
-    let mut p = Interactive::spawn(h.qvault(["recover", &arg(&h.vault())]));
+    let mut p = Interactive::spawn(h.qv(["recover", &arg(&h.vault())]));
     p.expect("Recovery phrase (24 words): ");
     p.line(phrase.expose_secret());
     choose(&mut p);
@@ -126,14 +126,14 @@ fn credentials_recover_rejects_wrong_phrases_and_cancel_before_writes() {
     let foreign = create(&other);
     let before = std::fs::read(h.vault()).unwrap();
     for input in ["wrong phrase", foreign.expose_secret()] {
-        let mut p = Interactive::spawn(h.qvault(["recover", &arg(&h.vault())]));
+        let mut p = Interactive::spawn(h.qv(["recover", &arg(&h.vault())]));
         p.expect("Recovery phrase (24 words): ");
         p.line(input);
         let (code, text) = p.finish();
         assert_eq!(code, 3, "{text}");
         assert_eq!(std::fs::read(h.vault()).unwrap(), before);
     }
-    let mut p = Interactive::spawn(h.qvault(["recover", &arg(&h.vault())]));
+    let mut p = Interactive::spawn(h.qv(["recover", &arg(&h.vault())]));
     p.expect("Recovery phrase (24 words): ");
     p.send(&[3]);
     let (code, text) = p.finish();
@@ -153,7 +153,7 @@ fn credentials_preflight_refuses_json_stdin_and_nonterminal_displays() {
         vec!["--json", "recovery", "show"],
         vec!["recovery", "show"],
     ] {
-        let out = piped(h.qvault(args), b"");
+        let out = piped(h.qv(args), b"");
         assert_eq!(out.code, 2, "{}", out.stderr);
     }
 }
@@ -162,7 +162,7 @@ fn credentials_preflight_refuses_json_stdin_and_nonterminal_displays() {
 fn credentials_weak_password_delay_is_not_skipped_by_yes() {
     let h = Home::new();
     let _phrase = create(&h);
-    let mut p = Interactive::spawn(h.qvault(["--yes", "-v", &arg(&h.vault()), "passwd"]));
+    let mut p = Interactive::spawn(h.qv(["--yes", "-v", &arg(&h.vault()), "passwd"]));
     p.expect("Master password: ");
     p.line(PASSWORD);
     p.expect("Use this passphrase? [y/N] ");
@@ -204,7 +204,7 @@ fn credentials_rotation_marker_blocks_normal_unlock_and_phrase_recovery() {
     let marker = h.vault().with_file_name("v.qvault.qvrotate");
     std::fs::write(&marker, b"incomplete rotation intent").unwrap();
     let out = piped(
-        h.qvault(["--password-stdin", "-v", &arg(&h.vault()), "ls"]),
+        h.qv(["--password-stdin", "-v", &arg(&h.vault()), "ls"]),
         format!("{PASSWORD}\n").as_bytes(),
     );
     assert_eq!(out.code, 7, "{}", out.stderr);
@@ -212,7 +212,7 @@ fn credentials_rotation_marker_blocks_normal_unlock_and_phrase_recovery() {
     if h.snapshots().exists() {
         assert_eq!(std::fs::read_dir(h.snapshots()).unwrap().count(), 0);
     }
-    let mut p = Interactive::spawn(h.qvault(["recover", &arg(&h.vault())]));
+    let mut p = Interactive::spawn(h.qv(["recover", &arg(&h.vault())]));
     p.expect("Recovery phrase (24 words): ");
     p.line(phrase.expose_secret());
     let (code, text) = p.finish();
@@ -223,7 +223,7 @@ fn credentials_rotation_marker_blocks_normal_unlock_and_phrase_recovery() {
     // In the rename gap, an absent active name still reports integrity (7),
     // rather than NotFound (4). Store tests also check creation in this gap.
     std::fs::rename(h.vault(), h.vaults().join("old.qvault")).unwrap();
-    let out = piped(h.qvault(["-v", &arg(&h.vault()), "info"]), b"");
+    let out = piped(h.qv(["-v", &arg(&h.vault()), "info"]), b"");
     assert_eq!(out.code, 7, "{}", out.stderr);
     assert!(!h.vault().exists());
     for (path, bytes) in anchors {
@@ -250,7 +250,7 @@ fn credentials_reserved_rotation_copy_is_never_unlocked_or_anchored() {
         .join("v.qvault.qvrotate-new-00112233445566778899aabbccddeeff");
     std::fs::copy(h.vault(), &copy).unwrap();
     let out = piped(
-        h.qvault(["--password-stdin", "-v", &arg(&copy), "ls"]),
+        h.qv(["--password-stdin", "-v", &arg(&copy), "ls"]),
         format!("{PASSWORD}\n").as_bytes(),
     );
     assert_eq!(out.code, 7, "{}", out.stderr);

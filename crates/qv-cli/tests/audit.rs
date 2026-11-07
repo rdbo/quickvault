@@ -73,7 +73,7 @@ fn with_vault(h: &Home, args: &[&str]) -> Vec<String> {
 /// Runs from the home directory: attachment sources are relative paths
 /// there (an absolute path through the shared `/tmp` is refused).
 fn run_as(h: &Home, wrap: impl Fn(Command) -> Command, password: &str, args: &[&str]) -> Output {
-    let mut c = h.qvault(with_vault(h, args));
+    let mut c = h.qv(with_vault(h, args));
     c.current_dir(&h.root);
     piped(wrap(c), format!("{password}\n").as_bytes())
 }
@@ -169,7 +169,7 @@ fn audit_modes_owner_only_under_umask_000() {
     let vault = arg(&h.vault());
 
     // init on a terminal (phrase check skipped to keep it short).
-    let mut p = Interactive::spawn(umask0(h.qvault(["init", &vault])));
+    let mut p = Interactive::spawn(umask0(h.qv(["init", &vault])));
     let at = choose(&mut p, 0, PASSWORD);
     let at = p.expect_from(at, "Press any key");
     p.send(b" ");
@@ -199,7 +199,7 @@ fn audit_modes_owner_only_under_umask_000() {
         assert_eq!(o.code, 0, "{args:?}: {}", o.stderr);
     }
 
-    let mut p = Interactive::spawn(umask0(h.qvault(["-v", &vault, "--yes", "passwd"])));
+    let mut p = Interactive::spawn(umask0(h.qv(["-v", &vault, "--yes", "passwd"])));
     p.expect("Master password: ");
     p.line(PASSWORD);
     let at = choose(&mut p, 0, NEW);
@@ -210,7 +210,7 @@ fn audit_modes_owner_only_under_umask_000() {
     assert_eq!(code, 0, "{text}");
 
     rotate(
-        umask0(h.qvault(["-v", &vault, "recovery", "rotate"])),
+        umask0(h.qv(["-v", &vault, "recovery", "rotate"])),
         NEW,
         THIRD,
     );
@@ -371,10 +371,7 @@ fn audit_write_failure_fails_closed_at_every_write_path() {
     // nothing is published and the old password still opens the vault.
     let before = evidence(&h);
     let vault = arg(&h.vault());
-    let mut p = Interactive::spawn(limited(
-        h.qvault(["-v", &vault, "recovery", "rotate"]),
-        1024,
-    ));
+    let mut p = Interactive::spawn(limited(h.qv(["-v", &vault, "recovery", "rotate"]), 1024));
     p.expect("Master password: ");
     p.line(PASSWORD);
     let at = p.expect("Type rotate to continue: ");
@@ -390,7 +387,7 @@ fn audit_write_failure_fails_closed_at_every_write_path() {
 
     // A new vault: nothing is published at the target.
     let target = h.vaults().join("new.qvault");
-    let mut p = Interactive::spawn(limited(h.qvault(["init", &arg(&target)]), 4096));
+    let mut p = Interactive::spawn(limited(h.qv(["init", &arg(&target)]), 4096));
     choose(&mut p, 0, PASSWORD);
     let (code, text) = p.finish();
     assert!(matches!(code, 1 | 9), "init: exit {code}: {text}");
@@ -515,7 +512,7 @@ fn audit_canary_secrets_never_reach_output_or_files() {
         ),
     ];
     for (what, args, password, want) in cases {
-        let mut c = h.qvault(&args);
+        let mut c = h.qv(&args);
         c.current_dir(&h.root);
         let o = piped(c, format!("{password}\n").as_bytes());
         assert_ne!(o.code, 0, "{what}: {}", o.stdout);
@@ -527,7 +524,7 @@ fn audit_canary_secrets_never_reach_output_or_files() {
     }
 
     // A cancelled rotation, on a terminal.
-    let mut p = Interactive::spawn(h.qvault(["-v", &arg(&h.vault()), "recovery", "rotate"]));
+    let mut p = Interactive::spawn(h.qv(["-v", &arg(&h.vault()), "recovery", "rotate"]));
     p.expect("Master password: ");
     p.line(CANARY_MASTER);
     p.expect("Type rotate to continue: ");
@@ -537,7 +534,7 @@ fn audit_canary_secrets_never_reach_output_or_files() {
     no_canary("cancelled rotation", &text);
 
     // A new password typed, mismatched, then cancelled.
-    let mut p = Interactive::spawn(h.qvault(["-v", &arg(&h.vault()), "passwd"]));
+    let mut p = Interactive::spawn(h.qv(["-v", &arg(&h.vault()), "passwd"]));
     p.expect("Master password: ");
     p.line(CANARY_MASTER);
     let at = p.expect("Use this passphrase? [y/N] ");

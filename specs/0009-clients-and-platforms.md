@@ -110,10 +110,13 @@ validation packages may exercise the implemented path.
     user acknowledges the shown status;
   - a changed status asks again;
   - complete protection asks nothing;
-  - the mode stays visible in security settings.
+  - the mode stays visible in security settings;
+  - the locked screen shows a protection chip only while a reduced status
+    awaits acknowledgement; it opens the status for review. An acknowledged
+    or complete status shows no lasting chip (owner, 2026-11-06).
   - On Linux without screen-lock/sleep detection, 0008 §1.4's notice:
-    - before use: it is in that acknowledgement and the locked screen's
-      protection chip;
+    - before use: it is in that acknowledgement and the pending protection
+      chip;
     - while unlocked: a lasting mark on the lock button, whose label says
       screen lock and sleep do not lock QuickVault, and an "Idle only"
       auto-lock row in security settings.
@@ -329,6 +332,9 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-06: §1.8: the locked screen's protection chip shows only while a
+  reduced status awaits acknowledgement; the acknowledged mode stays in
+  security settings (owner request, plan 0043). Still Draft.
 - 2026-11-06: §1.7: the camera permission prompt that a Scan opens defers
   background expiry for that scan, like the document picker, so granting
   permission continues to the camera instead of locking (owner-reported bug,

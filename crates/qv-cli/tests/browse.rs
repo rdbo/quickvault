@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault ls` and `qvault search` end to end (vaults built with `qv-core`
+//! `qv ls` and `qv search` end to end (vaults built with `qv-core`
 //! in the test, the binary run through pipes with `--password-stdin`).
 
 #![cfg(any(target_os = "linux", target_os = "android"))]
@@ -86,7 +86,7 @@ fn run(f: &Fixture, args: &[&str]) -> Output {
     let vault = arg(&f.home.vault());
     let mut all = vec!["--password-stdin", "-v", &vault];
     all.extend_from_slice(args);
-    piped(f.home.qvault(all), format!("{PASSWORD}\n").as_bytes())
+    piped(f.home.qv(all), format!("{PASSWORD}\n").as_bytes())
 }
 
 fn no_raw_controls(s: &str) {
@@ -198,7 +198,7 @@ fn browse_streamed_json_keeps_separators_and_reports_write_errors() {
     let vault = arg(&home.vault());
     let password = format!("{PASSWORD}\n");
     let output = piped(
-        home.qvault(["--password-stdin", "-v", &vault, "ls", "--json"]),
+        home.qv(["--password-stdin", "-v", &vault, "ls", "--json"]),
         password.as_bytes(),
     );
     assert_eq!(output.code, 0, "{}", output.stderr);
@@ -211,7 +211,7 @@ fn browse_streamed_json_keeps_separators_and_reports_write_errors() {
         )
     );
     let output = piped(
-        home.qvault([
+        home.qv([
             "--password-stdin",
             "-v",
             &vault,
@@ -237,7 +237,7 @@ fn browse_streamed_json_keeps_separators_and_reports_write_errors() {
             use std::io::Write;
             use std::process::Stdio;
             let _serial = common::serial();
-            let mut cmd = home.qvault(["--password-stdin", "-v", &vault, command]);
+            let mut cmd = home.qv(["--password-stdin", "-v", &vault, command]);
             if command == "search" {
                 cmd.arg("Branch");
             }

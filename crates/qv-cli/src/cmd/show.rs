@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault show <entry> [--reveal] [--field <name>]` (spec 0011 §4, §3.3,
+//! `qv show <entry> [--reveal] [--field <name>]` (spec 0011 §4, §3.3,
 //! §5.2).
 //!
 //! Protected values print as `••••••••` unless `--reveal` is given; their

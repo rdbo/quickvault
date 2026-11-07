@@ -231,7 +231,7 @@ On ordinary unlock verify the manifest, that every referenced object row exists
 with the referenced length, and the AEAD of every active record (needed for
 views anyway). Verify hash and AEAD again whenever a historical version or chunk
 is read. A full re-hash of all stored ciphertext runs on explicit
-`qvault verify` and before creating an archive; it is not repeated on every
+`qv verify` and before creating an archive; it is not repeated on every
 CLI command. Ignore unreferenced objects. Missing or mismatched data is an
 integrity failure, never an empty record.
 

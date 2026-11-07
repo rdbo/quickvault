@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault verify [--json]` (spec 0011 §4–5, 0004 §3.6).
+//! `qv verify [--json]` (spec 0011 §4–5, 0004 §3.6).
 //!
 //! One read-only full pass over the vault: every referenced object, the
 //! manifest, every active head, every retained history version and every

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault lan open|sync|join` (spec 0011 §4 *LAN command contracts*, 0013;
+//! `qv lan open|sync|join` (spec 0011 §4 *LAN command contracts*, 0013;
 //! plan 0042).
 //!
 //! The code is a secret. It is shown only on the alternate screen

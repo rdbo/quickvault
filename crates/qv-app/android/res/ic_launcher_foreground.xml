@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Adaptive launcher icon foreground: the LOGO.svg mark, scaled into the
+     66dp safe circle of the 108dp canvas (centre of the mark at 54,54). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="17.88"
+        android:translateY="16.76"
+        android:scaleX="0.14"
+        android:scaleY="0.14">
+        <path
+            android:fillColor="#43D4A4"
+            android:fillType="evenOdd"
+            android:pathData="M208 96H288C349.856 96 400 146.144 400 208V288C400 312.65 392.04 335.44 378.55 353.93L420 395.38L379.38 436L337.93 394.55C319.44 408.04 296.65 416 272 416H208C146.144 416 96 365.856 96 304V208C96 146.144 146.144 96 208 96ZM248 164C215.967 164 190 189.967 190 222C190 248.461 207.723 270.785 231.947 277.751L218 316H250L238 348H290L304 310H273L284.907 266.746C297.79 256.109 306 240.013 306 222C306 189.967 280.033 164 248 164Z" />
+    </group>
+</vector>

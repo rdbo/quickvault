@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault search <query>` (spec 0011 §4 *Browsing*).
+//! `qv search <query>` (spec 0011 §4 *Browsing*).
 //!
 //! Case-insensitive, over titles, group names and non-protected text, URL
 //! and e-mail fields (`qv-core`); protected values and notes are never

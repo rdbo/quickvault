@@ -64,9 +64,9 @@ h1,h2,h3{margin:0;letter-spacing:-.01em}
 .drag{flex:1;align-self:stretch;min-width:12px}
 .brand{display:flex;align-items:center;gap:9px;padding:4px 8px 4px 4px;border-radius:8px;border:0;background:none;min-width:0}
 .brand:hover:enabled{background:var(--raised)}
-.dial{width:26px;height:26px;border-radius:8px;background:var(--accent);color:var(--ink);display:grid;place-items:center;flex:none}
+.logo{display:block;flex:none}
+.logo-bar{width:26px;height:26px}
 .brand b{font-weight:620;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
-.brand .ico{color:var(--text3);width:14px}
 .cmd{width:min(420px,40%);height:30px;display:flex;align-items:center;gap:8px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--text3);text-align:left}
 .cmd:hover:enabled{border-color:var(--text3)}
 /* The magnifier's handle sits low; drop the label 1px so they read as level. */
@@ -127,6 +127,7 @@ kbd{font:11px system-ui,sans-serif;border:1px solid var(--line);border-bottom-wi
 .steps i{width:22px;height:4px;border-radius:2px;background:var(--line)}
 .steps i.on{background:var(--accent)}
 .welcome{width:min(560px,100%);display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center}
+.logo-hero{width:96px;height:96px;filter:drop-shadow(0 10px 30px rgba(0,0,0,.25))}
 .welcome h1{font-size:26px;font-weight:700;letter-spacing:-.02em;margin-top:6px}
 .welcome>p{color:var(--text2);max-width:420px;margin:0 0 14px}
 .choices{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
@@ -604,3 +605,7 @@ button.set-row:hover:enabled{background:var(--raised)}
   .menu.pop,.menu.pop.end,.menu.pop.mid{transform:none;position:fixed;left:12px!important;right:12px!important;top:auto!important;bottom:calc(84px + env(safe-area-inset-bottom))!important;width:auto;min-width:0;max-height:calc(100% - 200px);overflow:auto;z-index:31}
   .ie-join{flex-wrap:wrap}
 }
+.about-brand{display:flex;align-items:center;gap:12px}
+.about-brand>span{display:flex;flex-direction:column;gap:2px}
+.about-brand .hint{margin:0}
+.logo-about{width:40px;height:40px}

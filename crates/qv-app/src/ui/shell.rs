@@ -4,7 +4,7 @@
 //! no OS decorations, 0009 §1.8), sidebar, phone tabs, command bar, toasts
 //! and confirmations. Layout comes from CSS container queries over one DOM.
 use super::ShellView;
-use super::icons::{Icon, Svg, initial, item_hue, kind_icon};
+use super::icons::{Icon, Logo, Svg, initial, item_hue, kind_icon};
 use super::{items, pages};
 use crate::controller::{AppError, Controller, FormEpoch};
 use crate::prefs::Theme;
@@ -68,11 +68,11 @@ pub(crate) fn TitleBar(
             div { class: "titlebar", onmousedown: drag.clone(), ondoubleclick: maximize.clone(),
                 if unlocked {
                     div { class: "brand",
-                        span { class: "dial", Svg { icon: Icon::Lock } }
+                        Logo { class: "logo-bar" }
                         b { "{vault.clone().unwrap_or_default()}" }
                     }
                 } else {
-                    div { class: "brand", span { class: "dial", Svg { icon: Icon::Lock } } b { "QuickVault" } }
+                    div { class: "brand", Logo { class: "logo-bar" } b { "QuickVault" } }
                 }
                 div { class: "drag" }
                 if let Some(mut p) = palette {

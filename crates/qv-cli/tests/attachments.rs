@@ -13,7 +13,7 @@ fn run(h: &Home, args: &[&str]) -> common::Output {
     let vault = arg(&h.vault());
     let mut all = vec!["--password-stdin", "--yes", "-v", &vault];
     all.extend_from_slice(args);
-    let mut c: Command = h.qvault(all);
+    let mut c: Command = h.qv(all);
     c.current_dir(h.vaults());
     piped(c, format!("{PASSWORD}\n").as_bytes())
 }
@@ -84,7 +84,7 @@ fn attachment_cli_preflight_ambiguity_and_input_limits() {
     ] {
         let mut a = vec!["--password-stdin"];
         a.extend(args);
-        let out = piped(h.qvault(a), b"");
+        let out = piped(h.qv(a), b"");
         assert_eq!(out.code, 2);
         assert!(!out.stderr.contains("Master password"));
     }

@@ -10,7 +10,7 @@ fn run(h: &Home, extra: &[&str]) -> Output {
     let vault = arg(&h.vault());
     let mut args = vec!["--password-stdin", "-v", &vault];
     args.extend_from_slice(extra);
-    piped(h.qvault(args), format!("{PASSWORD}\n").as_bytes())
+    piped(h.qv(args), format!("{PASSWORD}\n").as_bytes())
 }
 
 // 0012 §1: Exchange-file password guessing
@@ -28,7 +28,7 @@ fn exchange_cli_preflight_and_explicit_backup_consent() {
         assert!(!h.root.join("exports").exists());
         assert!(o.stdout.is_empty());
     }
-    let mut prompt = common::Interactive::spawn(h.qvault([
+    let mut prompt = common::Interactive::spawn(h.qv([
         "-v",
         &arg(&h.vault()),
         "snapshot",

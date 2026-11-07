@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault show`, `totp` and `generate` end to end, and the exit codes that
+//! `qv show`, `totp` and `generate` end to end, and the exit codes that
 //! need a real vault state (6, 7).
 
 #![cfg(any(target_os = "linux", target_os = "android"))]
@@ -48,7 +48,7 @@ fn run(home: &Home, args: &[&str]) -> Output {
     let vault = arg(&home.vault());
     let mut all = vec!["--password-stdin", "-v", &vault];
     all.extend_from_slice(args);
-    piped(home.qvault(all), format!("{PASSWORD}\n").as_bytes())
+    piped(home.qv(all), format!("{PASSWORD}\n").as_bytes())
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn show_field_is_escaped_on_a_terminal() {
     let home = fixture();
     let vault = arg(&home.vault());
     let mut p =
-        Interactive::spawn(home.qvault(["show", "-v", &vault, "--field", "Raw", "Work/GitHub"]));
+        Interactive::spawn(home.qv(["show", "-v", &vault, "--field", "Raw", "Work/GitHub"]));
     p.expect("Master password: ");
     p.line(PASSWORD);
     let (code, all) = p.finish();
@@ -159,7 +159,7 @@ fn totp_prints_the_current_code() {
             .unwrap();
         let now = s.totp(field.handle).unwrap();
         let same = now.code.expose_secret() == code;
-        // Release the vault lock before running qvault again.
+        // Release the vault lock before running qv again.
         drop(now);
         drop(s);
         if same {
@@ -178,7 +178,7 @@ fn generate_modes_and_defaults() {
     let gen_ = |args: &[&str]| {
         let mut a = vec!["generate"];
         a.extend_from_slice(args);
-        piped(home.qvault(a), b"")
+        piped(home.qv(a), b"")
     };
     // No vault selected: the 0010 defaults, no prompt.
     let out = gen_(&[]);
@@ -230,7 +230,7 @@ fn generate_modes_and_defaults() {
     assert_eq!(out.stdout.trim_end().len(), 7);
     // Options override them without unlocking.
     let out = piped(
-        home.qvault(["generate", "-v", &arg(&home.vault()), "--pin", "4"]),
+        home.qv(["generate", "-v", &arg(&home.vault()), "--pin", "4"]),
         b"",
     );
     assert_eq!(out.stdout.trim_end().len(), 4);
@@ -250,14 +250,14 @@ fn exit_codes_for_vault_states() {
     assert_eq!(run(&home, &["ls"]).code, 0);
     // 3: a wrong password.
     let out = piped(
-        home.qvault(["ls", "--password-stdin", "-v", &arg(&home.vault())]),
+        home.qv(["ls", "--password-stdin", "-v", &arg(&home.vault())]),
         b"wrong\n",
     );
     assert_eq!(out.code, 3);
     // 9: a password over 1024 bytes on stdin.
     let long = format!("{}\n", "x".repeat(1025));
     let out = piped(
-        home.qvault(["ls", "--password-stdin", "-v", &arg(&home.vault())]),
+        home.qv(["ls", "--password-stdin", "-v", &arg(&home.vault())]),
         long.as_bytes(),
     );
     assert_eq!(out.code, 9);
@@ -283,7 +283,7 @@ fn vault_inside_the_anchor_directory_is_refused() {
     let inside = home.anchors().join("v.qvault");
     std::fs::rename(home.vault(), &inside).unwrap();
     let out = piped(
-        home.qvault(["ls", "--password-stdin", "-v", &arg(&inside)]),
+        home.qv(["ls", "--password-stdin", "-v", &arg(&inside)]),
         format!("{PASSWORD}\n").as_bytes(),
     );
     assert_eq!(out.code, 1, "{}", out.stderr);

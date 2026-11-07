@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault verify` (0011 §4–5): the full report, the anchor semantics, the
+//! `qv verify` (0011 §4–5): the full report, the anchor semantics, the
 //! JSON shape and the integrity exits. The vault is never repaired.
 #![cfg(any(target_os = "linux", target_os = "android"))]
 #![allow(clippy::unwrap_used, clippy::panic)]
@@ -14,7 +14,7 @@ fn run(h: &Home, extra: &[&str]) -> Output {
     let vault = arg(&h.vault());
     let mut a = vec!["--password-stdin", "-v", &vault];
     a.extend_from_slice(extra);
-    piped(h.qvault(a), format!("{PASSWORD}\n").as_bytes())
+    piped(h.qv(a), format!("{PASSWORD}\n").as_bytes())
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn verify_wrong_password_and_a_damaged_vault_exit_3_and_7() {
     drop(s);
     let vault = arg(&h.vault());
     let o = piped(
-        h.qvault(["--password-stdin", "-v", &vault, "verify"]),
+        h.qv(["--password-stdin", "-v", &vault, "verify"]),
         b"wrong password\n",
     );
     assert_eq!(o.code, 3, "{}", o.stderr);
@@ -129,7 +129,7 @@ fn exchange_file_password_guessing_a_snapshot_does_not_open_with_the_password() 
     std::fs::copy(&snapshot, &copy).unwrap();
     std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o600)).unwrap();
     let o = piped(
-        h.qvault(["--password-stdin", "-v", &arg(&copy), "verify"]),
+        h.qv(["--password-stdin", "-v", &arg(&copy), "verify"]),
         format!("{PASSWORD}\n").as_bytes(),
     );
     assert_ne!(o.code, 0, "the snapshot opened as a vault: {}", o.stdout);

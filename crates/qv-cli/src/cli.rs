@@ -29,7 +29,7 @@ const REVEAL_HELP: &str =
 
 /// The full command tree.
 pub(crate) fn command() -> Command {
-    Command::new("qvault")
+    Command::new("qv")
         .about("QuickVault: an offline-first, end-to-end encrypted password manager")
         .after_help(ARGV_NOTE)
         .version(env!("CARGO_PKG_VERSION"))
@@ -507,7 +507,7 @@ pub(crate) fn rotation_hint(
         && core.rotation_pending(path).unwrap_or(false)
     {
         err.message.push_str(
-            "\nhint: an interrupted key rotation exists; run `qvault recovery rotate` to complete or roll it back",
+            "\nhint: an interrupted key rotation exists; run `qv recovery rotate` to complete or roll it back",
         );
     }
     err
@@ -517,14 +517,14 @@ pub(crate) fn rotation_hint(
 pub(crate) fn warn_location(w: qv_core::LocationWarnings) {
     if w.sync_folder {
         crate::out::eprint(
-            "qvault: warning: the vault is in a file-sync folder; synced copies can be rolled back or forked\n",
+            "qv: warning: the vault is in a file-sync folder; synced copies can be rolled back or forked\n",
         );
     }
     if w.network_fs {
-        crate::out::eprint("qvault: warning: the vault is on a network filesystem\n");
+        crate::out::eprint("qv: warning: the vault is on a network filesystem\n");
     }
     if w.removable {
-        crate::out::eprint("qvault: warning: the vault is on removable media\n");
+        crate::out::eprint("qv: warning: the vault is on removable media\n");
     }
 }
 
@@ -536,16 +536,16 @@ pub(crate) fn warn_snapshots(session: &Session) {
     };
     if report.failed {
         crate::out::eprint(
-            "qvault: warning: the automatic snapshot could not be written; the vault is unchanged\n",
+            "qv: warning: the automatic snapshot could not be written; the vault is unchanged\n",
         );
     }
     match report.skipped {
         Some(qv_core::SnapshotSkip::OverBudget { needed }) => crate::out::eprint(&format!(
-            "qvault: warning: the automatic snapshot needs {needed} bytes and was skipped: it does \
+            "qv: warning: the automatic snapshot needs {needed} bytes and was skipped: it does \
              not fit the snapshot budget\n"
         )),
         Some(qv_core::SnapshotSkip::Disabled) => crate::out::eprint(
-            "qvault: warning: local snapshots are disabled: no usable private snapshot directory\n",
+            "qv: warning: local snapshots are disabled: no usable private snapshot directory\n",
         ),
         _ => {}
     }
@@ -583,7 +583,7 @@ pub(crate) fn run(args: impl IntoIterator<Item = OsString>, env: Environment) ->
     let memory = qv_core::harden().memory;
     if memory.is_reduced() {
         crate::out::eprint(&format!(
-            "qvault: warning: reduced protection: {} secret buffer(s) could not be locked in \
+            "qv: warning: reduced protection: {} secret buffer(s) could not be locked in \
              memory and may be written to swap\n",
             memory.lock_failures
         ));
@@ -628,15 +628,11 @@ fn dispatch(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
     }
 }
 
-/// Prints an error on stderr: `qvault: error: …`, each line escaped.
+/// Prints an error on stderr: `qv: error: …`, each line escaped.
 pub(crate) fn report(e: &CliError) {
     let mut o = Out::stderr();
     for (i, line) in e.message.split('\n').enumerate() {
-        o.raw(if i == 0 {
-            "qvault: error: "
-        } else {
-            "qvault: "
-        });
+        o.raw(if i == 0 { "qv: error: " } else { "qv: " });
         // The message is fixed text plus already escaped context; escaping
         // it again would double the backslashes, so only stray controls
         // are escaped here.
@@ -684,7 +680,7 @@ mod tests {
                 walk(s, &format!("{path} {}", s.get_name()));
             }
         }
-        walk(&command(), "qvault");
+        walk(&command(), "qv");
         // `--password-stdin` is a flag.
         let c = command();
         let a = c
@@ -697,25 +693,16 @@ mod tests {
     #[test]
     fn cli_usage_and_help_codes() {
         let env = Environment::default();
+        assert_eq!(run(["qv", "--help"].map(OsString::from), env.clone()), 0);
+        assert_eq!(run(["qv", "--version"].map(OsString::from), env.clone()), 0);
         assert_eq!(
-            run(["qvault", "--help"].map(OsString::from), env.clone()),
-            0
-        );
-        assert_eq!(
-            run(["qvault", "--version"].map(OsString::from), env.clone()),
-            0
-        );
-        assert_eq!(
-            run(["qvault", "--frobnicate"].map(OsString::from), env.clone()),
+            run(["qv", "--frobnicate"].map(OsString::from), env.clone()),
             2
         );
-        assert_eq!(run(["qvault"].map(OsString::from), env.clone()), 2);
-        assert_eq!(run(["qvault", "show"].map(OsString::from), env.clone()), 2);
+        assert_eq!(run(["qv"].map(OsString::from), env.clone()), 2);
+        assert_eq!(run(["qv", "show"].map(OsString::from), env.clone()), 2);
         assert_eq!(
-            run(
-                ["qvault", "generate", "--pin", "x"].map(OsString::from),
-                env
-            ),
+            run(["qv", "generate", "--pin", "x"].map(OsString::from), env),
             2
         );
     }

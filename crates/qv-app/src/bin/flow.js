@@ -25,10 +25,13 @@ let passed=false;let stage=0;
 try{
  // First run: protection review and the explicit reduced-protection acknowledgement.
  stage=1;await until(()=>!!$("#welcome-create"));
- await tap("protection-chip");await until(()=>!!$("#protection-status"));
- const clipboard=byId("protection-status").textContent.includes("Clipboard clearingAvailable");
- if($("#protection-ack"))await tap("protection-ack");else await click("Done");
- await until(()=>!$("#protection-status"));
+ // The chip shows only while a reduced status awaits acknowledgement.
+ let clipboard=null;
+ if($("#protection-chip")){
+  await tap("protection-chip");await until(()=>!!$("#protection-status"));
+  clipboard=byId("protection-status").textContent.includes("Clipboard clearingAvailable");
+  await tap("protection-ack");await until(()=>!$("#protection-status"));
+ }
  await tap("welcome-create");
  stage=2;await until(()=>!!$("#vault-name"));
  input("vault-name","Synthetic vault");await tap("create-next");input("password",password);input("repeat",password);await tap("create-submit");
@@ -52,7 +55,8 @@ try{
  stage=53;await press(()=>$('[aria-label="Reveal for 30 seconds"]'),"reveal");await until(()=>($(".field-value.revealed")?.textContent||"").length>=8);
  stage=54;await press(()=>$('.fld [aria-label="Hide"]'),"hide");await until(()=>!$(".field-value.revealed"));
  stage=6;await press(()=>$('.fld [aria-label="Copy"]'),"copy");
- if(clipboard)await until(()=>Array.from(document.querySelectorAll(".toast")).some(t=>t.textContent.startsWith("Copied")));else await until(()=>!!$(".error"));
+ const copied=()=>Array.from(document.querySelectorAll(".toast")).some(t=>t.textContent.startsWith("Copied"));
+ if(clipboard===null)await until(()=>copied()||!!$(".error"));else if(clipboard)await until(copied);else await until(()=>!!$(".error"));
  await dismissErrors();
  stage=61;await tap("entry-edit");await until(()=>!!$("#ws-title"));input("ws-title","Edited engine entry");await tap("entry-save");await until(()=>title()==="Edited engine entry");await unlocked();
  await tap("entry-history");await until(()=>!!$(".history-row"));await press(()=>$(".history-row"),"history row");await until(()=>!!$("#restore-version"));await tap("restore-version");

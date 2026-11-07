@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault init <path> [--name <name>]` (spec 0011 §4, §3.7, §5.4; 0010
+//! `qv init <path> [--name <name>]` (spec 0011 §4, §3.7, §5.4; 0010
 //! §4.2; 0002 §4.2).
 //!
 //! 1. A generated 6-word passphrase is suggested on the alternate screen.
@@ -88,7 +88,7 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
 fn create_failed(mut e: CliError, path: &Path) -> CliError {
     if std::fs::symlink_metadata(path).is_ok() {
         e.message.push_str(&format!(
-            "\nhint: a vault file may still have been created at {}; check it with `qvault info`",
+            "\nhint: a vault file may still have been created at {}; check it with `qv info`",
             escape_str(&path.to_string_lossy())
         ));
     }

@@ -39,9 +39,9 @@ fn phrase(p: &Interactive, at: usize) -> String {
     words.join(" ")
 }
 
-/// `qvault` with `args`, inside `unshare -rn` when `blocked`.
+/// `qv` with `args`, inside `unshare -rn` when `blocked`.
 fn cmd(home: &Home, blocked: bool, args: &[&str]) -> Command {
-    let base = home.qvault(args);
+    let base = home.qv(args);
     if !blocked {
         return base;
     }

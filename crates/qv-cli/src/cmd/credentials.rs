@@ -142,7 +142,7 @@ pub(crate) fn recover(ctx: &Ctx, args: &ArgMatches) -> Result<(), CliError> {
     drop(phrase);
     crate::cli::warn_location(s.warnings()?);
     if matches!(s.snapshot_status(), Some(r) if r.skipped == Some(SnapshotSkip::Disabled)) {
-        crate::out::eprint("qvault: local snapshots are unavailable.\n");
+        crate::out::eprint("qv: local snapshots are unavailable.\n");
     }
     let new = crate::cmd::init::choose_password(&tty)?;
     let recovery = if s.is_read_only()? {
@@ -170,7 +170,7 @@ pub(crate) fn recover(ctx: &Ctx, args: &ArgMatches) -> Result<(), CliError> {
         && s.finish_destructive(copy).is_err()
     {
         crate::out::eprint(
-            "qvault: the password reset committed, but its recovery snapshot could not be reclassified; it remains on disk.\n",
+            "qv: the password reset committed, but its recovery snapshot could not be reclassified; it remains on disk.\n",
         );
     }
     offer_snapshots(&tty, &s, &ids)?;
@@ -185,7 +185,7 @@ still open the data as it was. Earlier snapshots stay under the snapshot budgets
 with the old recovery phrase. A recovery snapshot is taken first.\n";
 
 const PARTIAL: &str = "\nThe key rotation may be partly applied. Do not delete or rename any \
-`.qvrotate` file; run `qvault recovery rotate` again and enter both master passwords.";
+`.qvrotate` file; run `qv recovery rotate` again and enter both master passwords.";
 
 /// Types `word` exactly, or the operation is declined (nothing changed).
 fn typed(tty: &Tty<'_>, label: &str, word: &str) -> Result<bool, CliError> {
@@ -295,7 +295,7 @@ pub(crate) fn rotate(ctx: &Ctx) -> Result<(), CliError> {
                 done.new_generation.0
             ))?;
             if done.cleanup_pending {
-                tty.say("Some files of the old generation could not be removed yet; run `qvault recovery rotate` again with the new master password to finish.\n")?;
+                tty.say("Some files of the old generation could not be removed yet; run `qv recovery rotate` again with the new master password to finish.\n")?;
             }
             Ok(())
         }

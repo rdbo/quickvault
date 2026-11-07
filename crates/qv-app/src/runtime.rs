@@ -83,6 +83,11 @@ fn launch(title: &'static str, script: &'static [u8]) -> ! {
         .with_window(
             dioxus_desktop::WindowBuilder::new()
                 .with_title(title)
+                // The logo for the taskbar and window switcher, rendered from
+                // `LOGO.svg`; a decoding failure leaves the framework default.
+                .with_window_icon(
+                    dioxus_desktop::icon_from_memory(include_bytes!("../assets/icon-256.png")).ok(),
+                )
                 // The app draws its own title bar (0009 §1.8); no effect on Android.
                 .with_decorations(false)
                 .with_inner_size(dioxus_desktop::LogicalSize::new(width, height))

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault snapshot ls [--json]` / `restore <id> <new-path>` (spec 0011 §4–5, 0007 §3).
+//! `qv snapshot ls [--json]` / `restore <id> <new-path>` (spec 0011 §4–5, 0007 §3).
 //!
 //! Listing authenticates each file's archive header with the vault key, so
 //! only this vault ID and key generation appear. Files that do not
@@ -74,7 +74,7 @@ fn restore(ctx: &Ctx, args: &ArgMatches) -> Result<(), CliError> {
     crate::cli::warn_snapshots(&session);
     session.lock();
     crate::out::eprint(
-        "qvault: restored a new recovery baseline; the snapshot may be old and does not establish the latest global state. For a single-slot snapshot use its original password; if its keyslot heads conflict, use this source vault's current working password. All conflicts are preserved.\n",
+        "qv: restored a new recovery baseline; the snapshot may be old and does not establish the latest global state. For a single-slot snapshot use its original password; if its keyslot heads conflict, use this source vault's current working password. All conflicts are preserved.\n",
     );
     Ok(())
 }
@@ -84,7 +84,7 @@ fn list(ctx: &Ctx) -> Result<(), CliError> {
     let listing = session.snapshots()?;
     if listing.unreadable != 0 {
         crate::out::eprint(&format!(
-            "qvault: warning: {} snapshot file(s) could not be authenticated and were skipped\n",
+            "qv: warning: {} snapshot file(s) could not be authenticated and were skipped\n",
             listing.unreadable
         ));
     }
@@ -150,7 +150,7 @@ fn export(ctx: &Ctx, args: &ArgMatches) -> Result<(), CliError> {
     let backup = args.get_flag("self-contained");
     if backup {
         crate::out::eprint(
-            "qvault: warning: anyone holding this self-contained backup can try offline master-password guessing. Old copies are not revoked by a password change.\n",
+            "qv: warning: anyone holding this self-contained backup can try offline master-password guessing. Old copies are not revoked by a password change.\n",
         );
         if !ctx.yes
             && !crate::term::stdio_tty()?.confirm("Include the password slot in this backup?")?
@@ -172,7 +172,7 @@ fn print_export_report(report: qv_core::ArchiveExportReport) -> Result<(), CliEr
     out.flush()?;
     if let Some(error) = report.completion_error {
         crate::out::eprint(
-            "qvault: archive published; crash durability is unconfirmed because publication completion failed\n",
+            "qv: archive published; crash durability is unconfirmed because publication completion failed\n",
         );
         return Err(error.into());
     }

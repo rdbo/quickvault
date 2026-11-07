@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault generate [options]` (spec 0011 §4; 0010).
+//! `qv generate [options]` (spec 0011 §4; 0010).
 //!
 //! Without options, the selected vault's defaults are used (the vault is
 //! unlocked for them); with no vault selected, the 0010 defaults. Any

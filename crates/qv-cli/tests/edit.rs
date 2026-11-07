@@ -11,7 +11,7 @@ fn run(h: &Home, args: &[&str]) -> Output {
     let vault = arg(&h.vault());
     let mut all = vec!["--password-stdin", "-v", &vault];
     all.extend_from_slice(args);
-    piped(h.qvault(all), format!("{PASSWORD}\n").as_bytes())
+    piped(h.qv(all), format!("{PASSWORD}\n").as_bytes())
 }
 fn ok(h: &Home, args: &[&str]) {
     let o = run(h, args);
@@ -152,7 +152,7 @@ fn prompts_notes_interactive_and_cancellation() {
     let h = Home::new();
     drop(h.create());
     let vault = arg(&h.vault());
-    let mut p = Interactive::spawn(h.qvault([
+    let mut p = Interactive::spawn(h.qv([
         "-v",
         &vault,
         "add",
@@ -190,7 +190,7 @@ fn prompts_notes_interactive_and_cancellation() {
     let old_seq = s.overview().unwrap().local_seq;
     drop(d);
     drop(s);
-    let mut p = Interactive::spawn(h.qvault([
+    let mut p = Interactive::spawn(h.qv([
         "-v", &vault, "edit", "Prompted", "-i", "--field", "password",
     ]));
     let at = p.expect("Master password: ");
@@ -218,7 +218,7 @@ fn prompts_notes_interactive_and_cancellation() {
     assert!(seq > old_seq);
     drop(d);
     drop(s);
-    let mut p = Interactive::spawn(h.qvault([
+    let mut p = Interactive::spawn(h.qv([
         "-v",
         &vault,
         "edit",
@@ -266,7 +266,7 @@ fn prompt_preflight_and_field_name_ambiguity() {
         let vault = arg(&h.vault());
         let mut a = vec!["--password-stdin", "-v", &vault];
         a.extend(args);
-        let o = piped(h.qvault(a), b"");
+        let o = piped(h.qv(a), b"");
         assert_eq!(o.code, 2, "{}", o.stderr);
     }
     assert_eq!(
@@ -337,7 +337,7 @@ fn signals_restore_terminal_and_never_save_partial_input() {
                 "notes" => vec!["-v", &vault, "edit", "SignalEntry", "--notes"],
                 _ => vec!["-v", &vault, "trash", "empty"],
             };
-            let mut p = Interactive::spawn(h.qvault(args));
+            let mut p = Interactive::spawn(h.qv(args));
             let observer = p.terminal_observer();
             let at = p.expect("Master password: ");
             if stage != "master" {
@@ -381,7 +381,7 @@ fn signals_clear_recovery_alternate_screen() {
     for signal in [Signal::INT, Signal::TERM, Signal::HUP] {
         let h = Home::new();
         let vault = arg(&h.vault());
-        let mut p = Interactive::spawn(h.qvault(["init", &vault]));
+        let mut p = Interactive::spawn(h.qv(["init", &vault]));
         let observer = p.terminal_observer();
         let at = p.expect("Use this passphrase? [y/N] ");
         p.line("n");
@@ -428,7 +428,7 @@ fn value_bounds_and_invalid_utf8_leave_the_entry_unchanged() {
         if option == "--secret-field" {
             args.push("password");
         }
-        let mut p = Interactive::spawn(h.qvault(args));
+        let mut p = Interactive::spawn(h.qv(args));
         let at = p.expect("Master password: ");
         p.line(PASSWORD);
         p.expect_from(at, prompt);
@@ -447,7 +447,7 @@ fn signals_interrupt_the_weak_password_countdown() {
     for signal in [Signal::INT, Signal::TERM, Signal::HUP] {
         let h = Home::new();
         let vault = arg(&h.vault());
-        let mut p = Interactive::spawn(h.qvault(["init", &vault, "--yes"]));
+        let mut p = Interactive::spawn(h.qv(["init", &vault, "--yes"]));
         let at = p.expect("Use this passphrase? [y/N] ");
         p.line("n");
         let at = p.expect_from(at, "New master password: ");
@@ -476,7 +476,7 @@ fn signal_cancels_a_pending_password_pipe() {
     for (signal, number) in [(Signal::INT, 2), (Signal::TERM, 15), (Signal::HUP, 1)] {
         let _serial = common::serial();
         let mut child = h
-            .qvault(["--password-stdin", "-v", &vault, "ls"])
+            .qv(["--password-stdin", "-v", &vault, "ls"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

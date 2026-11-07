@@ -10,7 +10,7 @@ fn run(home: &Home, args: &[&str]) -> common::Output {
     let vault = arg(&home.vault());
     let mut all = vec!["--password-stdin", "-v", &vault];
     all.extend_from_slice(args);
-    piped(home.qvault(all), format!("{PASSWORD}\n").as_bytes())
+    piped(home.qv(all), format!("{PASSWORD}\n").as_bytes())
 }
 #[test]
 fn history_cli_show_restore_and_purge_persist() {
@@ -85,7 +85,7 @@ fn history_cli_preflight_before_unlock_and_scoped_absence() {
     ] {
         let mut a = vec!["--password-stdin"];
         a.extend(args);
-        let out = piped(h.qvault(a), b"");
+        let out = piped(h.qv(a), b"");
         assert_eq!(out.code, 2, "{}", out.stderr);
         assert!(!out.stderr.contains("Master password"));
     }
@@ -123,7 +123,7 @@ fn history_purge_confirmation_cancel_and_signal_preserve_history() {
         Some(Signal::TERM),
         Some(Signal::HUP),
     ] {
-        let mut p = Interactive::spawn(h.qvault(["-v", &vault, "history", "purge", "History"]));
+        let mut p = Interactive::spawn(h.qv(["-v", &vault, "history", "purge", "History"]));
         p.expect("Master password: ");
         p.line(PASSWORD);
         p.expect("[y/N] ");

@@ -56,7 +56,7 @@ pub(crate) fn hold(value: SecretBytes, options: ClipboardOptions) -> Result<(), 
     crate::signals::check()?;
     if qv_core::harden().memory.is_reduced() {
         crate::out::eprint(
-            "qvault: warning: reduced protection: secret buffers could not all be locked in memory and may reach swap\n",
+            "qv: warning: reduced protection: secret buffers could not all be locked in memory and may reach swap\n",
         );
     }
     let tty = rustix::termios::isatty(rustix::stdio::stderr());

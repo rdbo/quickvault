@@ -954,7 +954,7 @@ release; it is not weakened.
 
 - [ ] **Do:** Stage the remote state, verify it against the base, merge into a
   candidate, publish via CAS and query ambiguous outcomes by operation ID, with
-  bounded in-operation retries. Add `qvault sync` and `checkpoint show/compare`.
+  bounded in-operation retries. Add `qv sync` and `checkpoint show/compare`.
 - **Specs:** 0005 §0.3, §0.5, §3, §5.5; 0011 §4.
 - **Depends on:** 3.5.
 - **Files:** `crates/qv-sync/`, `crates/qv-cli/`.
@@ -968,7 +968,7 @@ release; it is not weakened.
 - [ ] **Do:** Pairing per 0006 (QR ticket, comparison code, one request per
   ticket, ephemeral X-Wing transfer of the full payload and the trusted
   checkpoint), grants per generation, atomic revocation, and checks on every
-  operation. Add `qvault account …` and `qvault device …`.
+  operation. Add `qv account …` and `qv device …`.
 - **Specs:** 0006 (adding a device, revocation); 0002 §6.
 - **Depends on:** 3.6, 2.8.
 - **Files:** `crates/qv-server/`, `crates/qv-sync/`, `crates/qv-cli/`.

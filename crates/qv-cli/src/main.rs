@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault`, the QuickVault command-line client (spec 0011).
+//! `qv`, the QuickVault command-line client (spec 0011).
 //!
 //! A thin layer over `qv-core`: every command that needs vault contents
 //! prompts for the master password, unlocks, does its work, and drops
@@ -76,7 +76,7 @@ fn main() -> ExitCode {
     let protection = qv_core::harden();
     if protection.process.is_reduced() {
         out::eprint(
-            "qvault: warning: reduced protection: core dumps or debugger attachment could not \
+            "qv: warning: reduced protection: core dumps or debugger attachment could not \
              be disabled\n",
         );
     }

@@ -93,7 +93,7 @@ rather than creating unused workspace scaffolding.
 | qv-sync | Shared causal merge candidates; LAN over TCP: the one-use sync window and the joiner in sync or new-device mode, and the two-way exchange (roadmap 2.9–2.10, plan 0042); remote candidate state and publication orchestration (planned) |
 | qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets, the `verify` report, and LAN sync windows, sync from a code and new-device join for frontends; strict scanned QR kind/profile/address inspection without network I/O |
 | qv-platform | Injected OS traits; local unicast addresses for LAN endpoints from route probes, attached networks first (`/proc/net/route` where readable; std only); Linux logind lifecycle, xdg-desktop-portal file picker (zbus, local `file:` results only), X11 clipboard ownership, single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; gated Android keystore quick unlock with process-local policy; gated exact-identity autofill matching; native input unavailable |
-| qv-cli / qv-app | Explicit user actions and views, including `qvault lan open|sync|join` and the app's Devices screen and Join mode; qv-app's shared UI (own title bar, one DOM for desktop and phone, 0009 §1.8), its non-secret preferences file (theme, acknowledged protection status), QR rendering/decoding and bounded native Android Camera2 glue (camera gated pending device validation); no unrestricted crypto/file/SQL bridge |
+| qv-cli / qv-app | Explicit user actions and views, including `qv lan open|sync|join` and the app's Devices screen and Join mode; qv-app's shared UI (own title bar, one DOM for desktop and phone, 0009 §1.8), its non-secret preferences file (theme, acknowledged protection status), QR rendering/decoding and bounded native Android Camera2 glue (camera gated pending device validation); no unrestricted crypto/file/SQL bridge |
 | qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
 
 Implemented so far: `qv-encoding` (canonical CBOR codec, fuzzed in CI) and
@@ -113,7 +113,7 @@ surfacing and vault settings including generator defaults, plus the
 unverified header view, the zxcvbn master-password estimate, session-bound
 streaming attachment operations, local snapshot policy/budgets with their
 authenticated listing, and the `verify` report) and `qv-cli`
-(`qvault` with `init`, `info`, `ls`, `search`, `show`, `totp`, `generate`,
+(`qv` with `init`, `info`, `ls`, `search`, `show`, `totp`, `generate`,
 `add`, `edit`, `mv`, `mkdir`, `rm`, `trash ls|restore|empty`,
 `snapshot ls|restore`, `verify`, `copy` and
 `totp`/`generate --copy`, `attach add|ls|save|rm`; protected
@@ -163,7 +163,7 @@ Roadmap 2.10 (plan 0038) makes LAN sync usable (0013 §5, §7, §8):
   peer receipt are reported separately, and the ordinary snapshot coalescing
   runs before a merge;
 - qv-platform: local addresses from route probes;
-- qv-cli: `qvault lan pair|join|receive|sync|links|unlink` and exit code 10;
+- qv-cli: `qv lan pair|join|receive|sync|links|unlink` and exit code 10;
 - qv-app: the Devices screen and Join mode, whose prompts are answered while
   the operation waits on its worker. Only bounded listeners without a pending
   question defer idle locking; prompts and initiated operations retain it.
@@ -176,7 +176,7 @@ session handshake and receive windows above with one-use sync windows:
 sync mode proves VK possession bound to the pairing transcript and runs one
 exchange; new-device mode keeps the comparison code; nothing about a peer is
 stored (the `lan_link` rows and digest stay in the format, always empty
-after a commit). The CLI is `qvault lan open|sync|join`, and in the app a
+after a commit). The CLI is `qv lan open|sync|join`, and in the app a
 scanned code that names its address starts the sync or join at once.
 
 DNS-SD discovery stays deferred (owner decision 2026-11-03). Roadmap 2.10b
@@ -255,7 +255,7 @@ a rollback is refused once the anchor names the new head. Core pins the
 mandatory recovery snapshot, consumes the session and installs only after
 three phrase words are confirmed. Snapshot policy counts inventoried copies
 of older generations and removes one only when its hash matches. A missing
-inventory fails closed. `qvault recovery rotate` drives both the new and the
+inventory fails closed. `qv recovery rotate` drives both the new and the
 resumed flow. The owner-approved
 0002 amendment defers offline-only recovery public-key derivation until sync
 uses the identities; the independent seeds still change with the new VK.
@@ -271,7 +271,7 @@ operation is never pruned, and a `recover-` file left by a crash is reclassified
 before pruning. `trash empty` writes and verifies a recovery copy before its
 purge commits: a copy that cannot be written aborts the deletion with nothing
 purged, and exceeding the ordinary budget requires explicit approval.
-`qvault verify` is a read-only full re-hash/authentication pass that reports the
+`qv verify` is a read-only full re-hash/authentication pass that reports the
 local head and the anchor comparison; it never repairs, and the documented
 remedy for a failure is `snapshot restore <id> <new-path>`. Restore authenticates
 all archived records, history and attachment content, preserves the manifest's

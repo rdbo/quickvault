@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault totp <entry>` (spec 0011 §4): the current code of the entry's
+//! `qv totp <entry>` (spec 0011 §4): the current code of the entry's
 //! first TOTP field and the seconds left. The code is printed (it is
 //! short-lived); the seed never is. An entry with conflicting versions needs
 //! a version choice (exit 8).

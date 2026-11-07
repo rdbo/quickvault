@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `qvault init` and `qvault info` end to end, through a PTY and pipes.
+//! `qv init` and `qv info` end to end, through a PTY and pipes.
 
 #![cfg(any(target_os = "linux", target_os = "android"))]
 // The helpers are test code, but clippy's `allow-*-in-tests` settings only
@@ -91,7 +91,7 @@ fn confirm_all(p: &mut Interactive, words: &[String], mut at: usize) -> usize {
 fn init_with_the_suggested_passphrase() {
     let home = Home::new();
     let vault = home.vault();
-    let mut p = Interactive::spawn(home.qvault(["init", &arg(&vault), "--name", "Mine"]));
+    let mut p = Interactive::spawn(home.qv(["init", &arg(&vault), "--name", "Mine"]));
     let at = p.expect("Use this passphrase? [y/N] ");
     let screen = String::from_utf8_lossy(&p.seen[..at]).into_owned();
     let line = screen
@@ -122,7 +122,7 @@ fn init_with_the_suggested_passphrase() {
     }
 
     // The suggestion is the master password.
-    let mut c = home.qvault(["info", "--full", "--password-stdin", "-v", &arg(&vault)]);
+    let mut c = home.qv(["info", "--full", "--password-stdin", "-v", &arg(&vault)]);
     c.current_dir(&home.root);
     let out = piped(c, format!("{suggestion}\n").as_bytes());
     assert_eq!(out.code, 0, "{}", out.stderr);
@@ -151,7 +151,7 @@ fn init_with_the_suggested_passphrase() {
 fn init_typed_password_retry_and_show_again() {
     let home = Home::new();
     let vault = home.vault();
-    let mut p = Interactive::spawn(home.qvault(["init", &arg(&vault)]));
+    let mut p = Interactive::spawn(home.qv(["init", &arg(&vault)]));
     let at = p.expect("Use this passphrase? [y/N] ");
     p.line("n");
     // Mismatched passwords ask again.
@@ -203,7 +203,7 @@ fn init_typed_password_retry_and_show_again() {
 fn init_skip_is_recorded() {
     let home = Home::new();
     let vault = home.vault();
-    let mut p = Interactive::spawn(home.qvault(["init", &arg(&vault)]));
+    let mut p = Interactive::spawn(home.qv(["init", &arg(&vault)]));
     let at = typed_password(&mut p, STRONG);
     let (_, at) = phrase_after(&mut p, at);
     p.send(b" ");
@@ -236,7 +236,7 @@ fn init_skip_is_recorded() {
 fn init_weak_password_waits_even_with_yes() {
     let home = Home::new();
     let vault = home.vault();
-    let mut p = Interactive::spawn(home.qvault(["init", "--yes", &arg(&vault)]));
+    let mut p = Interactive::spawn(home.qv(["init", "--yes", &arg(&vault)]));
     let at = typed_password(&mut p, "password");
     let at = p.expect_from(at, "This password is weak and could be guessed");
     let shown = Instant::now();
@@ -264,22 +264,19 @@ fn init_refusals() {
     let home = Home::new();
     let vault = home.vault();
     // No terminal on stdin.
-    let out = piped(home.qvault(["init", &arg(&vault)]), b"");
+    let out = piped(home.qv(["init", &arg(&vault)]), b"");
     assert_eq!(out.code, 2, "{}", out.stderr);
     assert!(!vault.exists());
     // --password-stdin is refused.
-    let out = piped(
-        home.qvault(["init", "--password-stdin", &arg(&vault)]),
-        b"pw\n",
-    );
+    let out = piped(home.qv(["init", "--password-stdin", &arg(&vault)]), b"pw\n");
     assert_eq!(out.code, 2);
     // A wrong extension.
-    let p = Interactive::spawn(home.qvault(["init", &arg(&home.vaults().join("v.txt"))]));
+    let p = Interactive::spawn(home.qv(["init", &arg(&home.vaults().join("v.txt"))]));
     let (code, all) = p.finish();
     assert_eq!(code, 2, "{all}");
     // An existing path is left untouched.
     std::fs::write(&vault, b"not a vault").unwrap();
-    let p = Interactive::spawn(home.qvault(["init", &arg(&vault)]));
+    let p = Interactive::spawn(home.qv(["init", &arg(&vault)]));
     let (code, all) = p.finish();
     assert_eq!(code, 1, "{all}");
     assert!(all.contains("path already exists"));
@@ -292,7 +289,7 @@ fn info_unverified_and_full() {
     let vault = home.vault();
     drop(home.create());
     // No password, no terminal.
-    let out = piped(home.qvault(["info", "-v", &arg(&vault)]), b"");
+    let out = piped(home.qv(["info", "-v", &arg(&vault)]), b"");
     assert_eq!(out.code, 0, "{}", out.stderr);
     assert!(out.stdout.starts_with("Vault header (unverified"));
     assert!(
@@ -305,7 +302,7 @@ fn info_unverified_and_full() {
     );
     assert!(!out.stdout.contains("Test vault"));
     // JSON.
-    let out = piped(home.qvault(["info", "--json", "-v", &arg(&vault)]), b"");
+    let out = piped(home.qv(["info", "--json", "-v", &arg(&vault)]), b"");
     assert_eq!(out.code, 0);
     assert!(
         out.stdout
@@ -317,13 +314,13 @@ fn info_unverified_and_full() {
     // --full with the password on stdin.
     let line = format!("{}\n", common::PASSWORD);
     let out = piped(
-        home.qvault(["info", "--full", "--password-stdin", "-v", &arg(&vault)]),
+        home.qv(["info", "--full", "--password-stdin", "-v", &arg(&vault)]),
         line.as_bytes(),
     );
     assert_eq!(out.code, 0, "{}", out.stderr);
     assert!(out.stdout.contains("name:            Test vault"));
     let out = piped(
-        home.qvault([
+        home.qv([
             "info",
             "--full",
             "--json",
@@ -339,30 +336,30 @@ fn info_unverified_and_full() {
     );
     // A wrong password is exit 3; no password and no terminal is exit 2.
     let out = piped(
-        home.qvault(["info", "--full", "--password-stdin", "-v", &arg(&vault)]),
+        home.qv(["info", "--full", "--password-stdin", "-v", &arg(&vault)]),
         b"wrong\n",
     );
     assert_eq!(out.code, 3, "{}", out.stderr);
     assert!(out.stderr.contains("wrong password"));
-    let out = piped(home.qvault(["info", "--full", "-v", &arg(&vault)]), b"");
+    let out = piped(home.qv(["info", "--full", "-v", &arg(&vault)]), b"");
     assert_eq!(out.code, 2);
     // A missing vault is exit 4; no vault selected is exit 2.
     let out = piped(
-        home.qvault(["info", "-v", &arg(&home.vaults().join("x.qvault"))]),
+        home.qv(["info", "-v", &arg(&home.vaults().join("x.qvault"))]),
         b"",
     );
     assert_eq!(out.code, 4);
-    let out = piped(home.qvault(["info"]), b"");
+    let out = piped(home.qv(["info"]), b"");
     assert_eq!(out.code, 2);
     assert!(out.stderr.contains("no vault selected"));
     // QVAULT_PATH and the config file select it too.
-    let mut c = home.qvault(["info"]);
+    let mut c = home.qv(["info"]);
     c.env("QVAULT_PATH", &vault);
     assert_eq!(piped(c, b"").code, 0);
     common::write_config(&home, &format!("default_vault = \"{}\"\n", arg(&vault)));
-    assert_eq!(piped(home.qvault(["info"]), b"").code, 0);
+    assert_eq!(piped(home.qv(["info"]), b"").code, 0);
     common::write_config(&home, "unknown = 1\n");
-    let out = piped(home.qvault(["info"]), b"");
+    let out = piped(home.qv(["info"]), b"");
     assert_eq!(out.code, 2);
     assert!(
         out.stderr
