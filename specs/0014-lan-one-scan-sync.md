@@ -173,15 +173,15 @@ Rows left in an older file are never read for authentication and disappear
 at that vault's next commit. Both structures are removed at the next format
 change (pre-1.0, no freeze).
 
-### 6. App (amends 0009 §1.7 and the Devices screen)
+### 6. App (amends 0009 §1.7 and the Sync screen)
 
-6.1. **Offering:** the Devices screen offers "Sync with another device".
+6.1. **Offering:** the Sync screen (named Devices before 2026-11-07) offers "Sync with another device".
 It opens a window and shows the QR, the manual code, the endpoints and the
 remaining time. A new-device hello shows the comparison code with the
 vault name and asks for confirmation. A sync-mode session needs no input on
 A. A shows the result, then the window is closed.
 
-6.2. **Scanning to sync** (an unlocked vault, Devices screen): the scan is
+6.2. **Scanning to sync** (an unlocked vault, Sync screen): the scan is
 the user's explicit action. If the QR carries endpoints, the sync starts at
 once with them. If it carries none, the form shows that the code came from
 the QR ("✓ Code from QR"; the code itself is never rendered) and asks for
@@ -308,6 +308,8 @@ In addition to 0013's rows that still apply:
 
 ## Changelog
 
+- 2026-11-07: §6: the Devices screen is called Sync; no behaviour change
+  (owner, plan 0045).
 - 2026-11-06: Accepted by the owner. §9 amendments applied (plan 0042 step 1).
 - 2026-11-06: Initial Draft (owner direction). Replaces 0013 links,
   sessions and receive windows with one-use sync windows and

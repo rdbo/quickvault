@@ -533,18 +533,19 @@ pub(crate) fn ListPane(
         // `fade-in` plays when the list mounts again after a tool page.
         section { class: if in_selection { "list selecting fade-in" } else { "list fade-in" }, "aria-label": "Items", onkeydown: keys,
             div { class: "phone-head",
-                // The open vault; tapping it opens the switcher (plan 0045).
-                if let Some(v) = controller.open_vault() {
-                    button { class: "vault-chip", id: "vault-chip", disabled: form, "aria-haspopup": "dialog", onclick: move |_| vault_sheet.set(true),
-                        span { class: "dot {super::shell::vault_hue(&v.name)}" }
-                        b { "{v.name}" }
-                        Svg { icon: Icon::ChevronDown }
-                    }
-                }
                 div { class: "ph-row",
                     h2 { "{title}" }
                     // Android selects by holding a row (plan 0045).
                     if count > 0 && !in_selection && !cfg!(target_os = "android") { button { class: "link", id: "list-select-phone", disabled: form, onclick: start_selecting.clone(), "Select" } }
+                    // The open vault as an account-style tile; tapping it
+                    // opens the vault switcher (plan 0045).
+                    if let Some(v) = controller.open_vault() {
+                        button { class: "vault-avatar tile {super::shell::vault_hue(&v.name)}", id: "vault-chip", disabled: form, "aria-haspopup": "dialog",
+                            "aria-label": "Vault {v.name}. Switch vault", title: "{v.name}",
+                            onclick: move |_| vault_sheet.set(true),
+                            "{initial(&v.name)}"
+                        }
+                    }
                 }
             }
             if in_selection { {selbar} } else {

@@ -15,7 +15,7 @@ queries on the app's own width.
   detail, under the app's own title bar.
 - 640–980 px: an icon sidebar.
 - Below 640 px (phones): one pane at a time, with bottom tabs (Vault,
-  Generator, Devices, Settings), sheets and a floating New button.
+  Generator, Sync, Settings), sheets and a floating New button.
 
 Other details:
 - Linux windows have no OS decorations. The title bar drags, maximizes and
@@ -250,11 +250,11 @@ integration and dependency patch scope are documented in
 [third-party](../../third-party/README.md).
 
 
-LAN sync (plans 0038, 0039, 0042; 0013 as amended by 0014). The Devices screen's
+LAN sync (plans 0038, 0039, 0042; 0013 as amended by 0014). The Sync screen's
 "Show a code" opens a one-use, ten-minute window with a QR (the exact binary
 0013 payload, four-module quiet zone), the 26-character code and this
 device's addresses. The other device either syncs ("Scan a code" or "Type a
-code" on Devices) or joins as a new device (the locked screen's "Join from
+code" on Sync) or joins as a new device (the locked screen's "Join from
 another device"). A sync needs no confirmation and stores nothing about the
 other device; a new device's join shows the comparison code on both screens
 and VK leaves only after both confirm. A scanned code that names its address

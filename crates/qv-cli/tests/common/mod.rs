@@ -133,11 +133,24 @@ impl Home {
     }
 
     /// Unlocks `vault()` in the test process.
+    ///
+    /// A `qv` child that another test thread is spawning shares this
+    /// process's open files between fork and exec (close-on-exec applies only
+    /// at exec), so the `flock` of a session just dropped here can outlive it
+    /// for that moment. Retry `Locked` briefly; a real holder keeps it.
     pub fn unlock(&self) -> Session {
         let _s = serial();
-        self.core()
-            .unlock(&self.vault(), &pw(PASSWORD), None)
-            .unwrap()
+        let end = Instant::now() + Duration::from_secs(5);
+        loop {
+            match self.core().unlock(&self.vault(), &pw(PASSWORD), None) {
+                Err(qv_core::CoreError::Store(qv_core::StoreError::Locked))
+                    if Instant::now() < end =>
+                {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                result => return result.unwrap(),
+            }
+        }
     }
 
     /// `qv` with only this home's environment.

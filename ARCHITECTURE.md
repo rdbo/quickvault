@@ -93,7 +93,7 @@ rather than creating unused workspace scaffolding.
 | qv-sync | Shared causal merge candidates; LAN over TCP: the one-use sync window and the joiner in sync or new-device mode, and the two-way exchange (roadmap 2.9–2.10, plan 0042); remote candidate state and publication orchestration (planned) |
 | qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets, the `verify` report, and LAN sync windows, sync from a code and new-device join for frontends; strict scanned QR kind/profile/address inspection without network I/O |
 | qv-platform | Injected OS traits; local unicast addresses for LAN endpoints from route probes, attached networks first (`/proc/net/route` where readable; std only); Linux logind lifecycle, xdg-desktop-portal file picker (zbus, local `file:` results only), X11 clipboard ownership, single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; Android keystore quick unlock with boot-bound policy state that survives app restarts (on where the device supports it; plan 0045); Android storage evidence from the OS encryption status; exact-identity autofill matching; native input unavailable |
-| qv-cli / qv-app | Explicit user actions and views, including `qv lan open|sync|join` and the app's Devices screen and Join mode; qv-app's shared UI (own title bar, one DOM for desktop and phone, 0009 §1.8), its non-secret preferences file (theme, acknowledged protection status), QR rendering/decoding and bounded native Android Camera2 glue (camera on by default; `QV_APP_QR_CAMERA=0` builds without it); in-app attachment previews decrypted only into memory and served to the webview from a one-time `/preview/` route (0003 §6.4); on Linux, portal file picks run in a re-executed helper process without vault data, since the portal refuses the non-dumpable app; no unrestricted crypto/file/SQL bridge |
+| qv-cli / qv-app | Explicit user actions and views, including `qv lan open|sync|join` and the app's Sync screen and Join mode; qv-app's shared UI (own title bar, one DOM for desktop and phone, 0009 §1.8), its non-secret preferences file (theme, acknowledged protection status), QR rendering/decoding and bounded native Android Camera2 glue (camera on by default; `QV_APP_QR_CAMERA=0` builds without it); in-app attachment previews decrypted only into memory and served to the webview from a one-time `/preview/` route (0003 §6.4); on Linux, portal file picks run in a re-executed helper process without vault data, since the portal refuses the non-dumpable app; no unrestricted crypto/file/SQL bridge |
 | qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
 
 Implemented so far: `qv-encoding` (canonical CBOR codec, fuzzed in CI) and
@@ -164,7 +164,7 @@ Roadmap 2.10 (plan 0038) makes LAN sync usable (0013 §5, §7, §8):
   runs before a merge;
 - qv-platform: local addresses from route probes;
 - qv-cli: `qv lan pair|join|receive|sync|links|unlink` and exit code 10;
-- qv-app: the Devices screen and Join mode, whose prompts are answered while
+- qv-app: the Sync screen and Join mode, whose prompts are answered while
   the operation waits on its worker. Only bounded listeners without a pending
   question defer idle locking; prompts and initiated operations retain it.
   Window expiry caps transport, snapshot copying and acceptance. Local

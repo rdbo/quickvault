@@ -191,7 +191,8 @@ release, but no longer gates the feature.
     desktop the title bar's vault name opens a switcher: the listed vaults
     (the open one marked), "Create a new vault" and "Join from another
     device". On phones the same choices open as a sheet of vault cards from
-    the vault's name above the item list or by holding the Vault tab; the
+    the vault's tile at the top right of the item list (like an account
+    picture) or by holding the Vault tab; the
     open vault's card can lock it, and a card marks the vault with quick
     unlock, whose prompt opens as soon as it is chosen (owner, 2026-11-07;
     plan 0045). Settings has "Switch vault" on every platform. Every choice
@@ -257,9 +258,12 @@ release, but no longer gates the feature.
   unlock not turned off, the app asks the system to enroll biometric quick
   unlock with that password; dismissing skips it until the next password
   unlock. The device-credential policy is offered only in Settings.
-- **Devices page.** Two large choices, "Show a code" and "Scan a code" (or
-  "Type a code" without a camera), stacked on phones; typing a code stays
-  available as a link (plan 0045).
+- **Sync page** (named Devices before 2026-11-07). It names the vault that
+  will be synced, with a way to change it, because phones show no title
+  bar; the code window and a running sync name it too. Two large choices,
+  "Show a code" and "Scan a code" (or "Type a code" without a camera),
+  stacked on phones; typing a code stays available as a button (owner,
+  plan 0045).
 - **Attachment previews** (owner, 2026-11-07; plan 0044). The item page shows
   the entry's attachments as a shelf with an add tile. Opening one previews
   it in a full-window viewer under 0003 §6.4: images (fit or actual size,
@@ -430,6 +434,9 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-07: §1.8: Devices is renamed Sync and names the vault being
+  synced; the phone switcher opens from the vault's tile at the top right
+  of the item list (owner feedback, plan 0045). Still Draft.
 - 2026-11-07: §1.8 vault list: on phones the vault's name above the list
   and a held Vault tab open a vault switcher sheet with a lock action
   (owner request, plan 0045). Still Draft.

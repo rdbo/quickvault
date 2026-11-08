@@ -29,8 +29,13 @@ Dates are ISO 8601. Newest first within each section.
   - App: the item list fades in when you return from a tool page.
   - App: the Devices page has two clear choices, "Show a code" and "Scan a
     code" (or "Type a code").
-  - Android: switch vaults without closing the app. Tap the vault's name
-    above the item list, or hold the Vault tab, for a sheet of vault cards:
+  - App: Devices is now called Sync. The Sync page, the code window and a
+    running sync show which vault is synced (with Change on the page).
+    "Type a code instead" is a proper button.
+  - Tests: a qv-cli test no longer fails intermittently when another test
+    is starting a `qv` process at the same moment.
+  - Android: switch vaults without closing the app. Tap the vault's tile at
+    the top right of the item list, or hold the Vault tab, for a sheet of vault cards:
     lock the open one, open another (its fingerprint prompt appears at
     once if it has one), create a new vault or join a device.
 - 2026-11-07: Owner feedback batch (plan 0044; specs 0003 §6.4, 0009 §1.8):

@@ -74,7 +74,7 @@ try{
  const archive=$(".report").textContent.match(/Archive published: ([a-f0-9]+)/)?.[1];if(!archive)throw new Error("synthetic archive id");
  input("ws-path",root+"/exports/"+archive+".qvsnap");await tap("merge-archive");await until(()=>/Archive merged|already accepted/.test($(".report")?.textContent||""));
  // LAN sync window: code, QR, navigation locked, cancel clears secrets.
- stage=64;await tap("nav-devices");await until(()=>title()==="Devices");await tap("show-code");
+ stage=64;await tap("nav-devices");await until(()=>title()==="Sync");await tap("show-code");
  await until(()=>(byIdOpt("lan-code")?.textContent||"").length===31);
  if(!$("#lan-qr path")||$("#lan-qr rect")?.getAttribute("fill")!=="white")throw new Error("synthetic code QR absent");
  if($(".side .nav:not([disabled])")||$(".tabbar button:not([disabled])"))throw new Error("synthetic nav enabled during a window");

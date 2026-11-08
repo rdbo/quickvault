@@ -383,7 +383,8 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
             Icon::Generator,
             "tab-generator",
         ),
-        (Screen::Devices, "Devices", Icon::Devices, "tab-devices"),
+        // "Sync": there are no device links any more, only syncing (plan 0045).
+        (Screen::Devices, "Sync", Icon::Refresh, "tab-devices"),
         (
             Screen::Settings(Pane::Overview),
             "Settings",
@@ -399,7 +400,7 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
             "nav-generator",
             0usize,
         ),
-        (Screen::Devices, "Devices", Icon::Devices, "nav-devices", 0),
+        (Screen::Devices, "Sync", Icon::Refresh, "nav-devices", 0),
         (Screen::Trash, "Trash", Icon::Trash, "nav-trash", trash),
         (
             Screen::Conflicts,
@@ -580,8 +581,8 @@ fn Palette(
             "",
         ),
         (
-            "Devices and sync",
-            Icon::Devices,
+            "Sync with another device",
+            Icon::Refresh,
             Command::Open(Screen::Devices),
             "",
         ),

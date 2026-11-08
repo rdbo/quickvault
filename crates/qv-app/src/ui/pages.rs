@@ -238,10 +238,14 @@ fn Devices(controller: Controller, epoch: FormEpoch, revision: u64, busy: bool) 
     let open = scanned || typing() == epoch;
     let close = move |_| typing.set(FormEpoch(u64::MAX));
     let scan = cfg!(target_os = "android") && crate::qr::camera_available();
+    let vault = controller.open_vault();
+    let fallback = use_signal(|| false);
+    let mut vault_sheet = try_use_context::<super::VaultSheet>().map_or(fallback, |v| v.0);
     rsx! {
-        Head { controller: controller.clone(), epoch, title: "Devices", lead: "" }
+        Head { controller: controller.clone(), epoch, title: "Sync", lead: "" }
         // One explanation, then the two ways to start (plan 0045): this
-        // device shows a code, or it scans (or types) the other one's.
+        // device shows a code, or it scans (or types) the other one's. The
+        // vault being synced is named here, since phones show no title bar.
         div { class: "dev-hero",
             div { class: "sync-orbit", "aria-hidden": "true",
                 span { class: "dev a", Svg { icon: Icon::Devices } }
@@ -250,6 +254,13 @@ fn Devices(controller: Controller, epoch: FormEpoch, revision: u64, busy: bool) 
             }
             b { "Sync with another device" }
             span { "Over your local network. No account, no server. One device shows a code, the other scans it. Each code works once." }
+            if let Some(v) = vault.as_ref() {
+                div { class: "sync-vault", id: "sync-vault",
+                    span { class: "tile {super::shell::vault_hue(&v.name)}", "{super::icons::initial(&v.name)}" }
+                    span { class: "l", small { "Vault to sync" } b { "{v.name}" } }
+                    button { class: "btn", id: "sync-vault-change", disabled: busy, onclick: move |_| vault_sheet.set(true), "Change" }
+                }
+            }
         }
         div { class: "choices dev-choices",
             button { class: "choice", id: "show-code", disabled: busy, onclick: act(&controller, epoch, WsAction::LanOffer),
@@ -266,14 +277,14 @@ fn Devices(controller: Controller, epoch: FormEpoch, revision: u64, busy: bool) 
             }
         }
         if scan {
-            p { class: "center", button { class: "link", id: "type-code", disabled: busy, onclick: move |_| typing.set(epoch), "Type a code instead" } }
+            button { class: "btn dev-type", id: "type-code", disabled: busy, onclick: move |_| typing.set(epoch), Svg { icon: Icon::Edit } "Type a code instead" }
         }
         if open {
             div { class: "layer",
                 button { class: "scrim", "aria-label": "Close", onclick: close }
                 div { class: "dialog", role: "dialog", "aria-modal": "true", "aria-label": "Use another device's code",
                     h3 { "Use another device's code" }
-                    p { "On the other device, open Devices and choose Show a code. Type the code and the address it shows." }
+                    p { "On the other device, open Sync and choose Show a code. Type the code and the address it shows." }
                     if scanned {
                         p { class: "banner ok", role: "status", id: "lan-code-scanned", Svg { icon: Icon::Check } " Code from the QR code" }
                     } else {
@@ -305,6 +316,7 @@ pub(crate) fn LanPanel(
     let Some(v) = controller.lan_view(epoch) else {
         return rsx! {};
     };
+    let vault = controller.open_vault();
     use crate::lan::{LanKind, Question};
     if let Some(done) = v.done.as_ref() {
         return receipt(&controller, epoch, v.kind, done, v.closes_in, expanded);
@@ -345,6 +357,10 @@ pub(crate) fn LanPanel(
                     }
                 }
                 h3 { "{title}" }
+                // Which vault this sends and receives (plan 0045).
+                if matches!(v.kind, LanKind::Window | LanKind::Sync) && let Some(o) = vault.as_ref() {
+                    p { class: "lan-vault", id: "lan-vault", span { class: "dot {super::shell::vault_hue(&o.name)}" } "Vault " b { "{o.name}" } }
+                }
                 if let Some(symbol) = v.qr.as_ref() { { qr_image(symbol) } }
                 if let Some(code) = code {
                     p { class: "center hint", "The code works once. Show it only to the device you want to sync with." }

@@ -697,7 +697,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
         rsx! {
             div { class: "wizard fade-in",
                 h2 { "Join from another device" }
-                p { "On the other device, open Devices and choose Show a code. Scan it, or type the code and the address it shows." }
+                p { "On the other device, open Sync and choose Show a code. Scan it, or type the code and the address it shows." }
                 pages::ScanButton { controller: controller.clone(), epoch, target: crate::qr::QrTarget::NewDevice }
                 if view.code_scanned() {
                     p { class: "banner ok", role: "status", id: "lan-code-scanned", Svg { icon: Icon::Check } " Code from the QR code" }

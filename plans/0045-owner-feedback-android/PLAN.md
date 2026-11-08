@@ -377,6 +377,9 @@ button.
 
 ## Revisions
 
+- 2026-11-08: Step 9 added (owner feedback on the switcher's placement,
+  sync vault visibility, the typed-code link, the Devices name; and the
+  flaky CLI test found in Step 8).
 - 2026-11-07: Step 8 added (owner: no way on Android to change vault once
   one is open; design delegated). The phone gets a vault switcher sheet;
   the Settings row stays.
@@ -398,6 +401,21 @@ button.
 - **Done when:** a controller test shows a switch to an enrolled vault
   prompts once and a manual lock still does not; gates pass; APK builds.
 - **Verify:** `cargo test --locked -p qv-app`; all gates; `sh crates/qv-app/scripts/build-android.sh`
+
+### Step 9 — Sync naming, vault visibility, flaky CLI test (revision 2026-11-08)
+
+- [x] **Do:** owner feedback: (1) the phone vault chip competed with the
+  list title, and a phone does not show which vault a sync uses; the vault
+  becomes an account-style tile at the top right of the list header, and
+  the Sync page, the code window and a running sync name the vault (with
+  Change on the page). (2) "Type a code instead" becomes a full-width
+  button. (3) Devices is renamed Sync (tab, sidebar, palette, page, join
+  text; ids unchanged). (4) The flaky qv-cli test: the `Home::unlock`
+  helper retries `Locked` for up to 5 s (fork/exec window of a parallel
+  test's `qv` child). Specs 0009 §1.8 and 0014 §6 (rename only) amended.
+- **Files:** specs 0009, 0014; `crates/qv-app/src/ui/{shell,items,pages,mod}.rs`, `crates/qv-app/assets/app.css`, `crates/qv-app/src/bin/flow.js`, `crates/qv-cli/tests/common/mod.rs`
+- **Done when:** gates pass; APK builds and is installed.
+- **Verify:** all gates; `sh crates/qv-app/scripts/build-android.sh`
 
 ## Execution log
 
@@ -469,3 +487,20 @@ button.
     `exit_codes_for_vault_states` Store(Locked); both passed alone and in
     the clean rerun). Validation lib tests 90 passed. APK built (SHA-256
     9b3ae4b0…53252) and installed on the owner's phone, hash verified.
+- 2026-11-08: Fix found on the phone: `Controller::open_vault` built a
+  throwaway list, so the new vault chip and sheet showed a joined vault's
+  file name ("Joined vault") instead of its stored name. It now uses the
+  real list; `the_vault_name_is_the_stored_one…` asserts it. Gates rerun:
+  SPDX, matrix, fmt, clippy ok; full `cargo test` (with `QV_TEST_XVFB`):
+  927 passed, 1 failed — qv-cli `exit_codes_for_vault_states` panicked with
+  `Store(Locked)` in its first `home.unlock()` (the second time in two full
+  runs); it passed 6/6 runs alone. No changed code is on its path (qv-cli
+  and the store are untouched). Found, not fixed: the fixture's session (or
+  a background step it starts) seems to still hold the vault's file lock
+  when the test unlocks it under full-suite load; needs its own look. APK rebuilt (SHA-256 4c04fab1…eb510) and installed, hash verified.
+- 2026-11-08: Step 9 done. Gates on the final tree: SPDX, matrix, fmt,
+  clippy ok; `QV_TEST_XVFB=… cargo test --locked --no-fail-fast` 928
+  passed, 0 failed; validation lib tests 90 passed. APK built (SHA-256
+  6175024a…54211) and installed on the owner's phone, hash verified. The
+  desktop flow harness's stage-64 title check now expects "Sync"; its
+  stale stage 64/67 checks (pre-existing, Step 7 log) remain.
