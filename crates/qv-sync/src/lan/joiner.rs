@@ -2,8 +2,8 @@
 
 //! The joining device (0013 §3.3, §4, §10): new-device mode and sync mode.
 //!
-//! Candidates are the QR endpoints plus the caller's, deduplicated, at most
-//! 16, and filtered by the [`EndpointPolicy`]. Each attempt uses a fresh
+//! Explicit caller endpoints replace QR hints. Candidates are deduplicated,
+//! at most 16, and filtered by the [`EndpointPolicy`]. Each attempt uses a fresh
 //! `nonce_B` and X-Wing key pair. A candidate that does not answer with a
 //! valid accept MAC is skipped. A wrong responder has seen only a hello,
 //! which holds nothing reusable. The first valid accept authenticates the
@@ -70,8 +70,12 @@ impl JoinCode {
         extra: &[SocketAddr],
         policy: EndpointPolicy,
     ) -> Vec<SocketAddr> {
-        let all: Vec<SocketAddr> = self.endpoints.iter().chain(extra).copied().collect();
-        super::candidates(&all, policy)
+        let selected = if extra.is_empty() {
+            &self.endpoints
+        } else {
+            extra
+        };
+        super::candidates(selected, policy)
     }
 }
 

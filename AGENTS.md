@@ -100,7 +100,10 @@ requests override the named intermediate commit/session boundary.
   (shell scripts use `#`, after the shebang); CI checks headers (D3).
   Approved vendored exception: dioxus-desktop 0.7.10 only (0030; the other
   forks were removed by 0032, owner 2026-11-02). See `third-party/README.md`: retain
-  upstream licenses/headers/lints, exclude them from the product workspace and validate package identity/provenance in the header checker.
+  upstream licenses/headers/lints, exclude them from the product workspace and
+  validate package identity metadata in the header checker. The checker does
+  not verify source contents or provenance; review against the hashed upstream
+  archive as described in `third-party/README.md`.
   QuickVault adapter code still follows all product header/lint rules. Review
   the local vendor patch as maintained application code; run its focused tests.
 - Crates opt into workspace lints (`[lints] workspace = true`): `unsafe_code`

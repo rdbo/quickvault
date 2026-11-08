@@ -223,7 +223,7 @@ pub(crate) fn command() -> Command {
                     .arg(Arg::new("path").required(true).value_parser(value_parser!(std::path::PathBuf)))),
         )
         .subcommand(Command::new("verify").about(
-            "Re-hash and authenticate the whole vault and report the anchor (never repairs)",
+            "Re-hash and authenticate the vault without repairing it; opening may complete a pending external anchor update",
         ))
 }
 
@@ -563,6 +563,13 @@ pub(crate) fn run(args: impl IntoIterator<Item = OsString>, env: Environment) ->
             };
             let _ = e.print();
             return code;
+        }
+    };
+    let _input_guard = match crate::term::command_input_guard() {
+        Ok(guard) => guard,
+        Err(error) => {
+            report(&error);
+            return error.code;
         }
     };
     let ctx = Ctx {

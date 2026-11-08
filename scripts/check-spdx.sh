@@ -30,7 +30,11 @@ approved_vendor() {
     ' "$vendor_dir/Cargo.toml"
 }
 
-git ls-files --cached --others --exclude-standard -- '*.rs' '*.sh' |
+files=$(git ls-files --cached --others --exclude-standard -- '*.rs' '*.sh') || {
+    echo 'cannot list source files for SPDX check' >&2
+    exit 1
+}
+printf '%s\n' "$files" |
 while IFS= read -r f; do
     [ -f "$f" ] || continue
     case "$f" in
@@ -38,7 +42,7 @@ while IFS= read -r f; do
         if approved_vendor "$f"; then
             continue
         fi
-        echo "invalid vendor identity/provenance: $f" | tee -a "$missing"
+        echo "invalid vendor identity metadata: $f" | tee -a "$missing"
         continue ;;
     *.rs) [ "$(sed -n 1p "$f")" = "$rs_header" ] && continue ;;
     *.sh) { [ "$(sed -n 1p "$f")" = "$sh_header" ] || [ "$(sed -n 2p "$f")" = "$sh_header" ]; } && continue ;;

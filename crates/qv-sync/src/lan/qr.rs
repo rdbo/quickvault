@@ -4,7 +4,7 @@
 use super::{EndpointPolicy, LanError};
 use qv_protocol::oob::decode_qr;
 use qv_protocol::registry::LanProfile;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 
 /// Non-secret information from a validated scanned code (0013 §4.2). Hints
 /// grant no trust.
@@ -27,12 +27,7 @@ pub fn inspect_lan_qr(bytes: &[u8]) -> Result<LanQrInfo, LanError> {
     let mut endpoints = Vec::new();
     for hint in hints {
         let addr = SocketAddr::new(hint.addr, hint.port);
-        let usable = EndpointPolicy::default().accepts(&addr)
-            && match hint.addr {
-                IpAddr::V4(a) => !a.is_link_local(),
-                IpAddr::V6(a) => !a.is_unicast_link_local() && a.to_ipv4_mapped().is_none(),
-            };
-        if !usable {
+        if !EndpointPolicy::default().accepts(&addr) {
             return Err(LanError::Protocol);
         }
         if !endpoints.contains(&addr) {
@@ -71,6 +66,10 @@ mod tests {
             "169.254.1.1",
             "fe80::1",
             "::ffff:127.0.0.1",
+            "::ffff:0.0.0.0",
+            "::ffff:224.0.0.1",
+            "::ffff:255.255.255.255",
+            "::ffff:169.254.1.1",
         ] {
             let q = encode_qr(LanProfile::V1, &[7; 16], &[endpoint(ip)], "").unwrap();
             assert!(inspect_lan_qr(&q).is_err(), "{ip}");

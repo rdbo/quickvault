@@ -120,6 +120,12 @@ port. v1 does not resolve hostnames, so manual entry leaks nothing to
 DNS. Loopback endpoints are allowed only for tests and must be enabled
 explicitly.
 
+Classify IPv4-mapped IPv6 addresses by their embedded IPv4 address. Endpoints
+must have a nonzero port and a usable unicast address: reject unspecified,
+multicast, IPv4 broadcast and IPv4/IPv6 link-local addresses (v1 carries no
+interface scope). Apply the same policy to connection candidates, advertised
+hints and scanned-code inspection.
+
 ### 2. Roles and states
 
 - *Offering device* **A**: has the vault unlocked and opens a sync
@@ -687,6 +693,10 @@ Release evidence for the 0012 §3 LAN gate and the 0012 §1 LAN rows:
    and per session. A device can still hold several vaults.
 
 ## Changelog
+
+- 2026-11-08: §1.4 clarifies one shared endpoint policy, mapped-address
+  classification and unscoped link-local rejection (audit QV-003/009, plan 0046;
+  owner requested remediation). Window closure policy is unchanged.
 
 - 2026-11-06: Amended by 0014 (owner direction; owner accepted 0014 the
   same day, plan 0042):

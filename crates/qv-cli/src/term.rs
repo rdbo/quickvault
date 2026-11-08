@@ -11,7 +11,9 @@
 //! `ICANON`, `ISIG` and `IEXTEN` off and discards pending input. Ctrl-C then
 //! arrives as a byte and cancels; Backspace removes the last character,
 //! Ctrl-U clears the line, Enter ends it, and Ctrl-D on an empty line
-//! cancels. A guard restores the saved terminal state on every return path.
+//! cancels. Prompt guards restore the command's no-echo state; a command
+//! guard discards pending input and restores the original state on exit.
+//! Between prompts ISIG retains the invoking terminal's signal behavior.
 //! Input goes byte by byte into a locked, zeroizing buffer of fixed size,
 //! so it never reallocates; input past the bound is drained to the end of
 //! the line and refused (exit 9). Signals are checked between bounded polls;
@@ -61,14 +63,20 @@ pub(crate) struct Tty<'a> {
 }
 
 /// Restores the saved terminal state when dropped.
-struct RawGuard<'a> {
+pub(crate) struct RawGuard<'a> {
     fd: BorrowedFd<'a>,
     saved: Termios,
+    flush: bool,
 }
 
 impl Drop for RawGuard<'_> {
     fn drop(&mut self) {
-        let _ = rustix::termios::tcsetattr(self.fd, OptionalActions::Now, &self.saved);
+        let action = if self.flush {
+            OptionalActions::Flush
+        } else {
+            OptionalActions::Now
+        };
+        let _ = rustix::termios::tcsetattr(self.fd, action, &self.saved);
     }
 }
 
@@ -84,6 +92,15 @@ pub(crate) fn stdin_is_tty() -> bool {
 /// Whether standard output is a terminal.
 pub(crate) fn stdout_is_tty() -> bool {
     rustix::termios::isatty(rustix::stdio::stdout())
+}
+
+/// Keep terminal type-ahead private until dispatch has finished (QV-018).
+/// Prompt guards nest inside this guard; piped input is unaffected.
+pub(crate) fn command_input_guard() -> Result<Option<RawGuard<'static>>, CliError> {
+    if !stdin_is_tty() {
+        return Ok(None);
+    }
+    stdio_tty()?.mode(true, true).map(Some)
 }
 
 /// The process's terminal (stdin for input, stderr for prompts), or exit 2
@@ -139,10 +156,16 @@ impl<'a> Tty<'a> {
     }
 
     fn raw(&self) -> Result<RawGuard<'a>, CliError> {
+        self.mode(false, false)
+    }
+
+    fn mode(&self, keep_signals: bool, flush: bool) -> Result<RawGuard<'a>, CliError> {
         let saved = rustix::termios::tcgetattr(self.input).map_err(io_err)?;
         let mut t = saved.clone();
-        t.local_modes -=
-            LocalModes::ECHO | LocalModes::ICANON | LocalModes::ISIG | LocalModes::IEXTEN;
+        t.local_modes -= LocalModes::ECHO | LocalModes::ICANON | LocalModes::IEXTEN;
+        if !keep_signals {
+            t.local_modes -= LocalModes::ISIG;
+        }
         t.special_codes[SpecialCodeIndex::VMIN] = 1;
         t.special_codes[SpecialCodeIndex::VTIME] = 0;
         // `Flush` also discards typed-ahead input, so a key pressed before
@@ -151,6 +174,7 @@ impl<'a> Tty<'a> {
         Ok(RawGuard {
             fd: self.input,
             saved,
+            flush,
         })
     }
 

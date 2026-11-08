@@ -30,24 +30,26 @@ impl EndpointPolicy {
         if addr.port() == 0 {
             return false;
         }
-        let ip = addr.ip();
+        let ip = addr.ip().to_canonical();
         if ip.is_loopback() {
             return self.allow_loopback;
         }
-        !(ip.is_unspecified() || ip.is_multicast() || ip == IpAddr::V4(Ipv4Addr::BROADCAST))
+        let link_local = match ip {
+            IpAddr::V4(a) => a.is_link_local(),
+            IpAddr::V6(a) => a.is_unicast_link_local(),
+        };
+        !(ip.is_unspecified()
+            || ip.is_multicast()
+            || ip == IpAddr::V4(Ipv4Addr::BROADCAST)
+            || link_local)
     }
 }
 
 /// Addresses a QR payload may list for a window in `scope`.
 pub(crate) fn advertisable(scope: ListenScope, ip: &IpAddr) -> bool {
     match scope {
-        ListenScope::LoopbackForTests => ip.is_loopback(),
-        ListenScope::AllInterfaces => {
-            !(ip.is_loopback()
-                || ip.is_unspecified()
-                || ip.is_multicast()
-                || *ip == IpAddr::V4(Ipv4Addr::BROADCAST))
-        }
+        ListenScope::LoopbackForTests => ip.to_canonical().is_loopback(),
+        ListenScope::AllInterfaces => EndpointPolicy::default().accepts(&SocketAddr::new(*ip, 1)),
     }
 }
 
@@ -70,4 +72,54 @@ pub(crate) fn bind_addrs(scope: ListenScope, port: u16) -> Vec<SocketAddr> {
 pub fn parse_endpoint(text: &str) -> Result<SocketAddr, super::LanError> {
     let e = qv_protocol::oob::parse_endpoint(text).map_err(|_| super::LanError::Protocol)?;
     Ok(SocketAddr::new(e.addr, e.port))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    // 0012 §1: LAN discovery mistaken for trust
+    #[test]
+    fn endpoint_policy_classifies_mapped_addresses_and_advertisements_consistently() {
+        for ip in [
+            "0.0.0.0",
+            "::",
+            "224.0.0.1",
+            "ff02::1",
+            "255.255.255.255",
+            "169.254.1.1",
+            "fe80::1",
+            "::ffff:0.0.0.0",
+            "::ffff:224.0.0.1",
+            "::ffff:255.255.255.255",
+            "::ffff:169.254.1.1",
+        ] {
+            let ip: IpAddr = ip.parse().unwrap();
+            for allow_loopback in [false, true] {
+                assert!(!EndpointPolicy { allow_loopback }.accepts(&SocketAddr::new(ip, 1234)));
+            }
+            assert!(!advertisable(ListenScope::AllInterfaces, &ip));
+            assert!(!advertisable(ListenScope::LoopbackForTests, &ip));
+        }
+        for ip in ["127.0.0.1", "::1", "::ffff:127.0.0.1"] {
+            let ip: IpAddr = ip.parse().unwrap();
+            assert!(!EndpointPolicy::default().accepts(&SocketAddr::new(ip, 1234)));
+            assert!(
+                EndpointPolicy {
+                    allow_loopback: true
+                }
+                .accepts(&SocketAddr::new(ip, 1234))
+            );
+            assert!(!advertisable(ListenScope::AllInterfaces, &ip));
+            assert!(advertisable(ListenScope::LoopbackForTests, &ip));
+        }
+        for ip in ["192.0.2.1", "2001:db8::1", "::ffff:192.0.2.1"] {
+            let ip: IpAddr = ip.parse().unwrap();
+            assert!(EndpointPolicy::default().accepts(&SocketAddr::new(ip, 1234)));
+            assert!(!EndpointPolicy::default().accepts(&SocketAddr::new(ip, 0)));
+            assert!(advertisable(ListenScope::AllInterfaces, &ip));
+            assert!(!advertisable(ListenScope::LoopbackForTests, &ip));
+        }
+    }
 }

@@ -42,9 +42,10 @@ pub struct XWingDecapsKey(SecretArray<32>);
 #[derive(Clone, PartialEq, Eq)]
 pub struct XWingEncapsKey(Box<[u8; XWING_ENCAPS_KEY_LEN]>);
 
-/// An X-Wing ciphertext of exact length. Any bytes are accepted: ML-KEM
-/// rejects implicitly, so a wrong ciphertext yields an unrelated secret that
-/// the protocol's key confirmation then refuses.
+/// An X-Wing ciphertext of exact length. Construction accepts any bytes;
+/// decapsulation implicitly rejects an invalid ML-KEM half but returns
+/// [`CryptoError::Integrity`] for a low-order X25519 half. Callers authenticate
+/// the pairing transcript before decapsulation.
 #[derive(Clone, PartialEq, Eq)]
 pub struct XWingCiphertext(Box<[u8; XWING_CIPHERTEXT_LEN]>);
 

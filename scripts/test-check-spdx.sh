@@ -9,6 +9,7 @@ trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/bin" "$fixture/third-party/dioxus-desktop" "$fixture/third-party/other"
 cat > "$fixture/bin/git" <<'EOF'
 #!/bin/sh
+[ "${QV_SPDX_TEST_GIT_FAIL:-0}" = 0 ] || exit 1
 printf '%s\n' "$QV_SPDX_TEST_FILES"
 EOF
 chmod +x "$fixture/bin/git"
@@ -36,6 +37,12 @@ printf 'fn main() {}\n' > product.rs
 check 1 product.rs
 printf '// SPDX-License-Identifier: AGPL-3.0-or-later\n' > product.rs
 check 0 product.rs
+# A failed file listing must not look like an empty successful scan.
+QV_SPDX_TEST_GIT_FAIL=1
+export QV_SPDX_TEST_GIT_FAIL
+check 1 product.rs
+QV_SPDX_TEST_GIT_FAIL=0
+export QV_SPDX_TEST_GIT_FAIL
 printf '// Upstream header\n' > third-party/dioxus-desktop/lib.rs
 check 1 third-party/dioxus-desktop/lib.rs
 printf '[package]\nname = "dioxus-desktop"\nversion = "0.7.10"\n' > third-party/dioxus-desktop/Cargo.toml

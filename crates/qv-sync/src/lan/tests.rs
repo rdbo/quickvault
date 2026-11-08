@@ -1067,7 +1067,10 @@ fn lan_enroll_codes_and_policies() {
     .iter()
     .map(|s| s.parse().unwrap())
     .collect();
-    assert!(j.candidates(&bad, LOOPBACK).len() == 1);
+    // Typed endpoints replace hints, even if every typed address is rejected.
+    assert!(j.candidates(&bad, LOOPBACK).is_empty());
+    let typed: SocketAddr = "192.0.2.55:7777".parse().unwrap();
+    assert_eq!(j.candidates(&[typed], LOOPBACK), vec![typed]);
     let many: Vec<SocketAddr> = (1..40)
         .map(|p| SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), p))
         .collect();

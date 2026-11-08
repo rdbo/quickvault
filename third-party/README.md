@@ -20,7 +20,7 @@ product adapter code keeps ordinary AGPL SPDX headers and workspace lints.
 
 Archive: `https://crates.io/api/v1/crates/dioxus-desktop/0.7.10/download`.
 `dioxus-desktop/UPSTREAM.sha256` records the hash; `scripts/check-spdx.sh`
-validates the exact package name, version and hash before allowing upstream
+validates the declared package name, version and recorded hash before allowing upstream
 headers. That is not a source-content check or an audit: compare the retained
 source against the hashed archive when reviewing or updating. The manifest sets
 `publish = false`. New `hardened.rs` uses QuickVault's AGPL SPDX header; the

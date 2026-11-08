@@ -28,6 +28,52 @@ use qv_core::{FieldKind, FieldValue, ItemHandle};
 const NEW: &str = "s8!Qp#7mV2$xR9&kL4@zN6%wT1";
 const THIRD: &str = "h3^Tz8!Wq5#Lm1&Vr7@Kd2%Ny9";
 
+// 0012 §1: Ambiguous trust boundary
+#[test]
+fn unlock_type_ahead_is_not_echoed_or_returned_to_the_shell() {
+    use rustix::termios::LocalModes;
+
+    for cancel in [false, true] {
+        let h = Home::new();
+        drop(h.create());
+        let mut p = Interactive::spawn(h.qv(["-v", &arg(&h.vault()), "ls"]));
+        let from = p.expect("Master password: ");
+        let terminal = p.terminal_observer();
+        p.line(PASSWORD);
+        // The prompt's newline is emitted after its guard has been dropped,
+        // immediately before the KDF; there are no later prompts in `ls`.
+        p.expect_from(from, "\n");
+        let modes = rustix::termios::tcgetattr(&terminal).unwrap().local_modes;
+        assert!(!modes.contains(LocalModes::ECHO));
+        assert!(!modes.contains(LocalModes::ICANON));
+        assert!(modes.contains(LocalModes::ISIG));
+        p.send(b"QV-018-synthetic-type-ahead\n");
+        if cancel {
+            p.signal(rustix::process::Signal::INT);
+        }
+        p.wait_exited();
+        let modes = rustix::termios::tcgetattr(&terminal).unwrap().local_modes;
+        assert!(modes.contains(LocalModes::ECHO | LocalModes::ICANON | LocalModes::ISIG));
+        let mut fds = [rustix::event::PollFd::new(
+            &terminal,
+            rustix::event::PollFlags::IN,
+        )];
+        let zero = rustix::event::Timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        assert_eq!(
+            rustix::event::poll(&mut fds, Some(&zero)).unwrap(),
+            0,
+            "type-ahead must be flushed before returning to the shell"
+        );
+        drop(terminal);
+        let (code, output) = p.finish();
+        assert_eq!(code, if cancel { 1 } else { 0 }, "{output}");
+        assert!(!output.contains("QV-018-synthetic-type-ahead"), "{output}");
+    }
+}
+
 /// `base` run through `sh -c script`, where the script ends with
 /// `exec ... "$0" "$@"`. Keeps `base`'s cleared environment and directory.
 fn wrapped(base: Command, script: &str) -> Command {

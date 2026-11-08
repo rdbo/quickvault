@@ -90,7 +90,7 @@ impl Default for SyncWindowOptions {
 /// Options for syncing with or joining from a code.
 #[derive(Clone, Debug, Default)]
 pub struct SyncOptions {
-    /// Endpoints typed by the user, tried after the QR's.
+    /// Endpoints typed by the user; a nonempty list replaces QR hints (0014 §6.4).
     pub extra_endpoints: Vec<SocketAddr>,
     /// Allow loopback endpoints (tests only, 0013 §1.4).
     pub allow_loopback: bool,

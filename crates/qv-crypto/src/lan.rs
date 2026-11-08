@@ -19,8 +19,9 @@
 //! so counter nonces never repeat.
 //!
 //! Record keys come only from the key schedule below:
-//! [`PairingKeys::record_keys`] for pairing (§4.4), and the session keys of
-//! §5.2 in phase 2.10.
+//! [`PairingKeys::record_keys`] for each one-use pairing connection (§4.4).
+//! Sync uses the same connection after transcript-bound vault-key proofs
+//! (0014 §2.3); there is no stored link or separate session handshake.
 //!
 //! # Pairing key schedule (0013 §4)
 //!
@@ -34,19 +35,15 @@
 //! | `k_b2a`, `k_a2b` | `ss ‖ P` | `th` | `["qv/lan-pair-key/v1", "b2a"|"a2b"]` |
 //! | `commit_B` | — | — | `H(["qv/lan-pair-commit/v1", nonce_B])` |
 //! | SAS | — | — | `u32be(H(["qv/lan-pair-sas/v1", th, nonce_B])[..4]) mod 10⁶` |
-//! | `K_lan` | VK | vault ID | purpose `lan-link` (0002 §3.3) |
-//! | link key | `K_lan ‖ ss` | `H(["qv/lan-link-salt/v1", th, nonce_B, link_id])` | `["qv/lan-link/v1", vault_id, key_generation, link_id]` |
-//! | proof | MAC/1 under `K_lan` | — | `["qv/lan-pair-prove/v1", th, "a"|"b", vault_id, key_generation]` |
+//! | `K_proof` | VK | vault ID | purpose `lan-proof` (0002 §3.3, 0014 §2.3) |
+//! | proof | MAC/1 under `K_proof` | — | `["qv/lan-pair-prove/v1", th, "a"|"b", vault_id, key_generation]` |
 //!
 //! `H` is SHA-256 of a canonical encoding ([`transcript_hash`]). The wire
 //! messages that `th` covers are built by `qv-protocol`; this module only
 //! sees their canonical bytes. Every key and nonce here lives in locked
 //! memory and has a redacted `Debug`. Every check is constant time.
 //!
-//! Link rows (0013 §9.1, 0004 §2.4) are sealed here because their plaintext
-//! holds the link key: `[link_key, label, created_at]` under the
-//! `local-state` key with AAD `["qv/lan-link-row/v1", vault_id,
-//! key_generation, link_id]`.
+//! No peer key or link row is retained after the exchange (0013 §9.1).
 
 use crate::error::CryptoError;
 use crate::ids::{KeyGeneration, VaultId};

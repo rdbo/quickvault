@@ -59,7 +59,9 @@
 //! Locking and process hardening report reduced protection instead of failing
 //! silently; callers must surface that status to the user. Known residual
 //! copies in this crate's dependencies: `hmac` builds its padded-key block on
-//! the stack without wiping it; `unicode-normalization` keeps a few characters
+//! the stack without wiping it; keyed `hmac`/`hkdf` internal states (including
+//! the PRK-keyed HMAC state) are not zeroized on drop, even though the
+//! application's PRK copy is wiped; `unicode-normalization` keeps a few characters
 //! in its own buffers while composing; Argon2's 256 MiB working memory is
 //! wiped after use but too large to lock.
 

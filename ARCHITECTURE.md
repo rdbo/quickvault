@@ -127,6 +127,11 @@ and releases only its own window. x11rb's ordinary send buffer briefly holds a
 copied value (documented best-effort library intermediate, 0008 §4.4; plan
 0032). Native Wayland is not implemented; OS/recipient/manager copies remain
 outside application erasure control.
+Decoded preview media can remain in the web engine's cache even after its
+route is revoked. The app's lock lifecycle removes the viewer elements;
+route revocation and `no-store` alone do not erase already decoded pixels.
+This remains a best-effort cleanup limit under 0008 §4.4.
+
 Roadmap 2.8 adds:
 - `qv-protocol`: the key-free LAN wire layer (bounded frames, the wire-label
   and arity registry, exact-shape messages, profile, feature and error-code
@@ -272,12 +277,16 @@ before pruning. `trash empty` writes and verifies a recovery copy before its
 purge commits: a copy that cannot be written aborts the deletion with nothing
 purged, and exceeding the ordinary budget requires explicit approval.
 `qv verify` is a read-only full re-hash/authentication pass that reports the
-local head and the anchor comparison; it never repairs, and the documented
-remedy for a failure is `snapshot restore <id> <new-path>`. Restore authenticates
+local head and the anchor comparison; it never repairs vault contents. Opening
+may complete an external anchor update left pending by a durable commit
+(0005 §5.4). `snapshot restore <id> <new-path>` requires an unlocked healthy
+source vault; it is not a way to unlock a damaged source. Preserve a healthy
+replica and verified archives for recovery. Restore authenticates
 all archived records, history and attachment content, preserves the manifest's
 history/floors/tombstones and writes a new private vault via the existing
-creation protocol. It uses fresh local replica/writer/head/anchor state and the
-snapshot's password slot; the active vault and its external anchor remain
+creation protocol. It uses fresh local replica/writer/head/anchor state and
+the healthy source's checked password slot; the active vault and its external
+anchor remain
 unchanged. It establishes an explicit recovery baseline, not global freshness.
 Restore defers automatic pruning until its selected input is safely restored.
 Archive verification uses bounded seek passes over encrypted frames and checks
@@ -286,6 +295,13 @@ Snapshot failures and budget skips are warnings on stderr and never fail the
 requested command. Archives carry no device-local slots, keys, session tokens,
 sync state or anchors; hosts, other media and independent copies remain outside
 application control, so no erasure is claimed.
+
+Raw filesystem copies of a vault retain its replica ID. Under the same anchor
+directory, the copy and original therefore share an anchor: editing either can
+make the other fail rollback detection. Use archive/snapshot export for backups
+and the supported new-path restore, which creates a fresh replica, for an
+independent working copy (0004 §1.1, 0005 §4.1). A missing or damaged anchor must
+not be silently discarded to bypass this protection.
 The isolated `spikes/ui-feasibility/` crate is a non-production Dioxus
 prototype with standard webview input and a qv-core fixture controller. Its
 controller tests and real Linux/Android create/edit/reopen, Android background

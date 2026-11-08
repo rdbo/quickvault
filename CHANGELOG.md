@@ -9,6 +9,18 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-08: Initial security-assessment repairs (plan 0046): enforce the
+  committed SQLite build flags despite ambient overrides; fail the SPDX check
+  when source listing fails and describe its vendor check as identity metadata,
+  not source provenance; share LAN endpoint classification (including mapped
+  IPv4 and link-local rejection); let typed addresses replace scanned hints;
+  keep CLI terminal input un-echoed through command exit and flush type-ahead
+  before returning to the shell. Correct the LAN key-schedule, X-Wing rejection,
+  library memory-residual, `verify` anchor and healthy-source restore docs.
+  The 64 MiB index budget, parent-directory policy and active LAN window policy
+  remain unchanged pending owner discussion. Other assessment work is tracked
+  in the plan's finding ledger; this batch does not close the whole assessment.
+
 - 2026-11-07: Owner feedback (plan 0045; specs 0002 §5.4, 0009 §1.8):
   - Android: fingerprint unlock comes first. After you unlock with your
     master password, the app asks the system to turn it on; then the locked

@@ -5,6 +5,11 @@ what they say, and behaviour changes start with a spec change.
 
 ## Index
 
+Audit remediation (plan 0046, 2026-11-08) clarifies 0011 §3.1's terminal
+protection through command exit and 0013 §1.4's shared endpoint classification.
+The index budget, filesystem binding and active LAN window policies are pending
+owner discussion and are unchanged.
+
 0014 (accepted by the owner 2026-11-06, plan 0042) replaces 0013's stored
 device links with one-use sync codes; its amendments are applied to 0013,
 0002, 0004, 0005, 0009, 0011 and 0012.
