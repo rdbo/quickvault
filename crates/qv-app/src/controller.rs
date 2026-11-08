@@ -324,6 +324,9 @@ pub struct View {
     pub theme: crate::prefs::Theme,
     /// Reduced protection needs the user's acknowledgement first.
     pub ack_needed: bool,
+    /// The locked screen opens the quick-unlock prompt by itself for this
+    /// foreground entry (plan 0045).
+    pub autoprompt: Option<u64>,
 }
 impl View {
     /// Whether the Join form's code came from a scan (it is never rendered).
@@ -522,6 +525,10 @@ pub(crate) struct Inner {
     /// and the one during which a vault was last opened (plan 0045).
     quick_prompted: AtomicU64,
     quick_opened: AtomicU64,
+    /// [`Controller::autoprompt`]'s last answer, by (entry, prompted marker,
+    /// selected vault).
+    #[allow(clippy::type_complexity)]
+    quick_auto: Mutex<Option<((u64, u64, Option<PathBuf>), Instant, bool)>>,
     #[cfg(feature = "validation")]
     preview: AtomicBool,
     #[cfg(feature = "validation")]
@@ -608,6 +615,7 @@ impl Controller {
             ack_cache: Mutex::new(None),
             quick_prompted: AtomicU64::new(0),
             quick_opened: AtomicU64::new(0),
+            quick_auto: Mutex::new(None),
             #[cfg(feature = "validation")]
             preview: AtomicBool::new(false),
             #[cfg(feature = "validation")]
@@ -1037,72 +1045,99 @@ impl Controller {
     pub fn quick_policy(&self) -> Option<qv_core::platform::QuickPolicy> {
         self.0.services.keystore().policy()
     }
-    /// Background work the polled UI drives (plan 0045): open the fingerprint
-    /// prompt once when the locked screen appears at start or after a return
-    /// to the foreground (never after a lock in the foreground), and run the
-    /// pending quick-unlock offer once the vault is open.
+    /// Background work the polled UI drives (plan 0045): run the pending
+    /// quick-unlock offer once the vault is open.
     pub fn pump(&self) {
         if self.0.working.load(Ordering::SeqCst) {
             return;
         }
-        let entries = self.0.services.foreground_entries();
-        let (epoch, offer) = {
+        let (offer, epoch) = {
             let mut s = self.state();
             let offer = if s.phase == Phase::Unlocked {
                 s.quick_offer.take()
             } else {
                 None
             };
+            (offer, FormEpoch(s.epoch))
+        };
+        let Some(pw) = offer else {
+            return;
+        };
+        let _ = self.run_op(epoch, None, move |s, token, c| {
+            let done = s.enroll_quick(&pw, qv_core::platform::QuickPolicy::Class3, Some(token));
+            drop(pw);
+            let notice = match &done {
+                Ok(()) => Some("Fingerprint unlock is on for this vault."),
+                Err(CoreError::Cancelled) => None,
+                Err(_) => Some(
+                    "Fingerprint unlock could not be turned on. You can try again in Settings.",
+                ),
+            };
+            if done.is_ok() {
+                c.set_quick_off(false);
+            }
+            Ok(crate::workspace::on_ws(move |ws| {
+                if notice.is_some() {
+                    ws.notice = notice;
+                }
+            }))
+        });
+    }
+    /// The foreground entry for which the locked screen should open the
+    /// quick-unlock prompt by itself, if any (0009 §1.8, plan 0045): at app
+    /// start, after a return to the foreground or after choosing a vault
+    /// with quick unlock, never after a lock in the foreground. The page
+    /// opens it only once it shows the locked screen (`app.js`), so the
+    /// prompt never covers a screen from before the lock. Taken before the
+    /// state lock (it reads the vault list and the keystore) and cached per
+    /// entry, so the 200 ms poll stays cheap.
+    fn autoprompt(&self) -> Option<u64> {
+        let entries = self.0.services.foreground_entries();
+        let prompted = self.0.quick_prompted.load(Ordering::SeqCst);
+        if entries == 0
+            || entries == prompted
+            || entries == self.0.quick_opened.load(Ordering::SeqCst)
+            || self.0.working.load(Ordering::SeqCst)
+        {
+            return None;
+        }
+        {
+            let s = self.state();
             let idle = s.phase == Phase::Locked
                 && s.mode == Mode::Unlock
                 && s.resume.is_none()
                 && s.lan.is_none()
                 && s.inputs.iter().all(|v| v.is_empty());
-            (
-                idle.then_some(FormEpoch(s.epoch)),
-                (offer, FormEpoch(s.epoch)),
-            )
-        };
-        if let (Some(pw), epoch) = offer {
-            let _ = self.run_op(epoch, None, move |s, token, c| {
-                let done = s.enroll_quick(&pw, qv_core::platform::QuickPolicy::Class3, Some(token));
-                drop(pw);
-                let notice = match &done {
-                    Ok(()) => Some("Fingerprint unlock is on for this vault."),
-                    Err(CoreError::Cancelled) => None,
-                    Err(_) => Some(
-                        "Fingerprint unlock could not be turned on. You can try again in Settings.",
-                    ),
-                };
-                if done.is_ok() {
-                    c.set_quick_off(false);
-                }
-                Ok(crate::workspace::on_ws(move |ws| {
-                    if notice.is_some() {
-                        ws.notice = notice;
-                    }
-                }))
-            });
-            return;
-        }
-        let Some(epoch) = epoch else {
-            return;
-        };
-        if entries == 0
-            || entries == self.0.quick_prompted.load(Ordering::SeqCst)
-            || entries == self.0.quick_opened.load(Ordering::SeqCst)
-            || !self.consent()
-            || !self.quick_ready()
-        {
-            return;
-        }
-        self.0.quick_prompted.store(entries, Ordering::SeqCst);
-        if let Err(error) = self.submit(epoch, Action::QuickUnlock, true) {
-            let mut s = self.state();
-            if s.epoch == epoch.0 {
-                s.error = Some(error);
+            if !idle {
+                return None;
             }
         }
+        let selected = self
+            .0
+            .selected
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        let key = (entries, prompted, selected);
+        let mut cache = self.0.quick_auto.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some((k, at, ready)) = cache.as_ref()
+            && *k == key
+            && at.elapsed() < Duration::from_secs(2)
+        {
+            return ready.then_some(entries);
+        }
+        drop(cache);
+        let ready = self.consent() && self.quick_ready();
+        cache = self.0.quick_auto.lock().unwrap_or_else(|p| p.into_inner());
+        *cache = Some((key, Instant::now(), ready));
+        ready.then_some(entries)
+    }
+    /// The locked screen started quick unlock (by the page's automatic
+    /// prompt or a tap): no further automatic prompt for this entry.
+    pub fn quick_started(&self) {
+        self.0
+            .quick_prompted
+            .store(self.0.services.foreground_entries(), Ordering::SeqCst);
     }
     /// The platform protection status, with lifecycle monitoring as observed.
     pub fn protection(&self) -> qv_core::platform::ProtectionStatus {
@@ -1119,6 +1154,7 @@ impl Controller {
     /// Snapshot polls core locking as well as local inactivity, so OS callbacks
     /// and session auto-locks destroy renderer-visible state without user action.
     pub fn snapshot(&self) -> View {
+        let autoprompt = self.autoprompt();
         let mut s = self.state();
         let idle = if matches!(s.phase, Phase::Phrase | Phase::Rotation)
             || s.workspace
@@ -1192,6 +1228,7 @@ impl Controller {
             },
             theme: self.theme(),
             ack_needed: self.ack_needed_cached(),
+            autoprompt,
         }
     }
     /// Select a workflow, clearing the old form and invalidating late events.

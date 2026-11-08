@@ -31,14 +31,43 @@ const forms=new MutationObserver(records=>{
     const epoch=document.querySelector("[data-qv-epoch]")?.getAttribute("data-qv-epoch");
     if(epoch!==currentFormEpoch){currentFormEpoch=epoch;clearControls();}
     focusInserted(records);
+    autoPrompt();
 });
-forms.observe(document,{subtree:true,childList:true,attributes:true,attributeFilter:["data-qv-epoch"]});
+forms.observe(document,{subtree:true,childList:true,attributes:true,attributeFilter:["data-qv-epoch","data-qv-autoprompt"]});
 document.addEventListener("click",event=>{
     if(event.target instanceof Element&&event.target.closest("[data-qv-clear='true']"))clearControls();
 },true);
+// While the app is in the background the page is covered, and it stays
+// covered on return until the frame after any pending update (such as the
+// lock) is drawn, so a screen from before the lock never shows (plan 0045).
+// Frames registered earlier (pending edits) run before ours.
+function uncover(){
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+        if(document.hidden)return;
+        document.documentElement.classList.remove("qv-cover");
+        autoPrompt();
+    }));
+}
 document.addEventListener("visibilitychange",()=>{
-    if(document.hidden){clearControls();clearRevealed();}
+    if(document.hidden){clearControls();clearRevealed();document.documentElement.classList.add("qv-cover");}
+    else{uncover();autoPrompt();}
 });
+// Quick unlock opens by itself only once the locked screen is drawn and
+// visible: Rust marks the button with the foreground entry it is for, and
+// this clicks it once per entry, two frames after it appears (plan 0045).
+let autoPrompted=null;
+function autoPrompt(){
+    if(document.hidden)return;
+    const button=document.querySelector("#quick-unlock[data-qv-autoprompt]");
+    if(!button)return;
+    const entry=button.getAttribute("data-qv-autoprompt");
+    if(entry===autoPrompted)return;
+    autoPrompted=entry;
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+        if(!document.hidden&&button.isConnected&&!button.disabled&&button.getAttribute("data-qv-autoprompt")===entry&&!document.documentElement.classList.contains("qv-cover"))button.click();
+        else autoPrompted=null;
+    }));
+}
 // A card number groups as it is typed (4-4-4-4, Amex 4-6-5), keeping the
 // caret after the same digit. It runs before Rust reads the input; Rust
 // ignores the spaces. Formatting only; nothing is kept here.

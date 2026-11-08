@@ -32,6 +32,12 @@ Dates are ISO 8601. Newest first within each section.
   - App: Devices is now called Sync. The Sync page, the code window and a
     running sync show which vault is synced (with Change on the page).
     "Type a code instead" is a proper button.
+  - Android: returning to the app never shows the vault from before it
+    locked; the fingerprint prompt opens only once the locked screen is
+    shown.
+  - App: the screen no longer stops responding after the app was in the
+    background (neither fingerprint nor password worked). The internal
+    page link timed out while Android paused the page.
   - Tests: a qv-cli test no longer fails intermittently when another test
     is starting a `qv` process at the same moment.
   - Android: switch vaults without closing the app. Tap the vault's tile at

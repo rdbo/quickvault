@@ -758,7 +758,13 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                     }
                 }
                 if quick {
-                    button { class: "btn primary quick-go", id: "quick-unlock", "data-qv-clear": "true", disabled: busy || preview, onclick: move |_| g2(Action::QuickUnlock), Svg { icon: Icon::Finger, large: true } "{quick_label}" }
+                    // `data-qv-autoprompt`: app.js clicks this once the locked
+                    // screen is on screen (plan 0045).
+                    button { class: "btn primary quick-go", id: "quick-unlock", "data-qv-clear": "true", disabled: busy || preview,
+                        "data-qv-autoprompt": view.autoprompt.map(|n| n.to_string()),
+                        onclick: { let c = controller.clone(); move |_| { c.quick_started(); g2(Action::QuickUnlock) } },
+                        Svg { icon: Icon::Finger, large: true } "{quick_label}"
+                    }
                     div { class: "or-line", span { "or use your master password" } }
                 }
                 div { class: if error.is_some() { "pw bad" } else { "pw" },

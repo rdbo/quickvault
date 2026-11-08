@@ -252,7 +252,8 @@ release, but no longer gates the feature.
 - **Quick unlock first** (owner, 2026-11-07; plan 0045). Where quick unlock
   is enrolled for the selected vault, the locked screen offers it first: the
   system prompt opens by itself when the app starts or returns to the
-  foreground (not after a manual lock), and the master password field below
+  foreground (not after a manual lock), only once the locked screen itself
+  is drawn, and the master password field below
   stays usable, unfocused, after a dismissal. After a master-password unlock
   on a device that supports it, with no enrollment for that vault and quick
   unlock not turned off, the app asks the system to enroll biometric quick
@@ -434,6 +435,10 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-08: §1.8: the automatic quick-unlock prompt waits until the
+  locked screen is drawn, and the app's page is covered while in the
+  background until the frame after its pending update on return, so a
+  screen from before a lock never shows (owner bug report, plan 0045).
 - 2026-11-07: §1.8: Devices is renamed Sync and names the vault being
   synced; the phone switcher opens from the vault's tile at the top right
   of the item list (owner feedback, plan 0045). Still Draft.

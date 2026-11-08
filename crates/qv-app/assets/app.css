@@ -864,3 +864,5 @@ button.set-row:hover:enabled{background:var(--raised)}
 .vact .ci{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--soft);color:var(--accent)}
 .vault-sheet .note{margin:12px 0 0;text-align:center;color:var(--text3);font-size:12px}
 @media (hover:hover){.vcard:hover:enabled,.vact:hover:enabled{border-color:var(--accent)}}
+/* Plan 0045: covered while in the background and until the next frame on return. */
+html.qv-cover .qv{visibility:hidden}

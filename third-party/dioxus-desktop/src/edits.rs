@@ -381,6 +381,24 @@ impl EditWebsocket {
         };
 
         websocket.get_mut().remaining = None;
+        // QuickVault (plan 0045): the 3 s bounds cover the unauthenticated
+        // handshake only. Once the page has proven the key, the connection
+        // waits for its acknowledgement, which the page sends on its next
+        // animation frame; Android pauses those while the app is in the
+        // background. A timeout there dropped the connection, and the late
+        // acknowledgement then went to the reconnecting socket and was lost,
+        // so the renderer waited forever (taps reached the app but the page
+        // never updated again).
+        if hardened {
+            let inner = &websocket.get_ref().inner;
+            if inner
+                .set_read_timeout(None)
+                .and_then(|()| inner.set_write_timeout(None))
+                .is_err()
+            {
+                return;
+            }
+        }
         // Immediately send the key to authenticate the server
         if websocket
             .send(tungstenite::Message::Text(hex_encoded_server_key.into()))
@@ -690,6 +708,58 @@ mod hardened_transport_tests {
             queue.poll_edits_flushed(&mut cx),
             std::task::Poll::Ready(false)
         );
+    }
+    #[test]
+    fn hardened_authenticated_connection_waits_for_a_late_acknowledgement() {
+        let (location, listener) = start_server();
+        let port = listener.local_addr().unwrap().port();
+        let client_key = encode_key_string(&location.client_key);
+        let connections = Arc::new(RwLock::new(HashMap::new()));
+        connections
+            .write()
+            .unwrap()
+            .insert(0u32, WebviewConnectionState::default());
+        let server = {
+            let connections = connections.clone();
+            std::thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                EditWebsocket::handle_connection(
+                    stream,
+                    Arc::new(Mutex::new(location)),
+                    connections,
+                    true,
+                );
+            })
+        };
+        let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let url = format!("ws://127.0.0.1:{port}/0/{client_key}");
+        let (mut page, _) = tungstenite::client(url.as_str(), stream).unwrap();
+        // The server key arrives first, then the batch.
+        assert!(matches!(page.read().unwrap(), tungstenite::Message::Text(_)));
+        server.join().unwrap();
+        let mut applied = connections
+            .write()
+            .unwrap()
+            .get_mut(&0)
+            .unwrap()
+            .add_message(vec![1, 2, 3]);
+        assert!(matches!(page.read().unwrap(), tungstenite::Message::Binary(_)));
+        // A page in the background acknowledges only after the handshake
+        // bound has passed; the batch must still count as applied.
+        std::thread::sleep(std::time::Duration::from_millis(3500));
+        page.send(tungstenite::Message::Binary(Vec::new().into()))
+            .unwrap();
+        let waker = futures_util::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let result = loop {
+            if let std::task::Poll::Ready(r) = applied.poll_unpin(&mut cx) {
+                break r;
+            }
+            assert!(std::time::Instant::now() < end, "acknowledgement lost");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(result.is_ok());
     }
     #[test]
     fn hardened_handshake_reader_and_actual_stalled_peer_are_bounded() {

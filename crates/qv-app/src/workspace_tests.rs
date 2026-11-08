@@ -1955,6 +1955,22 @@ impl PlatformServices for QuickPhone {
     }
 }
 
+/// One poll as the app runs it: the controller's pump (the quick-unlock
+/// offer), then the page's automatic prompt (`app.js` clicks the marked
+/// button once the locked screen is drawn).
+fn page(env: &Env) {
+    env.c.pump();
+    env.wait();
+    if env.c.snapshot().autoprompt.is_some() {
+        env.c.quick_started();
+        env.c
+            .submit(env.epoch(), Action::QuickUnlock, true)
+            .unwrap();
+        env.wait();
+    }
+    assert_eq!(env.c.snapshot().autoprompt, None, "one prompt per entry");
+}
+
 #[test]
 fn quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only() {
     let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
@@ -1986,15 +2002,13 @@ fn quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only() 
     env.c.submit(env.epoch(), Action::SkipPhrase, true).unwrap();
     env.wait();
     // Creating offers nothing; nothing is enrolled.
-    env.c.pump();
-    env.wait();
+    page(&env);
     assert!(!env.c.quick_ready());
     // A password unlock offers it once, as the next operation.
     env.c.lock();
     env.unlock(PASSWORD);
     assert_eq!(env.c.snapshot().phase, Phase::Unlocked);
-    env.c.pump();
-    env.wait();
+    page(&env);
     assert_eq!(
         env.notice(),
         Some("Fingerprint unlock is on for this vault.")
@@ -2005,15 +2019,13 @@ fn quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only() 
     env.c.lock();
     assert!(env.c.quick_ready());
     for _ in 0..3 {
-        env.c.pump();
-        env.wait();
+        page(&env);
     }
     assert_eq!(opened.load(Ordering::SeqCst), 0);
     assert_eq!(env.c.snapshot().phase, Phase::Locked);
     // Returning to the foreground prompts once, and opens the vault.
     entries.fetch_add(1, Ordering::SeqCst);
-    env.c.pump();
-    env.wait();
+    page(&env);
     assert_eq!(opened.load(Ordering::SeqCst), 1);
     assert_eq!(env.c.snapshot().phase, Phase::Unlocked);
     // A dismissal shows no error, keeps quick unlock, and is not repeated.
@@ -2021,8 +2033,7 @@ fn quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only() 
     entries.fetch_add(1, Ordering::SeqCst);
     dismiss.store(true, Ordering::SeqCst);
     for _ in 0..3 {
-        env.c.pump();
-        env.wait();
+        page(&env);
     }
     assert_eq!(opened.load(Ordering::SeqCst), 2);
     assert_eq!(env.c.snapshot().phase, Phase::Locked);
@@ -2031,8 +2042,7 @@ fn quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only() 
     // Typing a password stops the automatic prompt.
     entries.fetch_add(1, Ordering::SeqCst);
     env.fill(InputField::Password, "typing");
-    env.c.pump();
-    env.wait();
+    page(&env);
     assert_eq!(opened.load(Ordering::SeqCst), 2);
     // The phone switcher (plan 0045): from a second vault, choosing the
     // enrolled one opens its prompt at once; a manual lock still does not.
@@ -2053,20 +2063,17 @@ fn quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only() 
     env.wait();
     assert_eq!(env.c.open_vault().unwrap().name, "Second");
     assert!(env.c.quick_ready_for(&first));
-    env.c.pump();
-    env.wait();
+    page(&env);
     assert_eq!(opened.load(Ordering::SeqCst), 2);
     assert!(env.c.switch_vault(
         env.epoch(),
         crate::controller::SwitchTo::Vault(first.clone())
     ));
-    env.c.pump();
-    env.wait();
+    page(&env);
     assert_eq!(opened.load(Ordering::SeqCst), 3);
     assert_eq!(env.c.open_vault().unwrap().path, first);
     env.c.lock();
-    env.c.pump();
-    env.wait();
+    page(&env);
     assert_eq!(opened.load(Ordering::SeqCst), 3);
     // Turning it off in Settings stops the offer after a password unlock.
     env.unlock(PASSWORD);
@@ -2077,7 +2084,6 @@ fn quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only() 
     assert!(crate::prefs::Prefs::load(&env.dir).quick_off);
     env.c.lock();
     env.unlock(PASSWORD);
-    env.c.pump();
-    env.wait();
+    page(&env);
     assert_eq!(env.c.quick_policy(), None);
 }

@@ -54,6 +54,15 @@ Unmodified upstream unsafe is retained; product code adds none.
   adds `media-src 'self'` (no `data:`/`blob:`). Tests
   `hardened_events_are_an_allow_list`, `hardened_preview_ranges_and_csp`.
 
+- Plan 0045 (device bug), in edits.rs: the hardened 3 s read/write bounds
+  now cover the unauthenticated handshake only and are cleared once the page
+  has proven the key. The page acknowledges an edit batch on its next
+  animation frame, which Android pauses in the background; the old timeout
+  dropped the connection, the late acknowledgement went to the reconnecting
+  socket and was lost, and the renderer waited forever. Test
+  `hardened_authenticated_connection_waits_for_a_late_acknowledgement`
+  (acknowledges after 3.5 s; fails without the change).
+
 - Plan 0033 device follow-up: edits.rs stores protocol connection metadata
   independently of the renderer's RefCell. CSP/bootstrap metadata reads no
   longer borrow the mutable render queue on Android request threads; the same

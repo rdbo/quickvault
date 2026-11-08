@@ -377,6 +377,10 @@ button.
 
 ## Revisions
 
+- 2026-11-08: Step 11 added (owner bug report: prompt over a stale
+  unlocked screen after a return from the background).
+- 2026-11-08: Step 10 added (device bug found by the owner: the app stopped
+  reacting on the locked screen after being in the background).
 - 2026-11-08: Step 9 added (owner feedback on the switcher's placement,
   sync vault visibility, the typed-code link, the Devices name; and the
   flaky CLI test found in Step 8).
@@ -416,6 +420,43 @@ button.
 - **Files:** specs 0009, 0014; `crates/qv-app/src/ui/{shell,items,pages,mod}.rs`, `crates/qv-app/assets/app.css`, `crates/qv-app/src/bin/flow.js`, `crates/qv-cli/tests/common/mod.rs`
 - **Done when:** gates pass; APK builds and is installed.
 - **Verify:** all gates; `sh crates/qv-app/scripts/build-android.sh`
+
+### Step 10 — UI transport stall after backgrounding (revision 2026-11-08)
+
+- [x] **Do:** the owner's phone stopped reacting on the locked screen
+  (neither fingerprint nor password). Diagnosed over the debuggable build's
+  DevTools socket: 15 `markEditsFinished` exceptions ("WebSocket still in
+  CONNECTING state") and a renderer that no longer applied events. Cause:
+  the vendored hardened transport kept its 3 s handshake read timeout on
+  the authenticated connection; the page acknowledges on its next animation
+  frame, paused in the background, so the server dropped the connection
+  and the late acknowledgement was lost on the reconnecting socket. Fix:
+  clear the timeouts after authentication (vendored `edits.rs`), with a
+  regression test; patch recorded in `third-party/README.md`.
+- **Files:** `third-party/dioxus-desktop/src/edits.rs`, `third-party/README.md`
+- **Done when:** the regression test passes (and fails without the fix);
+  focused vendor tests, gates, APK build.
+- **Verify:** `cargo test --manifest-path third-party/Cargo.toml --locked -p dioxus-desktop --no-default-features --features tokio_runtime --lib hardened`; all gates
+
+### Step 11 — Prompt over a stale screen (revision 2026-11-08)
+
+- [x] **Do:** owner report: after a while in the background, the fingerprint
+  prompt appeared over the *unlocked* vault; tapping outside it did not
+  cancel it on this phone (logcat: no error until QuickVault's own 60 s
+  cancel at 08:35:19), so nothing was clickable for a minute. Two causes:
+  the page draws the lock only on its next frame after return, and `pump`
+  started the prompt at the foreground entry, before that frame. Fixes:
+  (1) `app.js` covers the page (`html.qv-cover`) while hidden and lifts it
+  two frames after return, after pending edits; (2) the automatic prompt
+  moves to the page: the snapshot carries `autoprompt` (entry), the locked
+  screen marks `#quick-unlock` with it, and `app.js` clicks it once per
+  entry, two frames after it is drawn and visible; `pump` keeps only the
+  offer. Checked on the phone that `document.hidden` flips on background
+  and return.
+- **Files:** `crates/qv-app/src/controller.rs`, `crates/qv-app/src/ui/mod.rs`, `crates/qv-app/assets/{app.js,app.css}`, `crates/qv-app/src/workspace_tests.rs`, spec 0009
+- **Done when:** the controller flow test drives the prompt like the page;
+  gates pass; APK installed.
+- **Verify:** `cargo test --locked -p qv-app`; all gates
 
 ## Execution log
 
@@ -504,3 +545,18 @@ button.
   6175024a…54211) and installed on the owner's phone, hash verified. The
   desktop flow harness's stage-64 title check now expects "Sync"; its
   stale stage 64/67 checks (pre-existing, Step 7 log) remain.
+- 2026-11-08: Step 10 done. Regression test fails without the change
+  ("acknowledgement lost") and passes with it. Gates on the final tree:
+  `scripts/test-check-spdx.sh`, SPDX, matrix, fmt, clippy ok; full
+  `cargo test` (with `QV_TEST_XVFB`) 928 passed, 0 failed; vendored
+  focused tests (`… -p dioxus-desktop … --lib hardened`) 9 passed. APK built
+  (SHA-256 c3f5b827…c8a02); not installed: the phone was disconnected.
+- 2026-11-08: APK c3f5b827…c8a02 installed on the owner's phone after it
+  reconnected; installed hash verified. The DevTools port forward used for
+  the diagnosis was removed.
+- 2026-11-08: Step 11 done. Gates on the final tree: SPDX, matrix, fmt,
+  clippy ok; full `cargo test` (with `QV_TEST_XVFB`) 928 passed, 0 failed;
+  validation lib tests 90 passed. APK built (SHA-256 4124d73f…dd5ea7) and
+  installed on the owner's phone, hash verified. Not verifiable here: how
+  the phone's prompt treats a tap outside it (the system kept the session
+  open); the prompt's "Use password" button and Back cancel it.
