@@ -9,6 +9,43 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-08: Plan the three discussed assessment follow-ups in 0047: large-vault
+  views without an aggregate text cap, documented move/copy policy, and LAN
+  credential authentication with owner-selected ephemeral v4. LAN work is first;
+  password enrollment takes the password on both devices, with no new stored
+  verifier or storage-format migration. Planning only; update audit dispositions
+  to distinguish selected directions from implemented repairs.
+
+- 2026-11-08: Add exploratory LAN enrollment candidate v4: the password is
+  typed on both devices, so no password-authentication state is stored and no
+  storage format changes. Documentation only.
+
+- 2026-11-08: Propose solutions to the LAN v3 design-review findings: explicit
+  incompatible storage migration, a concrete authentication-KDF candidate,
+  atomic grant authorization and an explicit disclosure boundary, retaining
+  both final-key confirmation messages. Exploratory documentation only.
+
+- 2026-11-08: Review exploratory LAN v3 and its proposed simplifications;
+  request old-reader migration gates, authentication-KDF cost assessment and
+  atomic grant authorization, and distinguish final traffic-key confirmation.
+  Documentation only; no protocol or implementation change.
+
+- 2026-11-08: Add a product-specific exploratory LAN enrollment construction
+  and editable v3 diagram. It describes separate public-slot/secret-state
+  serialization, one accepted connection, credential-bound record keys and
+  grant verification before bulk transfer. No implementation or accepted-spec
+  change; cryptographic composition review remains required.
+
+- 2026-11-08: Record follow-up review of the exploratory LAN v2 diagram and
+  analysis, with changes requested; clarify the diagram README's v1/v2 scope.
+  No production protocol or code changes.
+
+- 2026-11-08: Add the exploratory LAN credential-authentication sequence
+  diagram beside plan 0046, with editable Mermaid source and SVG/PNG exports.
+  It records a proposal for discussion, not an implemented or accepted protocol.
+- 2026-11-08: Add an analysis of that diagram and a revised exploratory LAN
+  join flow (password-gated VK grant), also not an accepted protocol.
+
 - 2026-11-08: Initial security-assessment repairs (plan 0046): enforce the
   committed SQLite build flags despite ambient overrides; fail the SPDX check
   when source listing fails and describe its vendor check as identity metadata,

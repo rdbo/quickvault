@@ -1,0 +1,62 @@
+---
+title: QuickVault — proposed credential-gated LAN authentication
+---
+sequenceDiagram
+    autonumber
+    participant A as A · Emitter<br/>Vault already unlocked
+    participant B as B · Receiver<br/>No local vault yet
+
+    Note over A,B: EXPLORATORY · NOT IMPLEMENTED OR CRYPTOGRAPHICALLY VALIDATED<br/>OPAQUE is a candidate for the password route, the exact suite and composition remain under review.
+    Note over A: Already holds VK.<br/>Password route needs protected PAKE setup state.<br/>Create or migrate it on a trusted device<br/>while the password is available.
+
+    rect rgb(237, 243, 252)
+        Note over A,B: 1 · CODE-AUTHENTICATED HYBRID CHANNEL
+        A-->>B: User scans a fresh one-use secret P from A's QR
+        B->>B: Generate ephemeral X-Wing key pair and nonce commitment
+        B->>A: Hello: public KEM key, commitment, profile/mode, MAC derived from P
+        A->>A: Validate hello, including code MAC and key shape<br/>Consume code, close listener after this valid attempt
+        A->>A: X-Wing encapsulation produces ciphertext ct and shared secret ss
+        A->>B: Accept: ct, fresh nonce, MAC derived from P
+        B->>B: X-Wing decapsulation recovers ss
+        Note over A,B: TH = hash of the bound outer handshake<br/>Directional transport keys derive from ss + P + TH.<br/>Subsequent network messages are encrypted and authenticated under these keys.
+        B->>A: Encrypted reveal of committed nonce
+        Note over A,B: Show the comparison code on both devices.<br/>Retain emitter-side approval that the codes match.
+        A->>B: Encrypted bootstrap context: vault ID, generation, allowed methods/profiles, fresh challenge
+        B->>A: Encrypted selection of the password or recovery method
+        Note over A,B: CTX binds TH + vault ID + generation + roles + chosen method + profiles + challenge.<br/>Neither the QR nor this public context contains VK or a password-wrapped VK.
+    end
+
+    alt 2A · Password route · candidate OPAQUE
+        rect rgb(244, 238, 253)
+            Note over B: Enter password locally.<br/>Never transmit the password<br/>or its raw derived master key.
+            B->>A: Encrypted PAKE KE1, bound to CTX
+            A->>B: Encrypted PAKE KE2 from protected credential state
+            B->>B: Verify emitter's PAKE authentication<br/>Abort if verification fails
+            B->>A: Encrypted PAKE KE3 · receiver confirmation
+            A->>A: Verify receiver confirmation BEFORE releasing VK
+            Note over A,B: PAKE produces a mutually confirmed secret K_PAKE.<br/>An unsuccessful client must not receive a reusable offline password-guessing target.
+            A->>A: K_grant = purpose-separated HKDF(K_PAKE, CTX)<br/>N = fresh random AEAD nonce<br/>G = AEAD_Seal(K_grant, N, plaintext=VK, AAD=CTX)
+            A->>B: Outer encrypted record containing N and G<br/>VK remains protected by the inner PAKE-derived wrapping
+            B->>B: Derive K_grant, authenticate and decrypt G to obtain VK
+        end
+    else 2B · Recovery phrase route · no key delivery
+        rect rgb(230, 247, 243)
+            Note over B: Enter recovery words locally.<br/>The 24 words directly encode<br/>the 256-bit VK.
+            B->>B: Decode and validate recovery phrase to obtain VK<br/>No password wrapper, PAKE exchange or VK grant is needed
+        end
+    end
+
+    rect rgb(235, 247, 235)
+        Note over A,B: 3 · CONFIRM THE ACTUAL VAULT KEY · BOTH ROUTES
+        Note over A,B: K_confirm derives from VK with a dedicated purpose and CTX.<br/>The MAC proves key possession, not which credential produced the key.
+        B->>A: Encrypted proof_B = HMAC(K_confirm, CTX + receiver-role)
+        A->>A: Verify proof_B in constant time, abort on mismatch
+        A->>B: Encrypted proof_A = HMAC(K_confirm, CTX + emitter-role)
+        B->>B: Verify proof_A, abort on mismatch
+        Note over A,B: Distinct role-bound proofs prevent reflection.<br/>Fresh session context prevents replay into another connection or vault.
+        A->>B: Transfer authenticated encrypted vault objects<br/>Only after approval and all required confirmations succeed
+        B->>B: Verify complete received state before publishing local vault
+    end
+
+    Note over A,B: END OR FAILURE: close connection, erase temporary secrets.<br/>A new attempt requires a new code. No fallback to the legacy pre-credential VK grant.
+    Note over A,B: SYMBOLIC NOTATION ONLY: exact KDF labels, encodings, PAKE suite, credential provisioning,<br/>password-change migration, transcript binding and post-quantum assumptions require specification and review.

@@ -1,7 +1,25 @@
-# Policies to discuss before the next repair batch
+# Policy discussion and owner decisions
 
 The owner explicitly requested discussion of these three policies on 2026-11-08.
 None of the options below has been implemented or accepted by silence.
+
+## Decisions reached after discussion — 2026-11-08
+
+The owner explicitly selected the following directions. They supersede the
+historical recommendations below; implementation is planned in
+[0047](../0047-audit-policy-and-lan-auth/PLAN.md).
+
+| Topic | Owner direction | Implementation status |
+|-------|-----------------|-----------------------|
+| Search/listing text | Remove aggregate searchable-text eligibility; use bounded cache residency, on-demand reads and paged frontend consumption. Retain 1 GiB referenced ciphertext. | Planned; existing index unchanged |
+| Folder substitution | Valid moved/copied authenticated vaults are acceptable. Do not add directory identity binding or ancestor restrictions; retain runtime redirection/replacement and rollback checks. Divergent-copy management belongs to the user. | Policy accepted; documentation/tests planned |
+| LAN listener | Consume the code and close all listeners after the first fully valid hello. No ongoing second-hello monitor. | Planned |
+| LAN credentials | Explicitly selected v4: password entry on both devices, ephemeral password-authentication state, credential authentication and final-key confirmation before grant; recovery/existing-copy proof uses VK without a grant. | Planned; exact contract/review and implementation pending |
+
+The v3 persistent-verifier/storage-migration option is superseded. A new LAN
+profile is still required; v4 does not introduce new file/archive formats.
+
+## Historical options considered
 
 ## The 64 MiB index-text budget
 

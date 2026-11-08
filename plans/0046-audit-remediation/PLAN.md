@@ -6,6 +6,12 @@
 
 ## Intent
 
+**Follow-up:** the three policy discussions now have explicit owner directions
+and are planned in [0047](../0047-audit-policy-and-lan-auth/PLAN.md). Its LAN
+baseline is owner-selected v4, with password entry on both devices and no
+persistent authentication state. The original initial-batch scope and completed
+steps below remain historical; none of these later changes is implemented here.
+
 Check the friend's 32 findings against the current implementation, fix defects
 whose required behavior is settled, and explain consequential changes before
 implementing them. Preserve the supplied `security-review` symlink and report.
@@ -155,6 +161,20 @@ No dependency changes; deny/vet not required for this batch.
 
 ## Revisions
 
+- 2026-11-08: Owner requested a QuickVault-specific cryptographic construction
+  driven by product security rather than external-protocol conformance. Add
+  `diagrams/DESIGN-v3.md` and `lan-auth-v3.*` as exploratory analysis only.
+  Do not rewrite the historical v1/v2 proposals or infer implementation approval.
+
+- 2026-11-08: At the owner's request, analyse the exploratory LAN diagram and
+  add a revised exploratory flow (`diagrams/ANALYSIS.md`, `lan-auth-v2.*`).
+  Documentation only; no spec, protocol or code change.
+
+- 2026-11-08: At the owner's request, add exploratory authentication-diagram
+  artifacts under `diagrams/` (Mermaid source, SVG/PNG exports and render notes).
+  This documentation follow-up does not alter the completed implementation
+  steps or approve a cryptographic composition.
+
 - 2026-11-08: keep the command guard in `cli::run` after argument parsing,
   instead of `main`, so it covers dispatch directly and leaves help parsing
   alone. No public interface change.
@@ -196,3 +216,101 @@ No dependency changes; deny/vet not required for this batch.
   so deny/vet not required. Plan status Reviewed refers only to this initial
   scope: the full assessment remains open, and the owner's three requested
   policy discussions are unresolved. No commit, branch or push performed.
+- 2026-11-08: Owner requested that the editable LAN-authentication diagram and
+  image exports be placed in the repository instead of `/tmp`. Copied the
+  validated Mermaid source, SVG and PNG to `diagrams/`, with portable layout
+  configuration and explanatory notes. Source/export bytes are unchanged;
+  environment-specific browser state and launch configuration are excluded.
+  The proposed password PAKE and recovery-key paths remain exploratory. No
+  production or normative protocol change is included in this follow-up.
+- 2026-11-08: Artifact-copy verification: repository Mermaid/SVG/PNG/layout
+  files match their rendered source artifacts byte for byte. The blanket
+  every-change gate rule prompted an unnecessary Cargo run for this doc-only
+  copy. Owner objected and directed scope-appropriate verification; a stop was
+  attempted, but the runner had already finished. No further Cargo run is
+  needed for this artifact operation.
+- 2026-11-08: LAN diagram analysis. Root defect: the 0013 §4.7 grant goes out
+  before any password proof; §10 step 4 is a client-side check. Ten findings on
+  `lan-auth` (credential-state location, a VK proof that proves nothing on the
+  password route, a redundant grant envelope, method negotiation, the guess
+  budget, the active-quantum OPAQUE gap, the B-side slot check). v2 recommends
+  OPAQUE (the 0006 profile) with its state in the VK-encrypted keyslot record
+  and the PAKE key folded into the record keys. Rendered with mmdc using a
+  scratch no-sandbox Puppeteer config. Doc-only: SPDX check run, no Cargo gates.
+- 2026-11-08: Owner requested a follow-up review of the other agent's diagram
+  changes. `diagrams/REVIEW.md` requests changes to the verifier-compromise
+  explanation, quantum-attack time horizon, missing explicit listener closure,
+  proposed metadata leakage and key-confirmation rationale. A minor README fix
+  distinguishes v1 from v2. Cryptographic proposals and exports are unchanged;
+  the initial code batch's Reviewed status is preserved. The owner-selected
+  close-after-first-valid-attempt policy must be carried into the next design.
+  Artifact-only verification follows the owner's direction; no Cargo commands.
+- 2026-11-08: Follow-up artifact checks passed: both Mermaid sources render;
+  repository SVG text equals fresh source renders; both PNGs pass structure/CRC
+  validation; local documentation links resolve; SPDX and whitespace checks
+  pass. Analysis, Mermaid, SVG, PNG and layout files remain identical to their
+  staged versions. No Cargo commands, production changes or staging operations.
+- 2026-11-08: Drafted the requested product-specific v3 construction and
+  diagram. Identified a repository-specific prospective leak: the current
+  restore path serializes the encrypted keyslot payload into a clear local
+  slot, so future secret authentication state needs distinct types/encoders.
+  V3 specifies listener closure, one credential attempt, session-bound
+  authentication, an explicit key-epoch transition, and slot/VK consistency
+  checking before bulk transfer. A synthetic fake-emitter example confirmed
+  that a direct password-derived HMAC can become an offline guessing target;
+  it is a counterexample to a rejected shortcut, not validation of v3. No
+  primitive, production protocol, dependency, accepted spec or staging change.
+- 2026-11-08: V3 documentation/artifact checks passed: Mermaid renders; SVG
+  parses and contains the updated flow; PNG structure/CRCs are valid and the
+  export was visually inspected; local links, SPDX and whitespace checks pass.
+  V1/v2 sources, exports, analysis and review are unchanged from staging.
+  Source and exports are in the repository. Render logs are under
+  `/tmp/qv-lan-v3-final-3j6r54a9/`. No Cargo commands were run for this design work.
+  These checks validate documentation artifacts, not cryptographic security.
+- 2026-11-08: Reviewed v3 against product fit only (owner: no external-document
+  conformance criterion). `diagrams/REVIEW-v3.md`: direction sound; v3 fixes
+  v2 review R1-R5. Confirmed the restore-path encoder hazard
+  (`qv-store/src/restore.rs:153` writes the record payload, `ext` included,
+  as the clear local slot). Requested simplifications: drop the context
+  commitment, Finished pair, GrantAccepted and key-method acknowledgement;
+  send Reveal with KE1; separate key-method MAC and schedule keys; use the
+  record version in place of a credential epoch; move the text-cache policy
+  out of scope. Recorded a product reason for the augmented PAKE (leaked state
+  degrades only to offline guessing). Doc-only; no Cargo run.
+- 2026-11-08: Completed another requested design review in
+  `diagrams/REVIEW-v3-followup.md`, preserving the original proposals and review.
+  Changes requested: exclude old readers before introducing encrypted secret
+  fields, assess authentication-KDF guessing cost against the password slot,
+  and define the atomic snapshot-check/grant-sealing boundary. Qualified the
+  previous review's claim that removing Finished preserves every guarantee;
+  no credential bypass demonstrated. Updated review navigation/index and
+  changelog only. SPDX, whitespace and changed local-link checks pass. No
+  production/spec/dependency or staging changes, no Cargo commands. Initial
+  code-batch approval remains unchanged; v3 is still exploratory.
+- 2026-11-08: At the owner's request for solutions, refined exploratory
+  `diagrams/DESIGN-v3.md` with §13: structurally incompatible control records
+  plus file/archive/LAN gates, a 256 MiB/t=3/p=4 Argon2id authentication-profile
+  candidate with assessed profile pairs and upgrade rules, atomic snapshot
+  verification/grant sealing under the existing session mutex, and conservative
+  disclosure accounting from completed sealing. Retain FinishedA/B. Called out
+  older-app incompatibility and the impossibility of guaranteed recall after
+  grant authorization. These are proposed resolutions awaiting review, not
+  closed findings or accepted/implemented behavior. No code, spec, dependency,
+  Mermaid/export or staging change. Documentation checks: SPDX, whitespace and
+  changed local links pass; no Cargo commands.
+- 2026-11-08: Reviewed v3 §13 and the v3 follow-up; drafted `DESIGN-v4.md`
+  and `lan-auth-v4.*`. The follow-up's F1-F3 all come from persisting
+  password-authentication state. v4 removes that state: A's user types the
+  vault password when approving the code, A checks it against its local slot,
+  builds an ephemeral engine registration and wipes it with the session. This
+  means no storage-format break, no migration, no credential lifecycle and no
+  stored guessing target. Accepted F4: FinishedB is kept but sent in the same
+  flight as KE3. Applied the agreed simplifications (no C/R, no GrantAccepted
+  or ack, Reveal+KE1, split key-method secrets). The keyslot `ext`-to-clear-slot
+  coupling is recorded as independent hardening. Doc-only; SPDX and whitespace
+  checks, no Cargo run.
+- 2026-11-08: Owner requested one concrete follow-up plan for the three
+  discussed topics and explicitly selected ephemeral v4 over stored-state v3.
+  Added plan 0047, LAN first, with cache/paging and filesystem disposition.
+  Updated DECISIONS/FINDINGS to supersede the original recommendations without
+  marking planned repairs fixed. Initial code review remains unchanged.

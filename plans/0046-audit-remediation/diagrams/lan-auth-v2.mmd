@@ -1,0 +1,49 @@
+---
+title: QuickVault — revised LAN join (v2) · password-gated VK grant
+---
+sequenceDiagram
+    autonumber
+    participant A as A · Offering device<br/>Vault unlocked
+    participant B as B · Joining device
+
+    Note over A,B: EXPLORATORY · NOT A SPEC · NOT REVIEWED (0012 §3). See ANALYSIS.md.
+    Note over A: Holds VK and the VK-encrypted keyslot record.<br/>The record also carries the OPAQUE server setup and<br/>registration, written with the password slot (0002 §3.2).
+
+    rect rgb(237, 243, 252)
+        Note over A,B: 1 · CHANNEL · 0013 §4.1–4.4 unchanged
+        A-->>B: QR: one-use secret P (+ endpoints). User opening the window = approval
+        B->>A: Hello: mode (vk | password), commit_B, ek_B, MAC(K_hello)
+        A->>A: Check MAC first, then key. One valid hello per window
+        A->>B: Accept: nonce_A, ct, MAC(K_accept)
+        Note over A,B: th = H(hello, accept) · k1 = HKDF(ss ‖ P, th) per direction<br/>Every later message is a record under k1 (or k2 below)
+    end
+
+    alt 2A · mode = password · B has only the vault password
+        rect rgb(244, 238, 253)
+            B->>A: Reveal nonce_B
+            Note over A,B: Both show the committed 6-digit code (0013 §4.5).<br/>A's user confirms. Nothing below runs before that.
+            A->>B: Context: vault_id, key_generation
+            Note over B: User types the vault password on B only.<br/>Unique verified keyslot record required on A, else abort `keyslot`.
+            B->>A: OPAQUE KE1 · context = H(th, vault_id, key_generation), roles a/b
+            A->>B: OPAQUE KE2 from the keyslot record's server state
+            B->>B: Open envelope. Fails = wrong password or wrong peer → abort
+            B->>A: OPAQUE KE3 · B's key confirmation
+            A->>A: Verify KE3. Fails → abort window: one guess per code
+            Note over A,B: K = OPAQUE session key · th2 = H(th, context, KE1, KE2, KE3)<br/>k2 = HKDF(ss ‖ P ‖ K, th2) per direction, sequence numbers restart at 0
+            A->>B: Grant (under k2): vault_id, key_generation, VK
+            A->>B: Exchange 0013 §7 under k2, B starts empty
+            B->>B: Received keyslot record must unwrap to the granted VK<br/>with the typed password. Confirm vault name. Then publish
+        end
+    else 2B · mode = vk · B holds VK (its own copy, or a recovery phrase)
+        rect rgb(235, 247, 235)
+            A->>B: Context: vault_id, key_generation
+            B->>B: Has a copy: check vault and generation match.<br/>Recovery phrase: decode VK, local manifest is empty
+            B->>A: prove_B = MAC(K_proof, th, "b", vault_id, key_generation)
+            A->>A: Verify in constant time. Fails → vault_mismatch, abort
+            A->>B: proved_A = MAC(K_proof, th, "a", vault_id, key_generation)
+            B->>B: Verify before sending anything else
+            A->>B: Exchange 0013 §7 under k1. VK never crosses the network
+        end
+    end
+
+    Note over A,B: Any failure: abort, erase ephemeral secrets (P, ss, K, k1, k2), close. A new attempt needs a new code.<br/>The pre-v2 grant (VK with no password proof) is removed, not kept as a fallback.

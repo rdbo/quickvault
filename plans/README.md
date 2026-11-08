@@ -84,4 +84,5 @@ plan, or a new plan that names the one it supersedes.
 | [0043](0043-owner-polish/PLAN.md) | Page fade, title-bar icon contrast, protection chip, `qv` binary (owner follow-ups) | Implemented — fresh review pending |
 | [0044](0044-owner-feedback-batch/PLAN.md) | List selection, sync receipt, conflict compare, in-app attachment previews, Android shell (owner feedback batch) | Implemented — fresh review and device check pending |
 | [0045](0045-owner-feedback-android/PLAN.md) | Fingerprint first (persistent quick unlock), protection levels, Android long press, conflicts, Devices, fade, focus (owner feedback) | Implemented — fresh review and device check pending |
-| [0046](0046-audit-remediation/PLAN.md) | Security assessment: initial fixes and full findings disposition | Reviewed — initial batch only; remaining findings and index/filesystem/LAN decisions open |
+| [0046](0046-audit-remediation/PLAN.md) | Security assessment: initial fixes and full findings disposition | Reviewed — initial code batch only; LAN v2/v3 design changes requested, v3 resolutions proposed and awaiting review; remaining assessment work open |
+| [0047](0047-audit-policy-and-lan-auth/PLAN.md) | Large-vault views, filesystem policy and authenticated LAN enrollment | Proposed — three-topic follow-up; owner selected ephemeral v4 with password entry on both devices; LAN first |

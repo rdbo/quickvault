@@ -7,8 +7,11 @@ what they say, and behaviour changes start with a spec change.
 
 Audit remediation (plan 0046, 2026-11-08) clarifies 0011 §3.1's terminal
 protection through command exit and 0013 §1.4's shared endpoint classification.
-The index budget, filesystem binding and active LAN window policies are pending
-owner discussion and are unchanged.
+The three policy discussions now have owner-selected directions recorded in
+[plan 0047](../plans/0047-audit-policy-and-lan-auth/PLAN.md): bounded cache/paged
+views, no persistent filesystem binding, and ephemeral v4 LAN authentication
+with listener closure. Their spec amendments and implementation are planned;
+the normative behavior is unchanged by that plan alone.
 
 0014 (accepted by the owner 2026-11-06, plan 0042) replaces 0013's stored
 device links with one-use sync codes; its amendments are applied to 0013,

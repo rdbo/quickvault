@@ -99,3 +99,15 @@ initial repair batch; the remaining assessment requires subsequent designs
 and implementation/review, starting with durability outcomes and the selected
 availability/protocol policies. Never infer full security assurance from these
 gates or the supplied assessment.
+
+## Follow-up: exploratory authentication diagrams (2026-11-08)
+
+The documentation-only v2 follow-up has **Changes requested** in
+[diagrams/REVIEW.md](diagrams/REVIEW.md). This does not change the approval of
+the initial code batch above. No cryptographic implementation has been reviewed
+or approved through the exploratory diagrams.
+
+The v3 construction and its proposed simplifications have **Changes requested**
+in [diagrams/REVIEW-v3-followup.md](diagrams/REVIEW-v3-followup.md): old-reader
+migration gates, authentication-KDF cost, atomic grant authorization and precise
+key-confirmation guarantees. The initial implementation verdict is unchanged.

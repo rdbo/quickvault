@@ -1,0 +1,48 @@
+---
+title: QuickVault LAN enrollment v4
+---
+sequenceDiagram
+    autonumber
+    participant A as A · Offering device<br/>Vault unlocked
+    participant B as B · Joining device<br/>Password, phrase or copy
+
+    Note over A,B: EXPLORATORY · NOT A SPEC · NOT REVIEWED (0012 §3). See DESIGN-v4.md.<br/>Nothing new is stored on either device. No storage-format change.
+
+    rect rgb(237, 243, 252)
+        Note over A,B: 1 · ONE CODE · ONE CONNECTION
+        A-->>B: User scans one-use code P
+        B->>A: Hello: J, method, commit_B, ek_B, MAC_P
+        A->>A: MAC, then key. First valid hello:<br/>consume P, CLOSE ALL LISTENERS
+        A->>B: Accept: nonce_A, ct, MAC_P
+        Note over A,B: T0 = H(J, hello, accept) · epoch-0 keys from Extract(T0, ss ‖ P)<br/>Rule: A sends no epoch-1 record before it has verified one from B
+    end
+
+    alt 2A · Password method
+        rect rgb(244, 238, 253)
+            B->>A: Reveal nonce_B + KE1 · context [J, password, T0]
+            Note over B: User types the vault password on B
+            Note over A: Show comparison code + password field.<br/>Approve = type the vault password.<br/>Check against the local slot (retry here only).<br/>Build an EPHEMERAL registration, wipe the password
+            A->>B: KE2
+            B->>B: Open envelope. Failure = wrong password or fake A → abort<br/>Z · TA = H(T0, Reveal, KE1, KE2, KE3) · root1 = Extract(TA, ss ‖ P ‖ Z)
+            B->>A: KE3 (epoch 0) + FinishedB (first epoch-1 record), one flight
+            A->>A: Verify KE3 → Z, derive root1, verify FinishedB<br/>Atomically: unlocked, not cancelled, keyslot head unchanged → seal grant once
+            A->>B: Grant (epoch 1): vault_id, generation, VK, public slot
+            B->>B: Unwrap slot with typed password, compare VK in constant time<br/>Wipe password · confirm vault name
+        end
+    else 2B · Key method · recovery phrase or existing copy
+        rect rgb(230, 247, 243)
+            B->>A: proof_B = MAC(z_mac, J, b, T0) · z_mac from VK and T0
+            A->>A: Verify before disclosing anything
+            A->>B: M = vault_id, generation · proof_A = MAC(z_mac, J, a, T0, H(M))
+            B->>B: Verify. A copy checks M, a phrase adopts M<br/>root1 = Extract(TA, ss ‖ P ‖ z_ks)
+        end
+    end
+
+    rect rgb(235, 247, 235)
+        Note over A,B: 3 · EXCHANGE UNDER EPOCH 1
+        B->>A: Exchange start: B's acceptance and its first epoch-1 record (key method)
+        A->>B: Objects B lacks · 0013 §7, full verification and staging
+        B->>B: Verify everything, then publish (new vault: fresh replica and anchor)
+    end
+
+    Note over A,B: Any failure, lock, cancel or timeout: abort, erase P, ss, Z, the registration and the keys, close.<br/>One credential attempt per code. No legacy code-only grant.

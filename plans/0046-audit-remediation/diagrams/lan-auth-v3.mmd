@@ -1,0 +1,64 @@
+---
+title: QuickVault LAN enrollment — product-specific candidate v3
+---
+sequenceDiagram
+    autonumber
+    participant A as A · Offering device<br/>Unlocked selected vault
+    participant B as B · Receiving device<br/>Password or existing VK
+
+    Note over A,B: EXPLORATORY CONSTRUCTION · NOT IMPLEMENTED OR SECURITY-VALIDATED<br/>See DESIGN-v3.md for assumptions, state separation, attack cases and open validation work.
+    Note over A: Password slot and secret authentication state<br/>are atomically paired in an encrypted control record.<br/>Separate encoders prevent exporting secret state<br/>to the clear local keyslot table.
+
+    rect rgb(237, 243, 252)
+        Note over A,B: 1 · ONE CODE · ONE ACCEPTED CONNECTION
+        A-->>B: User scans a fresh one-use code P
+        B->>A: Bounded hello with method, ephemeral KEM key, commitment and code MAC
+        A->>A: Validate code MAC and all hello checks<br/>Consume code and CLOSE ALL LISTENERS
+        A->>B: Hybrid KEM accept with fresh nonce and code authentication
+        Note over A,B: T0 binds the complete handshake, version and method.<br/>Directional epoch-0 keys derive from ss + P + T0.<br/>All later messages are encrypted records.
+    end
+
+    alt 2A · Password method
+        rect rgb(244, 238, 253)
+            B->>A: Reveal committed nonce
+            Note over A,B: Compare displayed codes, A explicitly approves.<br/>One credential attempt per accepted code.
+            A->>B: Authentication profile and randomized identity commitment C
+            Note over A,B: C commits to vault, generation, credential epoch and slot.<br/>No password wrapper, secret setup or stable vault ID is sent yet.
+            B->>A: PasswordStart bound to T0, method, profile and C
+            A->>B: PasswordReply from protected registration state
+            B->>B: Authenticate responder before final response<br/>The password stays local
+            B->>A: PasswordFinish
+            A->>A: Verify receiver authentication<br/>Failure ends this attempt with NO KEY GRANT
+            Note over A,B: Password authentication engine outputs mutually authenticated secret Z.<br/>TA commits to all authentication messages and context.
+        end
+    else 2B · Key method · recovery words or unlocked copy
+        rect rgb(230, 247, 243)
+            B->>B: Obtain VK locally, recovery words directly decode it
+            Note over A,B: Derive session-specific Z from VK, T0 and a dedicated key-auth purpose.
+            B->>A: Receiver-role MAC under Z, before requesting vault identity
+            A->>A: Verify before disclosing identity
+            A->>B: Vault identity M and emitter-role MAC bound to H(M)
+            B->>B: Verify MAC and known identity if holding a copy
+            B->>A: Distinct receiver acknowledgement bound to H(M)
+            A->>A: Verify acknowledgement
+            Note over A,B: TA binds this complete key-authentication exchange.<br/>VK is never delivered in this method.
+        end
+    end
+
+    rect rgb(235, 247, 235)
+        Note over A,B: 3 · CREDENTIAL-BOUND TRAFFIC KEYS
+        Note over A,B: root1 = HKDF-Extract(TA, ss ‖ P ‖ Z)<br/>Expand independent epoch-1 keys bound to version, method, direction and TA.<br/>New counters start at zero only under distinct new keys. Old epoch is rejected.
+        A->>B: FinishedA under new epoch-1 keys
+        B->>A: FinishedB under new epoch-1 keys
+        A->>A: Verify FinishedB and recheck credential snapshot<br/>Abort if locked or credentials changed before grant
+        opt Password method only
+            A->>B: Protected grant: VK, identity opening and PUBLIC password-slot descriptor
+            B->>B: Verify C opening and slot bindings<br/>Unwrap slot with typed password and compare VK<br/>Wipe password and temporary password keys
+            B->>A: GrantAccepted under epoch 1
+        end
+        A->>B: Complete authenticated ciphertext exchange under epoch 1
+        B->>B: Verify all objects, control record and model limits<br/>Bound cache residency, not total searchable text<br/>Confirm vault and destination before publication<br/>Recovery preserves password state, no silent reset
+    end
+
+    Note over A,B: Cancel, lock, expiry or any failed check ends the connection and clears temporary secrets.<br/>A retry needs a fresh code. No legacy code-only grant fallback.
+    Note over A,B: SYMBOLIC CRYPTOGRAPHIC NOTATION · Exact encoding, profile, engine integration, key schedule,<br/>credential migration and recovery publication require specification and independent review.
