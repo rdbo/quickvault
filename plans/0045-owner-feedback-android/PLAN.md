@@ -377,9 +377,27 @@ button.
 
 ## Revisions
 
+- 2026-11-07: Step 8 added (owner: no way on Android to change vault once
+  one is open; design delegated). The phone gets a vault switcher sheet;
+  the Settings row stays.
 - 2026-11-07: Decision 6 reads the launch API level through `getprop`
   (`Build.VERSION.DEVICE_INITIAL_SDK_INT` is not public in SDK 35); an
   unreadable value leaves swap unknown (level Medium).
+
+### Step 8 — Phone vault switcher (revision 2026-11-07)
+
+- [x] **Do:** a vault chip (dot, name, ▾) above the phone item list and a
+  held Vault tab (`app.js` hold → Ctrl-click, as for rows) open a bottom
+  sheet: one card per listed vault (initial tile, name, place; the open one
+  marked "Open" with a Lock button; a fingerprint mark on the vault with
+  quick unlock), then "Create a new vault" and "Join from another device".
+  Choosing a vault uses `switch_vault` (locks first; refused while a form
+  has input) and lets the locked screen open its quick-unlock prompt at
+  once. Escape/Back closes the sheet. 0009 §1.8 switching bullet amended.
+- **Files:** `specs/0009-clients-and-platforms.md`, `crates/qv-app/src/ui/{mod,shell,items}.rs`, `crates/qv-app/src/controller.rs`, `crates/qv-app/assets/{app.js,app.css}`
+- **Done when:** a controller test shows a switch to an enrolled vault
+  prompts once and a manual lock still does not; gates pass; APK builds.
+- **Verify:** `cargo test --locked -p qv-app`; all gates; `sh crates/qv-app/scripts/build-android.sh`
 
 ## Execution log
 
@@ -436,3 +454,18 @@ button.
   - Not verified: on-device behaviour (the phone disconnected before the
     final build), `getprop` readability for the app's SELinux domain, a
     process restart keeping quick unlock, and the device UI test run.
+- 2026-11-07: Step 8 done. `VaultSheet` signal in `Root` (Escape/Back
+  closes it, like the palette); `VaultCards` sheet in `shell.rs`; vault chip
+  in the phone list head; a held Vault tab arrives as a Ctrl-click (app.js
+  hold extended to `#tab-vault`). `switch_vault` to a listed vault resets the
+  prompt markers so `pump` prompts once if that vault is enrolled; the
+  sheet's fingerprint mark uses `Controller::quick_ready_for` (the open
+  vault's mark is inferred, its header being held). Controller flow test
+  extended (switch prompts once; manual lock does not).
+  - Gates on the final tree: SPDX, matrix, fmt, clippy ok;
+    `QV_TEST_XVFB=… cargo test --locked --no-fail-fast` 928 passed, 0 failed
+    (a first run in parallel with the APK build had two load-related
+    failures, qv-core `lan_core_sync_converges…` timeout and qv-cli
+    `exit_codes_for_vault_states` Store(Locked); both passed alone and in
+    the clean rerun). Validation lib tests 90 passed. APK built (SHA-256
+    9b3ae4b0…53252) and installed on the owner's phone, hash verified.

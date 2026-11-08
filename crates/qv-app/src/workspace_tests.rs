@@ -1669,6 +1669,11 @@ fn the_vault_name_is_the_stored_one_and_files_are_never_renamed() {
     env.act(WsAction::SaveSettings);
     assert_eq!(env.error(), None);
     assert_eq!(env.read(views::overview).name.as_str(), "Home");
+    // The open vault (phone vault chip and switcher) shows the stored name too.
+    assert_eq!(
+        env.c.open_vault().map(|v| (v.name, v.file)),
+        Some(("Home".to_owned(), "Personal.qvault".to_owned()))
+    );
     env.c.lock();
     let v = env.c.selected_vault().unwrap();
     assert_eq!(
@@ -2029,9 +2034,41 @@ fn quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only() 
     env.c.pump();
     env.wait();
     assert_eq!(opened.load(Ordering::SeqCst), 2);
-    // Turning it off in Settings stops the offer after a password unlock.
-    env.c.lock();
+    // The phone switcher (plan 0045): from a second vault, choosing the
+    // enrolled one opens its prompt at once; a manual lock still does not.
     dismiss.store(false, Ordering::SeqCst);
+    env.c.lock();
+    env.unlock(PASSWORD);
+    let first = env.c.open_vault().unwrap().path;
+    assert!(env.c.switch_vault(
+        env.epoch(),
+        crate::controller::SwitchTo::Mode(crate::controller::Mode::Create)
+    ));
+    env.fill(InputField::Name, "Second");
+    env.fill(InputField::Password, PASSWORD);
+    env.fill(InputField::Repeat, PASSWORD);
+    env.c.submit(env.epoch(), Action::Create, true).unwrap();
+    env.wait();
+    env.c.submit(env.epoch(), Action::SkipPhrase, true).unwrap();
+    env.wait();
+    assert_eq!(env.c.open_vault().unwrap().name, "Second");
+    assert!(env.c.quick_ready_for(&first));
+    env.c.pump();
+    env.wait();
+    assert_eq!(opened.load(Ordering::SeqCst), 2);
+    assert!(env.c.switch_vault(
+        env.epoch(),
+        crate::controller::SwitchTo::Vault(first.clone())
+    ));
+    env.c.pump();
+    env.wait();
+    assert_eq!(opened.load(Ordering::SeqCst), 3);
+    assert_eq!(env.c.open_vault().unwrap().path, first);
+    env.c.lock();
+    env.c.pump();
+    env.wait();
+    assert_eq!(opened.load(Ordering::SeqCst), 3);
+    // Turning it off in Settings stops the offer after a password unlock.
     env.unlock(PASSWORD);
     env.c
         .navigate(env.epoch(), Screen::Settings(Pane::Password));

@@ -94,7 +94,8 @@ function activity(){
     document.getElementById("qv-activity")?.dispatchEvent(new Event("input",{bubbles:true}));
 }
 for(const name of ["pointermove","wheel","scroll","touchstart"])document.addEventListener(name,activity,{capture:true,passive:true});
-// Touch: holding an item row for 450 ms selects it (0009 §1.8, plan 0045).
+// Touch: holding an item row for 450 ms selects it, and holding the Vault
+// tab opens the vault switcher (0009 §1.8, plan 0045).
 // The hold becomes a Ctrl-click on the row's open button, the input that
 // starts a selection on desktop; the click after the release is swallowed.
 // A move over 10 px, a scroll or a cancelled touch ends the hold.
@@ -103,7 +104,8 @@ function endHold(){if(hold){clearTimeout(hold.timer);hold=null;}}
 document.addEventListener("pointerdown",event=>{
     endHold();
     if(event.pointerType!=="touch"||!(event.target instanceof Element))return;
-    const open=event.target.closest(".row")?.querySelector(":scope>.open");
+    // A row's open button, or the Vault tab (held: the vault switcher).
+    const open=event.target.closest(".row")?.querySelector(":scope>.open")??event.target.closest("#tab-vault");
     if(!open||open.disabled||event.target.closest(".quick"))return;
     hold={x:event.clientX,y:event.clientY,timer:setTimeout(()=>{
         hold=null;heldAt=Date.now();

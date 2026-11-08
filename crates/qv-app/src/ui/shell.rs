@@ -9,7 +9,6 @@ use super::icons::Logo;
 use super::icons::{Icon, Svg, initial, item_hue, kind_icon};
 use super::{items, pages};
 use crate::controller::{AppError, Controller, FormEpoch};
-#[cfg(not(target_os = "android"))]
 use crate::controller::{Mode, SwitchTo};
 use crate::prefs::Theme;
 use crate::views;
@@ -175,6 +174,85 @@ pub(crate) fn VaultSwitcher(
     }
 }
 
+/// A vault's colour, from its name (vault names are not secret, 0009 §1.8).
+pub(crate) fn vault_hue(name: &str) -> &'static str {
+    let n = name
+        .bytes()
+        .fold(0u32, |a, b| a.wrapping_mul(31).wrapping_add(u32::from(b)));
+    super::icons::hue_class((n % 12) as u8)
+}
+
+/// The phone vault switcher (0009 §1.8, plan 0045): a sheet of vault cards.
+/// The open vault's card locks it; any other card locks this one and opens
+/// the locked screen on that vault, with its quick-unlock prompt if it has
+/// one. Disabled while a form holds unsaved input, as on the desktop.
+#[component]
+pub(crate) fn VaultCards(controller: Controller, epoch: FormEpoch, open: Signal<bool>) -> Element {
+    let vaults = controller.vaults();
+    let current = controller.open_vault().map(|v| v.path);
+    let editing = controller.screen(epoch).is_some_and(|s| s.is_form());
+    // The open vault's header is held by its session, so its mark is
+    // inferred: an enrollment that matches no other listed vault.
+    let quick: Vec<bool> = vaults
+        .iter()
+        .map(|v| {
+            current.as_ref() != Some(&v.path) && v.exists && controller.quick_ready_for(&v.path)
+        })
+        .collect();
+    let open_quick = controller.quick_policy().is_some() && !quick.contains(&true);
+    let mut close = move || open.set(false);
+    let switch = |to: SwitchTo| {
+        let c = controller.clone();
+        move |_| {
+            open.set(false);
+            c.switch_vault(epoch, to.clone());
+        }
+    };
+    let lock = {
+        let c = controller.clone();
+        move |_| {
+            open.set(false);
+            c.lock();
+        }
+    };
+    rsx! {
+        div { class: "layer vault-sheet",
+            button { class: "scrim", "aria-label": "Close", onclick: move |_| close() }
+            div { class: "dialog", role: "dialog", "aria-modal": "true", "aria-label": "Vaults", tabindex: "-1", autofocus: true,
+                div { class: "grab", "aria-hidden": "true" }
+                h3 { "Vaults" }
+                div { class: "vcards",
+                    for (v, has_quick) in vaults.into_iter().zip(quick) {
+                        if current.as_ref() == Some(&v.path) {
+                            div { class: "vcard on", id: "vcard-open",
+                                span { class: "tile {vault_hue(&v.name)}", "{initial(&v.name)}" }
+                                span { class: "l", b { "{v.name}" }
+                                    small { span { class: "live" } if open_quick { "Open · fingerprint unlock" } else { "Open now" } }
+                                }
+                                button { class: "btn", id: "vcard-lock", "data-qv-clear": "true", onclick: lock.clone(), Svg { icon: Icon::Lock } "Lock" }
+                            }
+                        } else {
+                            button { class: "vcard", disabled: editing || !v.exists, onclick: switch(SwitchTo::Vault(v.path.clone())),
+                                span { class: "tile {vault_hue(&v.name)}", "{initial(&v.name)}" }
+                                span { class: "l", b { "{v.name}" }
+                                    small { if !v.exists { "Not found" } else if has_quick { "Fingerprint unlock" } else { "Master password" } }
+                                }
+                                if has_quick { span { class: "vq", "aria-hidden": "true", Svg { icon: Icon::Finger } } }
+                                Svg { icon: Icon::Right }
+                            }
+                        }
+                    }
+                }
+                div { class: "vmore",
+                    button { class: "vact", id: "sheet-create", disabled: editing, onclick: switch(SwitchTo::Mode(Mode::Create)), span { class: "ci", Svg { icon: Icon::Plus } } "New vault" }
+                    button { class: "vact", id: "sheet-join", disabled: editing, onclick: switch(SwitchTo::Mode(Mode::Join)), span { class: "ci", Svg { icon: Icon::Qr } } "Join a device" }
+                }
+                p { class: "note", if editing { "Save or cancel your changes to switch vaults." } else { "Switching locks the open vault." } }
+            }
+        }
+    }
+}
+
 /// Edge and corner handles for resizing a window without OS decorations.
 #[component]
 pub(crate) fn ResizeHandles() -> Element {
@@ -212,6 +290,8 @@ pub(crate) fn ResizeHandles() -> Element {
 pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<bool>) -> Element {
     let epoch = view.epoch;
     let revision = view.revision;
+    let fallback = use_signal(|| false);
+    let mut sheet = try_use_context::<super::VaultSheet>().map_or(fallback, |v| v.0);
     let Some(screen) = controller.screen(epoch) else {
         return rsx! {};
     };
@@ -389,7 +469,10 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
         }
         nav { class: "tabbar", "aria-label": "Sections", inert: pending.is_some().then_some("true"),
             for (target, label, icon, id) in tabs {
-                button { class: if tab_on(&target) { "on" } else { "" }, id, disabled: busy, onclick: go(&controller, epoch, target.clone()),
+                button { class: if tab_on(&target) { "on" } else { "" }, id, disabled: busy,
+                    // Holding the Vault tab (app.js sends it as a Ctrl-click)
+                    // opens the vault switcher (plan 0045).
+                    onclick: { let mut f = go(&controller, epoch, target.clone()); let vault = id == "tab-vault"; move |e: MouseEvent| { if vault && e.modifiers().ctrl() { sheet.set(true); } else { f(e) } } },
                     i { Svg { icon } } "{label}"
                 }
             }
@@ -399,6 +482,7 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
         }
         pages::LanPanel { controller: controller.clone(), epoch, revision, seconds: view.lan_seconds }
         if view.scanning { pages::ScanPanel { controller: controller.clone(), epoch } }
+        if sheet() && !busy { VaultCards { controller: controller.clone(), epoch, open: sheet } }
         if let Some(p) = controller.peek(epoch, |ws| ws.preview.clone()).flatten() {
             for k in [p.handle.version_hex()] {
                 super::items::Viewer { key: "{k}", controller: controller.clone(), epoch, preview: p.clone() }

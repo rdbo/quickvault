@@ -29,6 +29,10 @@ Dates are ISO 8601. Newest first within each section.
   - App: the item list fades in when you return from a tool page.
   - App: the Devices page has two clear choices, "Show a code" and "Scan a
     code" (or "Type a code").
+  - Android: switch vaults without closing the app. Tap the vault's name
+    above the item list, or hold the Vault tab, for a sheet of vault cards:
+    lock the open one, open another (its fingerprint prompt appears at
+    once if it has one), create a new vault or join a device.
 - 2026-11-07: Owner feedback batch (plan 0044; specs 0003 §6.4, 0009 §1.8):
   - Linux app: the system file chooser opens again. xdg-desktop-portal
     refused the hardened (non-dumpable) app process, so every pick failed

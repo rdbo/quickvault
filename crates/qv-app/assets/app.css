@@ -834,3 +834,27 @@ button.set-row:hover:enabled{background:var(--raised)}
 .dev-hero .sync-orbit *{animation:none}
 .cmp-bar .keep{display:flex;flex-direction:column;align-items:center;line-height:1.2}
 .cmp-bar .keep small{font-size:11px;opacity:.75;font-weight:500}
+/* Plan 0045: the phone vault chip and switcher sheet. */
+.vault-chip{display:inline-flex;align-items:center;gap:8px;max-width:100%;margin:0 0 6px -4px;padding:5px 10px 5px 8px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--text2);font-size:13px}
+.vault-chip b{font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vault-chip .dot{width:9px;height:9px;border-radius:3px;background:hsl(var(--h),55%,55%);flex:none}
+.vault-chip .ico{width:14px;height:14px;flex:none}
+.vault-sheet .dialog{padding-top:10px}
+.vault-sheet .grab{width:40px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 14px}
+.vault-sheet h3{margin:0 0 12px}
+.vcards{display:flex;flex-direction:column;gap:8px}
+.vcard{display:flex;align-items:center;gap:12px;width:100%;padding:12px;border-radius:16px;border:1px solid var(--line);background:var(--panel);text-align:left;color:var(--text)}
+.vcard:disabled{opacity:.5}
+.vcard .l{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.vcard .l b{font-weight:620;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vcard .l small{color:var(--text3);font-size:12.5px;display:flex;align-items:center;gap:6px}
+.vcard>.ico{color:var(--text3)}
+.vcard .vq{color:var(--accent);display:grid}
+.vcard.on{border-color:var(--accent);background:linear-gradient(135deg,var(--soft),transparent 70%)}
+.vcard .live{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--soft)}
+.vcard .btn{flex:none}
+.vmore{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.vact{display:flex;align-items:center;gap:10px;padding:12px;border-radius:14px;border:1px dashed var(--line);background:none;color:var(--text2);font-weight:560}
+.vact .ci{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--soft);color:var(--accent)}
+.vault-sheet .note{margin:12px 0 0;text-align:center;color:var(--text3);font-size:12px}
+@media (hover:hover){.vcard:hover:enabled,.vact:hover:enabled{border-color:var(--accent)}}

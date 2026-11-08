@@ -190,7 +190,11 @@ release, but no longer gates the feature.
   - **Switching (owner, 2026-11-07):** one vault is open at a time. On the
     desktop the title bar's vault name opens a switcher: the listed vaults
     (the open one marked), "Create a new vault" and "Join from another
-    device". Settings has "Switch vault" on every platform. Every choice
+    device". On phones the same choices open as a sheet of vault cards from
+    the vault's name above the item list or by holding the Vault tab; the
+    open vault's card can lock it, and a card marks the vault with quick
+    unlock, whose prompt opens as soon as it is chosen (owner, 2026-11-07;
+    plan 0045). Settings has "Switch vault" on every platform. Every choice
     locks the open vault first, then opens the locked screen on the chosen
     vault or in the chosen mode. While a form holds unsaved input the
     choices are disabled and say why; switching never discards input.
@@ -426,6 +430,9 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-07: §1.8 vault list: on phones the vault's name above the list
+  and a held Vault tab open a vault switcher sheet with a lock action
+  (owner request, plan 0045). Still Draft.
 - 2026-11-07: §1.8: quick unlock first on the locked screen and offered
   after a password unlock; protection levels and Android evidence; long press
   selects on touch screens; conflict links; Devices layout; `quick=off`

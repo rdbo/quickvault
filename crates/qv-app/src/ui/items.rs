@@ -218,6 +218,8 @@ pub(crate) fn ListPane(
     conflicts: usize,
 ) -> Element {
     let _ = revision;
+    let fallback = use_signal(|| false);
+    let mut vault_sheet = try_use_context::<super::VaultSheet>().map_or(fallback, |v| v.0);
     let mut menu = use_signal(|| false);
     // Plan 0044: multi-select (record ids) and the open row menu.
     let mut anchor = use_signal(|| None::<String>);
@@ -531,6 +533,14 @@ pub(crate) fn ListPane(
         // `fade-in` plays when the list mounts again after a tool page.
         section { class: if in_selection { "list selecting fade-in" } else { "list fade-in" }, "aria-label": "Items", onkeydown: keys,
             div { class: "phone-head",
+                // The open vault; tapping it opens the switcher (plan 0045).
+                if let Some(v) = controller.open_vault() {
+                    button { class: "vault-chip", id: "vault-chip", disabled: form, "aria-haspopup": "dialog", onclick: move |_| vault_sheet.set(true),
+                        span { class: "dot {super::shell::vault_hue(&v.name)}" }
+                        b { "{v.name}" }
+                        Svg { icon: Icon::ChevronDown }
+                    }
+                }
                 div { class: "ph-row",
                     h2 { "{title}" }
                     // Android selects by holding a row (plan 0045).

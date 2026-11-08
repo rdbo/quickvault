@@ -935,7 +935,9 @@ impl Controller {
     pub fn open_vault(&self) -> Option<crate::vaults::Listed> {
         let path = self.state().vault_path.clone()?;
         let folder = self.default_folder();
-        let mut list = crate::vaults::VaultList::default();
+        // The real list, for the vault's stored name (a joined vault's file
+        // is "Joined vault.qvault" whatever it is called, plan 0041).
+        let mut list = self.vault_list().clone();
         list.remember(&path);
         crate::vaults::listed(&self.0.base, &folder, &list)
             .into_iter()
@@ -1025,6 +1027,11 @@ impl Controller {
             return false;
         };
         self.core().is_ok_and(|c| c.quick_ready_for(&vault.path))
+    }
+    /// Quick unlock is enrolled for the vault at `path` (judged from its
+    /// header, so not for the vault that is open now).
+    pub fn quick_ready_for(&self, path: &std::path::Path) -> bool {
+        self.core().is_ok_and(|c| c.quick_ready_for(path))
     }
     /// The enrolled quick-unlock policy, while one is live.
     pub fn quick_policy(&self) -> Option<qv_core::platform::QuickPolicy> {
@@ -1225,6 +1232,10 @@ impl Controller {
         if let SwitchTo::Vault(path) = to {
             // Taken after the state lock is released, as in `select_vault`.
             *self.0.selected.lock().unwrap_or_else(|p| p.into_inner()) = Some(path);
+            // A chosen vault with quick unlock opens its prompt at once
+            // (plan 0045); `pump` checks that it is enrolled.
+            self.0.quick_prompted.store(u64::MAX, Ordering::SeqCst);
+            self.0.quick_opened.store(u64::MAX, Ordering::SeqCst);
             let mut s = self.state();
             s.revision = s.revision.wrapping_add(1);
         }

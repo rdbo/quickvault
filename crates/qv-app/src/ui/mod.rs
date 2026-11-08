@@ -159,10 +159,14 @@ fn Root(controller: Controller, revision: u64) -> Element {
         }
     };
     let palette = use_signal(|| false);
+    // The phone vault switcher (plan 0045), opened from the list or the tab.
+    let switcher = use_signal(|| false);
+    use_context_provider(|| VaultSheet(switcher));
     let unlocked = view.phase == Phase::Unlocked;
     let keys = {
         let c = controller.clone();
         let mut palette = palette;
+        let mut switcher = switcher;
         move |event: KeyboardEvent| {
             // Bubbled after the target's own handler: show its result now.
             redraw.now();
@@ -176,6 +180,11 @@ fn Root(controller: Controller, revision: u64) -> Element {
             }
             if key == "Escape" && palette() {
                 palette.set(false);
+                event.prevent_default();
+                return;
+            }
+            if key == "Escape" && switcher() {
+                switcher.set(false);
                 event.prevent_default();
                 return;
             }
@@ -224,6 +233,10 @@ fn Root(controller: Controller, revision: u64) -> Element {
         }
     }
 }
+
+/// Whether the phone vault switcher sheet is open (plan 0045).
+#[derive(Clone, Copy)]
+pub(crate) struct VaultSheet(pub(crate) Signal<bool>);
 
 /// The parts of the snapshot the unlocked shell renders.
 #[derive(Clone, Copy, PartialEq)]
