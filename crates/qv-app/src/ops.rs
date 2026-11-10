@@ -24,6 +24,7 @@ fn anchor_label(a: qv_core::AnchorStatus) -> &'static str {
         qv_core::AnchorStatus::Advanced => "advanced",
         qv_core::AnchorStatus::Missing => "missing",
         qv_core::AnchorStatus::Mismatch => "mismatch",
+        qv_core::AnchorStatus::Damaged => "damaged",
         _ => "unknown",
     }
 }
@@ -306,13 +307,13 @@ pub(crate) fn run(
                 .with_ws(epoch, |ws, session| -> Result<_, AppError> {
                     let value = match &key {
                         CopyKey::Field(entry, field) => {
-                            if session.entry_versions(*entry)?.len() > 1 {
+                            if session.entry_version_count(*entry)? > 1 {
                                 return Err(AppError::Conflict);
                             }
                             protect(session.reveal(*field)?.expose_secret())?
                         }
                         CopyKey::Totp(entry, field) => {
-                            if session.entry_versions(*entry)?.len() > 1 {
+                            if session.entry_version_count(*entry)? > 1 {
                                 return Err(AppError::Conflict);
                             }
                             protect(session.totp(*field)?.code.expose_secret().as_bytes())?
@@ -342,7 +343,7 @@ pub(crate) fn run(
             .ok_or(AppError::InvalidInput)?,
         WsAction::EditEntry(entry) => c
             .with_ws(epoch, |ws, session| -> Result<(), AppError> {
-                if session.entry_versions(entry)?.len() > 1 {
+                if session.entry_version_count(entry)? > 1 {
                     return Err(AppError::Conflict);
                 }
                 let draft = session.edit_entry(entry)?;
@@ -643,37 +644,29 @@ pub(crate) fn run(
                 if row.conflicted {
                     return Err(AppError::Conflict);
                 }
-                let mut sink = crate::preview::Bounded::new(row.size)?;
-                // Only Ok confirms the verified content hash (0003 §6.4).
-                s.save_attachment(handle, &mut sink, Some(token))
-                    .map_err(|e| match e {
-                        qv_core::CoreError::Cancelled => AppError::from(e),
-                        _ => AppError::PreviewUnavailable,
-                    })?;
-                let bytes = sink.finish()?;
+                let prepared = crate::preview::prepare(s, handle, row.size, Some(token))?;
                 let (name, size, count) = (row.name.clone(), row.size, rows.len());
-                // Registered when applied, so a lock in between drops (and
-                // wipes) the content instead of leaving it served.
-                Ok(on_ws(move |ws| match crate::preview::open(bytes) {
-                    Ok(o) => {
-                        ws.preview = Some(crate::preview::PreviewView {
-                            handle,
-                            entry,
-                            name,
-                            size,
-                            kind: o.kind,
-                            mime: o.mime,
-                            src: o.src,
-                            text: o.text,
-                            cut: o.cut,
-                            index,
-                            count,
-                        });
+                // Install only when the worker result is applied to this session.
+                Ok(Box::new(move |state: &mut crate::controller::State| {
+                    let Some(session) = state.session.as_ref() else { return; };
+                    let weak = std::sync::Arc::downgrade(session);
+                    let Some(ws) = state.workspace.as_mut() else { return; };
+                    match crate::preview::open(prepared, weak, handle, size) {
+                        Ok(o) => ws.preview = Some(crate::preview::PreviewView {
+                            handle, entry, name, size, kind: o.kind, mime: o.mime,
+                            src: o.src, text: o.text, cut: o.cut, image_load: o.image_load, index, count,
+                        }),
+                        Err(e) => ws.error = Some(e),
                     }
-                    Err(e) => ws.error = Some(e),
                 }))
             })
         }
+        WsAction::LoadPreview(handle) => c.with_ws(epoch, |ws, _| {
+            let preview = ws.preview.as_mut().filter(|p| p.handle == handle && p.image_load.is_some()).ok_or(AppError::InvalidInput)?;
+            crate::preview::allow_image(handle)?;
+            preview.image_load = None;
+            Ok(())
+        }).ok_or(AppError::InvalidInput)?,
         WsAction::PreviewStep(step) => {
             let (entry, index) = c
                 .peek(epoch, |ws| ws.preview.as_ref().map(|p| (p.entry, p.index)))
@@ -716,11 +709,13 @@ pub(crate) fn run(
                 // Automatic removes only colour tokens; other icons stay
                 // (as `editor::pick_colour`).
                 None => {
-                    let coloured: Vec<qv_core::EntryHandle> = crate::views::all_items(s)?
-                        .into_iter()
-                        .filter(|i| i.row.colour.is_some() && entries.contains(&i.row.handle))
-                        .map(|i| i.row.handle)
-                        .collect();
+                    let mut coloured = Vec::new();
+                    for entry in &entries {
+                        let detail = s.entry(*entry)?;
+                        if crate::editor::colour(detail.icon.as_ref().map(qv_core::Text::expose)).is_some() {
+                            coloured.push(*entry);
+                        }
+                    }
                     s.set_entry_icons(&coloured, None)?;
                 }
             }
@@ -745,7 +740,7 @@ pub(crate) fn run(
             }))
         }),
         WsAction::PurgeExpired => c.run_op(epoch, retry, move |s, token, _| {
-            let items: Vec<_> = s.expired_trash()?.expired.iter().map(|t| t.item).collect();
+            let items: Vec<_> = s.expired_handles()?;
             let count = items.len();
             let ((), cleanup) = with_snapshot(s, over_budget, token, || s.purge(&items))?;
             Ok(on_ws(move |ws| {
@@ -764,22 +759,23 @@ pub(crate) fn run(
                 ws.notice = Some("Restored as a new version.");
             }))
         }),
-        WsAction::PurgeHistory(entry) => c.run_op(epoch, None, move |s, _, _| {
-            s.purge_history(entry)?;
-            Ok(on_ws(|ws| {
-                ws.notice = Some(
-                    "Local history suppressed. Snapshots, unseen concurrent history and independent copies may remain; no secure erasure.",
-                )
+        WsAction::PurgeHistory(entry) => c.run_op(epoch, retry, move |s, token, _| {
+            let ((), cleanup) = with_snapshot(s, over_budget, token, || s.purge_history(entry))?;
+            Ok(on_ws(move |ws| {
+                ws.notice = Some(if cleanup { CLEANUP } else {
+                    "Local history suppressed. Snapshots, unseen concurrent history and independent copies may remain; no secure erasure."
+                })
             }))
         }),
         WsAction::Resolve(record, version) => {
             let password = c
                 .peek(epoch, |ws| password(ws, WsField::Password).ok())
                 .ok_or(AppError::InvalidInput)?;
-            c.run_op(epoch, None, move |s, token, _| {
+            c.run_op(epoch, retry, move |s, token, _| {
                 let h = conflict_version(s, &record, &version)?;
+                let selected = s.conflict_version(&h)?;
                 let needs = matches!(
-                    s.conflict_version(&h)?.details,
+                    selected.details,
                     qv_core::ConflictDetails::PasswordSlot { .. }
                 );
                 let pw = if needs {
@@ -787,8 +783,11 @@ pub(crate) fn run(
                 } else {
                     None
                 };
-                let r = s.resolve_version(&h, pw.as_ref(), Some(token))?;
+                let (r, cleanup) = if selected.state == qv_core::Deletion::Final {
+                    with_snapshot(s, over_budget, token, || s.resolve_version(&h, pw.as_ref(), Some(token)))?
+                } else { (s.resolve_version(&h, pw.as_ref(), Some(token))?, false) };
                 Ok(on_ws(move |ws| {
+                    ws.notice = cleanup.then_some(CLEANUP);
                     ws.screen = Screen::Conflicts;
                     ws.report = Some(Report::Resolved {
                         conflicts: r.conflicts,
@@ -860,7 +859,7 @@ pub(crate) fn run(
                 })
                 .ok_or(AppError::InvalidInput)??;
             c.run_op(epoch, None, move |s, token, ctl| {
-                if s.entry_versions(entry)?.len() > 1 {
+                if s.entry_version_count(entry)? > 1 {
                     return Err(AppError::Conflict);
                 }
                 let (mut reader, default_name) = crate::documents::open_attachment(ctl, source, token)?;
@@ -1118,7 +1117,7 @@ fn reveal_value(
         }
         RevealKey::Totp(field) => protect(session.totp(*field)?.code.expose_secret().as_bytes())?,
         RevealKey::WifiJoin(entry) => {
-            if session.entry_versions(*entry)?.len() > 1 {
+            if session.entry_version_count(*entry)? > 1 {
                 return Err(AppError::Conflict);
             }
             let d = session.entry(*entry)?;

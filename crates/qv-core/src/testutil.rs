@@ -224,6 +224,20 @@ pub(crate) fn err<T>(r: Result<T, crate::CoreError>) -> crate::CoreError {
     }
 }
 
+/// Exercise the production copy/authorize/mutate/complete flow. Callers must
+/// configure a real SnapshotPolicy; this helper grants no test-only bypass.
+pub(crate) fn destructive<T>(
+    s: &Session,
+    f: impl FnOnce() -> Result<T, crate::CoreError>,
+) -> Result<T, crate::CoreError> {
+    let copy = s.begin_destructive(false, None)?;
+    let result = f();
+    let finished = s.finish_destructive(copy);
+    let value = result?;
+    finished?;
+    Ok(value)
+}
+
 /// The store's commit sequence number.
 pub(crate) fn seq(s: &Session) -> u64 {
     s.overview().unwrap().local_seq

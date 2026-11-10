@@ -74,7 +74,18 @@ fn exchange_cli_preflight_and_explicit_backup_consent() {
 #[test]
 fn exchange_cli_old_archive_keeps_suppression_and_receipts_survive_restart() {
     let h = Home::new();
-    let s = h.create();
+    let s = {
+        let _k = common::serial();
+        let policy =
+            qv_core::SnapshotPolicy::new(qv_core::SnapshotDir::open(&h.snapshots()).unwrap());
+        qv_core::Core::new(
+            qv_core::CoreConfig::new(qv_core::AnchorDir::open(&h.anchors()).unwrap())
+                .with_snapshots(policy),
+        )
+        .create(&h.vault(), &common::pw(PASSWORD), "Test vault")
+        .unwrap()
+        .session
+    };
     let root = s.root().unwrap();
     let entry = s
         .save_entry(s.new_entry(root, "login", "archive canary").unwrap())
@@ -85,7 +96,9 @@ fn exchange_cli_old_archive_keeps_suppression_and_receipts_survive_restart() {
     let mut draft = s.edit_entry(entry).unwrap();
     draft.entry_mut().title = qv_core::Text::new("current complete version").unwrap();
     s.save_entry(draft).unwrap();
+    let copy = s.begin_destructive(false, None).unwrap();
     s.purge_history(entry).unwrap();
+    s.finish_destructive(copy).unwrap();
     let newer = s.export_archive(&directory, false, None).unwrap();
     s.lock();
     let o = run(&h, &["merge", &arg(&source)]);

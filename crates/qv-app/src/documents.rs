@@ -17,6 +17,18 @@ use zeroize::Zeroizing;
 /// Attachment bound shared with the CLI and model (10 MiB).
 pub const MAX_ATTACHMENT: u64 = 10 * 1024 * 1024;
 
+#[cfg(target_os = "linux")]
+fn file_error(e: qv_core::platform::PlatformError) -> AppError {
+    match e {
+        qv_core::platform::PlatformError::StorageCapacity => {
+            qv_core::CoreError::Store(qv_core::StoreError::StorageCapacity).into()
+        }
+        qv_core::platform::PlatformError::LimitExceeded => qv_core::CoreError::LimitExceeded.into(),
+        qv_core::platform::PlatformError::Cancelled => qv_core::CoreError::Cancelled.into(),
+        _ => AppError::InvalidInput,
+    }
+}
+
 /// What a document picker is choosing for (Android); used by the UI.
 #[cfg(feature = "desktop")]
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -291,7 +303,7 @@ pub(crate) fn create_output(
             #[cfg(target_os = "linux")]
             {
                 let out = qv_core::platform::files::Output::create(&path, cancellation(token))
-                    .map_err(|_| AppError::InvalidInput)?;
+                    .map_err(file_error)?;
                 let out = std::sync::Arc::new(std::sync::Mutex::new(out));
                 let writer = Shared(out.clone());
                 Ok(Output {
@@ -300,7 +312,7 @@ pub(crate) fn create_output(
                         out.lock()
                             .map_err(|_| AppError::Unavailable)?
                             .finish()
-                            .map_err(|_| AppError::Unavailable)
+                            .map_err(file_error)
                     }),
                 })
             }

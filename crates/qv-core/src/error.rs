@@ -34,6 +34,8 @@ pub enum CoreError {
     /// The operation was cancelled (a lock was requested, or the caller's
     /// token was cancelled). Nothing was changed.
     Cancelled,
+    /// Clipboard ownership was lost before delivery could be confirmed.
+    ClipboardReplaced,
     /// The record has an unresolved conflict; an explicit resolution is
     /// needed first (0005 §1.2, §2.3).
     Conflict,
@@ -90,6 +92,9 @@ impl fmt::Display for CoreError {
                 Self::SessionLocked => "the vault session is locked",
                 Self::StaleHandle => "the item changed; reload it",
                 Self::Cancelled => "operation cancelled",
+                Self::ClipboardReplaced => {
+                    "clipboard replaced before delivery could be confirmed; copy again if needed"
+                }
                 Self::Conflict => "the item has conflicting versions; resolve them first",
                 Self::NotFound => "entry, group or field not found",
                 Self::NotEmpty => "the group is not empty",

@@ -29,7 +29,6 @@ fn fast() -> LanTimeouts {
         idle: Duration::from_secs(10),
         confirm: Duration::from_secs(20),
         connect: Duration::from_secs(2),
-        probe: Duration::from_secs(1),
     }
 }
 
@@ -51,8 +50,15 @@ fn sync_options(port: u16) -> SyncOptions {
 }
 
 /// The offering user: confirms a new device's code (sync never asks).
-struct Yes(Option<String>, Option<Box<dyn FnMut() + Send>>);
+struct Yes(
+    Option<String>,
+    Option<Box<dyn FnMut() + Send>>,
+    &'static str,
+);
 impl ApproverUi for Yes {
+    fn master_password(&mut self, _: bool) -> Option<MasterPassword> {
+        Some(pw(self.2))
+    }
     fn confirm(&mut self, sas: &str, name: &str) -> bool {
         assert_eq!(name, crate::testutil::NAME);
         if let Some(f) = &mut self.1 {
@@ -90,6 +96,7 @@ fn joined_report(s: Served) -> (bool, Option<LanError>) {
         Served::Joined {
             peer_confirmed,
             failure,
+            ..
         } => (peer_confirmed, failure),
         Served::Synced(_) => panic!("not a join"),
     }
@@ -110,7 +117,7 @@ fn join_new_with(
     password: &'static str,
 ) -> (Served, Result<Session, CoreError>) {
     let (w, manual, port) = code(a);
-    let mut yes = Yes(None, None);
+    let mut yes = Yes(None, None, password);
     let mut joiner = JoinerPw(password);
     let core = b_env.core();
     std::thread::scope(|s| {
@@ -212,7 +219,7 @@ fn round(
     scanner: &Session,
 ) -> (Result<SyncReport, CoreError>, Result<SyncReport, CoreError>) {
     let (w, manual, port) = code(w_side);
-    let mut yes = Yes(None, None);
+    let mut yes = Yes(None, None, PASSWORD);
     let (served, sent) = std::thread::scope(|s| {
         let h = s.spawn(|| w.run(w_side, &mut yes, None));
         let sent = scanner.sync_with_code(
@@ -297,7 +304,7 @@ fn lan_core_sync_with_another_vault_fails_on_both_sides() {
     };
     let (w, manual, port) = code(&a);
     let (served, sent) = std::thread::scope(|s| {
-        let h = s.spawn(|| w.run(&a, &mut Yes(None, None), None));
+        let h = s.spawn(|| w.run(&a, &mut Yes(None, None, PASSWORD), None));
         let sent = other.sync_with_code(
             JoinCode::from_manual(&manual).unwrap(),
             sync_options(port),
@@ -307,9 +314,9 @@ fn lan_core_sync_with_another_vault_fails_on_both_sides() {
     });
     assert!(matches!(
         served.err(),
-        Some(CoreError::Lan(LanError::VaultMismatch))
+        Some(CoreError::Lan(LanError::Integrity))
     ));
-    assert_eq!(err(sent), CoreError::Lan(LanError::VaultMismatch));
+    assert_eq!(err(sent), CoreError::Lan(LanError::Timeout));
 }
 
 #[test]
@@ -329,6 +336,7 @@ fn lan_core_lock_closes_the_window_without_a_grant() {
             flag.store(true, std::sync::atomic::Ordering::SeqCst);
             std::thread::sleep(Duration::from_millis(300));
         })),
+        PASSWORD,
     );
     let core = b_env.core();
     let mut joiner = Joiner(None);
@@ -355,7 +363,7 @@ fn lan_core_lock_closes_the_window_without_a_grant() {
     ));
     assert!(matches!(
         joined.err(),
-        Some(CoreError::Lan(LanError::PeerCancelled))
+        Some(CoreError::Lan(LanError::Timeout))
     ));
     assert!(!dest.exists());
 }
@@ -367,7 +375,7 @@ fn lan_core_lock_closes_a_waiting_window_promptly() {
     let (w, _, _) = code(&a);
     let started = std::time::Instant::now();
     let r = std::thread::scope(|s| {
-        let h = s.spawn(|| w.run(&a, &mut Yes(None, None), None));
+        let h = s.spawn(|| w.run(&a, &mut Yes(None, None, PASSWORD), None));
         std::thread::sleep(Duration::from_millis(100));
         a.lock();
         h.join().unwrap()
@@ -474,7 +482,7 @@ fn lan_core_rotation_stops_old_copies_and_joining_again_works() {
     // The old-generation copy fails the sync proof (0013 §12.2).
     let (w, manual, port) = code(&a2);
     let (served, sent) = std::thread::scope(|s| {
-        let h = s.spawn(|| w.run(&a2, &mut Yes(None, None), None));
+        let h = s.spawn(|| w.run(&a2, &mut Yes(None, None, PASSWORD), None));
         let sent = old.sync_with_code(
             JoinCode::from_manual(&manual).unwrap(),
             sync_options(port),
@@ -482,10 +490,10 @@ fn lan_core_rotation_stops_old_copies_and_joining_again_works() {
         );
         (h.join().unwrap(), sent)
     });
-    assert_eq!(err(sent), CoreError::Lan(LanError::VaultMismatch));
+    assert_eq!(err(sent), CoreError::Lan(LanError::Timeout));
     assert!(matches!(
         served.err(),
-        Some(CoreError::Lan(LanError::VaultMismatch))
+        Some(CoreError::Lan(LanError::Integrity))
     ));
     old.lock();
     let old_bytes = std::fs::read(&old_copy).unwrap();
@@ -544,7 +552,7 @@ fn lan_core_conflicted_keyslot_refuses_a_new_device() {
     let b_env = Env::empty(TestDir::new());
     let dest = b_env.dir.path().join("joined.qvault");
     let (w, manual, port) = code(&a);
-    let mut yes = Yes(None, None);
+    let mut yes = Yes(None, None, PASSWORD);
     let mut joiner = Joiner(None);
     let core_b = b_env.core();
     let (served, joined) = std::thread::scope(|s| {
@@ -556,12 +564,10 @@ fn lan_core_conflicted_keyslot_refuses_a_new_device() {
             &mut joiner,
             None,
         );
-        (h.join().unwrap().unwrap(), joined)
+        (h.join().unwrap(), joined)
     });
-    assert_eq!(err(joined), CoreError::Lan(LanError::Keyslot));
-    let (confirmed, failure) = joined_report(served);
-    assert!(!confirmed);
-    assert_eq!(failure, Some(LanError::Keyslot));
+    assert_eq!(err(joined), CoreError::Lan(LanError::Timeout));
+    assert!(matches!(served, Err(CoreError::Lan(LanError::Keyslot))));
     assert!(!dest.exists());
 }
 
@@ -581,4 +587,128 @@ fn lan_core_merges_take_an_ordinary_snapshot_at_most_once_per_interval() {
     let (_, sent) = round(&b, &a);
     assert_eq!(sent.unwrap().local, LocalAcceptance::Committed);
     assert_eq!(count(), before + 1);
+}
+
+// 0012 §1: Account-dependent LAN sync
+#[test]
+fn lan_core_phrase_enrollment_preserves_password_and_publishes_a_writable_unlocked_vault() {
+    struct PhraseJoin(Option<crate::SecretBytes>);
+    impl JoinerUi for PhraseJoin {
+        fn show_code(&mut self, _: &Sas) -> bool {
+            panic!("key enrollment has no comparison prompt")
+        }
+        fn confirm_vault(&mut self, _: &[u8], _: &Sas) -> bool {
+            panic!("key enrollment uses its authenticated-name prompt")
+        }
+        fn master_password(&mut self) -> Option<MasterPassword> {
+            panic!("phrase enrollment must not ask for a password")
+        }
+        fn credentials(&mut self) -> Option<crate::EnrollmentCredential> {
+            self.0
+                .take()
+                .map(crate::EnrollmentCredential::RecoveryPhrase)
+        }
+        fn confirm_recovered_vault(&mut self, name: &[u8]) -> bool {
+            assert_eq!(name, crate::testutil::NAME.as_bytes());
+            true
+        }
+    }
+    let env = Env::new();
+    let a = env.unlock();
+    let phrase = a.recovery_phrase(&pw(PASSWORD)).unwrap();
+    const NEW: &str = "phrase enrollment retains this changed source password";
+    a.change_password(&pw(NEW), None).unwrap();
+    let words = crate::SecretBytes::try_init(phrase.expose_secret().len(), |out| {
+        out.copy_from_slice(phrase.expose_secret().as_bytes());
+        Ok::<(), ()>(())
+    })
+    .unwrap();
+    drop(phrase);
+    let b_env = Env::empty(TestDir::new());
+    let dest = b_env.dir.path().join("phrase-joined.qvault");
+    let core = b_env.core();
+    let (w, code, port) = code(&a);
+    let mut yes = Yes(None, None, PASSWORD);
+    let mut joiner = PhraseJoin(Some(words));
+    let (served, b) = std::thread::scope(|scope| {
+        let h = scope.spawn(|| w.run(&a, &mut yes, None));
+        let b = core.join_new_device(
+            JoinCode::from_manual(&code).unwrap(),
+            &dest,
+            sync_options(port),
+            &mut joiner,
+            None,
+        );
+        (h.join().unwrap().unwrap(), b.unwrap())
+    });
+    assert!(matches!(
+        served,
+        Served::Joined {
+            key_disclosed: false,
+            peer_confirmed: true,
+            failure: None
+        }
+    ));
+    assert!(
+        yes.0.is_none(),
+        "key enrollment never asks the source for a password/comparison"
+    );
+    assert!(!b.is_read_only().unwrap());
+    assert_eq!(rows(&b), 0);
+    crate::testutil::add_entry(&b, b.root().unwrap(), "created after phrase enrollment");
+    b.lock();
+    assert!(core.unlock(&dest, &pw(NEW), None).is_ok());
+}
+
+// 0012 §1: LAN partial acceptance
+#[test]
+fn lan_core_cancellation_after_publication_keeps_the_file_without_returning_a_session() {
+    use crate::session::hooks::{self, Point};
+    for point in [Point::LanPublished, Point::LanBound] {
+        let env = Env::new();
+        let a = env.unlock();
+        let b_env = Env::empty(TestDir::new());
+        let dest = b_env.dir.path().join("cancelled-joined.qvault");
+        let core = b_env.core();
+        let (window, code, port) = code(&a);
+        let token = crate::CancelToken::new();
+        let (arrived_tx, arrived_rx) = std::sync::mpsc::channel();
+        let (go_tx, go_rx) = std::sync::mpsc::channel();
+        let (served, joined) = std::thread::scope(|scope| {
+            let source = scope.spawn(|| window.run(&a, &mut Yes(None, None, PASSWORD), None));
+            let receiver = scope.spawn(|| {
+                hooks::arm(point, arrived_tx, go_rx);
+                core.join_new_device(
+                    JoinCode::from_manual(&code).unwrap(),
+                    &dest,
+                    sync_options(port),
+                    &mut Joiner(None),
+                    Some(&token),
+                )
+            });
+            arrived_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+            token.cancel();
+            go_tx.send(()).unwrap();
+            (source.join().unwrap().unwrap(), receiver.join().unwrap())
+        });
+        assert!(matches!(
+            served,
+            Served::Joined {
+                peer_confirmed: true,
+                ..
+            }
+        ));
+        assert_eq!(
+            err(joined),
+            CoreError::Store(qv_store::StoreError::PublicationIncomplete)
+        );
+        assert!(dest.exists());
+        let reopened = core.unlock(&dest, &pw(PASSWORD), None).unwrap();
+        assert!(!reopened.is_read_only().unwrap());
+        crate::testutil::add_entry(
+            &reopened,
+            reopened.root().unwrap(),
+            "retained after cancellation",
+        );
+    }
 }

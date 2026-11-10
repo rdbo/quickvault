@@ -308,7 +308,10 @@ mod tests {
             copied.path(),
         );
         // A durable commit whose anchor reporting fails leaves AnchorPending.
-        assert_eq!(u.write().unwrap().commit(), Err(StoreError::Internal));
+        assert_eq!(
+            u.write().unwrap().commit(),
+            Err(StoreError::CommittedAnchorPending)
+        );
         assert!(!test::disarm());
         assert_eq!(anchors(&anchor_dir), old_anchors);
         let committed = std::fs::read(&path).unwrap();

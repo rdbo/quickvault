@@ -1,0 +1,531 @@
+qv-crypto v0.0.0 (/home/user/Repos/quickvault/crates/qv-crypto)
+├── ctutils v0.4.5
+│   └── cmov feature "default"
+│       └── cmov v0.5.4
+├── sha2 v0.10.9
+│   ├── digest feature "default"
+│   │   ├── digest v0.10.7
+│   │   │   ├── subtle v2.6.1
+│   │   │   ├── block-buffer feature "default"
+│   │   │   │   └── block-buffer v0.10.4
+│   │   │   │       └── generic-array feature "default"
+│   │   │   │           └── generic-array v0.14.7
+│   │   │   │               ├── zeroize v1.9.1
+│   │   │   │               │   └── zeroize_derive feature "default"
+│   │   │   │               │       └── zeroize_derive v1.5.0 (proc-macro)
+│   │   │   │               │           ├── proc-macro2 feature "default"
+│   │   │   │               │           │   ├── proc-macro2 v1.0.107
+│   │   │   │               │           │   │   └── unicode-ident feature "default"
+│   │   │   │               │           │   │       └── unicode-ident v1.0.27
+│   │   │   │               │           │   └── proc-macro2 feature "proc-macro"
+│   │   │   │               │           │       └── proc-macro2 v1.0.107 (*)
+│   │   │   │               │           ├── quote feature "default"
+│   │   │   │               │           │   ├── quote v1.0.47
+│   │   │   │               │           │   │   └── proc-macro2 v1.0.107 (*)
+│   │   │   │               │           │   └── quote feature "proc-macro"
+│   │   │   │               │           │       ├── quote v1.0.47 (*)
+│   │   │   │               │           │       └── proc-macro2 feature "proc-macro" (*)
+│   │   │   │               │           ├── syn feature "default"
+│   │   │   │               │           │   ├── syn v2.0.119
+│   │   │   │               │           │   │   ├── proc-macro2 v1.0.107 (*)
+│   │   │   │               │           │   │   ├── quote v1.0.47 (*)
+│   │   │   │               │           │   │   └── unicode-ident feature "default" (*)
+│   │   │   │               │           │   ├── syn feature "clone-impls"
+│   │   │   │               │           │   │   └── syn v2.0.119 (*)
+│   │   │   │               │           │   ├── syn feature "derive"
+│   │   │   │               │           │   │   └── syn v2.0.119 (*)
+│   │   │   │               │           │   ├── syn feature "parsing"
+│   │   │   │               │           │   │   └── syn v2.0.119 (*)
+│   │   │   │               │           │   ├── syn feature "printing"
+│   │   │   │               │           │   │   └── syn v2.0.119 (*)
+│   │   │   │               │           │   └── syn feature "proc-macro"
+│   │   │   │               │           │       ├── syn v2.0.119 (*)
+│   │   │   │               │           │       ├── proc-macro2 feature "proc-macro" (*)
+│   │   │   │               │           │       └── quote feature "proc-macro" (*)
+│   │   │   │               │           ├── syn feature "extra-traits"
+│   │   │   │               │           │   └── syn v2.0.119 (*)
+│   │   │   │               │           ├── syn feature "full"
+│   │   │   │               │           │   └── syn v2.0.119 (*)
+│   │   │   │               │           └── syn feature "visit"
+│   │   │   │               │               └── syn v2.0.119 (*)
+│   │   │   │               └── typenum feature "default"
+│   │   │   │                   └── typenum v1.20.1
+│   │   │   │               [build-dependencies]
+│   │   │   │               └── version_check feature "default"
+│   │   │   │                   └── version_check v0.9.5
+│   │   │   └── crypto-common feature "default"
+│   │   │       └── crypto-common v0.1.7
+│   │   │           ├── generic-array feature "default" (*)
+│   │   │           ├── generic-array feature "more_lengths"
+│   │   │           │   └── generic-array v0.14.7 (*)
+│   │   │           └── typenum feature "default" (*)
+│   │   └── digest feature "core-api"
+│   │       ├── digest v0.10.7 (*)
+│   │       └── digest feature "block-buffer"
+│   │           └── digest v0.10.7 (*)
+│   ├── cpufeatures feature "default"
+│   │   └── cpufeatures v0.2.17
+│   └── cfg-if feature "default"
+│       └── cfg-if v1.0.5
+├── unicode-normalization v0.1.26
+│   ├── tinyvec feature "alloc"
+│   │   └── tinyvec v1.13.3
+│   └── tinyvec feature "default"
+│       └── tinyvec v1.13.3
+├── argon2 feature "alloc"
+│   ├── argon2 v0.5.3
+│   │   ├── blake2 v0.10.6
+│   │   │   ├── digest feature "default" (*)
+│   │   │   └── digest feature "mac"
+│   │   │       ├── digest v0.10.7 (*)
+│   │   │       └── digest feature "subtle"
+│   │   │           └── digest v0.10.7 (*)
+│   │   ├── zeroize v1.9.1 (*)
+│   │   ├── base64ct feature "default"
+│   │   │   └── base64ct v1.8.3
+│   │   ├── cpufeatures feature "default" (*)
+│   │   └── password-hash feature "default"
+│   │       ├── password-hash v0.5.0
+│   │       │   ├── rand_core v0.6.4
+│   │       │   ├── subtle v2.6.1
+│   │       │   └── base64ct feature "default" (*)
+│   │       └── password-hash feature "rand_core"
+│   │           └── password-hash v0.5.0 (*)
+│   ├── argon2 feature "password-hash"
+│   │   └── argon2 v0.5.3 (*)
+│   └── password-hash feature "alloc"
+│       ├── password-hash v0.5.0 (*)
+│       └── base64ct feature "alloc"
+│           └── base64ct v1.8.3
+├── argon2 feature "zeroize"
+│   └── argon2 v0.5.3 (*)
+├── zeroize feature "alloc"
+│   └── zeroize v1.9.1 (*)
+├── argon2 feature "zeroize"
+│   └── argon2 v0.6.0
+│       ├── blake2 v0.11.0
+│       │   ├── digest feature "default"
+│       │   │   ├── digest v0.11.3
+│       │   │   │   ├── zeroize v1.9.1 (*)
+│       │   │   │   ├── block-buffer feature "default"
+│       │   │   │   │   └── block-buffer v0.12.1
+│       │   │   │   │       ├── zeroize v1.9.1 (*)
+│       │   │   │   │       └── hybrid-array feature "default"
+│       │   │   │   │           └── hybrid-array v0.4.15
+│       │   │   │   │               ├── typenum feature "const-generics"
+│       │   │   │   │               │   └── typenum v1.20.1
+│       │   │   │   │               └── typenum feature "default" (*)
+│       │   │   │   ├── crypto-common feature "default"
+│       │   │   │   │   └── crypto-common v0.2.2
+│       │   │   │   │       └── hybrid-array feature "default" (*)
+│       │   │   │   └── ctutils feature "default"
+│       │   │   │       └── ctutils v0.4.5 (*)
+│       │   │   └── digest feature "block-api"
+│       │   │       └── digest v0.11.3 (*)
+│       │   └── digest feature "mac"
+│       │       └── digest v0.11.3 (*)
+│       ├── zeroize v1.9.1 (*)
+│       ├── base64ct feature "default" (*)
+│       └── cpufeatures feature "default"
+│           └── cpufeatures v0.3.1
+├── chacha20poly1305 feature "zeroize"
+│   ├── chacha20poly1305 v0.11.0
+│   │   ├── aead v0.6.1
+│   │   │   ├── crypto-common feature "default" (*)
+│   │   │   └── inout feature "default"
+│   │   │       └── inout v0.2.5
+│   │   │           └── hybrid-array feature "default" (*)
+│   │   ├── zeroize v1.9.1 (*)
+│   │   ├── chacha20 feature "xchacha"
+│   │   │   ├── chacha20 v0.10.2
+│   │   │   │   ├── rand_core v0.10.1
+│   │   │   │   ├── zeroize v1.9.1 (*)
+│   │   │   │   ├── cpufeatures feature "default" (*)
+│   │   │   │   ├── cfg-if feature "default" (*)
+│   │   │   │   ├── cipher feature "default"
+│   │   │   │   │   └── cipher v0.5.2
+│   │   │   │   │       ├── block-buffer feature "default" (*)
+│   │   │   │   │       ├── crypto-common feature "default" (*)
+│   │   │   │   │       └── inout feature "default" (*)
+│   │   │   │   └── cipher feature "stream-wrapper"
+│   │   │   │       ├── cipher v0.5.2 (*)
+│   │   │   │       └── cipher feature "block-buffer"
+│   │   │   │           └── cipher v0.5.2 (*)
+│   │   │   └── chacha20 feature "cipher"
+│   │   │       └── chacha20 v0.10.2 (*)
+│   │   ├── cipher feature "default" (*)
+│   │   └── poly1305 feature "default"
+│   │       └── poly1305 v0.9.1
+│   │           ├── cpufeatures feature "default" (*)
+│   │           └── universal-hash feature "default"
+│   │               └── universal-hash v0.6.1
+│   │                   ├── crypto-common feature "default" (*)
+│   │                   └── ctutils feature "default" (*)
+│   └── chacha20 feature "zeroize"
+│       └── chacha20 v0.10.2 (*)
+├── getrandom feature "default"
+│   └── getrandom v0.4.3
+│       ├── libc v0.2.191
+│       ├── cfg-if feature "default" (*)
+│       └── rand_core feature "default"
+│           └── rand_core v0.10.1
+├── hkdf feature "default"
+│   └── hkdf v0.13.0
+│       └── hmac feature "default"
+│           └── hmac v0.13.0
+│               ├── digest feature "default" (*)
+│               └── digest feature "mac" (*)
+├── hmac feature "default" (*)
+├── hmac feature "zeroize"
+│   ├── hmac v0.13.0 (*)
+│   └── digest feature "zeroize"
+│       ├── digest v0.11.3 (*)
+│       └── block-buffer feature "zeroize"
+│           └── block-buffer v0.12.1 (*)
+├── libcrux-kem feature "std"
+│   ├── libcrux-kem v0.0.10
+│   │   ├── libcrux-curve25519 v0.0.9
+│   │   │   ├── libcrux-hacl-rs feature "default"
+│   │   │   │   └── libcrux-hacl-rs v0.0.6
+│   │   │   │       └── libcrux-macros feature "default"
+│   │   │   │           └── libcrux-macros v0.0.4 (proc-macro)
+│   │   │   │               ├── quote feature "default" (*)
+│   │   │   │               ├── syn feature "default"
+│   │   │   │               │   ├── syn v3.0.9
+│   │   │   │               │   │   ├── proc-macro2 v1.0.107 (*)
+│   │   │   │               │   │   ├── quote v1.0.47 (*)
+│   │   │   │               │   │   └── unicode-ident feature "default" (*)
+│   │   │   │               │   ├── syn feature "clone-impls"
+│   │   │   │               │   │   └── syn v3.0.9 (*)
+│   │   │   │               │   ├── syn feature "derive"
+│   │   │   │               │   │   └── syn v3.0.9 (*)
+│   │   │   │               │   ├── syn feature "parsing"
+│   │   │   │               │   │   └── syn v3.0.9 (*)
+│   │   │   │               │   ├── syn feature "printing"
+│   │   │   │               │   │   └── syn v3.0.9 (*)
+│   │   │   │               │   └── syn feature "proc-macro"
+│   │   │   │               │       ├── syn v3.0.9 (*)
+│   │   │   │               │       ├── proc-macro2 feature "proc-macro" (*)
+│   │   │   │               │       └── quote feature "proc-macro" (*)
+│   │   │   │               └── syn feature "full"
+│   │   │   │                   └── syn v3.0.9 (*)
+│   │   │   ├── libcrux-macros feature "default" (*)
+│   │   │   ├── libcrux-secrets feature "default"
+│   │   │   │   └── libcrux-secrets v0.0.7
+│   │   │   └── libcrux-traits feature "default"
+│   │   │       └── libcrux-traits v0.0.9
+│   │   │           ├── rand v0.10.3
+│   │   │           │   ├── rand_core v0.10.1
+│   │   │           │   └── getrandom feature "default" (*)
+│   │   │           └── libcrux-secrets feature "default" (*)
+│   │   ├── libcrux-ecdh v0.0.9
+│   │   │   ├── rand v0.10.3 (*)
+│   │   │   ├── libcrux-curve25519 feature "default"
+│   │   │   │   └── libcrux-curve25519 v0.0.9 (*)
+│   │   │   ├── libcrux-p256 feature "default"
+│   │   │   │   └── libcrux-p256 v0.0.9
+│   │   │   │       ├── libcrux-hacl-rs feature "default" (*)
+│   │   │   │       ├── libcrux-macros feature "default" (*)
+│   │   │   │       ├── libcrux-secrets feature "default" (*)
+│   │   │   │       ├── libcrux-traits feature "default" (*)
+│   │   │   │       ├── libcrux-sha2 feature "default"
+│   │   │   │       │   └── libcrux-sha2 v0.0.9
+│   │   │   │       │       ├── libcrux-hacl-rs feature "default" (*)
+│   │   │   │       │       ├── libcrux-macros feature "default" (*)
+│   │   │   │       │       └── libcrux-traits feature "default" (*)
+│   │   │   │       └── libcrux-sha2 feature "expose-hacl"
+│   │   │   │           └── libcrux-sha2 v0.0.9 (*)
+│   │   │   └── libcrux-p256 feature "expose-hacl"
+│   │   │       └── libcrux-p256 v0.0.9 (*)
+│   │   ├── libcrux-p256 v0.0.9 (*)
+│   │   ├── rand v0.10.3 (*)
+│   │   ├── libcrux-traits feature "default" (*)
+│   │   ├── libcrux-ml-kem feature "default-no-std"
+│   │   │   ├── libcrux-ml-kem v0.0.11
+│   │   │   │   ├── rand v0.10.3 (*)
+│   │   │   │   ├── libcrux-secrets feature "default" (*)
+│   │   │   │   ├── libcrux-traits feature "default" (*)
+│   │   │   │   ├── libcrux-intrinsics feature "default"
+│   │   │   │   │   └── libcrux-intrinsics v0.0.9
+│   │   │   │   ├── libcrux-platform feature "default"
+│   │   │   │   │   └── libcrux-platform v0.0.4
+│   │   │   │   │       └── libc feature "default"
+│   │   │   │   │           ├── libc v0.2.191
+│   │   │   │   │           └── libc feature "std"
+│   │   │   │   │               └── libc v0.2.191
+│   │   │   │   └── libcrux-sha3 feature "default"
+│   │   │   │       └── libcrux-sha3 v0.0.11
+│   │   │   │           ├── libcrux-traits feature "default" (*)
+│   │   │   │           ├── libcrux-intrinsics feature "default" (*)
+│   │   │   │           └── libcrux-platform feature "default" (*)
+│   │   │   ├── libcrux-ml-kem feature "mlkem1024"
+│   │   │   │   └── libcrux-ml-kem v0.0.11 (*)
+│   │   │   ├── libcrux-ml-kem feature "mlkem512"
+│   │   │   │   └── libcrux-ml-kem v0.0.11 (*)
+│   │   │   ├── libcrux-ml-kem feature "mlkem768"
+│   │   │   │   └── libcrux-ml-kem v0.0.11 (*)
+│   │   │   └── libcrux-ml-kem feature "rand"
+│   │   │       └── libcrux-ml-kem v0.0.11 (*)
+│   │   └── libcrux-sha3 feature "default" (*)
+│   ├── rand feature "std"
+│   │   ├── rand v0.10.3 (*)
+│   │   ├── getrandom feature "std"
+│   │   │   └── getrandom v0.4.3 (*)
+│   │   └── rand feature "alloc"
+│   │       └── rand v0.10.3 (*)
+│   ├── libcrux-ecdh feature "std"
+│   │   ├── libcrux-ecdh v0.0.9 (*)
+│   │   └── rand feature "std" (*)
+│   └── libcrux-ml-kem feature "std"
+│       ├── libcrux-ml-kem v0.0.11 (*)
+│       ├── rand feature "std" (*)
+│       ├── libcrux-ml-kem feature "alloc"
+│       │   └── libcrux-ml-kem v0.0.11 (*)
+│       └── libcrux-ml-kem feature "rand" (*)
+├── opaque-ke feature "argon2"
+│   └── opaque-ke v4.0.1
+│       ├── displaydoc v0.2.7 (proc-macro)
+│       │   ├── proc-macro2 feature "default" (*)
+│       │   ├── quote feature "default" (*)
+│       │   └── syn feature "default" (*)
+│       ├── rand v0.8.8
+│       │   └── rand_core feature "default"
+│       │       └── rand_core v0.6.4
+│       ├── subtle v2.6.1
+│       ├── argon2 feature "alloc" (*)
+│       ├── digest feature "default" (*)
+│       ├── generic-array feature "default" (*)
+│       ├── zeroize feature "default"
+│       │   ├── zeroize v1.9.1 (*)
+│       │   └── zeroize feature "alloc" (*)
+│       ├── zeroize feature "zeroize_derive"
+│       │   └── zeroize v1.9.1 (*)
+│       ├── curve25519-dalek feature "zeroize"
+│       │   └── curve25519-dalek v4.1.3
+│       │       ├── rand_core v0.6.4
+│       │       ├── subtle v2.6.1
+│       │       ├── zeroize v1.9.1 (*)
+│       │       ├── cpufeatures feature "default" (*)
+│       │       ├── cfg-if feature "default" (*)
+│       │       └── curve25519-dalek-derive feature "default"
+│       │           └── curve25519-dalek-derive v0.1.1 (proc-macro)
+│       │               ├── proc-macro2 feature "default" (*)
+│       │               ├── quote feature "default" (*)
+│       │               ├── syn feature "default" (*)
+│       │               └── syn feature "full" (*)
+│       │       [build-dependencies]
+│       │       └── rustc_version feature "default"
+│       │           └── rustc_version v0.4.1
+│       │               └── semver feature "default"
+│       │                   ├── semver v1.0.28
+│       │                   └── semver feature "std"
+│       │                       └── semver v1.0.28
+│       ├── derive-where feature "default"
+│       │   └── derive-where v1.7.0 (proc-macro)
+│       │       ├── quote v1.0.47 (*)
+│       │       ├── proc-macro2 feature "proc-macro" (*)
+│       │       ├── syn feature "clone-impls" (*)
+│       │       ├── syn feature "derive" (*)
+│       │       ├── syn feature "extra-traits"
+│       │       │   └── syn v3.0.9 (*)
+│       │       ├── syn feature "full" (*)
+│       │       ├── syn feature "parsing" (*)
+│       │       └── syn feature "printing" (*)
+│       ├── derive-where feature "zeroize-on-drop"
+│       │   ├── derive-where v1.7.0 (proc-macro) (*)
+│       │   └── derive-where feature "zeroize"
+│       │       └── derive-where v1.7.0 (proc-macro) (*)
+│       ├── elliptic-curve feature "default"
+│       │   ├── elliptic-curve v0.13.8
+│       │   │   ├── ff v0.13.1
+│       │   │   │   ├── rand_core v0.6.4
+│       │   │   │   └── subtle feature "i128"
+│       │   │   │       └── subtle v2.6.1
+│       │   │   ├── group v0.13.0
+│       │   │   │   ├── ff v0.13.1 (*)
+│       │   │   │   ├── rand_core v0.6.4
+│       │   │   │   └── subtle v2.6.1
+│       │   │   ├── rand_core v0.6.4
+│       │   │   ├── subtle v2.6.1
+│       │   │   ├── zeroize v1.9.1 (*)
+│       │   │   ├── digest feature "default" (*)
+│       │   │   ├── generic-array feature "zeroize"
+│       │   │   │   └── generic-array v0.14.7 (*)
+│       │   │   ├── base16ct feature "default"
+│       │   │   │   └── base16ct v0.2.0
+│       │   │   ├── crypto-bigint feature "generic-array"
+│       │   │   │   └── crypto-bigint v0.5.5
+│       │   │   │       ├── subtle v2.6.1
+│       │   │   │       ├── zeroize v1.9.1 (*)
+│       │   │   │       ├── generic-array feature "default" (*)
+│       │   │   │       └── rand_core feature "default" (*)
+│       │   │   ├── crypto-bigint feature "rand_core"
+│       │   │   │   └── crypto-bigint v0.5.5 (*)
+│       │   │   ├── crypto-bigint feature "zeroize"
+│       │   │   │   └── crypto-bigint v0.5.5 (*)
+│       │   │   ├── sec1 feature "default"
+│       │   │   │   ├── sec1 v0.7.3
+│       │   │   │   │   ├── base16ct v0.2.0
+│       │   │   │   │   ├── generic-array v0.14.7 (*)
+│       │   │   │   │   ├── subtle v2.6.1
+│       │   │   │   │   ├── zeroize v1.9.1 (*)
+│       │   │   │   │   ├── der feature "default"
+│       │   │   │   │   │   └── der v0.7.10
+│       │   │   │   │   │       ├── zeroize v1.9.1 (*)
+│       │   │   │   │   │       └── const-oid feature "default"
+│       │   │   │   │   │           └── const-oid v0.9.6
+│       │   │   │   │   └── der feature "oid"
+│       │   │   │   │       └── der v0.7.10 (*)
+│       │   │   │   ├── sec1 feature "der"
+│       │   │   │   │   ├── sec1 v0.7.3 (*)
+│       │   │   │   │   └── sec1 feature "zeroize"
+│       │   │   │   │       ├── sec1 v0.7.3 (*)
+│       │   │   │   │       └── der feature "zeroize"
+│       │   │   │   │           └── der v0.7.10 (*)
+│       │   │   │   └── sec1 feature "point"
+│       │   │   │       └── sec1 v0.7.3 (*)
+│       │   │   ├── sec1 feature "subtle"
+│       │   │   │   └── sec1 v0.7.3 (*)
+│       │   │   └── sec1 feature "zeroize" (*)
+│       │   └── elliptic-curve feature "arithmetic"
+│       │       ├── elliptic-curve v0.13.8 (*)
+│       │       └── elliptic-curve feature "group"
+│       │           ├── elliptic-curve v0.13.8 (*)
+│       │           └── elliptic-curve feature "ff"
+│       │               └── elliptic-curve v0.13.8 (*)
+│       ├── elliptic-curve feature "hash2curve"
+│       │   ├── elliptic-curve v0.13.8 (*)
+│       │   ├── elliptic-curve feature "arithmetic" (*)
+│       │   └── elliptic-curve feature "digest"
+│       │       └── elliptic-curve v0.13.8 (*)
+│       ├── elliptic-curve feature "sec1"
+│       │   └── elliptic-curve v0.13.8 (*)
+│       ├── hkdf feature "default"
+│       │   └── hkdf v0.12.4
+│       │       └── hmac feature "default"
+│       │           └── hmac v0.12.1
+│       │               ├── digest feature "default" (*)
+│       │               └── digest feature "mac" (*)
+│       ├── hmac feature "default" (*)
+│       └── voprf feature "danger"
+│           └── voprf v0.5.0
+│               ├── displaydoc v0.2.7 (proc-macro) (*)
+│               ├── rand_core v0.6.4
+│               ├── sha2 v0.10.9 (*)
+│               ├── subtle v2.6.1
+│               ├── zeroize v1.9.1 (*)
+│               ├── digest feature "default" (*)
+│               ├── generic-array feature "default" (*)
+│               ├── curve25519-dalek feature "rand_core"
+│               │   └── curve25519-dalek v4.1.3 (*)
+│               ├── curve25519-dalek feature "zeroize" (*)
+│               ├── derive-where feature "default" (*)
+│               ├── derive-where feature "zeroize-on-drop" (*)
+│               ├── elliptic-curve feature "default" (*)
+│               ├── elliptic-curve feature "hash2curve" (*)
+│               ├── elliptic-curve feature "sec1" (*)
+│               └── elliptic-curve feature "voprf"
+│                   ├── elliptic-curve v0.13.8 (*)
+│                   └── elliptic-curve feature "digest" (*)
+├── opaque-ke feature "ristretto255"
+│   ├── opaque-ke v4.0.1 (*)
+│   └── voprf feature "ristretto255-ciphersuite"
+│       ├── voprf v0.5.0 (*)
+│       └── voprf feature "ristretto255"
+│           ├── voprf v0.5.0 (*)
+│           └── generic-array feature "more_lengths" (*)
+├── qv-encoding feature "default"
+│   └── qv-encoding v0.0.0 (/home/user/Repos/quickvault/crates/qv-encoding)
+│       └── zeroize feature "alloc" (*)
+├── region feature "default"
+│   ├── region v4.0.1
+│   │   ├── bitflags v2.13.2
+│   │   └── libc v0.2.191
+│   └── region feature "std"
+│       ├── region v4.0.1 (*)
+│       └── bitflags feature "std"
+│           └── bitflags v2.13.2
+├── rustix feature "process"
+│   ├── rustix v1.1.5
+│   │   ├── bitflags v2.13.2
+│   │   ├── linux-raw-sys feature "auxvec"
+│   │   │   └── linux-raw-sys v0.12.1
+│   │   ├── linux-raw-sys feature "elf"
+│   │   │   └── linux-raw-sys v0.12.1
+│   │   ├── linux-raw-sys feature "errno"
+│   │   │   └── linux-raw-sys v0.12.1
+│   │   ├── linux-raw-sys feature "general"
+│   │   │   └── linux-raw-sys v0.12.1
+│   │   ├── linux-raw-sys feature "ioctl"
+│   │   │   └── linux-raw-sys v0.12.1
+│   │   └── linux-raw-sys feature "no_std"
+│   │       └── linux-raw-sys v0.12.1
+│   └── linux-raw-sys feature "prctl"
+│       └── linux-raw-sys v0.12.1
+├── rustix feature "std"
+│   ├── rustix v1.1.5 (*)
+│   ├── bitflags feature "std" (*)
+│   └── rustix feature "alloc"
+│       └── rustix v1.1.5 (*)
+├── sha1 feature "zeroize"
+│   ├── sha1 v0.11.0
+│   │   ├── digest feature "default" (*)
+│   │   ├── cpufeatures feature "default" (*)
+│   │   └── cfg-if feature "default" (*)
+│   └── digest feature "zeroize" (*)
+└── sha2 feature "zeroize"
+    ├── sha2 v0.11.1
+    │   ├── digest feature "default" (*)
+    │   ├── cpufeatures feature "default" (*)
+    │   └── cfg-if feature "default" (*)
+    └── digest feature "zeroize" (*)
+[dev-dependencies]
+└── proptest feature "std"
+    ├── proptest v1.12.0
+    │   ├── num-traits v0.2.19
+    │   │   [build-dependencies]
+    │   │   └── autocfg feature "default"
+    │   │       └── autocfg v1.5.1
+    │   ├── chacha20 feature "rng"
+    │   │   └── chacha20 v0.10.2 (*)
+    │   ├── rand feature "alloc" (*)
+    │   ├── bitflags feature "default"
+    │   │   └── bitflags v2.13.2
+    │   ├── core_detect feature "default"
+    │   │   └── core_detect v1.0.0
+    │   ├── rand_xorshift feature "default"
+    │   │   └── rand_xorshift v0.5.0
+    │   │       └── rand_core feature "default" (*)
+    │   ├── regex-syntax feature "default"
+    │   │   ├── regex-syntax v0.8.11
+    │   │   ├── regex-syntax feature "std"
+    │   │   │   └── regex-syntax v0.8.11
+    │   │   └── regex-syntax feature "unicode"
+    │   │       ├── regex-syntax v0.8.11
+    │   │       ├── regex-syntax feature "unicode-age"
+    │   │       │   └── regex-syntax v0.8.11
+    │   │       ├── regex-syntax feature "unicode-bool"
+    │   │       │   └── regex-syntax v0.8.11
+    │   │       ├── regex-syntax feature "unicode-case"
+    │   │       │   └── regex-syntax v0.8.11
+    │   │       ├── regex-syntax feature "unicode-gencat"
+    │   │       │   └── regex-syntax v0.8.11
+    │   │       ├── regex-syntax feature "unicode-perl"
+    │   │       │   └── regex-syntax v0.8.11
+    │   │       ├── regex-syntax feature "unicode-script"
+    │   │       │   └── regex-syntax v0.8.11
+    │   │       └── regex-syntax feature "unicode-segment"
+    │   │           └── regex-syntax v0.8.11
+    │   └── unarray feature "default"
+    │       └── unarray v0.1.4
+    ├── rand feature "std" (*)
+    ├── rand feature "sys_rng"
+    │   ├── rand v0.10.3 (*)
+    │   ├── getrandom feature "sys_rng"
+    │   │   └── getrandom v0.4.3 (*)
+    │   └── rand feature "getrandom"
+    │       └── rand v0.10.3 (*)
+    ├── proptest feature "regex-syntax"
+    │   └── proptest v1.12.0 (*)
+    └── num-traits feature "std"
+        └── num-traits v0.2.19 (*)

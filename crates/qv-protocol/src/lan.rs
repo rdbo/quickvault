@@ -10,6 +10,9 @@
 //! wiped buffers. Messages that carry secrets are encoded into `Zeroizing`
 //! buffers.
 
+#[path = "lan_v2.rs"]
+pub mod v2;
+
 use qv_encoding::Encoder;
 use zeroize::Zeroizing;
 

@@ -29,6 +29,29 @@ Upstream license files are unchanged.
 
 ## Exact maintained changes
 
+- Plan0050 removes the desktop build's lazy-js-bundle/Bun invocation and its
+  build-only dependency. It consumes the **unchanged prebuilt** native_eval.js
+  from the hash-verified0.7.10 archive, SHA-256
+  `fc39bfae6f037e44dafa80b9e8ec022dd9f76f7a515dd455a30afb3d5966ca85`.
+  Its retained TypeScript source is unchanged too (SHA-256
+  `12780a5b3bdc0ad30dbe4ff5b39f3a5a4d60ee7ef8727ad3d8efcf6782c5e0f7`).
+  CI checks both with `python3 scripts/check-supply-chain.py`; Rust includes
+  the committed JS directly. Builds neither regenerate it nor consult Bun.
+  Changing/regenerating it is a deliberate vendor update requiring a specified
+  compiler, complete input provenance and fresh review; the package's TS import
+  alone is not a complete standalone regeneration recipe. No claim about the
+  upstream compiler's reproducibility or a new dependency audit is made.
+- Plan0050 (in progress) replaces the older custom-protocol preview response
+  vector with an opaque protected streaming provider on the existing numeric
+  loopback listener. New hardened_media.rs bounds initial headers/connections,
+  validates Host/origin/capabilities/ranges, supports GET/HEAD and416, and sends
+  no-store content directly through the application's revocable writer.
+  CSP img/media permit only the exact listener origin alongside self. Media
+  URLs do not reuse websocket credentials. Focused transport tests pass;
+  GTK/WebKit playback/seeking/revocation pass; Android media qualification is
+  pending (plan0050/VALIDATION.md).
+  Upstream archive hash was verified before these edits; this is maintained
+  application code, not an upstream audit or a new vendor exception.
 - PNG-only image dependency.
 - Hardened opt-in integration in config/protocol/webview/ipc/app/
   desktop_context/edits and the new `hardened.rs`: only the bundled document

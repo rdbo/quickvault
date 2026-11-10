@@ -461,9 +461,16 @@ pub(crate) fn initialize() {
                     #[cfg(not(feature = "validation"))]
                     let controller = Controller::new(root.clone(), os.clone());
                     #[cfg(feature = "validation")]
-                    let controller = Controller::new(root.clone(), os.clone()).inspect(|c| {
-                        c.0.fixture.store(true, std::sync::atomic::Ordering::SeqCst);
-                    });
+                    let controller = Controller::new(root.clone(), os.clone())
+                        .inspect(|c| {
+                            c.0.fixture.store(true, std::sync::atomic::Ordering::SeqCst);
+                        })
+                        .and_then(|controller| {
+                            if crate::validation_media::enabled() {
+                                crate::validation_media::install(&controller)?;
+                            }
+                            Ok(controller)
+                        });
                     let _ = crate::ui::ACTIVE.set(controller);
                     ready = true;
                 }

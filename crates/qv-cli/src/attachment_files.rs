@@ -6,7 +6,9 @@ use crate::exit::{CliError, LIMIT, OTHER};
 use qv_core::platform::{PlatformError, files};
 use std::{path::Path, sync::Arc};
 fn error(e: PlatformError) -> CliError {
-    if e == PlatformError::LimitExceeded {
+    if e == PlatformError::StorageCapacity {
+        CliError::from(qv_core::StoreError::StorageCapacity)
+    } else if e == PlatformError::LimitExceeded {
         CliError::new(LIMIT, "attachment exceeds 10 MiB limit")
     } else {
         CliError::new(OTHER, "attachment file I/O failed or path is unsafe")

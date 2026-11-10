@@ -25,6 +25,11 @@ removable location produces a warning, because those tools may copy or roll
 back the live file. Archive destinations are explicit user choices; new archives
 and restored vaults MUST NOT overwrite existing paths.
 
+Keep the external rollback record independent of the vault's storage. Refuse a
+vault inside the anchor directory. Warn if anchors are nested in the vault's
+directory, or their recognized sync/network/removable location can roll back
+together with it. Detection is heuristic, not a guarantee of independence.
+
 1.2. Set `secure_delete=ON`, `temp_store=MEMORY`, `foreign_keys=ON`,
 `journal_mode=DELETE`, `synchronous=FULL`, `trusted_schema=OFF`, `mmap_size=0`,
 `cell_size_check=ON`. Disable extensions, triggers, views and unused
@@ -36,6 +41,17 @@ triggers, views, expression indexes or schema versions are errors.
 See [SQLite security guidance](https://www.sqlite.org/security.html).
 QuickVault never ingests a SQLite file it did not create as part of an
 automatic workflow: snapshots, imports and file exchange use archives (§6).
+
+Before opening an existing file with journal-changing settings, identify its
+application/schema version, page size and exact catalog through a bounded,
+immutable read-only connection. Configure defensive flags, SQL/allocation limits
+and an execution-step budget before catalog reads. This connection MUST NOT
+recover, checkpoint, rewrite or create any database/sidecar file. A private
+percent-encoded file URI with `mode=ro&immutable=1` is permitted only for this
+identification probe; ordinary mutable connections still reject caller URIs.
+Close the probe before opening the mutable connection, retain the locked file
+and recheck path identity. Identification is not authentication: normal full
+hardening, own-journal recovery and authenticated unlock still follow.
 
 1.3. Serialize writers with a private per-vault process lock plus SQLite
 transactions. Re-read the local head inside `BEGIN IMMEDIATE`; an unexpected
@@ -257,6 +273,12 @@ yields to the object and clock-component budgets; active heads, tombstones
 and floors never do. A release gate (0012) checks this with a generated
 worst-case vector.
 
+Candidate acceptance and local publication also require each record's active
+head-clock union plus the actual local resolving writer to fit the per-clock
+writer limit (0005 §1.2). Do not admit a valid-per-head conflict that cannot be
+resolved under the same limit. Reading/exporting an existing state does not
+apply this additional admission rule.
+
 4.3. Network listing pages are at most 8 MiB and aggregate upload/download
 staging 2 GiB. A single object transfer is bounded by its own per-type limit
 (manifest, record or chunk) and is streamed, not buffered in a page. Group
@@ -280,8 +302,18 @@ Metadata and intermediate decoding buffers are confidential too (0008).
 active/history references and suppression metadata, store the new manifest,
 write the new authenticated local head, persist outbox, then prune by
 references. Commit durably, advance the external anchor (0005 §5.4), then
-report success. Integrity failure aborts the whole candidate; never silently
-omit a bad record.
+report success. If COMMIT is durable but anchor completion fails, return the
+distinct `CommittedAnchorPending` outcome: the change is saved, must not be
+repeated, and the session follows the committed state while blocking subsequent
+writes until the anchor is completed. Cancellation after COMMIT cannot turn
+this into an unchanged/cancelled result. Integrity failure before COMMIT aborts
+the whole candidate; never silently omit a bad record.
+
+An unreadable anchor encoding is `DamagedAnchor`, separately from damaged vault
+contents. Explicit recovery may authenticate and inspect the vault read-only
+with status `Damaged`, preserving the anchor until deliberate baseline adoption.
+Unsafe anchor paths and I/O errors still fail; they are not evidence of merely
+damaged anchor bytes. Never advise deleting an anchor to repair a vault.
 
 5.3. Never write plaintext to DB pages, journals, temp files, logs or crash
 reports. Archives are built by writing verified objects into a new file
@@ -290,6 +322,16 @@ state, writer identity, anchors, sessions, device bundles and quick slots
 are never present to be removed.
 
 ### 6. Archive format
+
+Private unpublished temporary files use cooperative file leases. Serialize
+creation→lease acquisition and stale cleanup with a short directory lock.
+Known `.<final-name>.tmp-<16 lowercase hex>` files and their SQLite journals may
+be reclaimed only when no live producer holds the matching base file's lease,
+after no-follow/owner/identity checks. Keep the lease through publication or
+removal, including after transferring its descriptor to a File. Reclaim stale
+archive/restore/anchor temporaries on the next operation in that exact family;
+never infer staleness from age or delete rotation-journal-owned replacements.
+Cleanup is not secure erasure and does not establish crash durability itself.
 
 6.1. An archive (`.qvsnap`) is the only format for local snapshots, explicit
 backups and file exchange (0005 §4, 0007 §3). It is a byte stream:
@@ -349,6 +391,68 @@ re-read and verify them, fsync, then publish atomically under a **new unique
 filename**, never replacing an existing path; fsync the directory where
 supported. Published archives are immutable.
 
+### 7. View residency and authenticated path policy (0047)
+
+7.1. A valid vault has no aggregate searchable-text eligibility limit. The
+1 GiB referenced-ciphertext budget and every §4.1 per-record/model/manifest
+limit remain. Use a compact structural index bounded by those limits and an
+evictable metadata cache with at most 64 MiB of owned text capacity, including
+normalized/sort-key copies and cursor text. Evict or bypass the cache when a
+valid row will not fit. Cache exhaustion MUST NOT reject unlock, edits,
+merge, restore, rotation or enrollment. Never spill plaintext to disk.
+This ceiling does not include structural metadata, one-record decoding scratch,
+returned pages, frontend/framework intermediates or KDF working memory; document
+those categories separately and do not claim a 64 MiB total-RSS bound.
+
+7.2. Unlock still authenticates and validates all required objects. Lazy
+views do not permit skipping integrity/schema checks. Decode one head at a
+time with compact merge summaries; do not retain all 256 maximum-size heads.
+Remove aggregate-text preflight rejection from acceptance/publication paths;
+validate the compact candidate and all existing model/storage budgets instead.
+
+7.3. Page views return at most 32 rows and 2 MiB owned display text. Account
+allocated capacity and Unicode normalization/lowercase expansion, including
+returned type-classification keys. Custom page byte bounds must still fit one
+maximum valid summary. Immutable cursor clones may share one zeroizing state;
+they must not duplicate unaccounted plaintext. Cache residency and all active
+query/sort/cursor text share the64MiB ceiling; a smaller cache target must not
+reduce the fixed working budget. Excess outstanding cursors/concurrent view
+work may fail a transient resource request; it never changes vault eligibility.
+No field or
+row truncation; a maximum valid row must remain readable. Preserve current
+case-insensitive matching and order: group order/ID, entry lowercase title/ID,
+search groups by lowercase name/ID before entries by lowercase title/ID. Use bounded top-k selection/on-demand reads
+rather than all-results plaintext accumulation. Private redacted/zeroizing
+cursors bind session, revision, query/scope and order; mismatches return
+StateChanged, never mixed-snapshot output. Scans process at most 16 records
+per session read, check cancellation between heads, release the mutex between
+batches and reject changed revisions. No detached key copy may bypass locking.
+
+7.4. Frontends retain bounded pages (app: current plus adjacent pages, at
+most three, plus selected detail) and clear stale/locked rows. CLI listings,
+search, paths and JSON stream pages without a full text/path map. A stale
+snapshot after partial output fails explicitly without silent restart or
+repeated rows. Path components may be resolved and emitted incrementally.
+
+7.5. A valid authenticated vault may be moved, restored or copied before
+opening; no persistent inode/directory binding or ancestor-writable refusal
+is added. Runtime permission, no-follow, regular-file, lock and open-file
+identity checks remain. Authentication rejects tampered/incomplete contents;
+an intact remembered external anchor rejects known rollback. Byte-identical
+copies are equivalent content, and divergent valid copies are not a pathname
+identity attack the product promises to detect. No pre-start parent-directory
+substitution detector or global fork/freshness guarantee is claimed.
+
+7.6. Newly installed clear slots use 0003 §8.1's public projection. LAN
+publication uses 0013 §15.6's method-bound verified capability, full private
+staging and pre-publication validation. Phrase enrollment preserves the shared
+password slot without another password check/reset. Report durable publication
+or anchor outcomes accurately if a later stage fails. Recheck cancellation and
+expiry after publication and platform binding before returning a new unlocked
+session. If either has occurred, discard the new session/key state, retain the
+created file and return a data-free publication-incomplete outcome with local
+open/recovery guidance.
+
 ## Security Considerations
 
 AEAD alone does not detect missing rows. Manifests detect omission relative to
@@ -365,6 +469,14 @@ is unsupported ([SQLite warning](https://www.sqlite.org/howtocorrupt.html)).
    format. Changes require documented policy/version updates.
 
 ## Changelog
+
+- 2026-11-09: Specify cooperative temporary-file lifetime/cleanup leases;
+  implementation is pending in plan0050.
+- 2026-11-09: Specify saved/anchor-pending outcomes, independent-anchor warnings
+  and authenticated read-only inspection of damaged anchors (plan0050).
+- 2026-11-09: Require non-mutating bounded vault identification before journal-changing hardening (QV-016, plan0050).
+
+- 2026-11-09: Separate 64 MiB cache residency from vault eligibility; specify paging, move/copy policy and credential-verified publication.
 
 - 2026-11-06: Accepted 0014 (owner, plan 0042): `lan_link` and
   `lan_links_digest` stay in the format but are always empty after a commit;

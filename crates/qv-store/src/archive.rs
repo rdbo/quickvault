@@ -526,8 +526,10 @@ impl ArchiveHeader {
 
 /// Writes the fixed prefix (0004 §6.1).
 pub(crate) fn write_prefix<W: Write>(out: &mut W) -> Result<(), StoreError> {
-    out.write_all(&ARCHIVE_MAGIC).map_err(|_| StoreError::Io)?;
-    out.write_all(&[ARCHIVE_FORMAT]).map_err(|_| StoreError::Io)
+    out.write_all(&ARCHIVE_MAGIC)
+        .map_err(crate::error::io_err)?;
+    out.write_all(&[ARCHIVE_FORMAT])
+        .map_err(crate::error::io_err)
 }
 
 /// Reads and checks the fixed prefix: another version is
@@ -551,8 +553,8 @@ fn read_prefix<R: Read>(input: &mut R) -> Result<(), StoreError> {
 pub(crate) fn write_frame<W: Write>(out: &mut W, bytes: &[u8]) -> Result<(), StoreError> {
     let len = u32::try_from(bytes.len()).map_err(|_| StoreError::LimitExceeded)?;
     out.write_all(&len.to_be_bytes())
-        .map_err(|_| StoreError::Io)?;
-    out.write_all(bytes).map_err(|_| StoreError::Io)
+        .map_err(crate::error::io_err)?;
+    out.write_all(bytes).map_err(crate::error::io_err)
 }
 
 /// Reads a frame's `u32be` length, refusing anything above `max` before
@@ -794,7 +796,7 @@ pub fn read_archive<R: Read + Seek>(
         if expected > MAX_ARCHIVE_OBJECT_FRAME {
             return Err(StoreError::LimitExceeded);
         }
-        let offset = input.stream_position().map_err(|_| StoreError::Io)?;
+        let offset = input.stream_position().map_err(crate::error::io_err)?;
         let len = read_frame_len(input, MAX_ARCHIVE_OBJECT_FRAME)?;
         if len != expected {
             return Err(StoreError::Integrity);
@@ -813,7 +815,7 @@ pub fn read_archive<R: Read + Seek>(
     // Exact EOF: a trailing byte means the archive was extended or tampered
     // with (0004 §6.3).
     exact_eof(input)?;
-    let end = input.stream_position().map_err(|_| StoreError::Io)?;
+    let end = input.stream_position().map_err(crate::error::io_err)?;
     crate::archive_verify::verify(input, &header, &manifest, &frames, vk, cancelled)?;
     for (r, indexed) in references.iter().zip(&frames) {
         if cancelled() {
@@ -824,7 +826,7 @@ pub fn read_archive<R: Read + Seek>(
     }
     input
         .seek(SeekFrom::Start(end))
-        .map_err(|_| StoreError::Io)?;
+        .map_err(crate::error::io_err)?;
     exact_eof(input)?;
     Ok(OpenedArchive {
         header,
@@ -841,7 +843,7 @@ fn exact_eof<R: Read>(input: &mut R) -> Result<(), StoreError> {
             Ok(0) => return Ok(()),
             Ok(_) => return Err(StoreError::Integrity),
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
-            Err(_) => return Err(StoreError::Io),
+            Err(e) => return Err(crate::error::io_err(e)),
         }
     }
 }
@@ -860,7 +862,7 @@ impl IndexedFrame {
     ) -> Result<Vec<u8>, StoreError> {
         input
             .seek(SeekFrom::Start(self.offset))
-            .map_err(|_| StoreError::Io)?;
+            .map_err(crate::error::io_err)?;
         let len = read_frame_len(input, MAX_ARCHIVE_OBJECT_FRAME)?;
         if len != object_frame_len(header.key_generation(), r)? {
             return Err(StoreError::Integrity);
@@ -953,6 +955,7 @@ mod platform {
     use std::ffi::{OsStr, OsString};
     use std::io::Write;
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
 
     use qv_model::Timestamp;
 
@@ -1000,12 +1003,29 @@ mod platform {
 
     /// One file in the snapshot directory: its name and size only. Reading
     /// what it contains needs the vault key (0011 `snapshot ls`).
-    #[derive(Clone, Debug, PartialEq, Eq)]
+    #[derive(Clone)]
     pub struct SnapshotEntry {
         name: OsString,
         size: u64,
         kind: SnapshotKind,
+        lease: Option<Arc<fs::ArchiveFile>>,
     }
+
+    impl core::fmt::Debug for SnapshotEntry {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.debug_struct("SnapshotEntry")
+                .field("name", &self.name)
+                .field("size", &self.size)
+                .field("kind", &self.kind)
+                .finish()
+        }
+    }
+    impl PartialEq for SnapshotEntry {
+        fn eq(&self, other: &Self) -> bool {
+            self.name == other.name && self.size == other.size && self.kind == other.kind
+        }
+    }
+    impl Eq for SnapshotEntry {}
 
     impl SnapshotEntry {
         /// The file name, `<prefix><32 hex>.qvsnap`. Not secret: it is the
@@ -1219,9 +1239,11 @@ mod platform {
                 object_count,
                 total_length,
                 password_slot: if self_contained {
-                    Some(Zeroizing::new(
-                        crate::slot::password_slot(&self.file.slots)?.body.clone(),
-                    ))
+                    Some(
+                        crate::slot::password_slot(&self.file.slots)?
+                            .keyslot
+                            .encode_public_descriptor()?,
+                    )
                 } else {
                     None
                 },
@@ -1236,8 +1258,8 @@ mod platform {
                 return Err(StoreError::Internal);
             }
             out.write_all(&header_len.to_be_bytes())
-                .map_err(|_| StoreError::Io)?;
-            out.write_all(&header_bytes).map_err(|_| StoreError::Io)?;
+                .map_err(crate::error::io_err)?;
+            out.write_all(&header_bytes).map_err(crate::error::io_err)?;
             write_frame(out, &envelope)?;
 
             // One frame per reference, in the manifest's sorted order.
@@ -1310,7 +1332,7 @@ mod platform {
             {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(_) => return Err(StoreError::Io),
+                Err(e) => return Err(crate::error::io_err(e)),
             }
             fs::check_private_dir(dir)?;
             Ok(Self {
@@ -1365,17 +1387,17 @@ mod platform {
         /// directories and symlinks) are not listed. Nothing here is
         /// authenticated: call [`Self::read_header`].
         pub fn entries(&self) -> Result<Vec<SnapshotEntry>, StoreError> {
-            let dir = std::fs::read_dir(&self.path).map_err(|_| StoreError::Io)?;
+            let dir = std::fs::read_dir(&self.path).map_err(crate::error::io_err)?;
             let mut out = Vec::new();
             for entry in dir {
-                let entry = entry.map_err(|_| StoreError::Io)?;
+                let entry = entry.map_err(crate::error::io_err)?;
                 let Ok(name) = entry.file_name().into_string() else {
                     continue;
                 };
                 let Some((kind, _id)) = parse_name(&name) else {
                     continue;
                 };
-                let meta = entry.metadata().map_err(|_| StoreError::Io)?;
+                let meta = entry.metadata().map_err(crate::error::io_err)?;
                 if !meta.file_type().is_file() {
                     continue;
                 }
@@ -1383,6 +1405,7 @@ mod platform {
                     name: OsString::from(name),
                     size: meta.len(),
                     kind,
+                    lease: None,
                 });
             }
             out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -1408,7 +1431,7 @@ mod platform {
         }
 
         /// Opens one private local snapshot, never as a SQLite database.
-        pub fn open_entry(&self, entry: &SnapshotEntry) -> Result<std::fs::File, StoreError> {
+        pub fn open_entry(&self, entry: &SnapshotEntry) -> Result<impl Read + Seek, StoreError> {
             fs::check_private_dir(&self.path)?;
             fs::open_private_ro(&self.file(entry)?)
         }
@@ -1439,12 +1462,38 @@ mod platform {
 
         /// Removes one published snapshot (0007 §3.3 pruning).
         pub fn remove(&self, entry: &SnapshotEntry) -> Result<(), StoreError> {
-            let path = self.file(entry)?;
+            let _dir = fs::lock_dir(&self.path)?;
+            let entry = self.lease_entry_unlocked(entry)?;
+            let path = self.file(&entry)?;
             std::fs::remove_file(&path).map_err(|e| match e.kind() {
                 std::io::ErrorKind::NotFound => StoreError::NotFound,
                 _ => StoreError::Io,
             })?;
             fs::sync_dir(&self.path)
+        }
+
+        /// Acquire an exclusive lifetime lease before checking a file for a
+        /// destructive policy operation. Another producer/pin returns Locked.
+        pub(crate) fn lease_entry(
+            &self,
+            entry: &SnapshotEntry,
+        ) -> Result<SnapshotEntry, StoreError> {
+            let _dir = fs::lock_dir(&self.path)?;
+            self.lease_entry_unlocked(entry)
+        }
+
+        fn lease_entry_unlocked(&self, entry: &SnapshotEntry) -> Result<SnapshotEntry, StoreError> {
+            fs::check_private_dir(&self.path)?;
+            let path = self.file(entry)?;
+            let mut leased = entry.clone();
+            if let Some(lease) = &entry.lease {
+                lease.same_as_path(&path)?;
+            } else {
+                let lock = fs::open_existing(&path)?;
+                lock.same_as_path(&path)?;
+                leased.lease = Some(Arc::new(lock.into_archive_file()));
+            }
+            Ok(leased)
         }
 
         /// Renames a recovery copy to an ordinary snapshot (0007 §3.2: after
@@ -1453,20 +1502,39 @@ mod platform {
         pub fn reclassify_as_ordinary(
             &self,
             entry: &SnapshotEntry,
+            scope: ArchiveScope,
+            vk: &VaultKey,
         ) -> Result<SnapshotEntry, StoreError> {
+            let _dir = fs::lock_dir(&self.path)?;
             let name = entry.name.to_str().ok_or(StoreError::Unsupported)?;
             let (kind, id) = parse_name(name).ok_or(StoreError::Unsupported)?;
-            if kind == SnapshotKind::Ordinary {
-                return Ok(entry.clone());
-            }
             let target = format!("{id}{SNAPSHOT_SUFFIX}");
-            fs::rename_noreplace(&self.path.join(&entry.name), &self.path.join(&target))?;
-            fs::sync_dir(&self.path)?;
-            Ok(SnapshotEntry {
+            let mut ordinary = SnapshotEntry {
                 name: OsString::from(target),
                 size: entry.size,
                 kind: SnapshotKind::Ordinary,
-            })
+                lease: entry.lease.clone(),
+            };
+            let source = self.path.join(&entry.name);
+            let present = match rustix::fs::lstat(&source) {
+                Ok(_) => true,
+                Err(rustix::io::Errno::NOENT) => false,
+                Err(e) => return Err(crate::error::errno_err(e)),
+            };
+            let leased = self.lease_entry_unlocked(if present { entry } else { &ordinary })?;
+            // Authenticate all bytes for idempotence too; an existing name is
+            // never enough to turn a real integrity/I/O failure into success.
+            let mut input = std::io::BufReader::new(self.open_entry(&leased)?);
+            let opened = read_archive(&mut input, scope, vk, &mut |_| Ok(()), &|| false)?;
+            if opened.header().is_self_contained() || opened.header().archive_id_hex() != id {
+                return Err(StoreError::Integrity);
+            }
+            ordinary.lease = leased.lease.clone();
+            if present && kind == SnapshotKind::Recovery {
+                fs::rename_noreplace(&source, &self.file(&ordinary)?)?;
+            }
+            fs::sync_dir(&self.path)?;
+            Ok(ordinary)
         }
 
         /// Writes, verifies and publishes a new snapshot (0004 §6.5,
@@ -1528,13 +1596,14 @@ mod platform {
             // The temp name is not a snapshot name, so a crash never leaves a
             // file that `entries` would list (0004 §6.5).
             let placeholder = self.path.join(format!("snapshot{SNAPSHOT_SUFFIX}"));
+            fs::remove_stale_temps(&placeholder)?;
             let (locked, temp) = fs::create_temp(&placeholder)?;
-            let built = (|| -> Result<(ArchiveStats, u64), StoreError> {
-                let file = locked.into_file();
+            let built = (|| -> Result<(ArchiveStats, u64, fs::ArchiveFile), StoreError> {
+                let file = locked.into_archive_file();
                 let mut file = file;
                 let stats =
                     vault.write_export_archive(&mut file, created_at, self_contained, cancelled)?;
-                let size = file.metadata().map_err(|_| StoreError::Io)?.len();
+                let size = file.metadata().map_err(crate::error::io_err)?.len();
 
                 // Re-open what is on disk under the temp's name and verify it
                 // with the archive reader.
@@ -1555,10 +1624,9 @@ mod platform {
                 }
                 point(CrashPoint::ArchiveVerified)?;
                 rustix::fs::fsync(&file).map_err(crate::error::errno_err)?;
-                drop(file);
-                Ok((stats, size))
+                Ok((stats, size, file))
             })();
-            let (stats, size) = match built {
+            let (stats, size, file) = match built {
                 Ok(built) => built,
                 Err(e) => {
                     fs::remove_best_effort(&temp);
@@ -1583,6 +1651,7 @@ mod platform {
                     name: OsString::from(name),
                     size,
                     kind,
+                    lease: Some(Arc::new(file)),
                 },
                 stats,
                 completion_error,
@@ -2323,7 +2392,17 @@ mod tests {
             .find(|e| e.kind() == SnapshotKind::Recovery)
             .unwrap()
             .clone();
-        let ordinary = dir.reclassify_as_ordinary(&recovery).unwrap();
+        assert_eq!(
+            err(dir.reclassify_as_ordinary(&recovery, scope_of(&u), u.vault_key())),
+            StoreError::Locked
+        );
+        let ordinary = dir
+            .reclassify_as_ordinary(second.entry(), scope_of(&u), u.vault_key())
+            .unwrap();
+        let again = dir
+            .reclassify_as_ordinary(second.entry(), scope_of(&u), u.vault_key())
+            .unwrap();
+        assert_eq!(again, ordinary);
         assert_eq!(ordinary.kind(), SnapshotKind::Ordinary);
         assert_eq!(
             ordinary.name().to_str().unwrap(),
@@ -2340,6 +2419,55 @@ mod tests {
         entries
             .iter()
             .any(|e| e.name().to_str().unwrap().starts_with("recover-"))
+    }
+
+    // 0012 §1: Snapshot disk growth
+    #[test]
+    fn snapshot_recovery_lease_prevents_other_process_reclassification_and_pruning() {
+        let d = crate::fs::test_dir::TestDir::new();
+        let (mut u, _a) = vault_with(&d);
+        let dir = snapshot_dir(&d);
+        let published = dir
+            .publish(&mut u, SnapshotKind::Recovery, CREATED, &|| false)
+            .unwrap();
+        let path = dir.path().join(published.entry().name());
+        drop(published);
+        let entry = dir.entries().unwrap().remove(0);
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "fs::tests::existing_lease_child"])
+            .env("QV_EXISTING_LEASE_FIXTURE", &path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !path.with_extension("ready").exists() && std::time::Instant::now() < deadline {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let ready = path.with_extension("ready").exists();
+        let removed = dir.remove(&entry);
+        let renamed = dir.reclassify_as_ordinary(&entry, scope_of(&u), u.vault_key());
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(ready);
+        assert_eq!(err(removed), StoreError::Locked);
+        assert_eq!(err(renamed), StoreError::Locked);
+        assert!(path.exists());
+        let ordinary = dir
+            .reclassify_as_ordinary(&entry, scope_of(&u), u.vault_key())
+            .unwrap();
+        assert!(!path.exists());
+        drop(ordinary);
+        // A second process/handle completing the already-finished rename
+        // verifies the same archive instead of reporting a false failure.
+        let ordinary = dir
+            .reclassify_as_ordinary(&entry, scope_of(&u), u.vault_key())
+            .unwrap();
+        dir.remove(&ordinary).unwrap();
+        assert!(dir.entries().unwrap().is_empty());
     }
 
     #[test]

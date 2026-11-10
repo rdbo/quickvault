@@ -57,6 +57,13 @@ is 30 days, measured by client policy; clock anomalies require confirmation
 before destructive expiry. Bulk deletion of a group applies explicit entry/
 group edits in one transaction, rather than silently hiding inaccessible children.
 
+One delete operation assigns a fresh random `delete_operation` ID shared by its
+entry/group edits (0003 §4/§5). Restoring a group restores only that group and
+its trashed, unconflicted descendants carrying the same operation ID, connected
+through groups with that ID by their source parents. Separately deleted records
+stay in trash even when their timestamps coincide. A group without a legacy
+operation ID restores that group alone; restore its children explicitly.
+
 2.2. Final deletion removes secret payload/history and installs a minimal causal
 tombstone; owned attachment metadata receives tombstones in the same transaction.
 Release chunks only when no retained reference needs them. Retain each tombstone's
@@ -87,6 +94,26 @@ edits between snapshots still have record history. Mandatory pre-operation
 recovery snapshots may bypass the hourly interval. Only one serialized recovery
 operation may pin a snapshot; after confirmed completion its copy becomes an
 ordinary snapshot subject to count/byte pruning.
+
+Core enforces this recovery policy for final deletion, history purge, baseline
+adoption and final-tombstone conflict resolution as well as existing import/
+restore/migration paths. A completed recovery-copy authorization is private,
+bound to its session, exact pre-mutation sequence/manifest and key generation,
+and invalid after a durable mutation or any intervening head change. Verify
+the copy under the current vault key before destroying data; a stale/foreign
+handle or missing copy never authorizes a mutation. Disabled snapshots produce
+NotAllowed, not an internal error. Baseline adoption requires a read-only
+recovery session, never an ordinary writable session. Frontends may obtain the
+copy with explicit over-budget consent, but cannot bypass enforcement.
+
+Hold a cooperative cross-process file lease from recovery-copy production until
+its pin is released. Creation/cleanup uses the same short directory lock across
+file creation and lease acquisition, so no live file is observable as unleased.
+Policy passes skip leased copies, including another process's recovery pin;
+SIGKILL releases leases without an age-based guess. After completion, a
+verified already-ordinary copy is an idempotent reclassification success.
+Do not suppress real integrity or I/O errors, or turn a durable mutation into
+an unchanged/cancelled result because completion metadata raced.
 
 3.3. Defaults are 30 days, at most 48 ordinary snapshots and a 512 MiB aggregate
 budget per vault. Prune oldest ordinary snapshots to fit count/bytes; configurable
@@ -165,6 +192,10 @@ reference set. Purge acknowledgements must not imply independent copies vanished
 
 ## Changelog
 
+- 2026-11-09: Specify core-enforced recovery-copy authorization and cross-process
+  lifetime leases; source repairs and qualification are tracked in plan0050.
+- 2026-11-09: Restore recursive deletions by explicit operation identity;
+  timestamps never restore separately deleted records (QV-004, plan0050).
 - 2026-10-30: Clarify indefinite preservation of dominated marked tombstones
   through purge and later final deletion, and omit non-restorable tombstones
   from payload-history views (combined 2.2b, plan 0027).

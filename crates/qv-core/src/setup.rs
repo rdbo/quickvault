@@ -205,6 +205,8 @@ impl Core {
         let file = VaultFile::open(path)?;
         let h = file.header();
         let kdf = file.password_kdf()?;
+        let mut warnings = file.warnings();
+        warnings.anchor_independence = self.anchors.independence_warning(path);
         Ok(VaultInfo {
             vault_id: hex(&h.vault_id.0),
             schema_version: file.schema_version(),
@@ -216,7 +218,7 @@ impl Core {
             min_derivation_profile: h.min_derivation_profile.id(),
             kdf_profile: kdf.id(),
             kdf: kdf.argon2_params(),
-            warnings: file.warnings(),
+            warnings,
         })
     }
 
@@ -307,6 +309,7 @@ impl Core {
         })?;
         match status {
             AnchorStatus::Missing => return Err(StoreError::NoAnchor.into()),
+            AnchorStatus::Damaged => return Err(StoreError::DamagedAnchor.into()),
             AnchorStatus::Mismatch => return Err(StoreError::Rollback.into()),
             _ => {}
         }
@@ -337,7 +340,10 @@ impl Core {
         let (vault, status) = self.open(path, cancel, |f| {
             f.unlock_with_phrase(phrase, &self.anchors)
         })?;
-        let read_only = matches!(status, AnchorStatus::Missing | AnchorStatus::Mismatch);
+        let read_only = matches!(
+            status,
+            AnchorStatus::Missing | AnchorStatus::Mismatch | AnchorStatus::Damaged
+        );
         let session = Session::open(
             vault,
             self.time.clone(),
@@ -362,7 +368,10 @@ impl Core {
         let (vault, status) = self.open(path, cancel, |f| {
             f.unlock_for_recovery(password, &self.anchors)
         })?;
-        let read_only = matches!(status, AnchorStatus::Missing | AnchorStatus::Mismatch);
+        let read_only = matches!(
+            status,
+            AnchorStatus::Missing | AnchorStatus::Mismatch | AnchorStatus::Damaged
+        );
         let session = Session::open(
             vault,
             self.time.clone(),
@@ -423,7 +432,8 @@ mod tests {
         );
         assert_eq!(info.kdf_profile, 1);
         assert_eq!(info.kdf, PasswordKdfProfile::V1.argon2_params());
-        assert!(!info.warnings.any());
+        assert!(info.warnings.anchor_independence);
+        assert!(!info.warnings.sync_folder);
         // The header matches what unlock authenticates.
         let s = env.unlock();
         let id = s

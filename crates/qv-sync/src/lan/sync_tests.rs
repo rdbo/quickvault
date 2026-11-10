@@ -11,7 +11,7 @@ use std::sync::atomic::AtomicUsize;
 use qv_crypto::lan::ProofRole;
 use qv_crypto::{KeyGeneration, RecordId};
 use qv_model::{Clock, Entry, Extensions, Payload, RecordBody, RecordVersion, Text, VersionId};
-use qv_protocol::lan::{MAX_WANT_MESSAGES, PairProve, PairProved};
+use qv_protocol::lan::MAX_WANT_MESSAGES;
 
 use super::*;
 
@@ -36,6 +36,7 @@ fn edit(d: &Device, record: RecordId, title: &str) {
             created_at: Timestamp(1),
             modified_at: Timestamp(1),
             deleted_at: None,
+            delete_operation: None,
             ext: Extensions::new(),
         })),
         ext: Extensions::new(),
@@ -62,8 +63,8 @@ fn replicas() -> (Device, Device) {
 /// Runs a sync window for `r` while `f` gets its address and code. The
 /// window ends by itself after its one session; if `f` started none, it is
 /// cancelled once `f` returns.
-fn with_window<T: Send>(
-    r: &dyn ApproverVault,
+fn with_window<T: Send, V: CredentialApprover>(
+    r: &V,
     f: impl FnOnce(SocketAddr, &str) -> T + Send,
 ) -> (Result<Approved, LanError>, T) {
     let (w, addr, code) = window();
@@ -208,11 +209,39 @@ impl ApproverVault for Faulty<'_> {
     fn context(&self) -> Result<ApproverContext, LanError> {
         ApproverVault::context(self.inner)
     }
-    fn grant(&self, seal: &mut Sealer<'_>) -> Result<Vec<u8>, LanError> {
-        self.inner.grant(seal)
+}
+impl CredentialApprover for Faulty<'_> {
+    type Authorization = TestAuthorization;
+    fn authenticate_password(
+        &self,
+        p: MasterPassword,
+        t0: &[u8; 32],
+        ke1: &[u8],
+    ) -> Result<(PasswordAuthServer, SecretBytes, TestAuthorization), LanError> {
+        self.inner.authenticate_password(p, t0, ke1)
+    }
+    fn check_authorization(&self, a: &TestAuthorization) -> Result<(), LanError> {
+        self.inner.check_authorization(a)
+    }
+    fn key_auth(
+        &self,
+        mode: crypto::AuthMode,
+        t0: [u8; 32],
+    ) -> Result<KeyAuthentication, LanError> {
+        CredentialApprover::key_auth(self.inner, mode, t0)
+    }
+    fn authorized_grant(
+        &self,
+        a: TestAuthorization,
+        sealer: &mut crypto::RecordSealer<FinalEpoch>,
+    ) -> Result<SealedGrant, LanError> {
+        self.inner.authorized_grant(a, sealer)
     }
 }
 impl JoinerVault for Faulty<'_> {
+    fn key_auth(&self, t0: [u8; 32]) -> Result<KeyAuthentication, LanError> {
+        JoinerVault::key_auth(self.inner, t0)
+    }
     fn context(&self) -> Result<JoinerContext, LanError> {
         JoinerVault::context(self.inner)
     }
@@ -250,7 +279,7 @@ fn lan_sync_failures_before_acceptance_change_nothing_and_after_it_keep_the_comm
         )
     });
     assert_eq!(r.unwrap_err(), LanError::Cancelled);
-    assert_eq!(window.unwrap_err(), LanError::PeerCancelled);
+    assert_eq!(window.unwrap_err(), LanError::Timeout);
     assert_eq!((seq(&a), seq(&b)), (sa, sb));
 
     // The window's side fails at its own acceptance, after the joiner
@@ -299,18 +328,30 @@ fn manual_sync<'c>(addr: SocketAddr, code: &str) -> Manual<'c> {
 fn proof_of(d: &Device, th: &[u8; 32], role: ProofRole, generation: KeyGeneration) -> [u8; 32] {
     let u = d.u();
     let h = u.header();
-    let root =
-        ProofRoot::derive(u.vault_key(), h.vault_id, generation, h.derivation_profile).unwrap();
-    *root
-        .proof(th, role, h.vault_id, generation)
-        .unwrap()
-        .as_bytes()
+    // PB deliberately carries no identity/generation. A nonlocal generation
+    // argument selects the cross-method negative fixture instead.
+    let mode = if generation == h.key_generation {
+        crypto::AuthMode::KeySync
+    } else {
+        crypto::AuthMode::KeyEnrollment
+    };
+    let auth = KeyAuthentication::new(u.vault_key(), mode, *th).unwrap();
+    let proof = auth.joiner_proof().unwrap();
+    if role == ProofRole::B {
+        *proof.as_bytes()
+    } else {
+        *auth
+            .accept_joiner(&proof)
+            .unwrap()
+            .offer(h.vault_id, h.key_generation)
+            .unwrap()
+            .0
+            .as_bytes()
+    }
 }
-
-fn send_prove(m: &mut Manual<'_>, d: &Device, generation: KeyGeneration, proof: &[u8; 32]) {
-    let vault = d.u().header().vault_id;
+fn send_prove(m: &mut Manual<'_>, _d: &Device, _generation: KeyGeneration, proof: &[u8; 32]) {
     m.ch.send(
-        &PairProve::encode(&vault.0, generation.0, proof).unwrap(),
+        &KeyProve { mac: proof }.encode().unwrap(),
         Duration::from_secs(5),
     )
     .unwrap();
@@ -328,7 +369,7 @@ fn lan_sync_window_sends_no_proof_before_a_valid_one_and_accepts_nothing() {
         // A proof from another vault's key, under b's vault ID.
         (
             "wrong VK",
-            LanError::VaultMismatch,
+            LanError::Integrity,
             Box::new(|m| {
                 let p = proof_of(&other, &m.th, ProofRole::B, generation);
                 send_prove(m, &a, generation, &p);
@@ -336,8 +377,8 @@ fn lan_sync_window_sends_no_proof_before_a_valid_one_and_accepts_nothing() {
         ),
         // Another generation's proof and generation.
         (
-            "generation",
-            LanError::VaultMismatch,
+            "cross-mode proof",
+            LanError::Integrity,
             Box::new(|m| {
                 let g = KeyGeneration(generation.0 + 1);
                 let p = proof_of(&a, &m.th, ProofRole::B, g);
@@ -347,7 +388,7 @@ fn lan_sync_window_sends_no_proof_before_a_valid_one_and_accepts_nothing() {
         // The window's own role (reflection).
         (
             "role",
-            LanError::VaultMismatch,
+            LanError::Integrity,
             Box::new(|m| {
                 let p = proof_of(&a, &m.th, ProofRole::A, generation);
                 send_prove(m, &a, generation, &p);
@@ -356,7 +397,7 @@ fn lan_sync_window_sends_no_proof_before_a_valid_one_and_accepts_nothing() {
         // An exchange message before any proof.
         (
             "no prove",
-            LanError::Protocol,
+            LanError::Integrity,
             Box::new(|m| {
                 let (vault, g) = a.scope().unwrap();
                 m.ch.send(
@@ -374,7 +415,7 @@ fn lan_sync_window_sends_no_proof_before_a_valid_one_and_accepts_nothing() {
             // The window answers with an error record, never a `proved`.
             m.ch.recv(Duration::from_secs(5), None).map(|r| r.len())
         });
-        assert_eq!(answer.err(), Some(expected), "{name}");
+        assert_eq!(answer.err(), Some(LanError::Timeout), "{name}");
         assert_eq!(window.unwrap_err(), expected, "{name}");
     }
     assert_eq!(seq(&b), sb);
@@ -397,8 +438,8 @@ fn lan_sync_a_proof_from_another_session_is_refused() {
         send_prove(&mut m, &a, generation, &relayed);
         m.ch.recv(Duration::from_secs(5), None).map(|r| r.len())
     });
-    assert_eq!(answer.err(), Some(LanError::VaultMismatch));
-    assert_eq!(window.unwrap_err(), LanError::VaultMismatch);
+    assert_eq!(answer.err(), Some(LanError::Timeout));
+    assert_eq!(window.unwrap_err(), LanError::Integrity);
 }
 
 /// A window that proves itself with `proof` instead of its own (B's
@@ -406,29 +447,29 @@ fn lan_sync_a_proof_from_another_session_is_refused() {
 fn hostile_window(b: &Device, bad_proof: [u8; 32]) -> (LanError, Option<LanError>) {
     let secret = PairingSecret::generate().unwrap();
     let code = qv_protocol::oob::encode_manual(secret.expose_secret()).to_string();
-    let keys = secret.keys().unwrap();
+    let keys = PairingKeys::new(secret).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     std::thread::scope(|s| {
         let h = s.spawn(|| {
             let (stream, _) = listener.accept().unwrap();
-            let mut conn = Conn::new(stream, &never).unwrap();
-            conn.within(Duration::from_secs(5), None);
-            let mut buf = Vec::new();
-            conn.recv_frame(FramePhase::Handshake, &mut buf).unwrap();
-            let hello = super::super::steps::check_hello(&keys, &buf).ok().unwrap();
-            let (ss, ct) = hello.ek.encapsulate().unwrap();
-            let (accept, accept_hash) =
-                super::super::steps::accept_for(&keys, &hello.hash, &[5; 32], &ct).unwrap();
-            conn.send_frame(FramePhase::Handshake, &accept).unwrap();
-            let th = th(&hello.hash, &accept_hash).unwrap();
-            let (b2a, a2b) = record_keys(&keys, &ss, &th).unwrap();
-            let mut ch = Channel::new(conn, RecordSealer::new(a2b), RecordOpener::new(b2a));
+            let (mut ch, _, hello, _) = accept_initial(stream, keys);
             let t = Duration::from_secs(5);
-            PairProve::decode(ch.recv(t, None).unwrap().expose_secret()).unwrap();
-            ch.send(&PairProved::encode(&bad_proof).unwrap(), t)
-                .unwrap();
-            // B must answer with an error record, never a State.
+            KeyProve::decode(ch.recv(t, None).unwrap().expose_secret()).unwrap();
+            let (vault, generation) = b.scope().unwrap();
+            ch.send(
+                &KeyProved {
+                    vault_id: vault.0,
+                    generation: generation.0,
+                    mac: bad_proof,
+                }
+                .encode()
+                .unwrap(),
+                t,
+            )
+            .unwrap();
+            assert_eq!(hello.mode, AuthMode::KeySync);
+            // Credential failures close without a distinct error oracle.
             ch.recv(t, None).err()
         });
         let r = sync_to(b, addr, &code).unwrap_err();
@@ -442,8 +483,8 @@ fn lan_sync_joiner_refuses_a_window_without_the_vault() {
     let b = Device::personal();
     let sb = seq(&b);
     let (joiner, window) = hostile_window(&b, [0x42; 32]);
-    assert_eq!(joiner, LanError::VaultMismatch);
-    assert_eq!(window, Some(LanError::VaultMismatch));
+    assert_eq!(joiner, LanError::Integrity);
+    assert_eq!(window, Some(LanError::Timeout));
     assert_eq!(seq(&b), sb);
 }
 
@@ -551,12 +592,29 @@ fn proved_session<'c>(a: &Device, addr: SocketAddr, code: &str) -> Manual<'c> {
     let generation = a.u().header().key_generation;
     let p = proof_of(a, &m.th, ProofRole::B, generation);
     send_prove(&mut m, a, generation, &p);
-    PairProved::decode(
-        m.ch.recv(Duration::from_secs(5), None)
-            .unwrap()
-            .expose_secret(),
+    let second = m.ch.recv(Duration::from_secs(5), None).unwrap();
+    let proved = KeyProved::decode(second.expose_secret()).unwrap();
+    let auth = JoinerVault::key_auth(a, m.th)
+        .unwrap()
+        .accept_offerer(
+            qv_crypto::VaultId(proved.vault_id),
+            KeyGeneration(proved.generation),
+            &qv_crypto::MacTag::from_bytes(proved.mac),
+        )
+        .unwrap();
+    let first = KeyProve { mac: &p }.encode().unwrap();
+    let ta = auth_transcript(
+        AuthMode::KeySync,
+        &m.th,
+        &first,
+        second.expose_secret(),
+        None,
     )
     .unwrap();
+    let (keys, finished) = m.schedule.take().unwrap().complete(auth, ta).unwrap();
+    drop(finished);
+    m.ch.finish(keys);
+    m.ch.final_channel().begin_exchange();
     m
 }
 
@@ -637,9 +695,16 @@ fn lan_sync_window_refuses_bad_states_and_requests() {
             }),
         ),
     ];
-    for (expected, script) in cases {
+    for (case, (expected, script)) in cases.into_iter().enumerate() {
         let (answer, window) = window_answer(&a, &b, script);
-        assert_eq!(answer.err(), Some(expected));
+        // The first three cases have no valid first final-key State. A must
+        // close silently. Bad Wants follow a valid State and may report errors.
+        let expected_peer = if case < 3 {
+            LanError::Timeout
+        } else {
+            expected
+        };
+        assert_eq!(answer.err(), Some(expected_peer));
         assert_eq!(window.unwrap_err(), expected);
     }
 }
@@ -714,9 +779,10 @@ fn lan_sync_expiry_closes_an_authenticated_connection_and_listener() {
             "listener dropped at expiry"
         );
         let late = super::super::exchange::exchange(
-            &mut m.ch,
+            m.ch.final_channel(),
             super::super::exchange::Role::Initiator,
             &a,
+            None,
             &fast(),
         );
         assert!(late.is_err());

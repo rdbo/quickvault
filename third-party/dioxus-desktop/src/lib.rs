@@ -20,6 +20,7 @@ mod file_upload;
 mod hooks;
 /// Restricted packaged-asset and ingress configuration.
 pub mod hardened;
+mod hardened_media;
 mod ipc;
 mod menubar;
 mod mobile;

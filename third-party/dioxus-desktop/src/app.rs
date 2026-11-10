@@ -57,6 +57,7 @@ pub(crate) struct SharedContext {
 impl App {
     pub fn new(mut cfg: Config, virtual_dom: VirtualDom) -> (EventLoop<UserWindowEvent>, Self) {
         let hardened = cfg.hardened.is_some();
+        let preview = cfg.hardened.as_ref().and_then(|policy| policy.preview.clone());
         let event_loop = cfg
             .event_loop
             .take()
@@ -81,7 +82,7 @@ impl App {
                 shortcut_manager: ShortcutRegistry::new(),
                 proxy: event_loop.create_proxy(),
                 target: event_loop.clone(),
-                websocket: EditWebsocket::start(hardened),
+                websocket: EditWebsocket::start(hardened, preview),
             }),
         };
 

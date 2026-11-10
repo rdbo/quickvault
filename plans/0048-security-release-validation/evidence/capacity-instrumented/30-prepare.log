@@ -1,0 +1,5 @@
+stage,elapsed_ms,before_rss_kib,after_rss_kib,sampled_peak_rss_kib,process_hwm_kib
+unlock,808.240,1960,29756,268180,267908
+paged_handles,10.440,29756,29756,31672,267908
+held_drafts,30,53608,267908
+prepare,60.224,29756,29760,53888,267908

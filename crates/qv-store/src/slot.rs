@@ -4,9 +4,10 @@
 //!
 //! A `keyslot` row is `(slot_id, type, body)`. Type 0 is a password slot
 //! and its body is the canonical slot descriptor of `qv_model::Keyslot`, the
-//! same bytes as the payload of the password-keyslot record. Other types
+//! defined-field projection of the password-keyslot record. Other types
 //! (quick unlock, phase 2.6) are [`StoreError::Unsupported`]. Unknown
-//! descriptor keys are preserved; the header MAC covers them. Version 1 of
+//! descriptor keys in existing rows are preserved; the header MAC covers them.
+//! Newly written slots use the public projection, omitting encrypted extensions. Version 1 of
 //! the development format requires exactly one password slot.
 
 use qv_crypto::{PasswordSlot, SlotId};
@@ -53,7 +54,7 @@ impl LocalSlot {
             slot,
             ext: qv_model::Extensions::new(),
         };
-        let body = keyslot.encode()?.to_vec();
+        let body = keyslot.encode_public_descriptor()?.to_vec();
         Ok(Self {
             slot_id: keyslot.slot.slot_id,
             kind: PASSWORD_SLOT,

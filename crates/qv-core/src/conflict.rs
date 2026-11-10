@@ -15,8 +15,8 @@ use qv_model::{
 /// One record in an unlocked session, including non-browsable control records.
 #[derive(Clone, Copy)]
 pub struct ConflictRecordHandle {
-    session: SessionTag,
-    record: RecordId,
+    pub(crate) session: SessionTag,
+    pub(crate) record: RecordId,
 }
 impl ConflictRecordHandle {
     /// Full record ID for explicit addressing.
@@ -45,6 +45,13 @@ pub struct ConflictRecord {
     pub kind: RecordKind,
     /// Number of active versions.
     pub versions: usize,
+}
+/// One bounded all-kind conflict row, with a display name only for groups/entries.
+pub struct ConflictRecordSummary {
+    /// Structural capability, kind and head count.
+    pub record: ConflictRecord,
+    /// Optional confidential display name.
+    pub name: Option<Text>,
 }
 /// One masked typed view, bounded by a single record's existing limits.
 pub struct ConflictVersion {
@@ -115,6 +122,7 @@ redacted!(
     ConflictRecordHandle,
     ConflictVersionHandle,
     ConflictRecord,
+    ConflictRecordSummary,
     ConflictVersion,
     ConflictDetails,
     ResolutionReport
@@ -324,6 +332,10 @@ impl Session {
                 }
             }
             if v.deletion() == Deletion::Final {
+                if ctx.open.read_only {
+                    return Err(qv_store::StoreError::NoAnchor.into());
+                }
+                crate::snapshot::require_recovery(ctx)?;
                 v.ext = Extensions::new();
             }
             let seq = ctx.open.vault.local_seq();

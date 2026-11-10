@@ -45,6 +45,9 @@
 //!
 //! No peer key or link row is retained after the exchange (0013 §9.1).
 
+#[path = "lan_v2.rs"]
+pub mod v2;
+
 use crate::error::CryptoError;
 use crate::ids::{KeyGeneration, VaultId};
 use crate::keys::{PurposeKey, VaultKey, cbor_array, derive_secret, purpose};

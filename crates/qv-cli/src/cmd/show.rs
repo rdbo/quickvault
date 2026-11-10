@@ -41,7 +41,7 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
     let addr = m.get_one::<String>("entry").map_or("", String::as_str);
     let handle = address::entry(&session, addr)?;
     let detail = session.entry(handle)?;
-    let versions = session.entry_versions(handle)?.len();
+    let versions = session.entry_version_count(handle)?;
     let reveal = m.get_flag("reveal");
     let r = match m.get_one::<String>("field") {
         Some(name) => one_field(ctx, &session, &detail, name, versions, reveal),
@@ -130,7 +130,6 @@ pub(crate) fn whole_version(
         }
     };
     let paths = Paths::walk(s)?;
-    let path = paths.get(ItemHandle::Entry(d.handle));
     let mut out = Out::stdout();
     if ctx.json {
         let mut j = Json::new(&mut out);
@@ -139,7 +138,8 @@ pub(crate) fn whole_version(
         if let Some(h) = historical {
             j.key("version_id").str(&h.version_hex());
         }
-        j.key("path").opt_str(path.as_deref().map(String::as_str));
+        j.key("path");
+        paths.json(&mut j, ItemHandle::Entry(d.handle))?;
         j.key("title").str(d.title.expose());
         j.key("type").str(d.type_hint.expose());
         j.key("notes").opt_str(d.notes.as_ref().map(|n| n.expose()));
@@ -173,10 +173,9 @@ pub(crate) fn whole_version(
     }
     out.raw("Title:     ").text(d.title.expose()).raw("\n");
     out.raw("Path:      ");
-    match path {
-        Some(p) => out.path(&p),
-        None => out.raw("(recovered items)"),
-    };
+    if !paths.human(&mut out, ItemHandle::Entry(d.handle))? {
+        out.raw("(recovered items)");
+    }
     out.raw("\nID:        @").raw(&d.handle.id_hex()).raw("\n");
     out.raw("Type:      ").text(d.type_hint.expose()).raw("\n");
     for f in &d.fields {

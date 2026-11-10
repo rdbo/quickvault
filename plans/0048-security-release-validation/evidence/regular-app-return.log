@@ -1,0 +1,7 @@
+Starting: Intent { cmp=org.quickvault.app/dev.dioxus.main.MainActivity }
+Status: ok
+LaunchState: COLD
+Activity: org.quickvault.app/dev.dioxus.main.MainActivity
+TotalTime: 1019
+WaitTime: 1023
+Complete

@@ -16,6 +16,7 @@
 //! | 7 | created_at | int (ms) | required |
 //! | 8 | modified_at | int (ms) | required |
 //! | 9 | deleted_at | int (ms) | optional: soft delete |
+//! | 10 | delete_operation | bstr 16 UUIDv4 | optional, only with deleted_at |
 //!
 //! Field:
 //!
@@ -69,6 +70,8 @@ pub struct Entry {
     pub modified_at: Timestamp,
     /// Set when the entry is in trash (0007 §2.1).
     pub deleted_at: Option<Timestamp>,
+    /// The explicit deletion operation; never inferred from time.
+    pub delete_operation: Option<crate::DeleteOperationId>,
     /// Unknown keys.
     pub ext: Extensions,
 }
@@ -169,6 +172,7 @@ pub(crate) fn decode(d: &mut Decoder<'_>) -> Result<Entry, ModelError> {
     let (mut group, mut type_hint, mut title, mut fields) = (None, None, None, None);
     let (mut notes, mut icon, mut expires_at) = (None, None, None);
     let (mut created_at, mut modified_at, mut deleted_at) = (None, None, None);
+    let mut delete_operation = None;
     let mut ext = Extensions::new();
     for _ in 0..read_map_len(d)? {
         match d.int()? {
@@ -189,6 +193,7 @@ pub(crate) fn decode(d: &mut Decoder<'_>) -> Result<Entry, ModelError> {
             7 => created_at = Some(read_time(d)?),
             8 => modified_at = Some(read_time(d)?),
             9 => deleted_at = Some(read_time(d)?),
+            10 => delete_operation = Some(read_id(d)?),
             k => keep(&mut ext, k, d)?,
         }
     }
@@ -203,6 +208,7 @@ pub(crate) fn decode(d: &mut Decoder<'_>) -> Result<Entry, ModelError> {
         created_at: req(created_at)?,
         modified_at: req(modified_at)?,
         deleted_at,
+        delete_operation,
         ext,
     })
 }
@@ -255,6 +261,9 @@ pub(crate) fn encode(p: &Entry, e: &mut Encoder) -> Result<(), EncodeError> {
         put_time(m, 7, p.created_at)?;
         put_time(m, 8, p.modified_at)?;
         put_opt_time(m, 9, p.deleted_at)?;
+        if let Some(id) = p.delete_operation {
+            put_id(m, 10, &id)?;
+        }
         put_ext(m, &p.ext)
     })
 }

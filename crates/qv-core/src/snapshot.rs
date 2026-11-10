@@ -263,8 +263,20 @@ impl core::fmt::Debug for VerifyReport {
 /// the pin; the copy then stays as a `recover-` file that the next policy
 /// pass reclassifies as ordinary.
 pub struct RecoverySnapshot {
-    pin: Arc<Mutex<Option<String>>>,
+    pin: Arc<Mutex<Option<RecoveryPin>>>,
     summary: SnapshotSummary,
+    entry: SnapshotEntry,
+}
+
+/// Private authorization. Its containing Arc binds it to this exact session;
+/// sequence/generation bind it to one pre-mutation state, and the leased entry
+/// keeps the completed recovery copy protected until the handle is released.
+#[derive(Clone)]
+pub(crate) struct RecoveryPin {
+    pub(crate) archive_id: String,
+    seq: u64,
+    generation: qv_crypto::KeyGeneration,
+    writer: qv_model::WriterId,
     entry: SnapshotEntry,
 }
 
@@ -286,7 +298,7 @@ impl core::fmt::Debug for RecoverySnapshot {
 impl Drop for RecoverySnapshot {
     fn drop(&mut self) {
         let mut pin = self.pin.lock().unwrap_or_else(PoisonError::into_inner);
-        if pin.as_deref() == Some(self.summary.archive_id.as_str()) {
+        if pin.as_ref().map(|p| p.archive_id.as_str()) == Some(self.summary.archive_id.as_str()) {
             *pin = None;
         }
     }
@@ -352,6 +364,7 @@ fn remove_row(
             report.failed = true;
             Ok(false)
         }
+        Err(StoreError::Locked) => Ok(false),
         Err(e) => Err(e.into()),
     }
 }
@@ -462,7 +475,10 @@ fn snapshot_pass(
         if pinned == Some(header.archive_id_hex().as_str()) {
             continue;
         }
-        dir.reclassify_as_ordinary(&entry)?;
+        match dir.reclassify_as_ordinary(&entry, scope, vault.vault_key()) {
+            Ok(_) | Err(StoreError::Locked | StoreError::NotFound) => {}
+            Err(e) => return Err(e.into()),
+        }
     }
 
     let mut report = SnapshotReport::default();
@@ -572,7 +588,9 @@ fn snapshot_pass(
             }
             let size = match &candidate {
                 Candidate::Current(entry) => {
-                    remove_entry(dir, entry, &id, &mut report)?;
+                    if !remove_entry(dir, entry, &id, &mut report)? {
+                        continue;
+                    }
                     entry.size()
                 }
                 Candidate::Old(row) => {
@@ -616,12 +634,13 @@ fn remove_entry(
     entry: &SnapshotEntry,
     id: &str,
     report: &mut SnapshotReport,
-) -> Result<(), CoreError> {
+) -> Result<bool, CoreError> {
     match dir.remove(entry) {
         Ok(()) | Err(StoreError::NotFound) => {
             report.pruned.push(id.to_owned());
-            Ok(())
+            Ok(true)
         }
+        Err(StoreError::Locked) => Ok(false),
         Err(e) => Err(e.into()),
     }
 }
@@ -653,7 +672,7 @@ pub(crate) fn begin_recovery(
     if open.pinned().is_some() {
         return Err(CoreError::NotAllowed);
     }
-    let policy = open.snapshots.clone().ok_or(CoreError::Internal)?;
+    let policy = open.snapshots.clone().ok_or(CoreError::NotAllowed)?;
     let taken = snapshot_pass(
         &policy,
         &mut open.vault,
@@ -665,12 +684,58 @@ pub(crate) fn begin_recovery(
     )?;
     let summary = taken.report.published.clone().ok_or(CoreError::Internal)?;
     let entry = taken.entry.ok_or(CoreError::Internal)?;
-    *open.pin.lock().unwrap_or_else(PoisonError::into_inner) = Some(summary.archive_id.clone());
+    *open.pin.lock().unwrap_or_else(PoisonError::into_inner) = Some(RecoveryPin {
+        archive_id: summary.archive_id.clone(),
+        seq: open.vault.local_seq(),
+        generation: open.vault.header().key_generation,
+        entry: entry.clone(),
+        writer: open.vault.writer_id(),
+    });
     Ok(RecoverySnapshot {
         pin: Arc::clone(&open.pin),
         summary,
         entry,
     })
+}
+
+/// Enforce recovery policy inside the serialized destructive call. Reading
+/// every frame again detects missing/replaced/damaged copies; frontend ordering
+/// and an authenticated header alone cannot authorize losing the only data.
+pub(crate) fn require_recovery(ctx: &crate::session::Ctx<'_>) -> Result<(), CoreError> {
+    ctx.check_cancel()?;
+    let open = &ctx.open;
+    let pin = open
+        .pin
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+        .ok_or(CoreError::NotAllowed)?;
+    if pin.seq != open.vault.local_seq()
+        || pin.generation != open.vault.header().key_generation
+        || pin.writer != open.vault.writer_id()
+    {
+        return Err(CoreError::StaleHandle);
+    }
+    let policy = open.snapshots.as_ref().ok_or(CoreError::NotAllowed)?;
+    let scope = ArchiveScope::new(open.vault.header().vault_id, pin.generation);
+    let file = policy.dir.open_entry(&pin.entry)?;
+    let mut input = std::io::BufReader::new(file);
+    let c = ctx.canceller();
+    let opened = qv_store::read_archive(
+        &mut input,
+        scope,
+        open.vault.vault_key(),
+        &mut |_| Ok(()),
+        &|| c.is_cancelled(),
+    )?;
+    ctx.check_cancel()?;
+    if opened.header().archive_id_hex() != pin.archive_id
+        || opened.header().is_self_contained()
+        || opened.manifest() != open.vault.manifest()
+    {
+        return Err(CoreError::StaleHandle);
+    }
+    Ok(())
 }
 
 pub(crate) fn finish_recovery(
@@ -682,13 +747,20 @@ pub(crate) fn finish_recovery(
     }
     {
         let mut pin = open.pin.lock().unwrap_or_else(PoisonError::into_inner);
-        if pin.as_deref() != Some(snapshot.summary.archive_id.as_str()) {
+        if pin.as_ref().map(|p| p.archive_id.as_str()) != Some(snapshot.summary.archive_id.as_str())
+        {
             return Err(CoreError::StaleHandle);
         }
         *pin = None;
     }
     let policy = open.snapshots.clone().ok_or(CoreError::Internal)?;
-    policy.dir.reclassify_as_ordinary(&snapshot.entry)?;
+    let scope = ArchiveScope::new(
+        open.vault.header().vault_id,
+        open.vault.header().key_generation,
+    );
+    policy
+        .dir
+        .reclassify_as_ordinary(&snapshot.entry, scope, open.vault.vault_key())?;
     Ok(())
 }
 
@@ -866,7 +938,7 @@ impl Session {
     /// Ends a destructive operation: release its pin and make its copy ordinary.
     /// Reclassification failure leaves a recovery file for the next policy pass.
     pub fn finish_destructive(&self, snapshot: RecoverySnapshot) -> Result<(), CoreError> {
-        self.read(|ctx| finish_recovery(ctx.open, snapshot))
+        self.mutate(|ctx| finish_recovery(ctx.open, snapshot))
     }
 
     /// One full integrity pass over the committed state (0011 `verify`;
@@ -1199,9 +1271,70 @@ mod tests {
             Some(SnapshotSkip::Disabled)
         );
         assert!(s.snapshots().unwrap().snapshots.is_empty());
-        assert_eq!(err(s.begin_destructive(false, None)), CoreError::Internal);
+        assert_eq!(err(s.begin_destructive(false, None)), CoreError::NotAllowed);
         assert_eq!(s.delete_snapshots(&["00".repeat(16)]).unwrap(), 0);
         assert!(s.snapshots_before(Timestamp(i64::MAX)).unwrap().is_empty());
+    }
+
+    // 0012 §1: Rotation/purge ambiguity
+    #[test]
+    fn destructive_authorization_is_current_verified_and_session_bound() {
+        let env = Env::new();
+        let s = env.unlock_with(Some(env.snapshot_policy()));
+        assert_eq!(err(s.adopt_baseline()), CoreError::NotAllowed);
+        let root = s.root().unwrap();
+        let a = add_entry(&s, root, "first");
+        let b = add_entry(&s, root, "second");
+        s.delete(crate::ItemHandle::Entry(a), false).unwrap();
+        s.delete(crate::ItemHandle::Entry(b), false).unwrap();
+        let before = seq(&s);
+        assert_eq!(
+            err(s.purge(&[crate::ItemHandle::Entry(a)])),
+            CoreError::NotAllowed
+        );
+        assert_eq!(err(s.purge_history(b)), CoreError::NotAllowed);
+        assert_eq!(seq(&s), before);
+
+        let stale = s.begin_destructive(false, None).unwrap();
+        let d = s.new_group(root, "intervening edit").unwrap();
+        s.save_group(d).unwrap();
+        assert_eq!(err(s.empty_trash()), CoreError::StaleHandle);
+        assert_eq!(seq(&s), before + 1);
+        s.finish_destructive(stale).unwrap();
+
+        for damage in [false, true] {
+            let copy = s.begin_destructive(false, None).unwrap();
+            let path = env
+                .dir
+                .path()
+                .join("snapshots")
+                .join(format!("recover-{}.qvsnap", copy.summary().archive_id));
+            if damage {
+                std::fs::write(&path, b"damaged").unwrap();
+            } else {
+                std::fs::remove_file(&path).unwrap();
+            }
+            assert!(s.empty_trash().is_err());
+            assert_eq!(seq(&s), before + 1);
+            assert!(s.finish_destructive(copy).is_err());
+        }
+
+        let other_env = Env::new();
+        let other = other_env.unlock_with(Some(other_env.snapshot_policy()));
+        let foreign = other.begin_destructive(false, None).unwrap();
+        assert_eq!(err(s.finish_destructive(foreign)), CoreError::StaleHandle);
+        assert_eq!(err(s.empty_trash()), CoreError::NotAllowed);
+
+        let copy = s.begin_destructive(false, None).unwrap();
+        s.purge(&[crate::ItemHandle::Entry(a)]).unwrap();
+        assert_eq!(seq(&s), before + 2);
+        assert_eq!(
+            err(s.purge(&[crate::ItemHandle::Entry(b)])),
+            CoreError::StaleHandle
+        );
+        s.finish_destructive(copy).unwrap();
+        crate::testutil::destructive(&s, || s.purge(&[crate::ItemHandle::Entry(b)])).unwrap();
+        assert_eq!(seq(&s), before + 3);
     }
 
     #[test]
@@ -1342,7 +1475,7 @@ mod tests {
         let root = s.root().unwrap();
         let e = add_entry(&s, root, "Gone");
         s.delete(crate::ItemHandle::Entry(e), false).unwrap();
-        s.empty_trash().unwrap();
+        crate::testutil::destructive(&s, || s.empty_trash()).unwrap();
         let report = s.verify(None).unwrap();
         assert!(report.ok(), "{report:?}");
         assert!(report.counts.suppressed_records >= 1);

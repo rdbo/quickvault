@@ -1,0 +1,18 @@
+
+org.quickvault.app.QuickUnlockTest:INSTRUMENTATION_STATUS: qvQuickEvidence=stage=40,level=2,size=256,auth=2,duration=0,hardwareAuth=true,invalidates=true,tagRejected=false,invalidatedKey=false
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: qvQuickEvidence=stage=50,level=2,size=256,auth=2,duration=0,hardwareAuth=true,invalidates=true,tagRejected=false,invalidatedKey=false
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: qvQuickEvidence=stage=40,level=2,size=256,auth=2,duration=0,hardwareAuth=true,invalidates=true,tagRejected=false,invalidatedKey=false
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: qvQuickEvidence=stage=50,level=2,size=256,auth=2,duration=0,hardwareAuth=true,invalidates=true,tagRejected=false,invalidatedKey=false
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: qvQuickEvidence=stage=40,level=2,size=256,auth=2,duration=0,hardwareAuth=true,invalidates=true,tagRejected=false,invalidatedKey=false
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: qvQuickEvidence=stage=50,level=2,size=256,auth=2,duration=0,hardwareAuth=true,invalidates=true,tagRejected=false,invalidatedKey=false
+INSTRUMENTATION_STATUS_CODE: 0
+.
+Test results for InstrumentationTestRunner=.
+Time: 19.665
+
+OK (1 test)

@@ -164,7 +164,15 @@ fn lan_link_clearing_crash_points_leave_old_or_new_state() {
             plant(&mut u, &[1]);
             arm(point, &p, &a.join("anchors"), s.path());
             let w = u.write().unwrap();
-            assert_eq!(err(w.commit()), StoreError::Internal, "{point:?}");
+            assert_eq!(
+                err(w.commit()),
+                if durable {
+                    StoreError::CommittedAnchorPending
+                } else {
+                    StoreError::Internal
+                },
+                "{point:?}"
+            );
             assert!(!disarm(), "{point:?} was not reached");
         }
         let anchors = AnchorDir::open(&s.join("anchors")).unwrap();

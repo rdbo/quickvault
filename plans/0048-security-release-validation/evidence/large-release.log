@@ -1,0 +1,34 @@
+    Finished `release` profile [optimized] target(s) in 0.21s
+     Running unittests src/lib.rs (target/release/deps/qv_core-bc37ba5b510b435d)
+
+running 1 test
+large-vault author: 614.069889ms
+large-vault password open: 2.167258379s
+large-vault complete-search counters: records=93 heads=93 objects=94 referenced_ciphertext=73058176 cache_text=66850395 cache_query_text=66850395
+large-vault complete-search process memory KiB: rss=Some(76120) hwm=Some(270932)
+large-vault traversal: rows=90 pages=45 searchable_bytes=70778880
+large-vault complete paged search: 626.29977ms
+large-vault complete-search counters: records=93 heads=93 objects=94 referenced_ciphertext=73058176 cache_text=66850395 cache_query_text=66850395
+large-vault complete-search process memory KiB: rss=Some(145948) hwm=Some(340236)
+large-vault traversal: rows=90 pages=45 searchable_bytes=70778880
+large-vault LAN password enrollment and reopen: 6.427511092s
+large-vault complete-search counters: records=93 heads=93 objects=94 referenced_ciphertext=73058176 cache_text=66850395 cache_query_text=66850395
+large-vault complete-search process memory KiB: rss=Some(145972) hwm=Some(341220)
+large-vault traversal: rows=90 pages=45 searchable_bytes=70778880
+large-vault LAN key enrollment and reopen: 4.386260324s
+large-vault complete-search counters: records=93 heads=93 objects=94 referenced_ciphertext=73058176 cache_text=66850395 cache_query_text=66850395
+large-vault complete-search process memory KiB: rss=Some(77144) hwm=Some(341228)
+large-vault traversal: rows=90 pages=45 searchable_bytes=70778880
+large-vault synthetic quick open and complete search: 1.539781941s
+large-vault complete-search counters: records=93 heads=93 objects=95 referenced_ciphertext=73058432 cache_text=66850395 cache_query_text=66850395
+large-vault complete-search process memory KiB: rss=Some(77172) hwm=Some(341228)
+large-vault traversal: rows=90 pages=45 searchable_bytes=70778880
+test large_vault_tests::large_vault_stock_budget_opens_edits_searches_restores_merges_and_rotates ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 135 filtered out; finished in 34.67s
+
+     Running tests/offline.rs (target/release/deps/offline-6241f6b77dd9cf22)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s

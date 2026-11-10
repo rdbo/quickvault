@@ -1,0 +1,23 @@
+{
+  "date": "2026-11-10",
+  "workspace": {
+    "groups": 48,
+    "passed": 1000,
+    "failed": 0,
+    "ignored": 6
+  },
+  "native_media": {
+    "private_runtime": "D-Bus, PipeWire, null audio sink",
+    "runs": [
+      "native media exit=0; peak summed process RSS=748576 KiB",
+      "native media exit=0; peak summed process RSS=685584 KiB"
+    ]
+  },
+  "android": {
+    "package": "org.quickvault.validation50",
+    "built": true,
+    "installed": false,
+    "device_tested": false
+  },
+  "independent_security_review": false
+}

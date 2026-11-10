@@ -29,15 +29,16 @@ use qv_crypto::{KeyGeneration, VaultId, VaultKey};
 use qv_model::{ObjectId, RandomId};
 use qv_protocol::lan::{
     Done, MAX_MANIFEST_LENGTH, MAX_MANIFEST_PART, MAX_WANT_IDS, MAX_WANT_MESSAGES, ManifestPart,
-    ObjectMsg, Outcome, PairGrant, State, Want,
+    ObjectMsg, Outcome, State, Want,
 };
 use qv_protocol::registry::check_features;
 use qv_store::{
     LanServeState, LanStaging, MAX_OBJECTS, Planned, StagedKeyslot, VerifiedLanStaging,
 };
+#[cfg(test)]
 use zeroize::Zeroizing;
 
-use super::transport::Channel;
+use super::transport::V2Channel as Channel;
 use super::{LanError, LanTimeouts};
 
 fn bad<E>(_: E) -> LanError {
@@ -46,12 +47,42 @@ fn bad<E>(_: E) -> LanError {
 
 /// The grant plaintext `["qv/lan-pair-grant/v1", vault_id, key_generation,
 /// vk, link_id]` (0013 §4.7), in a wiped buffer to be sealed at once.
-pub fn grant_plaintext(
+#[cfg(test)]
+pub(crate) fn grant_plaintext(
     vk: &VaultKey,
     vault: VaultId,
     generation: KeyGeneration,
 ) -> Result<Zeroizing<Vec<u8>>, LanError> {
-    PairGrant::encode(&vault.0, generation.0, |e| vk.encode_for_transfer(e)).map_err(bad)
+    qv_protocol::lan::PairGrant::encode(&vault.0, generation.0, |e| vk.encode_for_transfer(e))
+        .map_err(bad)
+}
+
+/// Exact descriptor/head-bound lan/2 grant, encoded and wiped under core's
+/// session mutex. The network driver receives only its sealed record.
+#[allow(clippy::too_many_arguments)] // Normative grant fields; all bindings explicit.
+pub fn credential_grant_plaintext(
+    vk: &VaultKey,
+    vault: VaultId,
+    generation: KeyGeneration,
+    descriptor: &[u8],
+    record: qv_model::RecordId,
+    version: qv_model::VersionId,
+    object: ObjectId,
+    hash: &[u8; 32],
+) -> Result<qv_crypto::SecretBytes, LanError> {
+    let descriptor = descriptor.try_into().map_err(|_| LanError::Integrity)?;
+    let mut encoded = qv_protocol::lan::v2::PairGrant::encode_with_key(
+        &vault.0,
+        generation.0,
+        descriptor,
+        &record.0,
+        &version.to_bytes(),
+        &object.to_bytes(),
+        hash,
+        |e| vk.encode_for_transfer(e),
+    )
+    .map_err(bad)?;
+    Ok(qv_crypto::SecretBytes::take_from(encoded.as_mut_slice()))
 }
 
 /// What one vault offers an exchange. qv-core implements it over a session
@@ -130,7 +161,31 @@ fn recv_state(
     t: &LanTimeouts,
 ) -> Result<State, LanError> {
     let msg = ch.recv(t.idle, None)?;
-    let s = State::decode(msg.expose_secret()).map_err(bad)?;
+    check_state(msg.expose_secret(), id, generation, empty)
+}
+
+/// A authenticates and validates B's first final-key State before enabling
+/// bulk framing/errors or sending any final-key response. This record has the
+/// small credential frame bound and the machine-message deadline.
+pub(crate) fn first_state(
+    ch: &mut Channel<'_>,
+    id: VaultId,
+    generation: KeyGeneration,
+    empty: bool,
+    t: &LanTimeouts,
+) -> Result<State, LanError> {
+    let msg = ch.recv(t.message, None)?;
+    let state = check_state(msg.expose_secret(), id, generation, empty)?;
+    ch.begin_exchange();
+    Ok(state)
+}
+fn check_state(
+    bytes: &[u8],
+    id: VaultId,
+    generation: KeyGeneration,
+    empty: bool,
+) -> Result<State, LanError> {
+    let s = State::decode(bytes).map_err(bad)?;
     if s.vault_id != id.0 || s.key_generation != generation.0 {
         return Err(LanError::VaultMismatch);
     }
@@ -287,6 +342,7 @@ pub(crate) fn exchange(
     ch: &mut Channel<'_>,
     role: Role,
     vault: &dyn ExchangeVault,
+    first: Option<State>,
     t: &LanTimeouts,
 ) -> Result<RoundReport, LanError> {
     let (id, generation) = vault.scope()?;
@@ -298,7 +354,7 @@ pub(crate) fn exchange(
             recv_state(ch, id, generation, false, t)?
         }
         Role::Responder => {
-            let peer = recv_state(ch, id, generation, false, t)?;
+            let peer = first.ok_or(LanError::Protocol)?;
             send_state(ch, id, generation, &my_hash, my_len, t)?;
             peer
         }
@@ -377,10 +433,10 @@ pub(crate) fn serve(
     vault: &dyn ExchangeVault,
     id: VaultId,
     generation: KeyGeneration,
+    _first: State,
     t: &LanTimeouts,
 ) -> Result<(), LanError> {
-    // B's state: this vault, empty, no features (§7.2).
-    recv_state(ch, id, generation, true, t)?;
+    // B's empty State was already authenticated/checked by first_state.
     let state: LanServeState = vault.serve_state()?;
     send_state(
         ch,

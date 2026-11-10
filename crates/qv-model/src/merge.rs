@@ -790,6 +790,7 @@ mod tests {
                     created_at: Timestamp(0),
                     modified_at: Timestamp(at),
                     deleted_at: None,
+                    delete_operation: None,
                     ext: Extensions::new(),
                 })),
                 ext: Extensions::new(),

@@ -39,17 +39,56 @@ impl Drop for Dir {
 }
 
 fn core(anchors: &Path) -> Core {
-    Core::new(CoreConfig::new(AnchorDir::open(anchors).unwrap()))
+    let snapshots = qv_core::SnapshotPolicy::new(
+        qv_core::SnapshotDir::open(&anchors.with_file_name("snapshots")).unwrap(),
+    );
+    Core::new(CoreConfig::new(AnchorDir::open(anchors).unwrap()).with_snapshots(snapshots))
 }
 
 fn pw() -> MasterPassword {
     MasterPassword::from_utf8(b"an offline test password").unwrap()
 }
 
+// This deliberately collects the small lifecycle fixture for comparison.
+// Product callers consume a page at a time.
+fn collect<T>(
+    mut next: impl FnMut(
+        Option<qv_core::ViewCursor>,
+    ) -> Result<qv_core::ViewPage<T>, qv_core::CoreError>,
+) -> Vec<T> {
+    let mut cursor = None;
+    let mut out = Vec::new();
+    loop {
+        let page = next(cursor).unwrap();
+        out.extend(page.items);
+        cursor = page.next;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    out
+}
+
 /// Everything the views show, revealed values included, as text.
 fn describe(s: &Session) -> Vec<String> {
     fn walk(s: &Session, g: GroupHandle, depth: usize, out: &mut Vec<String>) {
-        let l = s.list(g).unwrap();
+        let mut l = qv_core::Listing {
+            groups: Vec::new(),
+            entries: Vec::new(),
+        };
+        for item in collect(|cursor| {
+            s.list_page(
+                g,
+                cursor,
+                qv_core::PageLimit::default(),
+                &qv_core::CancelToken::new(),
+            )
+        }) {
+            match item {
+                qv_core::SearchHit::Entry(e) => l.entries.push(e),
+                qv_core::SearchHit::Group(g) => l.groups.push(g),
+            }
+        }
         for e in &l.entries {
             let d = s.entry(e.handle).unwrap();
             let mut line = format!(
@@ -89,19 +128,28 @@ fn describe(s: &Session) -> Vec<String> {
         o.conflicts
     )];
     walk(s, s.root().unwrap(), 0, &mut out);
-    let mut trash: Vec<String> = s
-        .trash()
-        .unwrap()
-        .iter()
-        .map(|t| format!("trash {}", t.name.expose()))
-        .collect();
+    let mut trash: Vec<String> = collect(|cursor| {
+        s.trash_page(
+            cursor,
+            qv_core::PageLimit::default(),
+            &qv_core::CancelToken::new(),
+        )
+    })
+    .iter()
+    .map(|t| format!("trash {}", t.name.expose()))
+    .collect();
     trash.sort();
     out.extend(trash);
     out.extend(
-        s.recovered()
-            .unwrap()
-            .iter()
-            .map(|e| format!("recovered {}", e.title.expose())),
+        collect(|cursor| {
+            s.recovered_page(
+                cursor,
+                qv_core::PageLimit::default(),
+                &qv_core::CancelToken::new(),
+            )
+        })
+        .iter()
+        .map(|e| format!("recovered {}", e.title.expose())),
     );
     out
 }
@@ -171,16 +219,33 @@ fn offline_lifecycle() {
         s.delete(ItemHandle::Group(old), true).unwrap();
         s.restore(ItemHandle::Group(old)).unwrap();
         s.delete(ItemHandle::Entry(tmp), false).unwrap();
+        let copy = s.begin_destructive(false, None).unwrap();
         s.purge(&[ItemHandle::Entry(tmp)]).unwrap();
+        s.finish_destructive(copy).unwrap();
         s.delete(ItemHandle::Group(old), true).unwrap();
 
         let mut st = s.edit_settings().unwrap();
         st.meta_mut().name = Text::new("Personal vault").unwrap();
         s.save_settings(st).unwrap();
 
-        let hits = s.search("example.org").unwrap();
+        let hits = collect(|cursor| {
+            s.search_page(
+                "example.org",
+                cursor,
+                qv_core::PageLimit::default(),
+                &qv_core::CancelToken::new(),
+            )
+        });
         assert_eq!(hits.len(), 1);
-        assert!(s.search("s3cret").unwrap().is_empty());
+        assert!(
+            collect(|cursor| s.search_page(
+                "s3cret",
+                cursor,
+                qv_core::PageLimit::default(),
+                &qv_core::CancelToken::new()
+            ))
+            .is_empty()
+        );
 
         let state = describe(&s);
         s.lock();

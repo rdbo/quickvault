@@ -86,14 +86,14 @@ rather than creating unused workspace scaffolding.
 | Component | Responsibility |
 |-----------|----------------|
 | qv-encoding | Bounded deterministic CBOR (0004 §3.1): validates hostile input before typed reads, encodes only canonical items, builds AAD/info/transcript arrays; depends on no other qv crate |
-| qv-crypto | Profiles, key hierarchy, encryption, protected memory, X-Wing draft-11 (libcrux-kem), the LAN record layer (0013 §6) and the one-use code key schedule (pairing keys, the `lan-proof` key and its transcript-bound proofs, the comparison code; 0013 §4); hybrid signature verification from roadmap 3.3 |
-| qv-model | Canonical payloads, atomic records, deterministic tree projection |
-| qv-store | Hardened SQLite, immutable objects, manifests, transactions, authenticated archives (header, writer, role-verifying reader), new-path restore and the full `verify` pass; no LAN peer state (the retired `lan_link` rows stay head-bound and clear at the next commit; 0013 §9.1), LAN serving reads, peer staging (new device, or merge with local copies of held objects) and receipt-free LAN acceptance through the archive acceptance transaction (0013 §7, §9–10) |
-| qv-protocol | Key-free hostile-input wire layer: bounded LAN frames, wire labels with exact arity, exact-shape message reader/writer, `lan / 1` profile, feature and error-code registry (roadmap 2.8); typed pairing/exchange/error messages, the one-use code's QR/manual form and endpoint text (roadmap 2.9–2.10, plan 0042); server wire types later; depends only on qv-encoding |
+| qv-crypto | Profiles, key hierarchy, encryption, protected memory, X-Wing draft-11 (libcrux-kem), typed LAN record epochs and one-use code keys, ephemeral password authentication, independent VK proofs, final-key confirmation and comparison codes (0013 §15); hybrid signature verification from roadmap 3.3 |
+| qv-model | Canonical payloads, atomic records, compact authenticated-head summaries and deterministic tree projection |
+| qv-store | Hardened SQLite with non-mutating identification, immutable objects, manifests, durable-outcome reporting, cooperative inode/directory leases for temporary files and snapshots, authenticated archives (header, writer, role-verifying reader), new-path restore and the full `verify` pass; no LAN peer state (the retired `lan_link` rows stay head-bound and clear at the next commit; 0013 §9.1), LAN serving reads, peer staging (new device, or merge with local copies of held objects) and receipt-free LAN acceptance through the archive acceptance transaction (0013 §7, §9–10) |
+| qv-protocol | Key-free hostile-input wire layer: bounded LAN frames, wire labels with exact arity, exact-shape message reader/writer, `lan / 2` profile, feature and error-code registry (roadmap 2.8); typed pairing/exchange/error messages, the one-use code's QR/manual form and endpoint text (roadmap 2.9–2.10, plan 0042); server wire types later; depends only on qv-encoding |
 | qv-sync | Shared causal merge candidates; LAN over TCP: the one-use sync window and the joiner in sync or new-device mode, and the two-way exchange (roadmap 2.9–2.10, plan 0042); remote candidate state and publication orchestration (planned) |
-| qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets, the `verify` report, and LAN sync windows, sync from a code and new-device join for frontends; strict scanned QR kind/profile/address inspection without network I/O |
+| qv-core | Session policy, handles, lock cancellation, mutation authorization including verified pre-state recovery copies, snapshot policy/budgets, the `verify` report, and LAN sync windows, sync from a code and new-device join for frontends; strict scanned QR kind/profile/address inspection without network I/O |
 | qv-platform | Injected OS traits; local unicast addresses for LAN endpoints from route probes, attached networks first (`/proc/net/route` where readable; std only); Linux logind lifecycle, xdg-desktop-portal file picker (zbus, local `file:` results only), X11 clipboard ownership, single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; Android keystore quick unlock with boot-bound policy state that survives app restarts (on where the device supports it; plan 0045); Android storage evidence from the OS encryption status; exact-identity autofill matching; native input unavailable |
-| qv-cli / qv-app | Explicit user actions and views, including `qv lan open|sync|join` and the app's Sync screen and Join mode; qv-app's shared UI (own title bar, one DOM for desktop and phone, 0009 §1.8), its non-secret preferences file (theme, acknowledged protection status), QR rendering/decoding and bounded native Android Camera2 glue (camera on by default; `QV_APP_QR_CAMERA=0` builds without it); in-app attachment previews decrypted only into memory and served to the webview from a one-time `/preview/` route (0003 §6.4); on Linux, portal file picks run in a re-executed helper process without vault data, since the portal refuses the non-dumpable app; no unrestricted crypto/file/SQL bridge |
+| qv-cli / qv-app | Explicit user actions and views, including `qv lan open|sync|join` and the app's Sync screen and Join mode; qv-app's shared UI (own title bar, one DOM for desktop and phone, 0009 §1.8), its non-secret preferences file (theme, acknowledged protection status), QR rendering/decoding and bounded native Android Camera2 glue (camera on by default; `QV_APP_QR_CAMERA=0` builds without it); in-app attachment previews verified and streamed in protected chunks through a revocable `/preview/` capability on the existing bounded loopback listener (0003 §6.4); on Linux, portal file picks run in a re-executed helper process without vault data, since the portal refuses the non-dumpable app; no unrestricted crypto/file/SQL bridge |
 | qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
 
 Implemented so far: `qv-encoding` (canonical CBOR codec, fuzzed in CI) and
@@ -106,8 +106,8 @@ its header and local keyslots; unlinkable encrypted objects, the encrypted
 manifest, the authenticated local head and the per-replica external anchor;
 writer state; creation, verified unlock with explicit anchor recovery, and
 the single mutation transaction, plus bounded authenticated attachment chunks, the authenticated archive reader/writer and the read-only full `verify` pass) and `qv-core` (sessions with lock,
-cancellation and session-scoped handles, mutation authorization, the bounded
-metadata index and search over non-protected fields, on-demand decryption,
+cancellation and session-scoped handles, mutation authorization, the compact structural
+index, evictable metadata cache and complete paged search over non-protected fields, on-demand decryption,
 causal entry/group edits, the trash with final tombstones, read-only conflict
 surfacing and vault settings including generator defaults, plus the
 unverified header view, the zxcvbn master-password estimate, session-bound
@@ -127,10 +127,15 @@ and releases only its own window. x11rb's ordinary send buffer briefly holds a
 copied value (documented best-effort library intermediate, 0008 §4.4; plan
 0032). Native Wayland is not implemented; OS/recipient/manager copies remain
 outside application erasure control.
-Decoded preview media can remain in the web engine's cache even after its
-route is revoked. The app's lock lifecycle removes the viewer elements;
-route revocation and `no-store` alone do not erase already decoded pixels.
-This remains a best-effort cleanup limit under 0008 §4.4.
+Preview preparation verifies the full content through bounded chunks. Native
+media requests use separate per-preview128-bit capabilities on the existing
+numeric loopback listener, with exact Host/origin/CSP bounds, strict ranges,
+bounded headers/connections and direct protected chunk writes. Sources hold
+Weak sessions and attachment handles, not detached keys. Close/navigation/lock
+and hiding revoke sources and pause/reset renderer media; large or unmeasured
+image decodes require explicit loading. The app's Rust buffers are bounded;
+decoder/kernel/GPU RSS and decoded residual copies are best-effort limits under
+0008 §4.4, even after route revocation and `no-store`.
 
 Roadmap 2.8 adds:
 - `qv-protocol`: the key-free LAN wire layer (bounded frames, the wire-label
@@ -426,8 +431,8 @@ document-picker streams in packaging glue; Uris never leave Kotlin.
 Dioxus 0.7.10 uses a maintained desktop integration: compiled local assets,
 strict CSP, exact native origin/navigation checks, bounded typed IPC and bounded
 authenticated loopback rendering. Native file-dialog/filesystem and document-eval
-routes are unavailable in this configuration. Five provenance-tracked upstream
-snapshots support the integration; see third-party/README.md. Application Rust
+routes are unavailable in this configuration. One provenance-tracked upstream
+snapshot supports the integration; see third-party/README.md. Application Rust
 secrets use protected containers; framework/DOM/OS copies have best-effort cleanup,
 not deterministic erasure. Linux real-WebKit boundary and rendered-flow tests
 pass under private Xvfb. Android APKs compile and synthetic instrumentation passes on a POCO X7 Pro
@@ -452,6 +457,7 @@ validation, and does not require separate application implementations per OS.
 flowchart TB
     ui["CLI / shared Dioxus UI and input"] --> core["qv-core: policy and sessions"]
     core --> rust["trusted Rust: model, crypto, store, sync"]
+    core --> views["structural index; bounded text cache and pages"]
     core --> platform["qv-platform: lifecycle, clipboard, protection status; gated Android keystore and autofill"]
     platform -. "lock/cancel notifications" .-> core
     ui --> clip["CLI clipboard via core reexports; keys already dropped"]
@@ -459,7 +465,7 @@ flowchart TB
     rust --> db[("private active SQLite vault")]
     db -->|"build from verified objects"| snapshot["immutable authenticated archives"]
     snapshot <-->|"backup / archive exchange"| files["user-selected file storage"]
-    rust <-->|"optional direct authenticated LAN sync"| peer["another QuickVault device"]
+    rust <-->|"one admitted LAN connection; credential auth then final-key exchange"| peer["another QuickVault device"]
     rust <-->|"optional account sync over hybrid TLS"| server["untrusted remote server"]
     anchor[("private external anchor")] <--> core
 ```
@@ -476,6 +482,33 @@ sessions are specified in 0013. Pairing (roadmap 2.9) and sessions with the
 exchange (roadmap 2.10) are implemented. The independent protocol review (0012 §3, D12) is
 still required before any LAN release. Snapshot exchange is a backup/interoperability utility,
 not a third live network sync mode.
+
+Plan 0047 (owner approved 2026-11-09) implements the following boundaries;
+combined validation and local review are in progress. qv-crypto owns ephemeral password authentication
+and credential-composed final LAN keys, qv-protocol remains key-free, qv-sync
+owns one accepted stream after closing all admission, and qv-core alone
+reauthenticates/authorizes an atomic grant. qv-store accepts source-bound,
+fully verified enrollment capabilities. No persistent password verifier or new
+vault/archive format is introduced. Frontends prompt without owning key policy.
+The new profile is incompatible with old LAN peers (0013 §15). Admission drops
+all listeners before continuing, and clears the displayed code. The initial
+channel is consumed on a typed transition to credential-bound final keys;
+bulk exchange never accepts an initial-epoch channel. Core's private one-use
+grant authorization binds the session, transcript, exact slot/head and original
+deadline. Snapshot checks and one seal share its mutex; successful sealing is
+reported as possible disclosure even when cancellation discards the frame.
+Passwords are discarded before bulk transfer. Verified source/method-bound
+staging and core preflight precede no-replace publication and VK-based opening.
+Fixed action facts survive a concurrent UI lock without retaining secret views.
+
+The 0047 view implementation separates bounded structural metadata from a zeroizing,
+evictable 64 MiB text cache per unlocked vault and transient record decoding. Snapshot-bound pages
+limit retained rows/text in core and frontends; cache size is not vault capacity
+or total process memory. The 1 GiB referenced-ciphertext validity limit remains.
+Eager plaintext collection APIs are retired to a development-only test feature;
+normal frontends consume pages. Full validation still precedes acceptance
+(0004 §7). Bulk mutations still stage payload vectors and can use substantially
+more memory than the cache; streaming those mutations is separate work.
 
 ## 4. Key hierarchy and lifecycle
 
@@ -514,8 +547,12 @@ advanced by a LAN exchange. The proposed protocol is
   code (QR or a 26-character code);
 - the other device scans or types it. A copy of the same vault proves this
   generation's VK with transcript-bound MACs and syncs once; a new device
-  confirms a committed comparison code before VK is transferred;
+  authenticates credentials before any VK grant: password enrollment types
+  the password on both devices and compares codes; recovery words prove
+  independently known VK without transferring it (0047, 0013 §15);
 - each session uses a fresh X-Wing exchange mixed with the code's secret;
+  the new lan/2 final keys additionally bind credential authentication, and
+  admission closes after the first fully valid hello;
 - nothing about the other device is stored, and rotation stops
   old-generation copies (amended by
   [0014](specs/0014-lan-one-scan-sync.md), 2026-11-06).
@@ -559,7 +596,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | UI | Dioxus 0.7.10, maintained hardened dioxus-desktop integration, standard webview input; shared Android/Linux screens, best-effort framework cleanup; iOS later |
 | Android foundation | arm64/API 29+, pinned SDK/NDK recipe, FLAG_SECURE, metadata-only lifecycle adapter, private no-backup storage; device validation pending |
 | Optional remote server | Axum/Tokio; SQLite first, Postgres deferred |
-| Local storage | rusqlite with bundled SQLite 3.53.2 and trimmed compile options (`.cargo/config.toml`), encrypted immutable objects and manifests; external anchors as per-replica files in the private state directory (`$XDG_STATE_HOME/quickvault/anchors` on Linux; keystore-backed where available later) |
+| Local storage | rusqlite 0.41.0 with bundled SQLite 3.54.1 and trimmed compile options (`.cargo/config.toml`), encrypted immutable objects and manifests; external anchors as per-replica files in the private state directory (`$XDG_STATE_HOME/quickvault/anchors` on Linux; keystore-backed where available later) |
 | Serialization | Bounded RFC 8949 deterministic CBOR |
 | Data encryption | XChaCha20-Poly1305; 64 KiB attachment content chunks with fixed padded framing and streaming SHA-256 verification |
 | Password KDF / derivation | Argon2id / HKDF-SHA-512 |
@@ -568,6 +605,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Remote transport | TLS 1.3, X25519MLKEM768, pinned application server identity |
 | Remote account authentication | Pinned RFC 9807 OPAQUE application profile |
 | Direct LAN discovery / enrollment / transport | Specified in 0013 (Accepted): DNS-SD only during explicit windows (`_qvault._tcp`, random instance), one-use QR/manual codes with transcript-bound VK proofs (0014; no stored links), X-Wing draft-11 + HKDF-SHA-512 + MAC/1 handshake, XChaCha20-Poly1305 counter-nonce records over TCP. X-Wing is `libcrux-kem` 0.0.10 (Cryspen; its draft-06 API matches the draft-11 vectors byte for byte); framing and records in qv-protocol/qv-crypto (roadmap 2.8); pairing and sessions over `std::net` TCP and endpoint addresses from `std` route probes, with no new dependency (2.9–2.10); DNS-SD discovery deferred (owner decision 2026-11-03); QR rendering/scanning in 2.10b |
+| LAN password authentication (0047 implemented; release gates open) | Pinned opaque-ke 4.0.1, defaults off, ristretto255 + Argon2; isolated compatibility aliases argon2 0.5.3 and sha2 0.10.9 in qv-crypto. Checked OS-RNG adapters, protected one-shot states and the explicit-KDF suite pass component tests. Host/Android component builds are recorded. Advisory reachability is documented; exact-version vet development exemptions are unaudited debt, with genuine review still required before release. Runtime lan/2 uses ephemeral registration/authentication and explicit final-key epochs; no stored verifier or vault/archive migration. Exact evidence: [0047 dependency review](plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md). |
 | LAN QR graphics / decoding | qrcodegen-no-heap 1.8.1 (caller-owned protected scratch) and quircs 0.10.3 (bounded grayscale/binary adapter); shared SVG display; native Android Camera2/ImageReader, no image files or Play Services; exact dependency audit debt in plan 0039 |
 | Linux OS adapters | Optional logind lifecycle monitoring via zbus 6.2.0 over the fixed system-bus Unix socket; existing rustix file locks/configuration probes; shared maintained X11 clipboard; quick unlock unavailable |
 | CLI / license | clap (builder API), rustix termios/poll for bounded no-echo prompts, signal-hook atomic flags for cancellation, own escaping and JSON writer, shared qv-platform X11 adapter over published x11rb 0.13.2 with QuickVault's bounded transport and framing budgets; `zxcvbn` (in `qv-core`) for typed master passwords / AGPL-3.0-or-later |

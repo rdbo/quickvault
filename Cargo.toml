@@ -22,6 +22,11 @@ hkdf = "=0.13.0"
 libcrux-kem = { version = "=0.0.10", default-features = false, features = ["std"] }
 hmac = { version = "=0.13.0", features = ["zeroize"] }
 proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
+# LAN ephemeral authentication, purpose-isolated compatibility dependencies.
+# opaque-ke re-exports its rand/generic-array API; no production RNG added.
+opaque-ke = { version = "=4.0.1", default-features = false, features = ["ristretto255", "argon2"] }
+argon2-opaque = { package = "argon2", version = "=0.5.3", default-features = false, features = ["alloc", "zeroize"] }
+sha2-opaque = { package = "sha2", version = "=0.10.9", default-features = false }
 qv-core = { path = "crates/qv-core", version = "=0.0.0" }
 qv-crypto = { path = "crates/qv-crypto", version = "=0.0.0" }
 qv-encoding = { path = "crates/qv-encoding", version = "=0.0.0" }
@@ -31,7 +36,7 @@ qv-platform = { path = "crates/qv-platform", version = "=0.0.0" }
 qv-protocol = { path = "crates/qv-protocol", version = "=0.0.0" }
 qv-sync = { path = "crates/qv-sync", version = "=0.0.0" }
 region = "=4.0.1"
-rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled", "hooks", "limits"] }
+rusqlite = { version = "=0.41.0", default-features = false, features = ["bundled", "hooks", "limits"] }
 rustix = { version = "=1.1.5", default-features = false, features = ["std", "process"] }
 sha1 = { version = "=0.11.0", default-features = false, features = ["zeroize"] }
 signal-hook = { version = "=0.4.5", default-features = false }

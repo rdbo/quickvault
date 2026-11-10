@@ -58,6 +58,65 @@ fn receipt_count(u: &vault::UnlockedVault) -> usize {
     .len()
 }
 
+// 0012 §1: Budget inconsistency
+#[test]
+fn acceptance_rejects_a_full_clock_without_room_for_its_local_resolving_writer() {
+    let (d, a, r, ra, private) = (
+        TestDir::new(),
+        TestDir::new(),
+        TestDir::new(),
+        TestDir::new(),
+        TestDir::new(),
+    );
+    let mut u = local(&d, &a);
+    let mut peer = local(&r, &ra);
+    peer.adopt_baseline().unwrap();
+    let id = RecordId::generate().unwrap();
+    let mut components = std::collections::BTreeMap::new();
+    while components.len() < qv_model::MAX_WRITERS - 1 {
+        let writer = qv_model::WriterId::generate().unwrap();
+        if writer != u.writer_id() && writer != peer.writer_id() {
+            components.insert(writer, 1);
+        }
+    }
+    let foreign = Clock::from_pairs(components.into_iter().collect()).unwrap();
+    let root = peer.manifest().root_group_id();
+    let mut write = peer.write().unwrap();
+    let counter = write.reserve_counter().unwrap();
+    write
+        .put_local(
+            id,
+            entry_version(root, "full clock", write.writer_id(), counter, &[foreign]),
+        )
+        .unwrap();
+    write.commit().unwrap();
+    let source = d.join("full-clock.qvsnap");
+    export(&mut peer, &source);
+    let mut input = incoming(&u, &source, &private);
+    let bytes = std::fs::read(d.join("v.qvault")).unwrap();
+    let manifest = u.manifest().clone();
+    let seq = u.local_seq();
+    let anchors: Vec<_> = std::fs::read_dir(u.anchors.path())
+        .unwrap()
+        .map(|e| {
+            let path = e.unwrap().path();
+            (path.clone(), std::fs::read(path).unwrap())
+        })
+        .collect();
+    assert_eq!(
+        u.accept_incoming(&mut input, &mut proposed, &|| false),
+        Err(StoreError::LimitExceeded)
+    );
+    assert_eq!(u.local_seq(), seq);
+    assert_eq!(u.manifest(), &manifest);
+    assert_eq!(std::fs::read(d.join("v.qvault")).unwrap(), bytes);
+    for (path, before) in anchors {
+        assert_eq!(std::fs::read(path).unwrap(), before);
+    }
+    assert_eq!(receipt_count(&u), 0);
+    assert!(u.manifest().record(id).is_none());
+}
+
 // 0012 §1: Hostile files from sync folders
 #[test]
 fn acceptance_atomic_receipts_redelivery_restart_and_changed_filename() {
@@ -214,7 +273,11 @@ fn acceptance_crash_matrix_data_receipt_head_anchor_are_one_commit() {
         );
         assert_eq!(
             u.accept_incoming(&mut input, &mut proposed, &|| false),
-            Err(StoreError::Internal),
+            Err(if committed {
+                StoreError::CommittedAnchorPending
+            } else {
+                StoreError::Internal
+            }),
             "{point:?}"
         );
         assert!(!disarm(), "{point:?}");

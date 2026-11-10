@@ -22,6 +22,7 @@ signal-hook.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+qv-core = { workspace = true, features = ["test-kdf-limit", "test-eager-views"] }
 x11rb.workspace = true
 proptest.workspace = true
 rustix = { workspace = true, features = ["termios", "stdio", "pty", "fs", "event", "pipe"] }

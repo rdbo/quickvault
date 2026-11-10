@@ -288,6 +288,7 @@ impl UnlockedVault {
         }
 
         // The replacement file under a reserved, never-published name.
+        manifest.check_resolvable(self.state.writer)?;
         let suffix = qv_crypto::random_array::<16>().map_err(|_| StoreError::Rng)?;
         let final_path = crate::rotation_guard::sibling(
             self.file.path(),

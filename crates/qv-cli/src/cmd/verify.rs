@@ -26,6 +26,7 @@ fn anchor_label(a: AnchorStatus) -> &'static str {
         AnchorStatus::Advanced => "advanced",
         AnchorStatus::Missing => "missing",
         AnchorStatus::Mismatch => "mismatch",
+        AnchorStatus::Damaged => "damaged",
         _ => "unknown",
     }
 }

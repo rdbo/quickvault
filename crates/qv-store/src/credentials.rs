@@ -189,7 +189,17 @@ fn credentials_crash_every_slot_transaction_and_anchor_boundary() {
         let (path, anchors) = copy_fixture(&d, &a, "v.qvault");
         let mut u = unlock(&path, &anchors, PASSWORD).unwrap();
         arm(point, &path, anchors.path(), snap.path());
-        assert_eq!(replace(&mut u, NEW), Err(StoreError::Internal), "{point:?}");
+        assert_eq!(
+            replace(&mut u, NEW),
+            Err(
+                if matches!(point, Committed | AnchorTempWritten | AnchorReplaced) {
+                    StoreError::CommittedAnchorPending
+                } else {
+                    StoreError::Internal
+                }
+            ),
+            "{point:?}"
+        );
         assert!(!disarm());
         drop(u);
         let durable = matches!(point, Committed | AnchorTempWritten | AnchorReplaced);
@@ -246,4 +256,152 @@ fn credentials_mismatched_or_unstaged_encrypted_descriptor_is_refused() {
         assert_eq!(w.commit(), Err(StoreError::InvalidEdit));
         assert!(u.recovery_phrase(&pw(PASSWORD)).is_ok());
     }
+}
+
+// 0012 §1: Mixed credentials
+// 0012 §1: Exchange-file password guessing
+#[test]
+fn credentials_extensions_stay_encrypted_across_adoption_restore_backup_and_lan() {
+    let (d, a) = (TestDir::new(), TestDir::new());
+    let (path, anchors) = copy_fixture(&d, &a, "v.qvault");
+    let mut u = unlock(&path, &anchors, PASSWORD).unwrap();
+    let id = u.manifest().keyslot_id();
+    let head = u.manifest().record(id).unwrap().heads()[0].version_id();
+    let mut previous = u.read_version(id, head).unwrap();
+    let mut w = u.write().unwrap();
+    let mut descriptor = {
+        let _k = kdf();
+        w.stage_password(&pw(NEW), PasswordKdfProfile::V1, PasswordWrapProfile::V1)
+            .unwrap()
+    };
+    let encoded = descriptor.encode().unwrap();
+    let mut decoder = qv_encoding::Decoder::new(&encoded).unwrap();
+    let count = decoder.map().unwrap();
+    let mut encoder = qv_encoding::Encoder::new();
+    encoder
+        .map(|map| {
+            for _ in 0..count {
+                let key = decoder.int().unwrap();
+                let value = decoder.raw_value().unwrap();
+                map.raw_entry(key, &value)?;
+            }
+            map.entry(99, |e| {
+                e.text("secret");
+                Ok(())
+            })
+        })
+        .unwrap();
+    decoder.finish().unwrap();
+    descriptor = qv_model::Keyslot::decode(&encoder.finish().unwrap()).unwrap();
+    let counter = w.reserve_counter().unwrap();
+    previous.clock = Clock::for_edit(w.head_clocks(id).iter(), w.writer_id(), counter).unwrap();
+    previous.version_id = VersionId::generate().unwrap();
+    previous.body = RecordBody::Live(Payload::PasswordKeyslot(descriptor));
+    w.put_local(id, previous).unwrap();
+    w.commit().unwrap();
+    assert!(u.file.slots[0].keyslot.ext.is_empty());
+    let head = u.manifest().record(id).unwrap().heads()[0].version_id();
+    let RecordBody::Live(Payload::PasswordKeyslot(encrypted)) =
+        u.read_version(id, head).unwrap().body
+    else {
+        panic!("keyslot");
+    };
+    assert_eq!(encrypted.ext.len(), 1);
+    let public = encrypted.encode_public_descriptor().unwrap();
+    assert_eq!(u.file.slots[0].body.as_slice(), public.as_slice());
+
+    for backup in [false, true] {
+        let mut bytes = Vec::new();
+        u.write_export_archive(&mut bytes, Timestamp(1), backup, &|| false)
+            .unwrap();
+        let scope = crate::ArchiveScope::new(u.header().vault_id, u.header().key_generation);
+        let opened = crate::archive::read_archive(
+            &mut std::io::Cursor::new(&bytes),
+            scope,
+            u.vault_key(),
+            &mut |_| Ok(()),
+            &|| false,
+        )
+        .unwrap();
+        assert_eq!(
+            opened.header().password_slot.as_deref().map(Vec::as_slice),
+            backup.then_some(public.as_slice())
+        );
+        let destination = d.join(if backup {
+            "backup.qvault"
+        } else {
+            "restore.qvault"
+        });
+        VaultFile::create_from_archive(
+            &destination,
+            &mut std::io::Cursor::new(bytes),
+            scope,
+            u.vault_key(),
+            &anchors,
+            &|| false,
+        )
+        .unwrap();
+        let restored = unlock(&destination, &anchors, NEW).unwrap();
+        assert_eq!(restored.file.slots[0].body.as_slice(), public.as_slice());
+        let RecordBody::Live(Payload::PasswordKeyslot(record)) =
+            restored.read_version(id, head).unwrap().body
+        else {
+            panic!("restored keyslot");
+        };
+        assert_eq!(record.ext.len(), 1);
+    }
+
+    let private = d.subdir("lan-private", 0o700);
+    let state = u.lan_serve_state().unwrap();
+    let mut staging = crate::LanStaging::begin(
+        &private,
+        u.vault_key(),
+        u.header().vault_id,
+        u.header().key_generation,
+        state.manifest_hash(),
+        state.envelope(),
+        &|| false,
+    )
+    .unwrap();
+    for object in staging.requested() {
+        staging
+            .add_object(&u.lan_object_envelope(&state, object).unwrap())
+            .unwrap();
+    }
+    let mut verified = staging.finish(u.vault_key(), &|| false).unwrap();
+    let proof = verified.verify_enrollment(u.vault_key(), None).unwrap();
+    let phrase = qv_crypto::RecoveryPhrase::from_vault_key(u.vault_key()).unwrap();
+    let vk = qv_crypto::VaultKey::from_recovery_phrase(phrase.expose_secret().as_bytes()).unwrap();
+    let joined_path = d.join("joined.qvault");
+    let joined =
+        VaultFile::create_from_verified_lan(&joined_path, verified, proof, vk, &anchors, &|| false)
+            .unwrap();
+    let RecordBody::Live(Payload::PasswordKeyslot(staged)) =
+        joined.read_version(id, head).unwrap().body
+    else {
+        panic!("staged keyslot")
+    };
+    assert_eq!(staged.ext.len(), 1);
+    assert_eq!(joined.file.slots[0].body.as_slice(), public.as_slice());
+}
+
+// 0012 §1: Whole-file rollback
+#[test]
+fn credentials_authenticated_identical_copy_and_move_open_before_runtime_tracking() {
+    let (d, a) = (TestDir::new(), TestDir::new());
+    let (path, anchors) = copy_fixture(&d, &a, "v.qvault");
+    let u = unlock(&path, &anchors, PASSWORD).unwrap();
+    let header = *u.header();
+    drop(u);
+    let copy = d.join("copy.qvault");
+    std::fs::copy(&path, &copy).unwrap();
+    let opened = unlock(&copy, &anchors, PASSWORD).unwrap();
+    assert_eq!(*opened.header(), header);
+    opened.verify_all(&|| false).unwrap();
+    drop(opened);
+    let moved = d.join("moved.qvault");
+    std::fs::rename(&copy, &moved).unwrap();
+    let opened = unlock(&moved, &anchors, PASSWORD).unwrap();
+    assert_eq!(*opened.header(), header);
+    opened.verify_all(&|| false).unwrap();
 }

@@ -3,14 +3,12 @@
 //! Stable hostile archive input, with no accepted-state mutation (0005 §4).
 
 use std::{
-    fs::File,
     io::{Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
 use qv_crypto::{ObjectHashProfile, ObjectHasher, RecordId, SecretArray, VaultKey, purpose};
 use qv_model::{ObjectId, RecordVersion, VersionId};
-use rustix::fs::FileType;
 
 use crate::{
     ArchiveHeader, ArchiveScope, Manifest, ObjectEnvelope, OpenedArchive, StoreError,
@@ -32,7 +30,7 @@ pub struct VerifiedIncoming {
 /// A complete authenticated archive in a private unlinked file: the shared
 /// reader of archive imports and LAN staging (0005 §4, 0013 §7).
 pub(crate) struct StagedArchive {
-    pub(crate) file: File,
+    pub(crate) file: fs::ArchiveFile,
     pub(crate) opened: OpenedArchive,
 }
 
@@ -124,16 +122,11 @@ impl VerifiedIncoming {
         }
         fs::check_private_dir(private_dir)?;
         let path = crate::incoming_path::normalize(source)?;
-        let fd = crate::incoming_path::open_source(&path)?;
-        let stat = rustix::fs::fstat(&fd).map_err(crate::error::errno_err)?;
-        if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
-            return Err(StoreError::UnsafeFile);
-        }
-        let size = u64::try_from(stat.st_size).map_err(|_| StoreError::Integrity)?;
+        let mut input = crate::incoming_path::open_source(&path)?;
+        let size = input.metadata().map_err(crate::error::io_err)?.len();
         if size > crate::MAX_DB_BYTES {
             return Err(StoreError::LimitExceeded);
         }
-        let mut input = File::from(fd);
         let (locked, name) = fs::create_temp(&private_dir.join("incoming.qvsnap"))?;
         // Unlink before any copy: success/failure/cancellation leaves no name.
         // A crash between creation and unlink can leave an empty file; no
@@ -142,7 +135,7 @@ impl VerifiedIncoming {
             fs::remove_best_effort(&name);
             return Err(StoreError::Io);
         }
-        let mut file = locked.into_file();
+        let mut file = locked.into_archive_file();
         let mut buffer = SecretArray::<65536>::zeroed();
         let mut total = 0u64;
         let mut hash = ObjectHasher::new(ObjectHashProfile::V1);
@@ -152,7 +145,7 @@ impl VerifiedIncoming {
             }
             let n = match input.read(buffer.expose_secret_mut()) {
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                r => r.map_err(|_| StoreError::Io)?,
+                r => r.map_err(crate::error::io_err)?,
             };
             if n == 0 {
                 break;
@@ -163,9 +156,10 @@ impl VerifiedIncoming {
                 .ok_or(StoreError::LimitExceeded)?;
             let bytes = &buffer.expose_secret()[..n];
             hash.update(bytes);
-            file.write_all(bytes).map_err(|_| StoreError::Io)?;
+            file.write_all(bytes).map_err(crate::error::io_err)?;
         }
-        file.seek(SeekFrom::Start(0)).map_err(|_| StoreError::Io)?;
+        file.seek(SeekFrom::Start(0))
+            .map_err(crate::error::io_err)?;
         let opened = read_archive(&mut file, scope, vk, &mut |_| Ok(()), cancelled)?;
         Ok(Self {
             archive: StagedArchive { file, opened },
@@ -395,7 +389,7 @@ mod tests {
             .unwrap_err(),
             StoreError::Io
         );
-        File::options()
+        std::fs::File::options()
             .write(true)
             .open(&source)
             .unwrap()

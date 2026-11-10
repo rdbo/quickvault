@@ -242,6 +242,7 @@ pub(crate) mod tests {
                 icon: None,
                 order: Text::new("a").unwrap(),
                 deleted_at: None,
+                delete_operation: None,
                 ext: qv_model::Extensions::new(),
             })),
             ext: qv_model::Extensions::new(),
@@ -447,6 +448,7 @@ pub(crate) mod tests {
             created_at: Timestamp(1),
             modified_at: Timestamp(1),
             deleted_at: None,
+            delete_operation: None,
             ext: qv_model::Extensions::new(),
         }));
         v

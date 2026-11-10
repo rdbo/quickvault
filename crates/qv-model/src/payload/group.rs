@@ -10,6 +10,7 @@
 //! | 3 | icon | text | optional |
 //! | 4 | order | text (fractional index) | required |
 //! | 5 | deleted_at | int (ms) | optional: soft delete |
+//! | 6 | delete_operation | bstr 16 UUIDv4 | optional, only with deleted_at |
 //!
 //! A non-root group with a `null`, missing, deleted or cyclic parent is
 //! repaired for display by the tree projection (0003 §4.1), never here.
@@ -39,6 +40,8 @@ pub struct Group {
     pub order: Text,
     /// Set when the group is in trash (0007 §2.1).
     pub deleted_at: Option<Timestamp>,
+    /// The explicit deletion operation; never inferred from time.
+    pub delete_operation: Option<crate::DeleteOperationId>,
     /// Unknown keys.
     pub ext: Extensions,
 }
@@ -48,6 +51,7 @@ crate::redacted_debug!(Group);
 pub(crate) fn decode(d: &mut Decoder<'_>) -> Result<Group, ModelError> {
     let (mut parent, mut name, mut notes, mut icon, mut order, mut deleted_at) =
         (None, None, None, None, None, None);
+    let mut delete_operation = None;
     let mut ext = Extensions::new();
     for _ in 0..read_map_len(d)? {
         match d.int()? {
@@ -63,6 +67,7 @@ pub(crate) fn decode(d: &mut Decoder<'_>) -> Result<Group, ModelError> {
             3 => icon = Some(read_text(d)?),
             4 => order = Some(read_text(d)?),
             5 => deleted_at = Some(read_time(d)?),
+            6 => delete_operation = Some(read_id(d)?),
             k => keep(&mut ext, k, d)?,
         }
     }
@@ -73,6 +78,7 @@ pub(crate) fn decode(d: &mut Decoder<'_>) -> Result<Group, ModelError> {
         icon,
         order: req(order)?,
         deleted_at,
+        delete_operation,
         ext,
     })
 }
@@ -91,6 +97,9 @@ pub(crate) fn encode(p: &Group, e: &mut Encoder) -> Result<(), EncodeError> {
         put_opt_text(m, 3, p.icon.as_ref())?;
         put_text(m, 4, &p.order)?;
         put_opt_time(m, 5, p.deleted_at)?;
+        if let Some(id) = p.delete_operation {
+            put_id(m, 6, &id)?;
+        }
         put_ext(m, &p.ext)
     })
 }

@@ -72,6 +72,8 @@ mod ids;
 mod kat;
 mod keys;
 pub mod lan;
+pub mod lan_auth;
+mod lan_auth_engine;
 mod memory;
 mod otp;
 mod password;

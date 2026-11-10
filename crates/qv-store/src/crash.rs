@@ -41,6 +41,8 @@ pub(crate) enum CrashPoint {
     /// `create`: the first anchor is written; the vault is not yet renamed
     /// into place.
     CreateAnchored,
+    /// LAN creation: destination renamed, before directory durability completes.
+    LanPublished,
     /// `publish`: the temp archive is written and re-verified with the
     /// archive reader; it is neither synced nor renamed yet.
     ArchiveVerified,

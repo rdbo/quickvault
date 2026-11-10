@@ -146,7 +146,7 @@ pub(crate) fn recover(ctx: &Ctx, args: &ArgMatches) -> Result<(), CliError> {
     }
     let new = crate::cmd::init::choose_password(&tty)?;
     let recovery = if s.is_read_only()? {
-        tty.say("The vault's external anchor is missing or mismatched. Accepting this verified file establishes a new local recovery baseline and does not prove it is the latest global state.\n")?;
+        tty.say("The vault's external rollback record is missing, mismatched or damaged. The vault has been authenticated for read-only inspection. Accepting this file establishes a new local recovery baseline and does not prove it is the latest global state. Preserve the original files before proceeding.\n")?;
         if !tty.confirm("Accept this file as the new local recovery baseline?")? {
             return Err(CliError::new(
                 OTHER,

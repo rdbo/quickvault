@@ -400,7 +400,10 @@ fn rotation_replacement_retries_a_pending_anchor_and_refuses_changed_heads() {
     let (path, anchors) = copy_fixture(&d, &a, "v.qvault");
     let mut u = unlock(&path, &anchors, PASSWORD).unwrap();
     test::arm(CrashPoint::Committed, &path, anchors.path(), copied.path());
-    assert_eq!(u.write().unwrap().commit(), Err(StoreError::Internal));
+    assert_eq!(
+        u.write().unwrap().commit(),
+        Err(StoreError::CommittedAnchorPending)
+    );
     assert!(!test::disarm());
     let stale = files(anchors.path());
     let p = prepare(u).unwrap();

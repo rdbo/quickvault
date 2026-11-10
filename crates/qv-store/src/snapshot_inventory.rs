@@ -443,12 +443,12 @@ mod platform {
             let target = self
                 .path()
                 .join(file_name(inventory.vault_id, inventory.generation));
+            fs::remove_stale_temps(&target)?;
             let (locked, temp) = fs::create_temp(&target)?;
+            let mut file = locked.into_archive_file();
             let written = (|| {
-                let mut file = locked.into_file();
-                file.write_all(&bytes).map_err(|_| StoreError::Io)?;
+                file.write_all(&bytes).map_err(crate::error::io_err)?;
                 rustix::fs::fsync(&file).map_err(crate::error::errno_err)?;
-                drop(file);
                 if read_bounded(&temp)? != bytes {
                     return Err(StoreError::Integrity);
                 }
@@ -501,11 +501,11 @@ mod platform {
                 return Err(StoreError::NotFound);
             }
             let entries = self.entries()?;
-            let entry = find(&entries, row).ok_or(StoreError::NotFound)?;
-            if !self.matches(entry, row, cancelled)? {
+            let entry = self.lease_entry(find(&entries, row).ok_or(StoreError::NotFound)?)?;
+            if !self.matches(&entry, row, cancelled)? {
                 return Err(StoreError::Integrity);
             }
-            self.remove(entry)
+            self.remove(&entry)
         }
 
         /// Removes one generation's inventory file (1.15c: after completion
@@ -538,7 +538,7 @@ mod platform {
                     Ok(0) => break,
                     Ok(n) => n,
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(_) => return Err(StoreError::Io),
+                    Err(e) => return Err(crate::error::io_err(e)),
                 };
                 hasher.update(buf.get(..n).ok_or(StoreError::Internal)?);
                 size = size
@@ -570,14 +570,15 @@ mod platform {
     /// [`MAX_INVENTORY_BYTES`], checking its size before reading.
     fn read_bounded(path: &std::path::Path) -> Result<Vec<u8>, StoreError> {
         let file = fs::open_private_ro(path)?;
-        let len = file.metadata().map_err(|_| StoreError::Io)?.len();
+        let len = file.metadata().map_err(crate::error::io_err)?.len();
         if len > MAX_INVENTORY_BYTES as u64 {
             return Err(StoreError::LimitExceeded);
         }
-        let mut bytes = Vec::with_capacity(usize::try_from(len).map_err(|_| StoreError::Io)?);
+        let mut bytes =
+            Vec::with_capacity(usize::try_from(len).map_err(|_| StoreError::LimitExceeded)?);
         file.take(MAX_INVENTORY_BYTES as u64 + 1)
             .read_to_end(&mut bytes)
-            .map_err(|_| StoreError::Io)?;
+            .map_err(crate::error::io_err)?;
         if bytes.len() > MAX_INVENTORY_BYTES {
             return Err(StoreError::LimitExceeded);
         }

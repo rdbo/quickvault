@@ -1,0 +1,2 @@
+P3: round 1 of 1 written
+P3: generated 1106440192 bytes in 9.6 s; VerifyCounts { objects: 15943, records: 103, active_heads: 103, retained_versions: 0, tombstones: 0, suppressed_records: 0, total_bytes: 1071077760 }

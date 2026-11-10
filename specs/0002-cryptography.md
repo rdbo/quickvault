@@ -28,7 +28,9 @@ not migrate record encryption, signatures or TLS.
 | stored-data / 1 | XChaCha20-Poly1305, 32-byte keys, random 24-byte nonce, 16-byte tag |
 | password-wrap / 1 | XChaCha20-Poly1305 with password KEK plus a 32-byte KEK commitment (§3.2) |
 | derivation / 1 | HKDF-SHA-512; canonical domain/context encoding (§3) |
-| lan / 1 | X-Wing draft-11, HKDF-SHA-512, MAC/1, XChaCha20-Poly1305 with per-direction counter nonces, SHA-256 transcripts (0013) |
+| lan / 1 | Historical; retired for new connections by §9/0013 §15 |
+| lan / 2 | X-Wing draft-11, credential-composed HKDF-SHA-512, MAC/1, epoch-bound XChaCha20-Poly1305 counter records and SHA-256 transcripts (0013 §15) |
+| lan-pake / 1 | Ephemeral OPAQUE-3DH, ristretto255, SHA-512 and fixed Argon2id stretching (§9, 0013 §15.1) |
 | MAC / 1 | HMAC-SHA-512 truncated to its first 32 bytes (not HMAC-SHA-512/256) |
 | object-hash / 1 | SHA-256 for immutable-object hashes and checkpoint IDs |
 | signature / 1 | Ed25519 (RFC 8032, strict verification) plus ML-DSA-65 (FIPS 204, pure, empty context); both verify the identical canonical transcript |
@@ -289,6 +291,24 @@ failures are integrity errors and must not be mislabeled as a password typo.
 With the commitment, the distinction reveals nothing about other passwords. See
 0004 and 0008.
 
+### 9. Ephemeral LAN credential authentication (0047)
+
+9.1. `lan/2` replaces `lan/1` for new connections. `lan-pake/1` is a
+separate immutable purpose namespace: OPAQUE-3DH with ristretto255, SHA-512,
+and explicit Argon2id v1.3 at 262144 KiB/t3/p4 with 64-byte output and zero
+salt16 over the fresh OPRF output. Exact contexts, identities, serialization,
+labels and key schedules are normative in 0013 §15. No peer selects KDF work.
+The old `lan-proof` purpose remains historical and is not used by lan/2;
+independent session-bound MAC and schedule derivations replace it.
+
+9.2. Password enrollment requires the password on both devices, fresh local
+registration on the offering device, authenticated final keys and B's slot
+verification before bulk. Recovery words/existing unlocked copies authenticate
+by independent VK possession, with no VK transfer. Persist no registration,
+server setup, credential epoch, verifier or password-engine state. Existing
+storage and archive profiles are unchanged. Outer X-Wing remains hybrid; the
+password engine is a documented classical exception, not a PQ PAKE.
+
 ## Security Considerations
 
 Neither strong primitives nor MACs establish freshness. Historical copies and
@@ -302,6 +322,8 @@ password guessing and device compromise are separate from vault encryption.
    mechanisms rather than relying on an unverified portability assumption.
 
 ## Changelog
+
+- 2026-11-09: Add owner-approved lan/2 and ephemeral lan-pake/1; retain storage profiles.
 
 - 2026-11-07: §5.4: quick-unlock policy state may survive app restarts when
   bound to the current boot; failed attempts are lockouts and failed unwraps,

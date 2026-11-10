@@ -125,6 +125,7 @@ impl Core {
             })?;
             match status {
                 AnchorStatus::Missing => return Err(StoreError::NoAnchor.into()),
+                AnchorStatus::Damaged => return Err(StoreError::DamagedAnchor.into()),
                 AnchorStatus::Mismatch => return Err(StoreError::Rollback.into()),
                 _ => {}
             }
@@ -158,6 +159,13 @@ fn same_vault(path: &Path, binding: QuickBinding) -> bool {
         let h = f.header();
         h.vault_id.0 == binding.vault && h.key_generation.0 == binding.generation
     })
+}
+
+/// Synthetic backend reuse for the large-vault lifecycle fixture. It copies
+/// protected data and provides no evidence about real biometric hardware.
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) fn synthetic_services() -> Arc<dyn qv_platform::PlatformServices> {
+    tests::services()
 }
 
 #[cfg(test)]
@@ -229,6 +237,10 @@ mod tests {
         fn keystore(&self) -> &dyn Keystore {
             &self.0
         }
+    }
+    #[cfg(target_os = "linux")]
+    pub(super) fn services() -> Arc<dyn PlatformServices> {
+        Arc::new(Platform(AndroidKeystore::new(Arc::new(Native))))
     }
     // 0012 §1: Hardware assumptions
     #[test]

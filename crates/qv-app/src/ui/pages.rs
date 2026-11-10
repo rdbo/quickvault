@@ -322,7 +322,8 @@ pub(crate) fn LanPanel(
         return receipt(&controller, epoch, v.kind, done, v.closes_in, expanded);
     }
     let title = match v.kind {
-        LanKind::Window => "Scan or type this code on the other device",
+        LanKind::Window if v.code.is_some() => "Scan or type this code on the other device",
+        LanKind::Window => "Connecting with another device",
         LanKind::Sync => "Syncing with another device",
         LanKind::Join => "Joining from another device",
     };
@@ -330,9 +331,10 @@ pub(crate) fn LanPanel(
         .code
         .as_ref()
         .map(|c| Zeroizing::new(String::from_utf8_lossy(c.expose_secret()).into_owned()));
+    let question_id = v.question_id;
     let answer = |yes: bool| {
         let c = controller.clone();
-        move |_| c.lan_answer(epoch, yes)
+        move |_| c.lan_answer(epoch, question_id, yes)
     };
     let cancel = {
         let c = controller.clone();
@@ -342,7 +344,7 @@ pub(crate) fn LanPanel(
         let c = controller.clone();
         move |event: FormEvent| {
             let mut value = event.value();
-            c.lan_secret(epoch, &mut value);
+            c.lan_secret(epoch, question_id, &mut value);
         }
     };
     rsx! {
@@ -402,16 +404,47 @@ pub(crate) fn LanPanel(
                             }
                         }
                     },
-                    Some(Question::Password { retry }) => rsx! {
+                    Some(Question::ChooseCredential) => rsx! {
+                        div { role: "alertdialog", "aria-label": "Choose vault credential",
+                            p { "Authenticate with the vault’s password or recovery words." }
+                            div { class: "actions",
+                                button { class: "btn subtle", onclick: cancel.clone(), "Cancel" }
+                                button { class: "btn subtle", id: "lan-use-phrase", onclick: answer(false), "Recovery words" }
+                                button { class: "btn primary", id: "lan-use-password", onclick: answer(true), "Vault password" }
+                            }
+                        }
+                    },
+                    Some(Question::RecoveryPhrase) => rsx! {
+                        div { role: "alertdialog", "aria-label": "Vault recovery words",
+                            div { class: "field",
+                                label { r#for: "lan-phrase", "Vault recovery words" }
+                                input { id: "lan-phrase", r#type: "password", maxlength: crate::workspace::LINE_MAX, autocomplete: "off", spellcheck: "false", autofocus: true, oninput: typed.clone() }
+                            }
+                            div { class: "actions",
+                                button { class: "btn subtle", onclick: answer(false), "Cancel" }
+                                button { class: "btn primary", "data-qv-clear": "true", id: "lan-phrase-submit", onclick: answer(true), "Authenticate" }
+                            }
+                        }
+                    },
+                    Some(Question::JoinRecoveredVault {vault}) => rsx! {
+                        div { role: "alertdialog", "aria-label": "Join vault",
+                            p { "Join the authenticated vault “{vault}” using the recovery words?" }
+                            div { class: "actions",
+                                button { class: "btn subtle", onclick: answer(false), "Cancel" }
+                                button { class: "btn primary", id: "lan-join-vault", onclick: answer(true), "Join this vault" }
+                            }
+                        }
+                    },
+                    Some(Question::Password { retry, offering }) => rsx! {
                         div { role: "alertdialog", "aria-label": "Master password",
                             if retry { p { class: "banner bad error", "Wrong password. Try again." } }
                             div { class: "field",
-                                label { r#for: "lan-password", "The joined vault's master password" }
+                                label { r#for: "lan-password", if offering { "This vault’s master password" } else { "The vault’s master password" } }
                                 input { id: "lan-password", r#type: "password", maxlength: crate::workspace::LINE_MAX, autocomplete: "off", spellcheck: "false", autofocus: true, oninput: typed }
                             }
                             div { class: "actions",
                                 button { class: "btn subtle", onclick: answer(false), "Cancel" }
-                                button { class: "btn primary", "data-qv-clear": "true", id: "lan-password-submit", onclick: answer(true), "Open the vault" }
+                                button { class: "btn primary", "data-qv-clear": "true", id: "lan-password-submit", onclick: answer(true), "Authenticate" }
                             }
                         }
                     },
@@ -527,9 +560,12 @@ fn receipt(
             e.stop_propagation();
             // One conflicted record opens its comparison directly.
             let only = c
-                .read(epoch, views::conflicts)
+                .read(epoch, |s| {
+                    let rows = s.conflict_records()?;
+                    Ok::<_, qv_core::CoreError>((rows.len() == 1).then(|| rows[0].handle.id_hex()))
+                })
                 .and_then(Result::ok)
-                .and_then(|rows| (rows.len() == 1).then(|| rows[0].record.clone()));
+                .flatten();
             c.navigate(
                 epoch,
                 only.map_or(Screen::Conflicts, Screen::ConflictRecord),
@@ -689,18 +725,30 @@ pub(crate) fn FilePicker(
 #[component]
 fn Trash(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
     let _ = revision;
-    let view = match controller.read(epoch, views::trash) {
+    let (owner, read) = super::use_page(
+        &controller,
+        epoch,
+        crate::page_read::Lane::Main,
+        2,
+        crate::page_read::Spec::Trash,
+    );
+    let page = read.as_ref().and_then(|r| r.page.clone());
+    let items = match page.as_deref().map(|p| &p.rows) {
+        Some(crate::page_read::Rows::Trash(rows)) => rows.as_slice(),
+        _ => &[],
+    };
+    let expiry = match controller.read(epoch, qv_core::Session::expiry_summary) {
         Some(Ok(v)) => v,
         other => return rsx! { Unreadable { error: other.and_then(Result::err) } },
     };
     rsx! {
         Head { controller: controller.clone(), epoch, title: "Trash", lead: "Items stay here until you delete them for good. A snapshot is taken first, so they can still be restored from Snapshots." }
-        if view.clock_anomaly { div { class: "banner", Svg { icon: Icon::Warn } span { "Vault dates are ahead of this device's clock; check it before deleting anything." } } }
-        if view.items.is_empty() {
+        if expiry.clock_anomaly { div { class: "banner", Svg { icon: Icon::Warn } span { "Vault dates are ahead of this device's clock; check it before deleting anything." } } }
+        if items.is_empty() && page.is_some() {
             div { class: "empty empty-tall", div { div { class: "big", Svg { icon: Icon::Trash } } span { class: "muted", "The trash is empty." } } }
         } else {
             div { class: "card",
-                for t in view.items.iter().cloned() {
+                for t in items.iter().cloned() {
                     div { class: "dev",
                         span { class: "tile {id_hue(&t.item.id_hex())}", "{initial(&t.name)}" }
                         div { class: "l", b { class: "row-title", "{t.name.as_str()}" } span { "{t.deleted.clone().unwrap_or_else(|| \"Deleted by a concurrent version\".into())}" if t.conflict { " · conflict" } } }
@@ -709,23 +757,32 @@ fn Trash(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
                 }
             }
             div { class: "actions start",
-                if view.expired > 0 { button { class: "btn", onclick: act(&controller, epoch, WsAction::PurgeExpired), "Delete {view.expired} expired" } }
+                if expiry.expired > 0 { button { class: "btn", onclick: act(&controller, epoch, WsAction::PurgeExpired), "Delete {expiry.expired} expired" } }
                 button { class: "btn", id: "empty-trash", class: "danger-text", onclick: act(&controller, epoch, WsAction::EmptyTrash), Svg { icon: Icon::Trash } "Empty trash…" }
             }
         }
+        if let (Some(owner), Some(read)) = (owner, read) { super::PageNav { controller: controller.clone(), epoch, owner, read } }
     }
 }
 
 #[component]
 fn Conflicts(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
     let _ = revision;
-    let rows = match controller.read(epoch, views::conflicts) {
-        Some(Ok(v)) => v,
-        other => return rsx! { Unreadable { error: other.and_then(Result::err) } },
+    let (owner, read) = super::use_page(
+        &controller,
+        epoch,
+        crate::page_read::Lane::Main,
+        2,
+        crate::page_read::Spec::Conflicts,
+    );
+    let page = read.as_ref().and_then(|r| r.page.clone());
+    let rows = match page.as_deref().map(|p| &p.rows) {
+        Some(crate::page_read::Rows::Conflicts(rows)) => rows.as_slice(),
+        _ => &[],
     };
     rsx! {
         Head { controller: controller.clone(), epoch, title: "Conflicts", lead: "Edits made on two devices at once are kept side by side until you choose one complete version." }
-        if rows.is_empty() {
+        if rows.is_empty() && page.is_some() {
             div { class: "empty empty-tall", div { div { class: "big", Svg { icon: Icon::Check } } span { class: "muted", "No conflicts." } } }
         }
         div { class: "card",
@@ -737,6 +794,7 @@ fn Conflicts(controller: Controller, epoch: FormEpoch, revision: u64) -> Element
                 }
             }
         }
+        if let (Some(owner), Some(read)) = (owner, read) { super::PageNav { controller: controller.clone(), epoch, owner, read } }
     }
 }
 
@@ -860,7 +918,7 @@ fn cmp_cell(
             let key = RevealKey::Conflict(record.to_owned(), version, field);
             let shown = controller
                 .revealed(epoch, &key)
-                .map(|v| Zeroizing::new(String::from_utf8_lossy(v.expose_secret()).into_owned()));
+                .map(|v| views::z(&String::from_utf8_lossy(v.expose_secret())));
             rsx! {
                 div { class: "cmp-cell masked", role: "cell",
                     if let Some(s) = &shown { pre { class: "field-value revealed", "{s.as_str()}" } } else { span { class: "masked field-value", "••••••••" } }
@@ -1059,7 +1117,7 @@ fn Settings(controller: Controller, epoch: FormEpoch, revision: u64, pane: Pane)
                 div { class: "group-t", "VAULT" }
                 div { class: "card",
                     if let Some(v) = open_vault.as_ref() {
-                        div { class: "set-row", id: "settings-file", span { class: "si", Svg { icon: Icon::File } } span { class: "l", b { "Vault file" } span { "{v.file} in {v.place}" } } }
+                        div { class: "set-row", id: "settings-file", span { class: "si", Svg { icon: Icon::File } } span { class: "l", b { "Vault file" } span { "{crate::views::z(&v.file).as_str()} in {crate::views::z(&v.place).as_str()}" } } }
                     }
                     button { class: "set-row", id: "settings-switch",
                         onclick: { let c = controller.clone(); move |_| { c.switch_vault(epoch, crate::controller::SwitchTo::Mode(crate::controller::Mode::Unlock)); } },
@@ -1279,40 +1337,55 @@ fn AutofillScreen(controller: Controller, epoch: FormEpoch, revision: u64) -> El
             Head { controller: controller.clone(), epoch, title: "Autofill", lead: "No autofill request is waiting." }
         };
     };
-    let requester = view.requester.clone();
-    let candidates = controller
-        .read(epoch, move |s| s.autofill_candidates(&requester))
-        .and_then(Result::ok)
-        .unwrap_or_default();
+    let (owner, read) = super::use_page(
+        &controller,
+        epoch,
+        crate::page_read::Lane::Main,
+        2,
+        crate::page_read::Spec::Autofill(view.requester.clone()),
+    );
+    let page = read.as_ref().and_then(|r| r.page.clone());
+    let candidates = match page.as_deref().map(|p| &p.rows) {
+        Some(crate::page_read::Rows::Autofill(rows)) => rows.as_slice(),
+        _ => &[],
+    };
     let query = controller
         .peek(epoch, |ws| {
             String::from_utf8_lossy(ws.input(WsField::Query)).into_owned()
         })
         .map(Zeroizing::new)
         .unwrap_or_default();
-    let results = if view.app.is_some() && !query.is_empty() {
-        controller
-            .read(epoch, |s| views::search(s, &query))
-            .and_then(Result::ok)
-            .map(|(_, entries)| entries)
-            .unwrap_or_default()
-    } else {
-        Vec::new()
+    let (link_owner, link_read) = super::use_page(
+        &controller,
+        epoch,
+        crate::page_read::Lane::Kinds,
+        2,
+        crate::page_read::Spec::Search(if view.app.is_some() {
+            query.clone()
+        } else {
+            Zeroizing::new(String::new())
+        }),
+    );
+    let link_page = link_read.as_ref().and_then(|r| r.page.clone());
+    let results = match link_page.as_deref().map(|p| &p.rows) {
+        Some(crate::page_read::Rows::Search { entries, .. }) => entries.as_slice(),
+        _ => &[],
     };
     rsx! {
         Head { controller: controller.clone(), epoch, title: "Fill a login", lead: "Only items linked to this exact verified identity are listed. Titles and app names are never used for matching." }
-        div { class: "banner ok", Svg { icon: Icon::Shield } span { "For: {view.label}" } }
-        if candidates.is_empty() { p { class: "muted", "No entry matches this verified identity." } }
+        div { class: "banner ok", Svg { icon: Icon::Shield } span { "For: {crate::views::z(&view.label).as_str()}" } }
+        if candidates.is_empty() && page.is_some() { p { class: "muted", "No entry matches this verified identity." } }
         div { class: "card",
             for c in candidates {
                 button { class: "set-row", "data-qv-autofill": "candidate", onclick: act(&controller, epoch, WsAction::AutofillFill(c.key())),
-                    span { class: "tile {id_hue(&c.entry().id_hex())}", "{initial(c.title.expose())}" }
-                    span { class: "l", b { "{c.title.expose()}" }
-                        span { if c.conflicted { "Conflicting version · check before filling · " } "{c.username.as_ref().map_or(\"\", |u| u.expose())}" }
+                    span { class: "tile {id_hue(&c.entry().id_hex())}", "{initial(crate::views::z(c.title.expose()).as_str())}" }
+                    span { class: "l", b { "{crate::views::z(c.title.expose()).as_str()}" }
+                        span { if c.conflicted { "Conflicting version · check before filling · " } "{crate::views::z(c.username.as_ref().map_or(\"\", |u| u.expose())).as_str()}" }
                     }
                 }
             }
         }
+        if let (Some(owner), Some(read)) = (owner, read) { super::PageNav { controller: controller.clone(), epoch, owner, read } }
         if let Some((package, signers)) = view.app.clone() {
             details { class: "mt",
                 summary { "Link this app to an item…" }
@@ -1320,7 +1393,7 @@ fn AutofillScreen(controller: Controller, epoch: FormEpoch, revision: u64) -> El
                 p { class: "hint", "Package {package} · signer {signers}…" }
                 Input { controller: controller.clone(), epoch, field: WsField::Query, label: "Find the item to link", kind: Kind::Line, value: Some(query.to_string()), disabled: false }
                 div { class: "card",
-                    for e in results {
+                    for e in results.iter().cloned() {
                         button { class: "set-row", "data-qv-autofill": "link", onclick: act(&controller, epoch, WsAction::AutofillLink(e.handle)),
                             span { class: "l", b { "{e.title.as_str()}" } span { "Link this app" } }
                         }
@@ -1328,6 +1401,7 @@ fn AutofillScreen(controller: Controller, epoch: FormEpoch, revision: u64) -> El
                 }
             }
         }
+        if let (Some(owner), Some(read)) = (link_owner, link_read) { super::PageNav { controller: controller.clone(), epoch, owner, read } }
         div { class: "actions start", button { class: "btn", "data-qv-autofill": "cancel", onclick: act(&controller, epoch, WsAction::AutofillCancel), "Cancel autofill" } }
     }
 }

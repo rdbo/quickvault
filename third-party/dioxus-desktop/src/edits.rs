@@ -40,9 +40,12 @@ use tokio::sync::Notify;
 struct HandshakeStream {
     inner: TcpStream,
     remaining: Option<usize>,
+    prefix: std::io::Cursor<Vec<u8>>,
 }
 impl std::io::Read for HandshakeStream {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = std::io::Read::read(&mut self.prefix, buf)?;
+        if n != 0 { return Ok(n); }
         let max = buf.len().min(self.remaining.unwrap_or(usize::MAX));
         if max == 0 {
             return Err(std::io::ErrorKind::InvalidData.into());
@@ -209,18 +212,19 @@ pub(crate) struct EditWebsocket {
 }
 
 impl EditWebsocket {
-    pub(crate) fn start(hardened: bool) -> Self {
+    pub(crate) fn start(hardened: bool, preview: Option<crate::hardened::Preview>) -> Self {
         let connections = Arc::new(RwLock::new(HashMap::new()));
 
         let notify = Arc::new(Notify::new());
         let (location, server) = start_server();
+        if preview.is_some() { crate::hardened::preview_port(location.port); }
         let current_location = Arc::new(Mutex::new(location));
 
         let connections_ = connections.clone();
         let current_location_ = current_location.clone();
         let notify_ = notify.clone();
         std::thread::spawn(move || {
-            Self::accept_loop(notify_, server, current_location_, connections_, hardened)
+            Self::accept_loop(notify_, server, current_location_, connections_, hardened, preview)
         });
 
         Self {
@@ -241,6 +245,7 @@ impl EditWebsocket {
         current_location: Arc<Mutex<ServerLocation>>,
         connections: Arc<RwLock<HashMap<u32, WebviewConnectionState>>>,
         hardened: bool,
+        preview: Option<crate::hardened::Preview>,
     ) {
         loop {
             // Accept connections until we hit an error
@@ -250,6 +255,7 @@ impl EditWebsocket {
                     current_location.clone(),
                     connections.clone(),
                     hardened,
+                    preview.clone(),
                 );
             }
 
@@ -260,6 +266,7 @@ impl EditWebsocket {
             // The client may try to reconnect to the old port that is now being used by an attacker who steals the client
             // key and uses it to read the edits from the new port.
             let (location, new_server) = start_server();
+            if preview.is_some() { crate::hardened::preview_port(location.port); }
             notify.notify_waiters();
             *current_location.lock().unwrap() = location;
             server = new_server;
@@ -271,6 +278,7 @@ impl EditWebsocket {
         server_location: Arc<Mutex<ServerLocation>>,
         connections: Arc<RwLock<HashMap<u32, WebviewConnectionState>>>,
         hardened: bool,
+        preview: Option<crate::hardened::Preview>,
     ) {
         use tungstenite::handshake::server::{Request, Response};
         let permit = if hardened {
@@ -296,213 +304,228 @@ impl EditWebsocket {
         } else {
             None
         };
-        let stream = HandshakeStream {
-            inner: stream,
-            remaining: hardened.then_some(8192),
-        };
+        let task = move || {
+            let mut stream = stream;
+            let prefix = if hardened {
+                let Some(head) = crate::hardened_media::read_head(&mut stream) else { return; };
+                if crate::hardened_media::is_preview(&head) {
+                    let _permit = permit;
+                    let port = server_location.lock().unwrap_or_else(std::sync::PoisonError::into_inner).port;
+                    crate::hardened_media::serve(&mut stream, &head, port, preview.as_ref());
+                    return;
+                }
+                head
+            } else { Vec::new() };
+            let stream = HandshakeStream {
+                inner: stream,
+                remaining: hardened.then_some(8192 - prefix.len()),
+                prefix: std::io::Cursor::new(prefix),
+            };
+            let current_server_location = { *server_location.lock().unwrap() };
+            let hex_encoded_client_key = encode_key_string(&current_server_location.client_key);
+            let hex_encoded_server_key = encode_key_string(&current_server_location.server_key);
+            let mut location = None;
 
-        let current_server_location = { *server_location.lock().unwrap() };
-        let hex_encoded_client_key = encode_key_string(&current_server_location.client_key);
-        let hex_encoded_server_key = encode_key_string(&current_server_location.server_key);
-        let mut location = None;
+            #[allow(clippy::result_large_err)]
+            let on_request = |req: &Request, res| {
+                // Try to parse the webview id and key from the path
+                let path = req.uri().path();
 
-        #[allow(clippy::result_large_err)]
-        let on_request = |req: &Request, res| {
-            // Try to parse the webview id and key from the path
-            let path = req.uri().path();
-
-            // The path should have two parts `/webview_id/key`
-            let mut segments = path.trim_matches('/').split('/');
-            let webview_id = segments
-                .next()
-                .and_then(|s| s.parse::<u32>().ok())
-                .ok_or_else(|| {
+                // The path should have two parts `/webview_id/key`
+                let mut segments = path.trim_matches('/').split('/');
+                let webview_id = segments
+                    .next()
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .ok_or_else(|| {
+                        Response::builder()
+                            .status(400)
+                            .body(Some("Bad Request: Invalid webview ID".to_string()))
+                            .unwrap()
+                    })?;
+                if hardened && !connections.read().unwrap().contains_key(&webview_id) {
+                    return Err(Response::builder()
+                        .status(400)
+                        .body(Some("Unknown view".to_string()))
+                        .unwrap());
+                }
+                let key = segments.next().ok_or_else(|| {
                     Response::builder()
                         .status(400)
-                        .body(Some("Bad Request: Invalid webview ID".to_string()))
+                        .body(Some("Bad Request: Missing key".to_string()))
                         .unwrap()
                 })?;
-            if hardened && !connections.read().unwrap().contains_key(&webview_id) {
-                return Err(Response::builder()
-                    .status(400)
-                    .body(Some("Unknown view".to_string()))
-                    .unwrap());
+
+                if hardened && segments.next().is_some() {
+                    return Err(Response::builder()
+                        .status(400)
+                        .body(Some("Bad request".to_string()))
+                        .unwrap());
+                }
+                // Make sure the key matches the expected key.
+                // VERY IMPORTANT: We cannot use normal string comparison here because it reveals information
+                // about the key based on timing information. Instead we use a constant time comparison method.
+                let key_matches: bool =
+                    subtle::ConstantTimeEq::ct_eq(hex_encoded_client_key.as_ref(), key.as_bytes())
+                        .into();
+                if !key_matches {
+                    return Err(Response::builder()
+                        .status(403)
+                        .body(Some("Forbidden: Invalid key".to_string()))
+                        .unwrap());
+                }
+
+                location = Some(WebviewWebsocketLocation {
+                    webview_id,
+                    server: server_location,
+                });
+
+                Ok(res)
+            };
+
+            // Accept the websocket connection while reading the path and setting the location
+            let mut websocket = match tungstenite::accept_hdr_with_config(
+                stream,
+                on_request,
+                hardened.then(|| {
+                    tungstenite::protocol::WebSocketConfig::default()
+                        .read_buffer_size(1024)
+                        .max_frame_size(Some(1024))
+                        .max_message_size(Some(1024))
+                }),
+            ) {
+                Ok(ws) => ws,
+                Err(_) => {
+                    tracing::error!("UI transport handshake refused");
+                    return;
+                }
+            };
+
+            websocket.get_mut().remaining = None;
+            // QuickVault (plan 0045): the 3 s bounds cover the unauthenticated
+            // handshake only. Once the page has proven the key, the connection
+            // waits for its acknowledgement, which the page sends on its next
+            // animation frame; Android pauses those while the app is in the
+            // background. A timeout there dropped the connection, and the late
+            // acknowledgement then went to the reconnecting socket and was lost,
+            // so the renderer waited forever (taps reached the app but the page
+            // never updated again).
+            if hardened {
+                let inner = &websocket.get_ref().inner;
+                if inner
+                    .set_read_timeout(None)
+                    .and_then(|()| inner.set_write_timeout(None))
+                    .is_err()
+                {
+                    return;
+                }
             }
-            let key = segments.next().ok_or_else(|| {
-                Response::builder()
-                    .status(400)
-                    .body(Some("Bad Request: Missing key".to_string()))
-                    .unwrap()
-            })?;
-
-            if hardened && segments.next().is_some() {
-                return Err(Response::builder()
-                    .status(400)
-                    .body(Some("Bad request".to_string()))
-                    .unwrap());
-            }
-            // Make sure the key matches the expected key.
-            // VERY IMPORTANT: We cannot use normal string comparison here because it reveals information
-            // about the key based on timing information. Instead we use a constant time comparison method.
-            let key_matches: bool =
-                subtle::ConstantTimeEq::ct_eq(hex_encoded_client_key.as_ref(), key.as_bytes())
-                    .into();
-            if !key_matches {
-                return Err(Response::builder()
-                    .status(403)
-                    .body(Some("Forbidden: Invalid key".to_string()))
-                    .unwrap());
-            }
-
-            location = Some(WebviewWebsocketLocation {
-                webview_id,
-                server: server_location,
-            });
-
-            Ok(res)
-        };
-
-        // Accept the websocket connection while reading the path and setting the location
-        let mut websocket = match tungstenite::accept_hdr_with_config(
-            stream,
-            on_request,
-            hardened.then(|| {
-                tungstenite::protocol::WebSocketConfig::default()
-                    .read_buffer_size(1024)
-                    .max_frame_size(Some(1024))
-                    .max_message_size(Some(1024))
-            }),
-        ) {
-            Ok(ws) => ws,
-            Err(_) => {
-                tracing::error!("UI transport handshake refused");
-                return;
-            }
-        };
-
-        websocket.get_mut().remaining = None;
-        // QuickVault (plan 0045): the 3 s bounds cover the unauthenticated
-        // handshake only. Once the page has proven the key, the connection
-        // waits for its acknowledgement, which the page sends on its next
-        // animation frame; Android pauses those while the app is in the
-        // background. A timeout there dropped the connection, and the late
-        // acknowledgement then went to the reconnecting socket and was lost,
-        // so the renderer waited forever (taps reached the app but the page
-        // never updated again).
-        if hardened {
-            let inner = &websocket.get_ref().inner;
-            if inner
-                .set_read_timeout(None)
-                .and_then(|()| inner.set_write_timeout(None))
+            // Immediately send the key to authenticate the server
+            if websocket
+                .send(tungstenite::Message::Text(hex_encoded_server_key.into()))
                 .is_err()
             {
                 return;
             }
-        }
-        // Immediately send the key to authenticate the server
-        if websocket
-            .send(tungstenite::Message::Text(hex_encoded_server_key.into()))
-            .is_err()
-        {
-            return;
-        }
 
-        let location = match location {
-            Some(loc) => loc,
-            None => {
-                tracing::error!("WebSocket connection without a valid webview ID");
-                return;
-            }
-        };
-
-        // Handle the websocket connection in a separate thread
-        let (edits_outgoing, edits_incoming_rx) = std::sync::mpsc::sync_channel::<MsgPair>(2);
-
-        let connections_ = connections.clone();
-        // Spawn a task to handle the websocket connection
-        std::thread::spawn(move || {
-            let _permit = permit;
-            let mut queued_message = None;
-            // Wait until there are edits ready to send
-            'connection: while let Ok(msg) = edits_incoming_rx.recv() {
-                let data = msg.edits.clone();
-                queued_message = Some(msg);
-                // Send the edits to the webview
-                if websocket
-                    .send(tungstenite::Message::Binary(data.into()))
-                    .is_err()
-                {
-                    tracing::error!("UI transport write failed");
-                    break 'connection;
+            let location = match location {
+                Some(loc) => loc,
+                None => {
+                    tracing::error!("WebSocket connection without a valid webview ID");
+                    return;
                 }
+            };
 
-                // Wait for the webview to apply the edits
-                let mut acknowledged = false;
-                while let Ok(ws_msg) = websocket.read() {
-                    match ws_msg {
-                        // We expect the webview to send a binary message when it has applied the edits
-                        // This is a signal that we can continue processing
-                        tungstenite::Message::Binary(ref b) if !hardened || b.is_empty() => {
-                            acknowledged = true;
-                            break;
+            // Handle the websocket connection in a separate thread
+            let (edits_outgoing, edits_incoming_rx) = std::sync::mpsc::sync_channel::<MsgPair>(2);
+
+            let connections_ = connections.clone();
+            // Spawn a task to handle the websocket connection
+            std::thread::spawn(move || {
+                let _permit = permit;
+                let mut queued_message = None;
+                // Wait until there are edits ready to send
+                'connection: while let Ok(msg) = edits_incoming_rx.recv() {
+                    let data = msg.edits.clone();
+                    queued_message = Some(msg);
+                    // Send the edits to the webview
+                    if websocket
+                        .send(tungstenite::Message::Binary(data.into()))
+                        .is_err()
+                    {
+                        tracing::error!("UI transport write failed");
+                        break 'connection;
+                    }
+
+                    // Wait for the webview to apply the edits
+                    let mut acknowledged = false;
+                    while let Ok(ws_msg) = websocket.read() {
+                        match ws_msg {
+                            // We expect the webview to send a binary message when it has applied the edits
+                            // This is a signal that we can continue processing
+                            tungstenite::Message::Binary(ref b) if !hardened || b.is_empty() => {
+                                acknowledged = true;
+                                break;
+                            }
+                            // If the websocket closes, switch back to the pending state and
+                            // re-queue the edits that haven't been acknowledged yet
+                            tungstenite::Message::Close(_) => {
+                                break 'connection;
+                            }
+                            _ if hardened => break 'connection,
+                            _ => {}
                         }
-                        // If the websocket closes, switch back to the pending state and
-                        // re-queue the edits that haven't been acknowledged yet
-                        tungstenite::Message::Close(_) => {
-                            break 'connection;
-                        }
-                        _ if hardened => break 'connection,
-                        _ => {}
+                    }
+
+                    if !acknowledged {
+                        break 'connection;
+                    }
+                    let msg = queued_message.take().expect("Message should be set here");
+
+                    // Notify that the edits have been applied
+                    if msg.response.send(()).is_err() {
+                        tracing::error!("Error sending edits applied notification");
+                    }
+                }
+                tracing::trace!("Webview {} closed the connection", location.webview_id);
+                let mut connection = WebviewConnectionState::default();
+                if let Some(msg) = queued_message {
+                    connection.add_message_pair(msg);
+                }
+                connections_
+                    .write()
+                    .unwrap()
+                    .insert(location.webview_id, connection);
+            });
+
+            let mut connections = connections.write().unwrap();
+            match connections.remove(&location.webview_id) {
+                // If there are pending edits, send them to the new connection
+                Some(WebviewConnectionState::Pending { mut pending }) => {
+                    while let Some(pair) = pending.pop_front() {
+                        _ = edits_outgoing.try_send(pair);
                     }
                 }
 
-                if !acknowledged {
-                    break 'connection;
+                // If the webview was already connected, never send edits from the old connection to
+                // the new connection. This should never happen
+                Some(WebviewConnectionState::Connected { .. }) => {
+                    tracing::error!(
+                        "Webview {} was already connected. Rejecting new connection.",
+                        location.webview_id
+                    );
+                    return;
                 }
-                let msg = queued_message.take().expect("Message should be set here");
 
-                // Notify that the edits have been applied
-                if msg.response.send(()).is_err() {
-                    tracing::error!("Error sending edits applied notification");
-                }
-            }
-            tracing::trace!("Webview {} closed the connection", location.webview_id);
-            let mut connection = WebviewConnectionState::default();
-            if let Some(msg) = queued_message {
-                connection.add_message_pair(msg);
-            }
-            connections_
-                .write()
-                .unwrap()
-                .insert(location.webview_id, connection);
-        });
-
-        let mut connections = connections.write().unwrap();
-        match connections.remove(&location.webview_id) {
-            // If there are pending edits, send them to the new connection
-            Some(WebviewConnectionState::Pending { mut pending }) => {
-                while let Some(pair) = pending.pop_front() {
-                    _ = edits_outgoing.try_send(pair);
-                }
+                None => {}
             }
 
-            // If the webview was already connected, never send edits from the old connection to
-            // the new connection. This should never happen
-            Some(WebviewConnectionState::Connected { .. }) => {
-                tracing::error!(
-                    "Webview {} was already connected. Rejecting new connection.",
-                    location.webview_id
-                );
-                return;
-            }
+            connections.insert(
+                location.webview_id,
+                WebviewConnectionState::Connected { edits_outgoing },
+            );
+        };
+        if hardened { std::thread::spawn(task); } else { task(); }
 
-            None => {}
-        }
-
-        connections.insert(
-            location.webview_id,
-            WebviewConnectionState::Connected { edits_outgoing },
-        );
     }
 
     pub(crate) fn create_queue(&self) -> WryQueue {
@@ -650,7 +673,7 @@ mod hardened_transport_tests {
     use std::io::Write;
     #[test]
     fn hardened_protocol_metadata_does_not_borrow_the_active_render_queue() {
-        let queue = EditWebsocket::start(true).create_queue();
+        let queue = EditWebsocket::start(true, None).create_queue();
         let _rendering = queue.inner.borrow_mut();
         let first = queue.edits_path();
         assert!(first.starts_with("ws://127.0.0.1:"));
@@ -687,7 +710,7 @@ mod hardened_transport_tests {
     }
     #[test]
     fn hardened_applied_batch_stays_applied_on_later_polls() {
-        let queue = EditWebsocket::start(true).create_queue();
+        let queue = EditWebsocket::start(true, None).create_queue();
         let waker = futures_util::task::noop_waker();
         let mut cx = std::task::Context::from_waker(&waker);
         let (applied, rx) = oneshot::channel();
@@ -728,6 +751,7 @@ mod hardened_transport_tests {
                     Arc::new(Mutex::new(location)),
                     connections,
                     true,
+                    None,
                 );
             })
         };
@@ -769,6 +793,7 @@ mod hardened_transport_tests {
         let mut bounded = HandshakeStream {
             inner: stream,
             remaining: Some(4),
+            prefix: std::io::Cursor::new(Vec::new()),
         };
         peer.write_all(b"abcdefgh").unwrap();
         let mut data = [0; 16];
@@ -785,6 +810,7 @@ mod hardened_transport_tests {
             Arc::new(Mutex::new(location)),
             Arc::new(RwLock::new(HashMap::new())),
             true,
+            None,
         );
         assert!(start.elapsed() < std::time::Duration::from_secs(5));
         drop(peer);

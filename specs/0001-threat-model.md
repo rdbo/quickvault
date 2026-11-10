@@ -94,7 +94,12 @@ through the application's own parsers or UI.
 - **SG6 Hybrid vault transport:** breaking only one half of the hybrid key
   transport/application signatures does not expose VK. OPAQUE and ordinary TLS
   certificates are documented classical exceptions; account compromise alone
-  does not grant VK.
+  does not grant VK. LAN password enrollment uses the ephemeral classical
+  password engine in 0013 §15: a code alone cannot grant VK; an approved
+  malicious code holder that later breaks the password engine may gain an
+  offline password-guessing route at the fixed lan-pake KDF cost. No PQ PAKE
+  guarantee is claimed. Passive recording without P remains protected by the
+  outer hybrid exchange. Independently known VK uses the separate key method.
 - **SG7 No silent conflict loss:** preserve concurrent complete versions and
   deletion knowledge; retained history follows bounded policy (0007).
 - **SG8 Intentional unrecoverability:** no project/server backdoor. Access needs
@@ -138,6 +143,8 @@ None in this model. Platform verification and independent protocol review are
 required implementation evidence under 0012.
 
 ## Changelog
+
+- 2026-11-09: Clarify lan/2 credential authentication and classical password-engine exception under SG6 (0047).
 
 - 2026-10-30: Owner-delegated acceptance of 0013 (roadmap D10, plan 0025): LAN advertisement and pairing metadata now point to 0013.
 - 2026-10-24: Cover direct LAN sync and standalone use explicitly; reject

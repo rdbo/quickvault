@@ -394,6 +394,8 @@ pub enum WsAction {
     ColourMany(Vec<EntryHandle>, Option<u8>),
     /// Preview an attachment of the open entry in the app (0003 §6.4).
     Preview(AttachmentHandle),
+    /// Explicit consent for this preview's potentially large image decode.
+    LoadPreview(AttachmentHandle),
     /// Preview the previous (-1) or next (+1) attachment of the entry.
     PreviewStep(i8),
     /// Close the preview, wiping its content.
@@ -1245,8 +1247,13 @@ impl Controller {
                 let g = *g;
                 let nonempty = self
                     .read(epoch, |s| {
-                        let l = s.list(g)?;
-                        Ok(!l.groups.is_empty() || !l.entries.is_empty())
+                        let l = s.list_page(
+                            g,
+                            None,
+                            qv_core::PageLimit::default(),
+                            &qv_core::CancelToken::new(),
+                        )?;
+                        Ok(!l.items.is_empty())
                     })
                     .ok_or(AppError::InvalidInput)??;
                 nonempty.then_some(ConfirmKind::DeleteRecursive)
@@ -1258,7 +1265,7 @@ impl Controller {
             WsAction::EmptyTrash => Some(ConfirmKind::EmptyTrash),
             WsAction::PurgeExpired => {
                 let anomaly = self
-                    .read(epoch, |s| Ok(s.expired_trash()?.clock_anomaly))
+                    .read(epoch, |s| Ok(s.expiry_summary()?.clock_anomaly))
                     .ok_or(AppError::InvalidInput)??;
                 Some(ConfirmKind::PurgeExpired(anomaly))
             }

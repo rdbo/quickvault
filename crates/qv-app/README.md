@@ -256,8 +256,15 @@ LAN sync (plans 0038, 0039, 0042; 0013 as amended by 0014). The Sync screen's
 device's addresses. The other device either syncs ("Scan a code" or "Type a
 code" on Sync) or joins as a new device (the locked screen's "Join from
 another device"). A sync needs no confirmation and stores nothing about the
-other device; a new device's join shows the comparison code on both screens
-and VK leaves only after both confirm. A scanned code that names its address
+other device; password enrollment shows the comparison code and requires the vault password
+on both devices. The receiver chooses password or recovery words before
+connecting. Recovery-word enrollment and syncing unlocked copies prove the
+independently held vault key and transfer no key. No password is kept through
+bulk transfer or requested again to create the received file. Admission closes
+and the displayed code clears after one valid hello; credential failure requires
+a fresh code. Both peers need the current compatible LAN version. Reports
+distinguish possible key disclosure, complete receipt and local publication;
+receipt does not prove that the receiving device published its file. A scanned code that names its address
 starts the sync or join at once; one without an address shows "Code from the
 QR code" (the code itself is never rendered) and asks for the address. A
 typed address replaces scanned hints. Lock and navigation clear pending codes,
@@ -299,3 +306,13 @@ combined step in [DEVICE-VALIDATION.md](../../plans/0039-lan-qr/DEVICE-VALIDATIO
 Validation has resumed on the connected phone; results and remaining rows
 are recorded separately from cross-build and synthetic evidence. [DEPENDENCIES.md](../../plans/0039-lan-qr/DEPENDENCIES.md)
 records the new library pins, targeted source inspection and unaudited debt.
+
+Large-vault views (0047): 64 MiB limits the owned text cache/query workspace per
+unlocked vault, not total searchable text or vault eligibility. Lists, search,
+sidebar choices, trash and conflicts use bounded pages; search remains complete.
+The validity limit remains 1 GiB of referenced ciphertext, including retained
+history and attachment objects. Pages default to32 rows/2 MiB display text.
+Repeated scans trade CPU/I/O for memory; 64 MiB is not a process-RSS promise.
+KDF scratch, record decoding, selected details, framework copies and bulk-edit
+payloads are additional. Measurements and remaining device qualification are in
+[0047 validation](../../plans/0047-audit-policy-and-lan-auth/LARGE-VAULT-VALIDATION.md).

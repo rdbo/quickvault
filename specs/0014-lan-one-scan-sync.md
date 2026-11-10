@@ -6,6 +6,11 @@
 
 ## Summary
 
+**0047 amendment (2026-11-09):** §10 applies the credential-authenticated
+lan/2 flow in 0013 §15. The older handshake descriptions here are historical;
+password enrollment prompts on both devices and key/phrase enrollment transfers
+no VK. Nothing adds persistent credentials or changes file/archive formats.
+
 Owner direction, 2026-11-06: "Not sure I see the point in pairing devices
 when there is no identity. Maybe scanning = 1 sync only, and thats it."
 
@@ -258,48 +263,72 @@ Each with a Changelog line in its spec:
    overclaim": drop "test selected LAN peer-removal policy separately"
    (there is no LAN peer state).
 
+### 10. Credential-authenticated one-scan amendment (0047)
+
+0013 §15 supersedes this spec's lan/1 handshake, proof, listener-monitor and
+post-transfer password language. Use lan/2 exclusively with separate method
+and intent: password/enroll, key/enroll (recovery words), key/sync (unlocked
+copy). The first valid code-authenticated hello closes all admission and spends
+the code; the accepted session retains the original absolute expiry. No
+second-hello detector, retry, persistent verifier or storage migration is added.
+
+Password enrollment prompts on both devices; A verifies locally and approves
+the comparison before sending its ephemeral password-engine response. A sends
+VK only after B proves credentials and confirms the final channel. B verifies
+the public slot before transfer, then wipes password keys. Phrase enrollment
+proves independently held VK, transfers no key and needs no password/reset.
+Existing-copy sync remains password-free. Full private staging, received-name/
+destination confirmation and source-bound preflight precede publication.
+Both peers need software implementing the new profile; do not fall back.
+
+All CLI/app prompt cleanup, bounded deadlines and precise disclosure/receipt/
+local-outcome requirements in 0013 §15, 0009 §7 and 0011 §7 apply. The existing
+command names, code-input confidentiality and endpoint replacement rules remain.
+
 ## Security Considerations
 
-- **Approval** is the window: a user action on an unlocked device, one
-  session, at most 10 minutes. It is not reusable and nothing outlives it.
-- **Observed code, no VK:** the observer can take the window's one hello,
-  then fails the proof. The window aborts; the intended device is refused
-  and its user opens a new code. Denial of service only. A reveals no
-  `K_proof` MAC before `proof_B` verifies, and `proof_B` is bound to `th`,
-  so it cannot be relayed to another session.
-- **Man in the middle with `P`:** each leg has its own `th`, so proofs from
-  one leg fail on the other. No comparison code is needed for sync mode,
-  because the proof binds the transcript and requires VK.
-- **VK holder who also observes the code** can take the session in place of
-  the intended device and exchange vault data. 0001 already concedes
-  same-generation state to any VK holder. The intended device then fails
-  to connect, and A shows that one session completed. Rotation remains the
-  recovery (0013 §12.3).
-- **New-device mode** is unchanged in strength: VK leaves A only after the
-  committed comparison code matches on both screens and A's user confirms.
-- **Post-quantum:** unchanged. Authentication is symmetric (MAC/1 with `P`
-  and `K_proof`); confidentiality and VK transfer use X-Wing (SG6).
-- **Less stored secret state:** no link keys at rest.
-- **Not reviewed.** The changed composition goes to the 0012 §3 LAN gate and
-  the D12 independent review, as 0013 did. Acceptance authorizes no
-  release.
+- Approval is one explicit window on an unlocked device, with an original
+  absolute lifetime of at most 10 minutes. The first valid code-authenticated
+  hello closes admission before credential work; no competing-hello detector
+  survives. A code holder can deny service by taking that one admission.
+- The code alone never authorizes a key grant or vault transfer. Password
+  enrollment requires the selected vault's password on both devices, successful
+  ephemeral password authentication and verified FinishedB before A seals a
+  grant. Completed sealing counts as possible disclosure even if delivery is
+  unknown. The receiver verifies the granted slot against its password before
+  bulk transfer and the staged record before publication.
+- Key routes require an independently obtained VK. B proves first; A reveals
+  its identity and role-bound proof only after verification. Each proof binds
+  the method, intent and outer transcript. A verifies B's first final-key State
+  before returning final-key data. Credential failures close silently.
+- A VK holder who observes the code can take the admitted session. The threat
+  model already concedes same-generation data to a VK holder; rotation is the
+  recovery. The intended receiver then needs a fresh window.
+- X-Wing supplies hybrid outer confidentiality. The password engine uses
+  classical Ristretto authentication; it is not claimed to be post-quantum.
+  The final schedule mixes the outer secret, pairing secret and independent
+  credential secret. SG6's limits and 0013 §15 apply.
+- No registration, verifier, link key or peer authorization is stored.
+  D12 independent composition review, dependency review and target evidence
+  remain release gates; implementation tests do not prove security.
 
 ## Testing Requirements
 
-In addition to 0013's rows that still apply:
+In addition to 0013's current rows:
 
 | Requirement | Evidence |
 |-------------|----------|
-| Sync proof binding | A wrong VK, vault ID or generation on either side fails with `vault_mismatch`; nothing committed on either side |
-| Proof ordering | A sends no `proved` record after a failed or missing `prove`; B sends no exchange message before verifying `proved` |
-| Relay | A `prove` captured from one session fails in another (different `th`) |
-| Raced code | A second hello aborts the window (unchanged); a racer without VK gets no state change and no proof |
-| One use | After one completed or aborted session the window refuses further hellos |
-| No peer state | After sync and join, `lan_link` is empty; an older file with rows opens, and its next commit clears them |
-| Removed messages | SyncHello, SyncAccept, the address-only QR and the old `proved`/`grant` shapes are refused |
-| Generation | An old-generation copy fails; new-device join of the new generation still works |
-| Interop vectors | Regenerated for every changed message and key (`K_proof`, `proved`, `grant`), checked independently |
-| App | Scan with endpoints starts at once; without endpoints asks for an address; no code in the DOM; undecodable frames skipped |
+| Key proof binding | Wrong VK, vault ID/generation, role, method or transcript fails before exchange or commit |
+| Proof ordering | No A identity/proof before valid PB; no A final-key data before valid B State |
+| Password ordering | No grant after missing/invalid KE3 or FinishedB; no code-only or legacy grant path |
+| Relay | Captured proofs or records fail with distinct T0/TA, mode, role or epoch |
+| Raced code | First valid hello closes every listener before approval; later connections cannot interrupt the admitted stream |
+| One use | Completion, credential failure, cancellation and expiry never reopen admission |
+| No peer state | Sync/join leave no peer authorization; historical link rows clear on the next ordinary commit |
+| Removed messages | Old profiles, QR labels and credential-free handshake/grant shapes are refused |
+| Generation | Old-generation copies fail; authenticated enrollment of the new generation works |
+| Interop vectors | Independent v2 schedule/record/wire vectors and pinned password-component fixtures, with explicit suite limits |
+| App | Protected instance-bound prompts, cleanup on cancel/lock, accurate receipt/publication reporting; no code in the DOM |
 
 ## Open Questions
 
@@ -307,6 +336,9 @@ In addition to 0013's rows that still apply:
    OQ1, to revisit after user testing.
 
 ## Changelog
+
+- 2026-11-09: Reconcile security/testing requirements with §15 credential authentication and single admission; preserve historical v1 descriptions above.
+- 2026-11-09: Apply owner-approved ephemeral credential authentication and one admitted connection.
 
 - 2026-11-07: §6: the Devices screen is called Sync; no behaviour change
   (owner, plan 0045).

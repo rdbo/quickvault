@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Direct LAN sync with one-use codes (spec 0013 §1–4, §6–10; plans 0037,
-//! 0038, 0042).
+//! 0038, 0042, 0047; current profile 0013 §15).
 //!
 //! - `transport`: TCP frames with time limits and prompt cancellation, and
-//!   the record channel under the pairing keys.
-//! - `steps`: the pure pairing computations (hello, accept, transcript),
+//!   the credential-bounded channel and consuming transition to final keys.
+//! - `steps_v2`: the pure pairing computations (hello, accept, transcript),
 //!   shared by the drivers and the interoperability vectors.
 //! - [`PairingWindow`] (the offering device A): a TCP listener for one
-//!   unlocked vault and one session; 16 failed attempts, second-hello
-//!   detection (§8.3), the time limit and cancellation.
+//!   unlocked vault and one session; 16 failed pre-admission attempts, then
+//!   listener closure before authentication, absolute expiry and cancellation.
 //! - [`join_new_device`] and [`sync_with_code`] (the joining device B):
 //!   candidate endpoints tried one at a time until one authenticates (§3.3).
 //! - `exchange`: the exchange (§7) between two holders of the vault, and the
@@ -21,8 +21,8 @@
 //!
 //! **Trust.** Endpoints are hints (§3.1). Nothing is sent before the hello
 //! MAC verifies, and nothing is decapsulated before the accept MAC verifies.
-//! After the pairing keys exist, a local failure sends one error record; a
-//! frame-level failure only closes. Every secret lives in a `qv_crypto`
+//! Credential failures close silently. Authenticated exchange failures may send
+//! one bounded error record; a frame-level failure only closes. Every secret lives in a `qv_crypto`
 //! protected container and is dropped (zeroized) on abort. Discovery (DNS-SD)
 //! is deferred (owner decision 2026-11-03); windows run with discovery off.
 
@@ -31,7 +31,9 @@ mod endpoint;
 mod exchange;
 mod joiner;
 mod qr;
-pub(crate) mod steps;
+#[cfg(test)]
+mod steps;
+mod steps_v2;
 mod transport;
 mod window;
 
@@ -41,12 +43,15 @@ use std::time::Duration;
 use qv_protocol::registry::ErrorCode;
 use qv_store::StoreError;
 
-pub use approver::{Approved, ApproverContext, ApproverVault, Confirm, PairingWindow, Sealer};
+pub use approver::{
+    Approved, ApproverContext, ApproverVault, Confirm, CredentialApprover, PairingWindow,
+    SealedGrant,
+};
 pub use endpoint::{EndpointPolicy, ListenScope, parse_endpoint};
-pub use exchange::{Accepted, ExchangeVault, Role, RoundReport, grant_plaintext};
+pub use exchange::{Accepted, ExchangeVault, Role, RoundReport, credential_grant_plaintext};
 pub use joiner::{
-    JoinCode, JoinedNewDevice, JoinerContext, JoinerUi, JoinerVault, join_new_device,
-    sync_with_code,
+    EnrollmentCredential, JoinCode, JoinedNewDevice, JoinerContext, JoinerUi, JoinerVault,
+    join_new_device, sync_with_code,
 };
 pub use qr::{LanQrInfo, inspect_lan_qr};
 pub use qv_crypto::lan::Sas;
@@ -66,9 +71,6 @@ pub enum LanError {
     Cancelled,
     /// The peer cancelled: its user rejected the code or cancelled.
     PeerCancelled,
-    /// A second valid pairing hello arrived: the code may have been observed
-    /// (0013 §4.3).
-    CodeObserved,
     /// 16 failed attempts closed the window (0013 §8.3).
     TooManyAttempts,
     /// The window's time limit passed (0013 §8.2).
@@ -102,7 +104,6 @@ impl core::fmt::Display for LanError {
             Self::Timeout => "the other device stopped responding",
             Self::Cancelled => "cancelled",
             Self::PeerCancelled => "cancelled on the other device",
-            Self::CodeObserved => "a second device used the code; it may have been observed",
             Self::TooManyAttempts => "unexpected connection attempts",
             Self::WindowExpired => "the code expired",
             Self::VaultMismatch => "the devices hold different vaults or key generations",
@@ -146,9 +147,7 @@ impl LanError {
             Self::Unsupported => ErrorCode::Unsupported,
             Self::Limit => ErrorCode::Limit,
             Self::Integrity => ErrorCode::Integrity,
-            Self::Cancelled | Self::CodeObserved | Self::TooManyAttempts | Self::WindowExpired => {
-                ErrorCode::Cancelled
-            }
+            Self::Cancelled | Self::TooManyAttempts | Self::WindowExpired => ErrorCode::Cancelled,
             Self::Busy | Self::Store(_) => ErrorCode::Busy,
             Self::StateChanged => ErrorCode::StateChanged,
             Self::Keyslot => ErrorCode::Keyslot,
@@ -185,8 +184,6 @@ pub struct LanTimeouts {
     pub confirm: Duration,
     /// Opening a connection: 10 s.
     pub connect: Duration,
-    /// Reading a probe hello from an extra connection (§8.3): 2 s.
-    pub probe: Duration,
 }
 
 impl Default for LanTimeouts {
@@ -196,7 +193,6 @@ impl Default for LanTimeouts {
             idle: Duration::from_secs(60),
             confirm: Duration::from_secs(600),
             connect: Duration::from_secs(10),
-            probe: Duration::from_secs(2),
         }
     }
 }
@@ -210,7 +206,6 @@ impl LanTimeouts {
             && ok(self.idle, max.idle)
             && ok(self.confirm, max.confirm)
             && ok(self.connect, max.connect)
-            && ok(self.probe, max.probe)
         {
             Ok(())
         } else {

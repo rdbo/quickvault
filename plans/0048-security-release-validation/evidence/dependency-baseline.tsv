@@ -1,0 +1,23 @@
+package	version	registry_sha256	development_exemption
+argon2	0.5.3	3c3610892ee6e0cbce8ae2700349fcf8f98adb0dbfbee85aec3c9179d29cc072	yes; unaudited debt
+base16ct	0.2.0	4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf	yes; unaudited debt
+blake2	0.10.6	46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe	yes; unaudited debt
+const-oid	0.9.6	c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8	yes; unaudited debt
+crypto-bigint	0.5.5	0dc92fb57ca44df6db8059111ab3af99a63d5d0f8375d9972e319a379c6bab76	yes; unaudited debt
+curve25519-dalek	4.1.3	97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be	yes; unaudited debt
+curve25519-dalek-derive	0.1.1	f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3	yes; unaudited debt
+der	0.7.10	e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb	yes; unaudited debt
+derive-where	1.7.0	2e2b94854e8576378ccda7c8de8a66ed8b4e8acbd2c50ec3418ea6c8aaf4b567	yes; unaudited debt
+elliptic-curve	0.13.8	b5e6043086bf7973472e0c7dff2142ea0b680d30e18d9cc40f267efbf222bd47	yes; unaudited debt
+ff	0.13.1	c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393	yes; unaudited debt
+fiat-crypto	0.2.9	28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d	yes; unaudited debt
+group	0.13.0	f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63	yes; unaudited debt
+hkdf	0.12.4	7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7	yes; unaudited debt
+hmac	0.12.1	6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e	yes; unaudited debt
+libsqlite3-sys	0.39.1	14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3	yes; unaudited debt
+opaque-ke	4.0.1	ded22991b43cd15561b62b2e1cf9ace1344a8534eebec96202d5c96a77a6616a	yes; unaudited debt
+password-hash	0.5.0	346f04948ba92c43e8469c1ee6736c7563d71012b17d40745260fe106aac2166	yes; unaudited debt
+rusqlite	0.41.0	9c026b4444579e8d754556c6c75d040d69c4a44283cdb648ab8a8d5965c2cfa8	yes; unaudited debt
+sec1	0.7.3	d3e97a565f76233a6003f9f5c54be1d9c5bdfa3eccfb189469f11ec4901c47dc	yes; unaudited debt
+voprf	0.5.0	28f59c30c76e2fea54cdece6a054e2662feffa7ab19658a7887524265ee39470	yes; unaudited debt
+zeroize_derive	1.5.0	3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328	yes; unaudited debt

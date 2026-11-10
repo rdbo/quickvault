@@ -28,7 +28,7 @@ pub(crate) fn run(ctx: &Ctx, matches: &ArgMatches) -> Result<(), CliError> {
             .map(String::as_str)
             .unwrap_or_default();
         let handle = address::entry(&session, addr)?;
-        if session.entry_versions(handle)?.len() > 1 {
+        if session.entry_version_count(handle)? > 1 {
             return Err(qv_core::CoreError::Conflict.into());
         }
         let detail = session.entry(handle)?;

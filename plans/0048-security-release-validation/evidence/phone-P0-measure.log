@@ -1,0 +1,2 @@
+profile,unlock_ms,verify_ms,write_ms,peak_rss_kib,file_bytes
+budget_bench: sample failed: budget_bench: unlock: Store(UnsafeFile)

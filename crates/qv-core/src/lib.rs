@@ -55,12 +55,15 @@
 //! with it. Final deletion is always an explicit call ([`Session::purge`],
 //! [`Session::empty_trash`]): it leaves a permanent tombstone, drops the
 //! record's history and advances its floor, and tombstones the entry's
-//! attachments. [`Session::expired_trash`] lists what the retention period
+//! attachments. [`Session::expiry_summary`] counts what the retention period
 //! offers for final deletion and flags a suspicious clock.
 //!
-//! **Development values** (frozen in phase 1.16): the 64 MiB view budget,
-//! the 10-minute clock-anomaly tolerance, the generator-defaults layout in
-//! `qv-model`.
+//! **View memory:** each unlocked vault has a 64 MiB owned-text cache/query
+//! budget, independent of total searchable text. Page APIs bound returned rows
+//! and bytes. Eager plaintext collection helpers exist only under unit tests or
+//! the development-only `test-eager-views` feature; production frontends use pages.
+//! Other development values include the 10-minute clock-anomaly tolerance
+//! and generator-defaults layout in `qv-model`.
 //!
 //! **History:** the store retains a target of ten versions subject to safe
 //! monotonic floors and budgets. Historical capabilities are separate from
@@ -126,6 +129,8 @@ mod error;
 mod history;
 mod index;
 mod order;
+mod paging;
+mod path;
 pub mod platform;
 mod rotation;
 mod session;
@@ -135,10 +140,15 @@ mod snapshot;
 mod strength;
 #[cfg(test)]
 mod testutil;
+mod view_cache;
 mod views;
 
 pub use edit::{EntryDraft, GroupDraft, MAX_BATCH, PurgeReport};
 pub use error::CoreError;
+pub use paging::{
+    ItemFilter, KindSummary, MAX_PAGE_ROWS, MAX_PAGE_TEXT_BYTES, PageLimit, ViewCursor, ViewPage,
+};
+pub use path::ViewPath;
 pub use rotation::{ROTATION_CONFIRMATIONS, Rotation, RotationError, RotationOutcome};
 pub use session::{CancelToken, EntryHandle, FieldHandle, GroupHandle, ItemHandle, Session};
 pub use settings::{SettingsDraft, estimate, generate};
@@ -150,8 +160,9 @@ pub use snapshot::{
 };
 pub use strength::{PasswordCheck, PasswordVerdict, confirmation_positions, password_strength};
 pub use views::{
-    ConflictSummary, EntryDetail, EntrySummary, ExpiryReport, FieldDetail, FieldSummary,
-    GroupDetail, GroupSummary, Listing, MAX_QUERY_BYTES, Overview, SearchHit, TotpNow, TrashItem,
+    ConflictSummary, EntryDetail, EntrySummary, ExpiryReport, ExpirySummary, FieldDetail,
+    FieldSummary, GroupDetail, GroupSummary, Listing, MAX_QUERY_BYTES, Overview, SearchHit,
+    TotpNow, TrashItem, is_display_control,
 };
 
 // What frontends need from the lower crates, so that they depend on
@@ -180,8 +191,8 @@ pub use exchange::{ArchiveExportReport, ArchiveMergeReport};
 
 mod conflict;
 pub use conflict::{
-    ConflictDetails, ConflictRecord, ConflictRecordHandle, ConflictVersion, ConflictVersionHandle,
-    ResolutionReport,
+    ConflictDetails, ConflictRecord, ConflictRecordHandle, ConflictRecordSummary, ConflictVersion,
+    ConflictVersionHandle, ResolutionReport,
 };
 pub use qv_model::{Deletion, RecordKind};
 
@@ -189,9 +200,10 @@ pub use qv_model::{Deletion, RecordKind};
 mod lan;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use lan::{
-    ApproverUi, JoinCode, JoinMode, JoinerUi, LanError, LanQrInfo, LanTimeouts, ListenScope,
-    LocalAcceptance, PAIRING_WINDOW_MAX, Sas, Served, SyncOptions, SyncReport, SyncWindow,
-    SyncWindowOptions, WindowCode, inspect_lan_qr, local_addresses, parse_endpoint,
+    ApproverUi, EnrollmentCredential, JoinCode, JoinMode, JoinerUi, LanError, LanQrInfo,
+    LanTimeouts, ListenScope, LocalAcceptance, PAIRING_WINDOW_MAX, Sas, Served, SyncOptions,
+    SyncReport, SyncWindow, SyncWindowOptions, WindowCode, inspect_lan_qr, local_addresses,
+    parse_endpoint,
 };
 #[cfg(all(test, any(target_os = "linux", target_os = "android")))]
 mod lan_tests;
@@ -199,3 +211,6 @@ mod lan_tests;
 /// Android autofill candidates and explicit fill values.
 pub mod autofill;
 mod quick_unlock;
+
+#[cfg(test)]
+mod large_vault_tests;

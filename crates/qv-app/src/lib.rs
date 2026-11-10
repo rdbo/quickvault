@@ -13,6 +13,9 @@ pub mod lan;
 #[cfg(test)]
 mod lan_tests;
 mod ops;
+// Native UI read workers are exercised headlessly in tests, but unused in the headless library.
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+mod page_read;
 #[cfg(all(feature = "desktop", target_os = "linux"))]
 pub mod picker;
 pub mod prefs;
@@ -22,6 +25,8 @@ pub mod qr;
 mod runtime;
 #[cfg(feature = "desktop")]
 mod ui;
+#[cfg(feature = "validation")]
+mod validation_media;
 pub mod vaults;
 pub mod views;
 pub mod workspace;

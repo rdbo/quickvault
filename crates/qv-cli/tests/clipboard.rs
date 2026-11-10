@@ -355,6 +355,22 @@ fn clipboard_binary_lifecycle_and_key_drop() {
     let seq = s.overview().unwrap().local_seq;
     drop(s);
     let vault = arg(&h.vault());
+    // Ownership loss without any text conversion must not report delivery.
+    {
+        let successor = display.client();
+        let mut run = Run::start(&h, &display, &["generate", "--copy", "--pin", "12"], false);
+        run.ready(&c);
+        successor.replace();
+        let (_, stderr) = run.finish(1);
+        assert!(stderr.contains("delivery could be confirmed"));
+        assert_eq!(successor.owner(), successor.window);
+        successor
+            .conn
+            .destroy_window(successor.window)
+            .unwrap()
+            .check()
+            .unwrap();
+    }
     let mut run = Run::start(
         &h,
         &display,
@@ -579,6 +595,43 @@ fn clipboard_incr_refusals_limits_and_expiry() {
         let run = Run::start(&h, &display, &args, true);
         run.finish(code);
         assert_eq!(observer.owner(), NONE);
+    }
+    // A pending INCR announcement is not a completed text delivery.
+    // A complete transfer remains distinguishable when ownership then changes.
+    for complete in [false, true] {
+        let successor = display.client();
+        let mut run = Run::start(
+            &h,
+            &display,
+            &[
+                "--password-stdin",
+                "-v",
+                &vault,
+                "copy",
+                "Large",
+                "--timeout",
+                "20",
+            ],
+            true,
+        );
+        run.ready(&observer);
+        if complete {
+            assert_eq!(observer.text(), vec![b'z'; 64 * 1024]);
+        } else {
+            assert_eq!(observer.request(observer.utf8).type_, observer.incr);
+        }
+        successor.replace();
+        let (_, stderr) = run.finish(if complete { 0 } else { 1 });
+        if !complete {
+            assert!(stderr.contains("delivery could be confirmed"));
+        }
+        assert_eq!(successor.owner(), successor.window);
+        successor
+            .conn
+            .destroy_window(successor.window)
+            .unwrap()
+            .check()
+            .unwrap();
     }
     let mut run = Run::start(
         &h,

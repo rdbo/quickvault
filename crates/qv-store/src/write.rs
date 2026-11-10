@@ -258,7 +258,7 @@ impl Write<'_> {
             kdf,
             wrap,
         )?;
-        let body = keyslot.encode()?;
+        let body = keyslot.encode_public_descriptor()?;
         self.password = Some(crate::slot::LocalSlot::from_stored(schema::StoredSlot {
             slot_id: keyslot.slot.slot_id.0,
             kind: crate::slot::PASSWORD_SLOT,
@@ -328,7 +328,7 @@ impl Write<'_> {
                 let n = match source.read(&mut buf.expose_secret_mut()[filled..filled + allowed]) {
                     Ok(n) => n,
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(_) => return Err(StoreError::Io),
+                    Err(e) => return Err(crate::error::io_err(e)),
                 };
                 if n == 0 {
                     break;
@@ -621,8 +621,10 @@ impl Write<'_> {
         if self.poisoned || !self.staged.is_empty() {
             return Err(StoreError::Internal);
         }
+        self.manifest.check_resolvable(self.writer)?;
         // A staged operational slot cannot be published without its matching
-        // encrypted causal record. Check the full descriptor, including extensions.
+        // encrypted causal record. Compare its defined-field public projection;
+        // encrypted extensions must never become clear local slot fields.
         if self.touched.contains(&self.manifest.keyslot_id()) && self.password.is_none() {
             return Err(StoreError::InvalidEdit);
         }
@@ -649,7 +651,9 @@ impl Write<'_> {
             let RecordBody::Live(Payload::PasswordKeyslot(descriptor)) = version.body else {
                 return Err(StoreError::Integrity);
             };
-            if descriptor.encode()?.as_slice() != slot.body.as_slice() {
+            if descriptor.encode_public_descriptor()?.as_slice()
+                != slot.keyslot.encode_public_descriptor()?.as_slice()
+            {
                 return Err(StoreError::InvalidEdit);
             }
             let h = &self.vault.file.header;
@@ -824,11 +828,14 @@ impl Write<'_> {
             state.links = rows;
         }
         self.vault.gate = WriteGate::AnchorPending;
-        point(CrashPoint::Committed)?;
-        self.vault.anchors.store(
-            &self.vault.state.replica.replica_id,
-            &anchor_of(&self.vault.state),
-        )?;
+        point(CrashPoint::Committed).map_err(|_| StoreError::CommittedAnchorPending)?;
+        self.vault
+            .anchors
+            .store(
+                &self.vault.state.replica.replica_id,
+                &anchor_of(&self.vault.state),
+            )
+            .map_err(|_| StoreError::CommittedAnchorPending)?;
         self.vault.gate = WriteGate::Open;
         Ok(())
     }
@@ -1417,6 +1424,7 @@ mod tests {
                         icon: None,
                         order: Text::new("a").unwrap(),
                         deleted_at: Some(Timestamp(9)),
+                        delete_operation: None,
                         ext: Extensions::new(),
                     }));
                     v
@@ -1440,6 +1448,7 @@ mod tests {
                         icon: None,
                         order: Text::new("a").unwrap(),
                         deleted_at: None,
+                        delete_operation: None,
                         ext: Extensions::new(),
                     }));
                     v
@@ -1533,7 +1542,7 @@ mod tests {
         let c = w.reserve_counter().unwrap();
         w.put_local(r, entry_version(root, "durable", w.writer_id(), c, &[]))
             .unwrap();
-        assert_eq!(w.commit(), Err(StoreError::Io));
+        assert_eq!(w.commit(), Err(StoreError::CommittedAnchorPending));
         // The change is durable; the session follows the database.
         assert_eq!(u.local_seq(), 2);
         assert!(u.manifest().record(r).is_some());
@@ -1594,7 +1603,7 @@ mod tests {
         let heads = w.head_clocks(r);
         w.put_local(r, entry_version(root, "x", w.writer_id(), c, &heads))
             .unwrap();
-        assert_eq!(w.commit(), Err(StoreError::Io));
+        assert_eq!(w.commit(), Err(StoreError::CommittedAnchorPending));
     }
 
     #[test]
@@ -1976,6 +1985,77 @@ mod attachment_tests {
             );
         }
     }
+    // 0012 §1: Self-referential/incomplete commitments
+    // 0012 §1: Budget inconsistency
+    #[test]
+    fn attachment_ranges_boundaries_cancellation_and_authenticated_chunks() {
+        let (d, a) = (TestDir::new(), TestDir::new());
+        let (p, dir) = copy_fixture(&d, &a, "v.qvault");
+        let mut u = unlock(&p, &dir, PASSWORD).unwrap();
+        let record = RecordId::generate().unwrap();
+        let entry = u.manifest().root_group_id();
+        let bytes: Vec<u8> = (0..131_091).map(|n| (n % 251) as u8).collect();
+        let mut w = u.write().unwrap();
+        let staged = w
+            .stage_attachment(record, &mut bytes.as_slice(), &|| false)
+            .unwrap();
+        let meta = staged.into_meta(
+            entry,
+            Text::new("fixture").unwrap(),
+            Text::new("x/test").unwrap(),
+        );
+        let chunks = meta.chunk_object_ids.clone();
+        let v = version(&mut w, record, meta);
+        let version = v.version_id;
+        w.put_local(record, v).unwrap();
+        w.commit().unwrap();
+        for (offset, length) in [
+            (0, 0),
+            (0, 65_536),
+            (1, 65_536),
+            (65_535, 65_536),
+            (131_072, 19),
+            (131_091, 0),
+        ] {
+            let got = u
+                .read_attachment_range(record, version, offset as u64, length, &|| false)
+                .unwrap();
+            assert_eq!(got.expose_secret(), &bytes[offset..offset + length]);
+        }
+        for (offset, length) in [(0, 65_537), (u64::MAX, 1), (131_091, 1), (131_092, 0)] {
+            assert_eq!(
+                err(u.read_attachment_range(record, version, offset, length, &|| false)),
+                StoreError::LimitExceeded
+            );
+        }
+        let calls = std::cell::Cell::new(0);
+        assert_eq!(
+            err(u.read_attachment_range(record, version, 1, 65_536, &|| {
+                calls.set(calls.get() + 1);
+                calls.get() >= 3
+            })),
+            StoreError::Io
+        );
+        // Damage in the second touched chunk must fail the unaligned range;
+        // the first independently authenticated chunk remains readable.
+        u.file
+            .conn
+            .execute(
+                "UPDATE object SET ciphertext=zeroblob(length(ciphertext)) WHERE object_id=?1",
+                [chunks[1].to_bytes().as_slice()],
+            )
+            .unwrap();
+        assert_eq!(
+            err(u.read_attachment_range(record, version, 1, 65_536, &|| false)),
+            StoreError::Integrity
+        );
+        assert_eq!(
+            u.read_attachment_range(record, version, 0, 65_536, &|| false)
+                .unwrap()
+                .expose_secret(),
+            &bytes[..65_536]
+        );
+    }
     #[test]
     fn attachment_ciphertext_mutations_and_reopen() {
         let (d, a) = (TestDir::new(), TestDir::new());
@@ -2094,7 +2174,16 @@ mod attachment_crash_tests {
                     )?;
                     w.commit()
                 })();
-                assert_eq!(result, Err(StoreError::Internal));
+                assert_eq!(
+                    result,
+                    Err(
+                        if matches!(point, Committed | AnchorTempWritten | AnchorReplaced) {
+                            StoreError::CommittedAnchorPending
+                        } else {
+                            StoreError::Internal
+                        }
+                    )
+                );
                 assert!(!disarm(), "{point:?}");
             }
             let anchors = crate::AnchorDir::open(&s.join("anchors")).unwrap();
@@ -2142,7 +2231,7 @@ impl Write<'_> {
         self.password = Some(crate::slot::LocalSlot::from_stored(schema::StoredSlot {
             slot_id: slot.slot.slot_id.0,
             kind: crate::slot::PASSWORD_SLOT,
-            body: slot.encode()?.to_vec(),
+            body: slot.encode_public_descriptor()?.to_vec(),
         })?);
         self.poisoned = false;
         Ok(())
@@ -2420,7 +2509,13 @@ mod selected_slot_tests {
             arm(point, &path, anchors.path(), snap.path());
             assert_eq!(
                 adopt(&mut u, version, NEW),
-                Err(StoreError::Internal),
+                Err(
+                    if matches!(point, Committed | AnchorTempWritten | AnchorReplaced) {
+                        StoreError::CommittedAnchorPending
+                    } else {
+                        StoreError::Internal
+                    }
+                ),
                 "{point:?}"
             );
             assert!(!disarm());

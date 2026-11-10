@@ -43,13 +43,25 @@ pub struct Keyslot {
 crate::redacted_debug!(Keyslot);
 
 impl Keyslot {
-    /// The bare descriptor map: the same bytes as the payload of a keyslot
-    /// record version. The vault file stores local slots in this encoding.
+    /// The complete encrypted record payload, preserving unknown keys.
+    /// Clear descriptors must use [`Self::encode_public_descriptor`] instead.
     pub fn encode(&self) -> Result<Zeroizing<Vec<u8>>, ModelError> {
         if !is_v4(&self.slot.slot_id.0) {
             return Err(ModelError::Malformed);
         }
         encode_item(|e| encode(self, e))
+    }
+
+    /// The defined-field public projection (0003 §8.1).
+    ///
+    /// Unknown encrypted extensions are deliberately omitted at clear-slot,
+    /// self-contained archive and LAN boundaries. This does not alter the
+    /// complete encrypted payload returned by [`Self::encode`].
+    pub fn encode_public_descriptor(&self) -> Result<Zeroizing<Vec<u8>>, ModelError> {
+        if !is_v4(&self.slot.slot_id.0) {
+            return Err(ModelError::Malformed);
+        }
+        encode_item(|e| encode_descriptor(&self.slot, e))
     }
 
     /// Decodes a bare descriptor map strictly: canonical, no trailing bytes,
@@ -97,7 +109,14 @@ pub(crate) fn decode(d: &mut Decoder<'_>) -> Result<Keyslot, ModelError> {
 }
 
 pub(crate) fn encode(p: &Keyslot, e: &mut Encoder) -> Result<(), EncodeError> {
-    let s = &p.slot;
+    encode_fields(&p.slot, &p.ext, e)
+}
+
+fn encode_descriptor(s: &PasswordSlot, e: &mut Encoder) -> Result<(), EncodeError> {
+    encode_fields(s, &Extensions::new(), e)
+}
+
+fn encode_fields(s: &PasswordSlot, ext: &Extensions, e: &mut Encoder) -> Result<(), EncodeError> {
     e.map(|m| {
         put_id(m, 0, &s.slot_id)?;
         put_uint(m, 1, u64::from(s.kdf_profile.id()))?;
@@ -106,6 +125,6 @@ pub(crate) fn encode(p: &Keyslot, e: &mut Encoder) -> Result<(), EncodeError> {
         put_bytes(m, 4, s.kek_commit.as_bytes())?;
         put_bytes(m, 5, &s.nonce)?;
         put_bytes(m, 6, &s.wrapped_vk)?;
-        put_ext(m, &p.ext)
+        put_ext(m, ext)
     })
 }

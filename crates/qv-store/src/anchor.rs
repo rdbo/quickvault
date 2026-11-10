@@ -41,8 +41,7 @@ use std::path::{Path, PathBuf};
 use qv_crypto::{KeyGeneration, VaultId};
 use qv_encoding::{Decoder, Encoder};
 use qv_model::RandomId;
-use rustix::fs::{Mode, OFlags, fstat, fsync, open, rename};
-use rustix::io::Errno;
+use rustix::fs::fsync;
 
 use crate::crash::{CrashPoint, point};
 use crate::error::{StoreError, errno_err};
@@ -166,7 +165,7 @@ impl AnchorDir {
         {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(_) => return Err(StoreError::Io),
+            Err(e) => return Err(crate::error::io_err(e)),
         }
         fs::check_private_dir(dir)?;
         Ok(AnchorDir {
@@ -177,6 +176,32 @@ impl AnchorDir {
     /// The directory's path (as given to [`Self::open`]).
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Heuristic warning: rollback records may travel with the live vault.
+    /// This does not establish independence when it returns false.
+    pub fn independence_warning(&self, vault: &Path) -> bool {
+        let Ok(anchors) = std::fs::canonicalize(&self.path) else {
+            return true;
+        };
+        if std::fs::canonicalize(fs::parent_of(vault))
+            .is_ok_and(|parent| anchors.starts_with(parent))
+        {
+            return true;
+        }
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let path_warning = crate::location::path_warnings(&anchors, home.as_deref());
+        if path_warning.any() || crate::location::has_sync_marker(&anchors) {
+            return true;
+        }
+        let Ok(file) = std::fs::File::open(&anchors) else {
+            return true;
+        };
+        // statfs magic has different signedness across Linux/Android ABIs.
+        #[allow(clippy::unnecessary_cast)]
+        rustix::fs::fstatfs(&file).map_or(true, |s| {
+            crate::location::fs_type_warnings(s.f_type as u64).any()
+        })
     }
 
     /// The default anchor directory on Linux: `$XDG_STATE_HOME/quickvault/
@@ -212,58 +237,39 @@ impl AnchorDir {
 
     /// Reads the anchor of `replica`; `None` if there is none.
     pub(crate) fn load(&self, replica: &[u8; 16]) -> Result<Option<Anchor>, StoreError> {
-        let fd = match open(
-            self.file(replica),
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
-            Mode::empty(),
-        ) {
-            Ok(fd) => fd,
-            Err(Errno::NOENT) => return Ok(None),
-            Err(Errno::LOOP | Errno::NXIO | Errno::ISDIR) => return Err(StoreError::UnsafeFile),
-            Err(e) => return Err(errno_err(e)),
+        let file = match fs::open_private_ro(&self.file(replica)) {
+            Ok(file) => file,
+            Err(StoreError::NotFound) => return Ok(None),
+            Err(e) => return Err(e),
         };
-        let st = fstat(&fd).map_err(errno_err)?;
-        if !fs::is_owner_only(&st) {
-            return Err(StoreError::UnsafeFile);
-        }
-        if u64::try_from(st.st_size).map_or(true, |n| n > MAX_ANCHOR_BYTES as u64) {
-            return Err(StoreError::Integrity);
+        if file.metadata().map_err(crate::error::io_err)?.len() > MAX_ANCHOR_BYTES as u64 {
+            return Err(StoreError::DamagedAnchor);
         }
         let mut buf = Vec::with_capacity(MAX_ANCHOR_BYTES + 1);
-        std::fs::File::from(fd)
-            .take(MAX_ANCHOR_BYTES as u64 + 1)
+        file.take(MAX_ANCHOR_BYTES as u64 + 1)
             .read_to_end(&mut buf)
-            .map_err(|_| StoreError::Io)?;
+            .map_err(crate::error::io_err)?;
         if buf.len() > MAX_ANCHOR_BYTES {
-            return Err(StoreError::Integrity);
+            return Err(StoreError::DamagedAnchor);
         }
-        Anchor::decode(&buf).map(Some)
+        Anchor::decode(&buf).map(Some).map_err(|e| match e {
+            StoreError::Integrity | StoreError::Unsupported => StoreError::DamagedAnchor,
+            other => other,
+        })
     }
 
     /// Atomically replaces the anchor of `replica`.
     pub(crate) fn store(&self, replica: &[u8; 16], anchor: &Anchor) -> Result<(), StoreError> {
         let bytes = anchor.encode()?;
-        let suffix = qv_crypto::random_array::<8>().map_err(|_| StoreError::Rng)?;
-        let mut temp_suffix = [0u8; 16];
-        temp_suffix[..8].copy_from_slice(&suffix);
-        let temp = self.path.join(format!(
-            ".{}.anchor.tmp-{}",
-            hex(replica),
-            &hex(&temp_suffix)[..16]
-        ));
-        let fd = open(
-            &temp,
-            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::RUSR | Mode::WUSR,
-        )
-        .map_err(errno_err)?;
+        let target = self.file(replica);
+        fs::remove_stale_temps(&target)?;
+        let (locked, temp) = fs::create_temp(&target)?;
+        let mut f = locked.into_archive_file();
         let written = (|| {
-            let mut f = std::fs::File::from(fd);
-            f.write_all(&bytes).map_err(|_| StoreError::Io)?;
+            f.write_all(&bytes).map_err(crate::error::io_err)?;
             fsync(&f).map_err(errno_err)?;
-            drop(f);
             point(CrashPoint::AnchorTempWritten)?;
-            rename(&temp, self.file(replica)).map_err(errno_err)
+            fs::replace_anchor(&temp, &target)
         })();
         if let Err(e) = written {
             fs::remove_best_effort(&temp);
@@ -330,6 +336,21 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn independent_anchor_location_warnings_cover_nested_and_sync_paths() {
+        let d = TestDir::new();
+        let vaults = d.subdir("vaults", 0o700);
+        let nested = AnchorDir::open(&vaults.join("state/anchors")).unwrap();
+        assert!(nested.independence_warning(&vaults.join("v.qvault")));
+        let separate = AnchorDir::open(&d.join("state/anchors")).unwrap();
+        assert!(!separate.independence_warning(&vaults.join("v.qvault")));
+        let synced = AnchorDir::open(&d.join("Dropbox/anchors")).unwrap();
+        assert!(synced.independence_warning(&vaults.join("v.qvault")));
+        let marked = AnchorDir::open(&d.join("marked/anchors")).unwrap();
+        std::fs::create_dir(d.join("marked/.stfolder")).unwrap();
+        assert!(marked.independence_warning(&vaults.join("v.qvault")));
+    }
+
+    #[test]
     fn anchor_file_rejections() {
         let d = TestDir::new();
         let dir = AnchorDir::open(&d.join("anchors")).unwrap();
@@ -348,7 +369,7 @@ pub(crate) mod tests {
         std::fs::remove_file(&f).unwrap();
         // Too long.
         write_file(&f, &[0u8; MAX_ANCHOR_BYTES + 1], 0o600);
-        assert_eq!(dir.load(&r), Err(StoreError::Integrity));
+        assert_eq!(dir.load(&r), Err(StoreError::DamagedAnchor));
         std::fs::remove_file(&f).unwrap();
         // An unknown key, a wrong format, garbage.
         let raw = |entries: &[(i64, u64)]| {
@@ -369,16 +390,16 @@ pub(crate) mod tests {
         unknown[0] += 1; // one more map entry
         unknown.extend_from_slice(&[0x05, 0x00]);
         write_file(&f, &unknown, 0o600);
-        assert_eq!(dir.load(&r), Err(StoreError::Unsupported));
+        assert_eq!(dir.load(&r), Err(StoreError::DamagedAnchor));
         std::fs::remove_file(&f).unwrap();
         write_file(&f, &raw(&[(0, 1)]), 0o600);
-        assert_eq!(dir.load(&r), Err(StoreError::Unsupported));
+        assert_eq!(dir.load(&r), Err(StoreError::DamagedAnchor));
         std::fs::remove_file(&f).unwrap();
         write_file(&f, &raw(&[(0, ANCHOR_FORMAT)]), 0o600);
-        assert_eq!(dir.load(&r), Err(StoreError::Integrity));
+        assert_eq!(dir.load(&r), Err(StoreError::DamagedAnchor));
         std::fs::remove_file(&f).unwrap();
         write_file(&f, b"not cbor", 0o600);
-        assert_eq!(dir.load(&r), Err(StoreError::Integrity));
+        assert_eq!(dir.load(&r), Err(StoreError::DamagedAnchor));
         std::fs::remove_file(&f).unwrap();
         // A directory at the anchor's name.
         std::fs::create_dir(&f).unwrap();

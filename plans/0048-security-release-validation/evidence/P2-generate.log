@@ -1,0 +1,5 @@
+P2: round 1 of 4 written
+P2: round 2 of 4 written
+P2: round 3 of 4 written
+P2: round 4 of 4 written
+P2: generated 122458112 bytes in 241.4 s; VerifyCounts { objects: 199991, records: 50000, active_heads: 50000, retained_versions: 149991, tombstones: 0, suppressed_records: 0, total_bytes: 54396720 }

@@ -1788,8 +1788,19 @@ fn attachments_preview_from_memory_and_close_with_their_screen() {
         (p.mime, p.size, p.count),
         ("image/png", png.len() as u64, 3)
     );
-    let route = format!("/{}", p.src.clone().unwrap());
-    assert_eq!(crate::preview::content(&route, None).unwrap().3, png);
+    let route = p.src.clone().unwrap();
+    // Unmeasured image dimensions require this preview's explicit Load action.
+    assert!(p.image_load.is_some());
+    assert!(crate::preview::test_range(&route, 0, png.len()).is_none());
+    env.act(WsAction::LoadPreview(handle("a-photo.png")));
+    assert_eq!(env.error(), None);
+    assert!(preview(&env).unwrap().image_load.is_none());
+    assert_eq!(
+        crate::preview::test_range(&route, 0, png.len())
+            .unwrap()
+            .expose_secret(),
+        png
+    );
     // Next: text renders as text and serves nothing.
     env.act(WsAction::PreviewStep(1));
     let p = preview(&env).unwrap();
@@ -1798,7 +1809,7 @@ fn attachments_preview_from_memory_and_close_with_their_screen() {
         p.text.as_deref().map(String::as_str),
         Some("line one\nline two")
     );
-    assert!(p.src.is_none() && crate::preview::content(&route, None).is_none());
+    assert!(p.src.is_none() && crate::preview::test_range(&route, 0, png.len()).is_none());
     // Next: a PDF is never rendered.
     env.act(WsAction::PreviewStep(1));
     let p = preview(&env).unwrap();

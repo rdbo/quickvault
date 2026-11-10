@@ -4,9 +4,12 @@
 
 use crate::ProtocolError;
 
-/// A `lan` profile ID. Only `lan / 1` exists; anything else fails closed.
+/// LAN profiles. Parsing is not negotiation: a driver must require its exact
+/// profile and message labels, with no downgrade or previous-key fallback.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LanProfile {
+    /// Credential-authenticated profile2, ephemeral password/key methods and explicit epochs.
+    V2,
     /// X-Wing draft-11, HKDF-SHA-512, MAC/1, XChaCha20-Poly1305 with
     /// per-direction counter nonces, SHA-256 transcripts.
     V1,
@@ -17,6 +20,7 @@ impl LanProfile {
     pub const fn id(self) -> u64 {
         match self {
             Self::V1 => 1,
+            Self::V2 => 2,
         }
     }
 
@@ -25,6 +29,7 @@ impl LanProfile {
     pub fn from_id(id: u64) -> Result<Self, ProtocolError> {
         match id {
             1 => Ok(Self::V1),
+            2 => Ok(Self::V2),
             _ => Err(ProtocolError::Unsupported),
         }
     }
@@ -95,7 +100,9 @@ mod tests {
     fn registry_profiles_fail_closed() {
         assert_eq!(LanProfile::from_id(1), Ok(LanProfile::V1));
         assert_eq!(LanProfile::V1.id(), 1);
-        for id in [0, 2, u64::MAX] {
+        assert_eq!(LanProfile::from_id(2), Ok(LanProfile::V2));
+        assert_eq!(LanProfile::V2.id(), 2);
+        for id in [0, 3, u64::MAX] {
             assert_eq!(LanProfile::from_id(id), Err(ProtocolError::Unsupported));
         }
     }

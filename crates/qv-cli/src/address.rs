@@ -16,8 +16,6 @@
 //!   Recovered entries (0003 §4.2) are in no group, so only `@id` reaches
 //!   them.
 
-use std::collections::HashMap;
-
 use qv_core::{EntryHandle, GroupHandle, ItemHandle, Session};
 use zeroize::Zeroizing;
 
@@ -92,79 +90,84 @@ pub(crate) fn path_escape(name: &str) -> Zeroizing<String> {
     s
 }
 
-/// One escaped component. Parent indices avoid recursive traversal and drop.
-struct PathNode {
-    parent: Option<usize>,
-    name: Zeroizing<String>,
+/// A revision only; paths decode one component on demand and never cache names.
+pub(crate) struct Paths<'a> {
+    session: &'a Session,
+    revision: u64,
 }
-
-/// Shared path components from one walk of the tree. Full paths are built
-/// only on demand, so a chain does not retain every ancestor prefix.
-pub(crate) struct Paths {
-    map: HashMap<ItemHandle, usize>,
-    nodes: Vec<PathNode>,
-}
-
-impl Paths {
-    pub(crate) fn walk(s: &Session) -> Result<Paths, CliError> {
-        let root = s.root()?;
-        let mut paths = Self {
-            map: HashMap::new(),
-            nodes: Vec::new(),
+impl<'a> Paths<'a> {
+    pub(crate) fn walk(s: &'a Session) -> Result<Self, CliError> {
+        Ok(Self {
+            session: s,
+            revision: s.view_revision()?,
+        })
+    }
+    pub(crate) fn check(&self) -> Result<(), CliError> {
+        crate::signals::check()?;
+        if self.session.view_revision()? != self.revision {
+            return Err(qv_core::CoreError::StaleHandle.into());
+        }
+        Ok(())
+    }
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
+    }
+    pub(crate) fn human(
+        &self,
+        out: &mut crate::out::Out,
+        item: ItemHandle,
+    ) -> Result<bool, CliError> {
+        self.parts(item, |s| {
+            out.path(s);
+            out.flush()
+        })
+    }
+    pub(crate) fn json(
+        &self,
+        j: &mut crate::json::Json<'_>,
+        item: ItemHandle,
+    ) -> Result<(), CliError> {
+        if self.session.item_path(item, self.revision)?.is_none() {
+            j.null();
+            return Ok(());
+        }
+        j.string_parts(|out| {
+            self.parts(item, |s| {
+                out.json_piece(s.as_bytes());
+                out.flush()
+            })?;
+            Ok(())
+        })
+    }
+    fn parts(
+        &self,
+        item: ItemHandle,
+        mut write: impl FnMut(&str) -> Result<(), CliError>,
+    ) -> Result<bool, CliError> {
+        let Some(mut path) = self.session.item_path(item, self.revision)? else {
+            return Ok(false);
         };
-        let root_index = paths.insert(ItemHandle::Group(root), None, "");
-        let mut queue = vec![(root, root_index)];
-        while let Some((g, parent)) = queue.pop() {
-            let listing = s.list(g)?;
-            for child in &listing.groups {
-                let index = paths.insert(
-                    ItemHandle::Group(child.handle),
-                    Some(parent),
-                    child.name.expose(),
-                );
-                queue.push((child.handle, index));
+        let mut nonempty = false;
+        while let Some(name) = self.session.path_next(&mut path)? {
+            crate::signals::check()?;
+            if nonempty {
+                write("/")?;
             }
-            for e in &listing.entries {
-                paths.insert(ItemHandle::Entry(e.handle), Some(parent), e.title.expose());
-            }
+            let escaped = path_escape(name.expose());
+            write(&escaped)?;
+            nonempty |= !escaped.is_empty();
         }
-        Ok(paths)
+        Ok(true)
     }
-
-    fn insert(&mut self, item: ItemHandle, parent: Option<usize>, name: &str) -> usize {
-        let index = self.nodes.len();
-        self.nodes.push(PathNode {
-            parent,
-            name: path_escape(name),
-        });
-        self.map.insert(item, index);
-        index
-    }
-
-    /// The item's path (`""` for the root), or `None` if it is not in the
-    /// tree (a recovered entry).
-    pub(crate) fn get(&self, item: ItemHandle) -> Option<Zeroizing<String>> {
-        let mut index = *self.map.get(&item)?;
-        let mut components = Vec::new();
-        let mut bytes = 0usize;
-        loop {
-            let node = self.nodes.get(index)?;
-            // The root is an empty component and contributes no separator.
-            let Some(parent) = node.parent else { break };
-            bytes += node.name.len();
-            components.push(node.name.as_str());
-            index = parent;
-        }
-        let mut path = Zeroizing::new(String::with_capacity(
-            bytes + components.len().saturating_sub(1),
-        ));
-        for component in components.into_iter().rev() {
-            if !path.is_empty() {
-                path.push('/');
-            }
-            path.push_str(component);
-        }
-        Some(path)
+    #[cfg(test)]
+    fn get(&self, item: ItemHandle) -> Option<Zeroizing<String>> {
+        let mut path = Zeroizing::new(String::new());
+        self.parts(item, |s| {
+            path.push_str(s);
+            Ok(())
+        })
+        .ok()?
+        .then_some(path)
     }
 }
 
@@ -172,7 +175,7 @@ fn not_found(addr: &str) -> CliError {
     CliError::new(NOT_FOUND, format!("not found: {}", escape_str(addr)))
 }
 
-fn ambiguous(addr: &str, matches: &[ItemHandle], paths: &Paths) -> CliError {
+fn ambiguous(addr: &str, matches: &[ItemHandle]) -> CliError {
     let mut msg = format!(
         "{} matches {} items; use one of these IDs:",
         escape_str(addr),
@@ -183,14 +186,50 @@ fn ambiguous(addr: &str, matches: &[ItemHandle], paths: &Paths) -> CliError {
             ItemHandle::Entry(_) => "entry",
             ItemHandle::Group(_) => "group",
         };
-        let path = paths
-            .get(*m)
-            .as_deref()
-            .map(|p| escape_str(p))
-            .unwrap_or_else(|| "(recovered)".into());
-        msg.push_str(&format!("\n  @{}  {kind}  {path}", m.id_hex()));
+        msg.push_str(&format!("\n  @{}  {kind}", m.id_hex()));
     }
     CliError::new(AMBIGUOUS, msg)
+}
+
+/// Exact names from one revision; only matching handles accumulate.
+pub(crate) fn named(
+    s: &Session,
+    group: GroupHandle,
+    name: &str,
+    want: Want,
+    revision: u64,
+) -> Result<Vec<ItemHandle>, CliError> {
+    let mut hits = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = s.list_page(
+            group,
+            cursor,
+            qv_core::PageLimit::default(),
+            &crate::signals::token(),
+        )?;
+        if page.revision != revision {
+            return Err(qv_core::CoreError::StaleHandle.into());
+        }
+        for hit in page.items {
+            let (item, matches) = match hit {
+                qv_core::SearchHit::Group(g) => {
+                    (ItemHandle::Group(g.handle), g.name.expose() == name)
+                }
+                qv_core::SearchHit::Entry(e) => {
+                    (ItemHandle::Entry(e.handle), e.title.expose() == name)
+                }
+            };
+            if matches && wanted(&item, want) {
+                hits.push(item);
+            }
+        }
+        cursor = page.next;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    Ok(hits)
 }
 
 fn wanted(item: &ItemHandle, want: Want) -> bool {
@@ -213,7 +252,7 @@ pub(crate) fn resolve(s: &Session, addr: &str, want: Want) -> Result<ItemHandle,
         return match found.as_slice() {
             [one] => Ok(*one),
             [] => Err(not_found(addr)),
-            many => Err(ambiguous(addr, many, &Paths::walk(s)?)),
+            many => Err(ambiguous(addr, many)),
         };
     }
     let parsed = parse_path(addr)?;
@@ -227,56 +266,26 @@ pub(crate) fn resolve(s: &Session, addr: &str, want: Want) -> Result<ItemHandle,
     if parsed.trailing_slash && want == Want::Entry {
         return Err(not_found(addr));
     }
+    let revision = s.view_revision()?;
     let mut group = root;
     for seg in parents {
-        let listing = s.list(group)?;
-        let hits: Vec<GroupHandle> = listing
-            .groups
-            .iter()
-            .filter(|g| g.name.expose() == seg.as_str())
-            .map(|g| g.handle)
-            .collect();
+        let hits = named(s, group, seg, Want::Group, revision)?;
         group = match hits.as_slice() {
-            [one] => *one,
+            [ItemHandle::Group(one)] => *one,
             [] => return Err(not_found(addr)),
-            many => {
-                let items: Vec<ItemHandle> = many.iter().map(|g| ItemHandle::Group(*g)).collect();
-                return Err(ambiguous(addr, &items, &Paths::walk(s)?));
-            }
+            many => return Err(ambiguous(addr, many)),
         };
     }
-    let listing = s.list(group)?;
-    let hits: Vec<ItemHandle> = match want {
-        Want::Any => listing
-            .groups
-            .iter()
-            .filter(|g| g.name.expose() == last.as_str())
-            .map(|g| ItemHandle::Group(g.handle))
-            .chain(
-                listing
-                    .entries
-                    .iter()
-                    .filter(|e| !parsed.trailing_slash && e.title.expose() == last.as_str())
-                    .map(|e| ItemHandle::Entry(e.handle)),
-            )
-            .collect(),
-        Want::Group => listing
-            .groups
-            .iter()
-            .filter(|g| g.name.expose() == last.as_str())
-            .map(|g| ItemHandle::Group(g.handle))
-            .collect(),
-        Want::Entry => listing
-            .entries
-            .iter()
-            .filter(|e| e.title.expose() == last.as_str())
-            .map(|e| ItemHandle::Entry(e.handle))
-            .collect(),
+    let want = if parsed.trailing_slash {
+        Want::Group
+    } else {
+        want
     };
+    let hits = named(s, group, last, want, revision)?;
     match hits.as_slice() {
         [one] => Ok(*one),
         [] => Err(not_found(addr)),
-        many => Err(ambiguous(addr, many, &Paths::walk(s)?)),
+        many => Err(ambiguous(addr, many)),
     }
 }
 
@@ -447,66 +456,41 @@ mod tests {
     }
 
     #[test]
-    fn deep_paths_and_listing_use_heap_storage() {
+    fn deep_listing_uses_ids_per_ancestor_and_one_page() {
         let f = fixture();
-        let s = &f.session;
-        let root = s.root().unwrap();
-        let item = ItemHandle::Group(root);
+        let root = f.session.root().unwrap();
         let depth = 50_000;
-        let mut paths = Paths {
-            map: HashMap::new(),
-            nodes: Vec::new(),
-        };
-        let mut parent = paths.insert(item, None, "");
-        // Synthetic components isolate path construction from durable writes.
-        // Reusing the map key does not change the parent-index chain.
-        for _ in 0..depth {
-            parent = paths.insert(item, Some(parent), "x");
-        }
-        assert_eq!(paths.nodes.len(), depth + 1);
-        assert_eq!(
-            paths.nodes.iter().map(|n| n.name.len()).sum::<usize>(),
-            depth
-        );
-        let path = paths.get(item).unwrap();
-        assert_eq!(path.len(), depth * 2 - 1);
-        assert!(path.starts_with("x/x/x") && path.ends_with("x/x/x"));
-        drop(path);
-        drop(paths); // Parent indices must also avoid recursive destruction.
-
         let mut calls = 0;
-        let mut groups = Vec::new();
-        let mut entries = Vec::new();
-        // Exercise the production traversal at the model's group budget,
-        // with a synthetic listing source rather than 50,000 SQLite commits.
-        crate::cmd::ls::collect(
-            |_| {
-                calls += 1;
-                Ok(qv_core::Listing {
-                    groups: if calls < depth {
-                        vec![qv_core::GroupSummary {
-                            handle: root,
-                            name: qv_core::Text::new("x").unwrap(),
-                            icon: None,
-                            order: qv_core::Text::new("").unwrap(),
-                            repaired: false,
-                            conflict: false,
-                        }]
-                    } else {
-                        Vec::new()
-                    },
-                    entries: Vec::new(),
-                })
-            },
+        let mut emitted = 0;
+        crate::cmd::ls::visit(
             root,
             true,
-            &mut groups,
-            &mut entries,
+            |_, after| {
+                if after.is_some() {
+                    return Ok(Vec::new());
+                }
+                calls += 1;
+                if calls >= depth {
+                    return Ok(Vec::new());
+                }
+                Ok(vec![qv_core::SearchHit::Group(qv_core::GroupSummary {
+                    handle: root,
+                    name: qv_core::Text::new("x").unwrap(),
+                    icon: None,
+                    order: qv_core::Text::new("").unwrap(),
+                    repaired: false,
+                    conflict: false,
+                    entries: 0,
+                })])
+            },
+            |_| {
+                emitted += 1;
+                Ok(())
+            },
         )
         .unwrap();
         assert_eq!(calls, depth);
-        assert_eq!(groups.len(), depth - 1);
-        assert!(entries.is_empty());
+        assert_eq!(emitted, depth - 1);
     }
 
     #[test]
@@ -521,50 +505,56 @@ mod tests {
         let a_entry = entry_in(s, a, "a");
         let b_entry = entry_in(s, b, "b");
         let c_entry = entry_in(s, c, "c");
+        let revision = s.view_revision().unwrap();
+        let source = |g, after: Option<ItemHandle>| {
+            let cursor = after.map(|a| s.list_resume(g, a, revision)).transpose()?;
+            Ok::<_, CliError>(
+                s.list_page(
+                    g,
+                    cursor,
+                    qv_core::PageLimit::default(),
+                    &qv_core::CancelToken::new(),
+                )?
+                .items,
+            )
+        };
         let mut groups = Vec::new();
         let mut entries = Vec::new();
-        crate::cmd::ls::collect(|g| Ok(s.list(g)?), root, true, &mut groups, &mut entries).unwrap();
-        assert_eq!(groups.iter().map(|g| g.0).collect::<Vec<_>>(), [a, c, b]);
-        assert_eq!(
-            entries.iter().map(|e| e.handle).collect::<Vec<_>>(),
-            [c_entry, a_entry, b_entry, root_entry]
-        );
-
+        crate::cmd::ls::visit(root, true, source, |hit| {
+            match hit {
+                qv_core::SearchHit::Group(g) => groups.push(g.handle),
+                qv_core::SearchHit::Entry(e) => entries.push(e.handle),
+            };
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(groups, [a, c, b]);
+        assert_eq!(entries, [c_entry, a_entry, b_entry, root_entry]);
         groups.clear();
         entries.clear();
-        let mut calls = 0;
-        crate::cmd::ls::collect(
-            |g| {
-                calls += 1;
-                Ok(s.list(g)?)
-            },
-            root,
-            false,
-            &mut groups,
-            &mut entries,
-        )
+        crate::cmd::ls::visit(root, false, source, |hit| {
+            match hit {
+                qv_core::SearchHit::Group(g) => groups.push(g.handle),
+                qv_core::SearchHit::Entry(e) => entries.push(e.handle),
+            };
+            Ok(())
+        })
         .unwrap();
-        assert_eq!(calls, 1);
-        assert_eq!(groups.iter().map(|g| g.0).collect::<Vec<_>>(), [a, b]);
-        assert_eq!(
-            entries.iter().map(|e| e.handle).collect::<Vec<_>>(),
-            [root_entry]
-        );
-
-        let err = crate::cmd::ls::collect(
-            |g| {
+        assert_eq!(groups, [a, b]);
+        assert_eq!(entries, [root_entry]);
+        let error = crate::cmd::ls::visit(
+            root,
+            true,
+            |g, after| {
                 if g == c {
                     Err(CliError::new(crate::exit::LIMIT, "test limit"))
                 } else {
-                    Ok(s.list(g)?)
+                    source(g, after)
                 }
             },
-            root,
-            true,
-            &mut Vec::new(),
-            &mut Vec::new(),
+            |_| Ok(()),
         )
         .unwrap_err();
-        assert_eq!(err.code, crate::exit::LIMIT);
+        assert_eq!(error.code, crate::exit::LIMIT);
     }
 }

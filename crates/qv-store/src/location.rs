@@ -27,12 +27,14 @@ pub struct LocationWarnings {
     pub network_fs: bool,
     /// On removable media.
     pub removable: bool,
+    /// The external rollback record may be copied or rolled back with the vault.
+    pub anchor_independence: bool,
 }
 
 impl LocationWarnings {
     /// Whether any warning applies.
     pub fn any(&self) -> bool {
-        self.sync_folder || self.network_fs || self.removable
+        self.sync_folder || self.network_fs || self.removable || self.anchor_independence
     }
 }
 
@@ -108,11 +110,12 @@ pub(crate) fn path_warnings(dir: &Path, home: Option<&Path>) -> LocationWarnings
         sync_folder: sync_named || resilio,
         network_fs: false,
         removable,
+        anchor_independence: false,
     }
 }
 
 /// Whether `dir` or one of its ancestors holds a sync marker.
-fn has_sync_marker(dir: &Path) -> bool {
+pub(crate) fn has_sync_marker(dir: &Path) -> bool {
     dir.ancestors().take(MAX_ANCESTORS).any(|a| {
         SYNC_MARKERS
             .iter()
@@ -127,6 +130,7 @@ pub(crate) fn fs_type_warnings(f_type: u64) -> LocationWarnings {
         sync_folder: false,
         network_fs: NETWORK_FS.contains(&magic),
         removable: REMOVABLE_FS.contains(&magic),
+        anchor_independence: false,
     }
 }
 
@@ -135,6 +139,7 @@ fn union(a: LocationWarnings, b: LocationWarnings) -> LocationWarnings {
         sync_folder: a.sync_folder || b.sync_folder,
         network_fs: a.network_fs || b.network_fs,
         removable: a.removable || b.removable,
+        anchor_independence: a.anchor_independence || b.anchor_independence,
     }
 }
 

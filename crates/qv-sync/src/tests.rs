@@ -55,6 +55,7 @@ fn entry(n: u32, pairs: &[(u32, u64)], title: &str) -> RecordVersion {
             created_at: Timestamp(1),
             modified_at: Timestamp(1),
             deleted_at: None,
+            delete_operation: None,
             ext: Extensions::new(),
         })),
     )
@@ -105,6 +106,7 @@ fn controls() -> Vec<Record> {
             icon: None,
             order: Text::new("a").unwrap(),
             deleted_at: None,
+            delete_operation: None,
             ext: Extensions::new(),
         }),
     ];

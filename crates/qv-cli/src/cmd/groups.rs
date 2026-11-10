@@ -20,14 +20,9 @@ pub(crate) fn walk(
 ) -> Result<GroupHandle, CliError> {
     let mut group = s.root()?;
     for name in parts {
-        let listing = s.list(group)?;
-        let hits: Vec<_> = listing
-            .groups
-            .iter()
-            .filter(|g| g.name.expose() == name.as_str())
-            .collect();
+        let hits = address::named(s, group, name, address::Want::Group, s.view_revision()?)?;
         group = match hits.as_slice() {
-            [one] => one.handle,
+            [qv_core::ItemHandle::Group(one)] => *one,
             [] if create => {
                 crate::signals::check()?;
                 s.save_group(s.new_group(group, name)?)?
@@ -37,7 +32,7 @@ pub(crate) fn walk(
                 let mut message =
                     format!("ambiguous group {}: use one of these IDs", escape_str(name));
                 for g in many {
-                    message.push_str(&format!("\n  @{}", g.handle.id_hex()));
+                    message.push_str(&format!("\n  @{}", g.id_hex()));
                 }
                 return Err(CliError::new(AMBIGUOUS, message));
             }

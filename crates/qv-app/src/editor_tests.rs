@@ -12,6 +12,46 @@ use qv_core::FieldKind;
 
 const CARD: &str = "4242 4242 4242 4242";
 
+#[test]
+fn display_escaping_does_not_change_editor_values_or_saved_content() {
+    let _k = lock();
+    let env = Env::unlocked();
+    let title = "Mail\u{202e}exe\u{200b}";
+    let value = "فارسی\u{200c}\u{200d}\u{2066}hidden";
+    let entry = env.read(|s| {
+        let mut draft = s.new_entry(s.root()?, "login", title)?;
+        draft.add_field(
+            "User\u{202e}name",
+            FieldKind::Text,
+            qv_core::FieldValue::text(value).unwrap(),
+        )?;
+        s.save_entry(draft)
+    });
+    let displayed = env.read(|s| views::entry(s, entry));
+    assert!(displayed.title.contains("\\u{202e}"));
+    assert!(displayed.fields[0].name.contains("\\u{202e}"));
+    assert!(
+        displayed.fields[0]
+            .value
+            .as_ref()
+            .unwrap()
+            .contains("\\u{2066}")
+    );
+    env.act(WsAction::EditEntry(entry));
+    let view = form(&env);
+    assert_eq!(view.title.as_str(), title);
+    assert_eq!(view.rows[0].name.as_str(), "User\u{202e}name");
+    assert_eq!(view.rows[0].value.as_ref().unwrap().as_str(), value);
+    env.act(WsAction::SaveEntry);
+    assert_eq!(env.error(), None);
+    let actual = env.read(|s| s.edit_entry(entry));
+    assert_eq!(actual.entry().title.expose(), title);
+    assert_eq!(
+        actual.entry().fields[0].value.expose_secret(),
+        value.as_bytes()
+    );
+}
+
 fn lock() -> std::sync::MutexGuard<'static, ()> {
     KDF.lock().unwrap_or_else(|p| p.into_inner())
 }

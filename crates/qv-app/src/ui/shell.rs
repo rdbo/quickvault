@@ -79,7 +79,7 @@ pub(crate) fn TitleBar(
                             "aria-expanded": if switcher() { "true" } else { "false" },
                             onclick: move |_| switcher.set(!switcher()),
                             Logo { class: "logo-bar" }
-                            b { "{vault.clone().unwrap_or_default()}" }
+                            b { "{crate::views::z(&vault.clone().unwrap_or_default()).as_str()}" }
                             Svg { icon: Icon::ChevronDown }
                         }
                         if switcher() && !busy { VaultSwitcher { controller: c, epoch, open: switcher } }
@@ -156,13 +156,13 @@ pub(crate) fn VaultSwitcher(
                 if current.as_ref() == Some(&v.path) {
                     button { class: "mi on", role: "menuitemradio", "aria-checked": "true", onclick: move |_| close(),
                         Svg { icon: Icon::Lock }
-                        span { class: "vault-mi", b { "{v.name}" } small { "Open · {v.place}" } }
+                        span { class: "vault-mi", b { "{crate::views::z(&v.name).as_str()}" } small { "Open · {crate::views::z(&v.place).as_str()}" } }
                         span { class: "sub", Svg { icon: Icon::Check } }
                     }
                 } else {
                     button { class: "mi", role: "menuitemradio", "aria-checked": "false", disabled: editing, onclick: switch(SwitchTo::Vault(v.path.clone())),
                         Svg { icon: Icon::Lock }
-                        span { class: "vault-mi", b { "{v.name}" } small { if v.exists { "{v.place}" } else { "Not found · {v.place}" } } }
+                        span { class: "vault-mi", b { "{crate::views::z(&v.name).as_str()}" } small { if v.exists { "{crate::views::z(&v.place).as_str()}" } else { "Not found · {crate::views::z(&v.place).as_str()}" } } }
                     }
                 }
             }
@@ -226,7 +226,7 @@ pub(crate) fn VaultCards(controller: Controller, epoch: FormEpoch, open: Signal<
                         if current.as_ref() == Some(&v.path) {
                             div { class: "vcard on", id: "vcard-open",
                                 span { class: "tile {vault_hue(&v.name)}", "{initial(&v.name)}" }
-                                span { class: "l", b { "{v.name}" }
+                                span { class: "l", b { "{crate::views::z(&v.name).as_str()}" }
                                     small { span { class: "live" } if open_quick { "Open · fingerprint unlock" } else { "Open now" } }
                                 }
                                 button { class: "btn", id: "vcard-lock", "data-qv-clear": "true", onclick: lock.clone(), Svg { icon: Icon::Lock } "Lock" }
@@ -234,7 +234,7 @@ pub(crate) fn VaultCards(controller: Controller, epoch: FormEpoch, open: Signal<
                         } else {
                             button { class: "vcard", disabled: editing || !v.exists, onclick: switch(SwitchTo::Vault(v.path.clone())),
                                 span { class: "tile {vault_hue(&v.name)}", "{initial(&v.name)}" }
-                                span { class: "l", b { "{v.name}" }
+                                span { class: "l", b { "{crate::views::z(&v.name).as_str()}" }
                                     small { if !v.exists { "Not found" } else if has_quick { "Fingerprint unlock" } else { "Master password" } }
                                 }
                                 if has_quick { span { class: "vq", "aria-hidden": "true", Svg { icon: Icon::Finger } } }
@@ -297,17 +297,37 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
     };
     let fixture = super::is_fixture(&controller);
     // The last data stays on screen while an operation owns the vault.
-    let all = super::use_last(controller.read(epoch, views::all_items))
-        .and_then(Result::ok)
-        .unwrap_or_default();
     let overview = super::use_last(controller.read(epoch, views::overview)).and_then(Result::ok);
-    let groups = super::use_last(controller.read(epoch, views::top_groups))
-        .and_then(Result::ok)
-        .unwrap_or_default();
-    let recovered =
-        super::use_last(controller.read(epoch, |s| views::recovered(s).map(|r| r.len())))
-            .and_then(Result::ok)
-            .unwrap_or(0);
+    let root = super::use_last(controller.read(epoch, |s| s.root())).and_then(Result::ok);
+    let (group_owner, group_read) = super::use_page(
+        &controller,
+        epoch,
+        crate::page_read::Lane::Groups,
+        0,
+        crate::page_read::Spec::Groups {
+            parent: root,
+            query: Zeroizing::new(String::new()),
+        },
+    );
+    let (kind_owner, kind_read) = super::use_page(
+        &controller,
+        epoch,
+        crate::page_read::Lane::Kinds,
+        0,
+        crate::page_read::Spec::Kinds,
+    );
+    let group_page = group_read.as_ref().and_then(|r| r.page.clone());
+    let kind_page = kind_read.as_ref().and_then(|r| r.page.clone());
+    let groups = match group_page.as_deref().map(|p| &p.rows) {
+        Some(crate::page_read::Rows::Groups(groups)) => groups.as_slice(),
+        _ => &[],
+    };
+    let kinds = match kind_page.as_deref().map(|p| &p.rows) {
+        Some(crate::page_read::Rows::Kinds(kinds)) => kinds.as_slice(),
+        _ => &[],
+    };
+    let recovered = overview.as_ref().map_or(0, |o| o.recovered);
+    let total_items = overview.as_ref().map_or(0, |o| o.entries);
     let context = controller
         .list_context(epoch)
         .unwrap_or(Screen::Browse(None));
@@ -317,28 +337,6 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
     let pending = controller.pending(epoch);
     let busy = view.busy;
     let live = view.live;
-    // Types present in the vault, common ones first.
-    let mut kinds: Vec<(Zeroizing<String>, usize)> = Vec::new();
-    for item in &all {
-        if item.kind.is_empty() {
-            continue;
-        }
-        match kinds.iter_mut().find(|(k, _)| *k == item.kind) {
-            Some((_, n)) => *n += 1,
-            None => kinds.push((item.kind.clone(), 1)),
-        }
-    }
-    let rank = |k: &str| match k {
-        "login" => 0,
-        "note" => 1,
-        "card" => 2,
-        "wifi" => 3,
-        _ => 4,
-    };
-    kinds.sort_by(|a, b| (rank(&a.0), a.0.as_str()).cmp(&(rank(&b.0), b.0.as_str())));
-    let in_group =
-        |g: qv_core::GroupHandle| all.iter().filter(|i| i.path.first() == Some(&g)).count();
-    let root = super::use_last(controller.read(epoch, |s| s.root())).and_then(Result::ok);
     let new_in = match &context {
         Screen::Browse(Some(g)) => Some(*g),
         _ => root,
@@ -413,19 +411,27 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
     let all_on = vault_screen && context == Screen::Browse(None);
     rsx! {
         if fixture && cfg!(target_os = "android") { p { class: "banner inset", "Synthetic validation build · isolated test vault only" } }
+        if overview.as_ref().is_some_and(|o| o.anchor_warning) {
+            p { class: "banner inset", role: "status", "The rollback record may be copied or rolled back with this vault. Keep it in independent private device storage." }
+        }
         // `inert` is not a Dioxus boolean attribute: a false value would still
         // render `inert="false"` and block the pointer, so omit it instead.
         div { class: if vault_screen { "shell" } else { "shell nolist" }, inert: pending.is_some().then_some("true"),
             nav { class: "side", "aria-label": "Vault",
                 button { class: nav_class(all_on), id: "nav-all", title: "All items", disabled: busy, onclick: go(&controller, epoch, Screen::Browse(None)),
-                    Svg { icon: Icon::All } span { class: "t", "All items" } span { class: "n", "{all.len()}" }
+                    Svg { icon: Icon::All } span { class: "t", "All items" } span { class: "n", "{total_items}" }
                 }
                 if !kinds.is_empty() { div { class: "h", "TYPES" } }
-                for (k, n) in kinds.iter().cloned() {
+                for kind in kinds.iter().cloned() {
+                    { let k = kind.kind; let n = kind.count; rsx! {
                     button { class: nav_class(vault_screen && context == Screen::Kind(k.clone())), title: "{kind_label(&k)}", disabled: busy,
                         onclick: go(&controller, epoch, Screen::Kind(k.clone())),
                         Svg { icon: kind_icon(&k) } span { class: "t", "{kind_label(&k)}" } span { class: "n", "{n}" }
                     }
+                    } }
+                }
+                if let (Some(owner), Some(read)) = (kind_owner, kind_read.clone()) {
+                    super::PageNav { controller: controller.clone(), epoch, owner, read }
                 }
                 div { class: "h", "GROUPS"
                     if let Some(r) = root {
@@ -435,8 +441,11 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
                 for g in groups.iter().cloned() {
                     button { class: nav_class(vault_screen && context == Screen::Browse(Some(g.handle))), title: "{g.name.as_str()}", disabled: busy,
                         onclick: go(&controller, epoch, Screen::Browse(Some(g.handle))),
-                        span { class: "dot {item_hue(g.colour, &g.handle.id_hex())}" } span { class: "t", "{g.name.as_str()}" } span { class: "n", "{in_group(g.handle)}" }
+                        span { class: "dot {item_hue(g.colour, &g.handle.id_hex())}" } span { class: "t", "{g.name.as_str()}" } span { class: "n", "{g.entries}" }
                     }
+                }
+                if let (Some(owner), Some(read)) = (group_owner, group_read.clone()) {
+                    super::PageNav { controller: controller.clone(), epoch, owner, read }
                 }
                 if recovered > 0 {
                     button { class: nav_class(vault_screen && context == Screen::Recovered), title: "Recovered items", disabled: busy, onclick: go(&controller, epoch, Screen::Recovered),
@@ -459,7 +468,7 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
                 }
             }
             if vault_screen {
-                items::ListPane { controller: controller.clone(), epoch, revision, list: context.clone(), screen: screen.clone(), all: all.clone(), busy, conflicts }
+                items::ListPane { controller: controller.clone(), epoch, revision, list: context.clone(), screen: screen.clone(), busy, conflicts }
                 items::Detail { controller: controller.clone(), epoch, revision, screen: screen.clone(), live, busy, report: report.clone() }
             } else {
                 pages::Page { controller: controller.clone(), epoch, revision, screen: screen.clone(), live, busy, report: report.clone() }
@@ -478,7 +487,7 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
                 }
             }
         }
-        if busy && controller.lan_view(epoch).is_none() && !view.scanning {
+        if view.busy_shown && controller.lan_view(epoch).is_none() && !view.scanning {
             div { class: "toasts", div { class: "toast busy-toast", role: "status", "Working… other actions wait until this finishes." } }
         }
         pages::LanPanel { controller: controller.clone(), epoch, revision, seconds: view.lan_seconds }
@@ -515,7 +524,7 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
         if palette() && !busy {
             Palette { controller: controller.clone(), epoch, revision, palette, root, theme: controller.theme() }
         }
-        if fixture { input { id: "validation-result", "data-fixture-root": controller.0.base.to_string_lossy().as_ref(), oninput: super::fixture_report(&controller) } }
+        if fixture { input { id: "validation-result", "data-fixture-root": controller.0.base.to_string_lossy().as_ref(), "data-peer-opened": super::fixture_peer_opened().to_string(), oninput: super::fixture_report(&controller) } }
     }
 }
 
@@ -563,14 +572,19 @@ fn Palette(
         .unwrap_or_default();
     let echo = items::use_echo(&query);
     let (shown, generation) = echo.borrow_mut().sync(&query);
-    let hits = if query.is_empty() {
-        Vec::new()
-    } else {
-        controller
-            .read(epoch, |s| views::search(s, &query))
-            .and_then(Result::ok)
-            .map(|(_, e)| e.into_iter().take(8).collect::<Vec<_>>())
-            .unwrap_or_default()
+    let (owner, read) = super::use_page(
+        &controller,
+        epoch,
+        crate::page_read::Lane::Main,
+        2,
+        crate::page_read::Spec::Search(query.clone()),
+    );
+    let page = read.as_ref().and_then(|r| r.page.clone());
+    let (groups, hits) = match page.as_deref().map(|p| &p.rows) {
+        Some(crate::page_read::Rows::Search { groups, entries }) => {
+            (groups.as_slice(), entries.as_slice())
+        }
+        _ => (&[][..], &[][..]),
     };
     let commands: Vec<(&'static str, Icon, Command, &'static str)> = vec![
         ("New item", Icon::Plus, Command::New, "Ctrl N"),
@@ -699,6 +713,13 @@ fn Palette(
                             span { "{e.title.as_str()}" } small { "{e.subtitle.as_str()}" }
                         }
                     }
+                    if !groups.is_empty() { div { class: "grp", "GROUPS" } }
+                    for g in groups {
+                        button { class: "it", onclick: { let mut run = run.clone(); let h = g.handle; move |_| run(Command::Open(Screen::Browse(Some(h)))) },
+                            span { class: "ic", Svg { icon: Icon::Folder } } span { "{g.name.as_str()}" }
+                        }
+                    }
+                    if let (Some(owner), Some(read)) = (owner, read) { super::PageNav { controller: controller.clone(), epoch, owner, read } }
                     if !commands.is_empty() { div { class: "grp", "COMMANDS" } }
                     for (label, icon, cmd, keys) in commands {
                         button { class: "it", onclick: { let mut run = run.clone(); move |_| run(cmd.clone()) },

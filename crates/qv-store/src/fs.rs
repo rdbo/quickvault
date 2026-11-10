@@ -29,13 +29,18 @@
 //!   moved into place with `RENAME_NOREPLACE`, so a path is never
 //!   overwritten and a crash never leaves a partial vault at it.
 
+use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
+use std::fs::File;
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError, Weak};
 
 use rustix::fs::{
-    CWD, FileType, FlockOperation, Mode, OFlags, RenameFlags, Stat, flock, fstat, fsync, lstat,
-    open, renameat_with, stat,
+    AtFlags, CWD, FileType, FlockOperation, Mode, OFlags, RenameFlags, Stat, flock, fstat, fsync,
+    lstat, open, openat, renameat_with, stat, statat,
 };
 use rustix::io::Errno;
 #[cfg(target_os = "android")]
@@ -50,16 +55,146 @@ const GROUP_OTHER: u32 = 0o077;
 const OTHER_WRITE: u32 = 0o002;
 const GROUP_WRITE: u32 = 0o020;
 
+type Identity = (u64, u64);
+struct Registered {
+    file: Arc<File>,
+    token: Weak<LeaseToken>,
+    opaque: bool,
+}
+static FILES: LazyLock<Mutex<HashMap<Identity, Registered>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn identity(st: &Stat) -> Identity {
+    (st.st_dev, st.st_ino)
+}
+
+struct LeaseToken(Identity);
+impl Drop for LeaseToken {
+    fn drop(&mut self) {
+        let mut files = FILES.lock().unwrap_or_else(PoisonError::into_inner);
+        // Close under the mutex, before another SQLite-capable acquisition.
+        drop(files.remove(&self.0));
+    }
+}
+
+#[derive(Clone)]
+struct FileHandle {
+    // Field order matters: the last token closes the registry's descriptor
+    // under its mutex after all handles have released their own file Arc.
+    file: Arc<File>,
+    _token: Arc<LeaseToken>,
+}
+
+fn register(
+    files: &mut HashMap<Identity, Registered>,
+    fd: OwnedFd,
+    st: &Stat,
+    opaque: bool,
+) -> FileHandle {
+    let file = Arc::new(File::from(fd));
+    let token = Arc::new(LeaseToken(identity(st)));
+    files.insert(
+        identity(st),
+        Registered {
+            file: file.clone(),
+            token: Arc::downgrade(&token),
+            opaque,
+        },
+    );
+    FileHandle {
+        file,
+        _token: token,
+    }
+}
+
+/// An opaque encrypted archive/journal descriptor with a lifetime lease and
+/// an independent cursor. Positioned I/O permits readers to share a producer's
+/// descriptor without opening/closing an extra fd or disturbing its cursor.
+pub(crate) struct ArchiveFile {
+    handle: FileHandle,
+    offset: u64,
+}
+impl std::ops::Deref for ArchiveFile {
+    type Target = File;
+    fn deref(&self) -> &File {
+        &self.handle.file
+    }
+}
+impl AsFd for ArchiveFile {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.handle.file.as_fd()
+    }
+}
+impl ArchiveFile {
+    pub(crate) fn same_as_path(&self, path: &Path) -> Result<(), StoreError> {
+        let now = lstat(path).map_err(errno_err)?;
+        let own = fstat(self.as_fd()).map_err(errno_err)?;
+        if !is_owner_only(&now) || identity(&now) != identity(&own) {
+            return Err(StoreError::Replaced);
+        }
+        Ok(())
+    }
+}
+impl Read for ArchiveFile {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.handle.file.read_at(buf, self.offset)?;
+        self.offset += n as u64;
+        Ok(n)
+    }
+}
+impl Write for ArchiveFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.handle.file.write_at(buf, self.offset)?;
+        self.offset += n as u64;
+        Ok(n)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+impl Seek for ArchiveFile {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        let next = match pos {
+            SeekFrom::Start(n) => Some(n),
+            SeekFrom::Current(n) => self.offset.checked_add_signed(n),
+            SeekFrom::End(n) => self.metadata()?.len().checked_add_signed(n),
+        }
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+        self.offset = next;
+        Ok(next)
+    }
+}
+
+/// Short cooperative directory lock: never retained during file production.
+pub(crate) struct DirectoryLock(OwnedFd);
+pub(crate) fn lock_dir(dir: &Path) -> Result<DirectoryLock, StoreError> {
+    let fd = open(
+        dir,
+        // Preserve the existing parent policy: owner-controlled directory
+        // aliases are allowed. Snapshot/anchor roots separately reject symlinks.
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(errno_err)?;
+    flock(&fd, FlockOperation::LockExclusive).map_err(errno_err)?;
+    Ok(DirectoryLock(fd))
+}
+impl Drop for DirectoryLock {
+    fn drop(&mut self) {
+        let _ = flock(&self.0, FlockOperation::Unlock);
+    }
+}
+
 /// The vault file's descriptor: holds the process lock and the identity.
 pub(crate) struct LockedFile {
-    fd: OwnedFd,
+    handle: FileHandle,
     identity: Stat,
 }
 
 impl LockedFile {
     /// The descriptor (for `fstatfs`, `fsync`).
     pub(crate) fn fd(&self) -> BorrowedFd<'_> {
-        self.fd.as_fd()
+        self.handle.file.as_fd()
     }
 
     /// [`StoreError::Replaced`] unless `path` still names this file and is
@@ -77,49 +212,67 @@ impl LockedFile {
 
     /// Flushes the file to stable storage.
     pub(crate) fn sync(&self) -> Result<(), StoreError> {
-        fsync(&self.fd).map_err(errno_err)
+        fsync(&*self.handle.file).map_err(errno_err)
     }
 
-    fn lock(fd: OwnedFd) -> Result<Self, StoreError> {
+    fn lock(fd: OwnedFd, files: &mut HashMap<Identity, Registered>) -> Result<Self, StoreError> {
         flock(&fd, FlockOperation::NonBlockingLockExclusive).map_err(|e| match e {
             Errno::WOULDBLOCK => StoreError::Locked,
             e => errno_err(e),
         })?;
         let identity = fstat(&fd).map_err(errno_err)?;
-        Ok(Self { fd, identity })
+        let handle = register(files, fd, &identity, false);
+        Ok(Self { handle, identity })
     }
 
-    /// Reads the whole locked file from offset 0 through a duplicate
-    /// descriptor (the lock is kept). [`StoreError::Integrity`] if its
+    /// Reads the whole locked file from offset 0 with positioned reads
+    /// (the descriptor and lock are kept). [`StoreError::Integrity`] if its
     /// size, checked by `fstat` before reading, or the bytes read exceed
     /// `max` (the rotation journal, plan 0023).
     pub(crate) fn read_bounded(&self, max: usize) -> Result<Vec<u8>, StoreError> {
-        let st = fstat(&self.fd).map_err(errno_err)?;
+        let st = fstat(self.fd()).map_err(errno_err)?;
         let len = usize::try_from(st.st_size).map_err(|_| StoreError::Integrity)?;
         if len > max {
             return Err(StoreError::Integrity);
         }
-        let dup = self.fd.try_clone().map_err(|_| StoreError::Io)?;
-        let mut file = std::fs::File::from(dup);
-        std::io::Seek::seek(&mut file, std::io::SeekFrom::Start(0)).map_err(|_| StoreError::Io)?;
+        // Used only for opaque rotation markers, never SQLite data. Do not
+        // duplicate/close its descriptor: use positioned reads instead.
         let mut bytes = Vec::with_capacity(len);
-        std::io::Read::read_to_end(
-            &mut std::io::Read::take(&mut file, max as u64 + 1),
-            &mut bytes,
-        )
-        .map_err(|_| StoreError::Io)?;
-        if bytes.len() > max {
-            return Err(StoreError::Integrity);
+        let mut chunk = [0; 4096];
+        loop {
+            let n = self
+                .handle
+                .file
+                .read_at(
+                    &mut chunk[..(max + 1 - bytes.len()).min(4096)],
+                    bytes.len() as u64,
+                )
+                .map_err(crate::error::io_err)?;
+            if n == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&chunk[..n]);
+            if bytes.len() > max {
+                return Err(StoreError::Integrity);
+            }
         }
         Ok(bytes)
     }
 
     /// Takes the descriptor out of the guard, for a temporary file that is
     /// written, re-read and published (archives, 0004 §6.5). Giving up the
-    /// descriptor also gives up the lock, which a temp file does not need:
-    /// its name is random and created with `O_EXCL`.
-    pub(crate) fn into_file(self) -> std::fs::File {
-        std::fs::File::from(self.fd)
+    /// descriptor preserves its flock until the final reader/producer drops.
+    /// This file must never subsequently host a SQLite connection.
+    pub(crate) fn into_archive_file(self) -> ArchiveFile {
+        FILES
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(identity(&self.identity))
+            .and_modify(|f| f.opaque = true);
+        ArchiveFile {
+            handle: self.handle,
+            offset: 0,
+        }
     }
 }
 
@@ -213,11 +366,15 @@ fn check_file(st: &Stat) -> Result<(), StoreError> {
 
 /// Opens and locks an existing vault file (plan 0008, *Open* steps 1–2).
 pub(crate) fn open_existing(path: &Path) -> Result<LockedFile, StoreError> {
+    let mut files = FILES.lock().unwrap_or_else(PoisonError::into_inner);
     let st = lstat(path).map_err(errno_err)?;
     if FileType::from_raw_mode(st.st_mode) == FileType::Symlink {
         return Err(StoreError::UnsafeFile);
     }
     check_parent(path)?;
+    if files.contains_key(&identity(&st)) {
+        return Err(StoreError::Locked);
+    }
     let fd = open(
         path,
         OFlags::RDWR | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
@@ -229,15 +386,44 @@ pub(crate) fn open_existing(path: &Path) -> Result<LockedFile, StoreError> {
         e => errno_err(e),
     })?;
     check_file(&fstat(&fd).map_err(errno_err)?)?;
-    LockedFile::lock(fd)
+    LockedFile::lock(fd, &mut files)
 }
 
 /// Opens a private regular file read-only, for re-reading what was just
 /// written before it is published (an archive temp file, 0004 §6.5).
 /// [`StoreError::UnsafeFile`] for a symlink, a non-regular file or a file
 /// that is not owner-only.
-pub(crate) fn open_private_ro(path: &Path) -> Result<std::fs::File, StoreError> {
-    let fd = open(
+pub(crate) fn open_private_ro(path: &Path) -> Result<ArchiveFile, StoreError> {
+    open_opaque_at(CWD, path, true)
+}
+
+pub(crate) fn open_opaque_at(
+    dir: impl AsFd,
+    path: &Path,
+    private: bool,
+) -> Result<ArchiveFile, StoreError> {
+    let mut files = FILES.lock().unwrap_or_else(PoisonError::into_inner);
+    let before = statat(&dir, path, AtFlags::SYMLINK_NOFOLLOW).map_err(errno_err)?;
+    if FileType::from_raw_mode(before.st_mode) != FileType::RegularFile
+        || (private && !is_owner_only(&before))
+    {
+        return Err(StoreError::UnsafeFile);
+    }
+    if let Some(registered) = files.get(&identity(&before)) {
+        if !registered.opaque {
+            return Err(StoreError::Locked);
+        }
+        let token = registered.token.upgrade().ok_or(StoreError::Locked)?;
+        return Ok(ArchiveFile {
+            handle: FileHandle {
+                file: registered.file.clone(),
+                _token: token,
+            },
+            offset: 0,
+        });
+    }
+    let fd = openat(
+        &dir,
         path,
         OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
         Mode::empty(),
@@ -247,10 +433,23 @@ pub(crate) fn open_private_ro(path: &Path) -> Result<std::fs::File, StoreError> 
         e => errno_err(e),
     })?;
     let st = fstat(&fd).map_err(errno_err)?;
-    if !is_owner_only(&st) {
+    if FileType::from_raw_mode(st.st_mode) != FileType::RegularFile
+        || (private && !is_owner_only(&st))
+    {
         return Err(StoreError::UnsafeFile);
     }
-    Ok(std::fs::File::from(fd))
+    flock(&fd, FlockOperation::NonBlockingLockShared).map_err(|e| match e {
+        Errno::WOULDBLOCK => StoreError::Locked,
+        e => errno_err(e),
+    })?;
+    let handle = register(&mut files, fd, &st, true);
+    Ok(ArchiveFile { handle, offset: 0 })
+}
+
+/// Atomic replacement is reserved for anchor metadata, never vault files.
+pub(crate) fn replace_anchor(from: &Path, to: &Path) -> Result<(), StoreError> {
+    let _files = FILES.lock().unwrap_or_else(PoisonError::into_inner);
+    rustix::fs::rename(from, to).map_err(errno_err)
 }
 
 /// Checks SQLite's sidecar files next to `path` before SQLite opens it
@@ -292,6 +491,8 @@ pub(crate) fn create_temp(final_path: &Path) -> Result<(LockedFile, PathBuf), St
         temp_name.push(format!("{b:02x}"));
     }
     let temp = parent_of(final_path).join(&temp_name);
+    let _dir = lock_dir(parent_of(final_path))?;
+    let mut files = FILES.lock().unwrap_or_else(PoisonError::into_inner);
     let fd = open(
         &temp,
         OFlags::RDWR | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
@@ -299,7 +500,7 @@ pub(crate) fn create_temp(final_path: &Path) -> Result<(LockedFile, PathBuf), St
     )
     .map_err(errno_err)?;
     let locked = match fstat(&fd).map_err(errno_err).and_then(|st| check_file(&st)) {
-        Ok(()) => LockedFile::lock(fd),
+        Ok(()) => LockedFile::lock(fd, &mut files),
         Err(e) => Err(e),
     };
     match locked {
@@ -313,6 +514,7 @@ pub(crate) fn create_temp(final_path: &Path) -> Result<(LockedFile, PathBuf), St
 
 /// Moves `from` to `to` without ever replacing an existing `to`.
 pub(crate) fn rename_noreplace(from: &Path, to: &Path) -> Result<(), StoreError> {
+    let _files = FILES.lock().unwrap_or_else(PoisonError::into_inner);
     renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE).map_err(|e| match e {
         // The filesystem cannot rename without replacing; never fall back.
         Errno::INVAL | Errno::NOSYS => StoreError::Unsupported,
@@ -342,14 +544,21 @@ pub(crate) fn remove_best_effort(path: &Path) {
 /// Only regular files owned by this user are removed, checked with `lstat`
 /// (never following a symlink). Every other name is left alone.
 pub(crate) fn remove_stale_temps(final_path: &Path) -> Result<(), StoreError> {
+    // Rotation recovery owns its replacements. Never reclaim this family on
+    // the basis of an apparently unleased sibling alone.
+    if crate::rotation_guard::is_reserved(final_path) {
+        return Ok(());
+    }
     let Some(name) = final_path.file_name().and_then(OsStr::to_str) else {
         return Err(StoreError::Unsupported);
     };
     let prefix = format!(".{name}.tmp-");
     let parent = parent_of(final_path);
+    check_parent(final_path)?;
+    let _dir = lock_dir(parent)?;
     let entries = match std::fs::read_dir(parent) {
         Ok(e) => e,
-        Err(_) => return Err(StoreError::Io),
+        Err(e) => return Err(crate::error::io_err(e)),
     };
     for entry in entries {
         let Ok(entry) = entry else { continue };
@@ -360,7 +569,8 @@ pub(crate) fn remove_stale_temps(final_path: &Path) -> Result<(), StoreError> {
         let Some(rest) = n.strip_prefix(&prefix) else {
             continue;
         };
-        let hex = rest.strip_suffix("-journal").unwrap_or(rest);
+        // A journal alone does not establish that no producer is live.
+        let hex = rest;
         if hex.len() != 16 || !hex.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')) {
             continue;
         }
@@ -368,13 +578,28 @@ pub(crate) fn remove_stale_temps(final_path: &Path) -> Result<(), StoreError> {
         let Ok(st) = rustix::fs::lstat(&path) else {
             continue;
         };
-        if rustix::fs::FileType::from_raw_mode(st.st_mode) == rustix::fs::FileType::RegularFile
-            && st.st_uid == geteuid().as_raw()
-        {
-            remove_best_effort(&path);
+        if !is_owner_only(&st) {
+            continue;
         }
+        let lease = match open_existing(&path) {
+            Ok(lease) => lease,
+            Err(StoreError::Locked | StoreError::NotFound) => continue,
+            Err(e) => return Err(e),
+        };
+        lease.same_as_path(&path)?;
+        let journal = with_suffix(&path, "-journal");
+        match lstat(&journal) {
+            Ok(st) if is_owner_only(&st) => {
+                std::fs::remove_file(&journal).map_err(crate::error::io_err)?;
+            }
+            Ok(_) => continue,
+            Err(Errno::NOENT) => {}
+            Err(e) => return Err(errno_err(e)),
+        }
+        lease.same_as_path(&path)?;
+        std::fs::remove_file(&path).map_err(crate::error::io_err)?;
     }
-    Ok(())
+    sync_dir(parent)
 }
 
 /// `path` with `suffix` appended to its file name (e.g. `-journal`).
@@ -627,6 +852,173 @@ mod tests {
         names.sort();
         names.dedup();
         assert_eq!(names.len(), 32);
+    }
+
+    // 0012 §1: Snapshot disk growth
+    #[test]
+    fn stale_cleanup_keeps_live_producers_readers_and_unowned_journals() {
+        let d = TestDir::new();
+        let target = d.join("new.qvault");
+        let (producer, temp) = create_temp(&target).unwrap();
+        let journal = with_suffix(&temp, "-journal");
+        write_file(&journal, b"synthetic journal", 0o600);
+        // A hardlink alias must be detected before opening/closing an fd.
+        let alias = d.join(".new.qvault.tmp-0123456789abcdef");
+        std::fs::hard_link(&temp, &alias).unwrap();
+        remove_stale_temps(&target).unwrap();
+        assert!(temp.exists() && alias.exists() && journal.exists());
+        assert_eq!(err(open_private_ro(&temp)), StoreError::Locked);
+        let mut producer = producer.into_archive_file();
+        producer.write_all(b"encrypted fixture").unwrap();
+        let mut reader = open_private_ro(&temp).unwrap();
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, b"encrypted fixture");
+        assert_eq!(producer.stream_position().unwrap(), 17);
+        drop(producer);
+        remove_stale_temps(&target).unwrap();
+        assert!(temp.exists() && alias.exists() && journal.exists());
+        drop(reader);
+        let orphan = d.join(".new.qvault.tmp-fedcba9876543210-journal");
+        write_file(&orphan, b"unknown owner", 0o600);
+        remove_stale_temps(&target).unwrap();
+        assert!(!temp.exists() && !alias.exists() && !journal.exists());
+        assert!(orphan.exists());
+    }
+
+    #[test]
+    #[ignore = "child process for stale_cleanup_waits_for_process_death"]
+    fn temporary_producer_child() {
+        let target = PathBuf::from(std::env::var_os("QV_TEMP_LEASE_FIXTURE").unwrap());
+        let (lease, temp) = create_temp(&target).unwrap();
+        let mut file = lease.into_archive_file();
+        file.write_all(b"encrypted fixture").unwrap();
+        write_file(&with_suffix(&temp, "-journal"), b"synthetic journal", 0o600);
+        std::fs::write(target.with_extension("ready"), b"ready").unwrap();
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+
+    #[test]
+    #[ignore = "child process for snapshot recovery lease tests"]
+    fn existing_lease_child() {
+        let path = PathBuf::from(std::env::var_os("QV_EXISTING_LEASE_FIXTURE").unwrap());
+        let _lease = open_existing(&path).unwrap();
+        std::fs::write(path.with_extension("ready"), b"ready").unwrap();
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+
+    // 0012 §1: Snapshot disk growth
+    #[test]
+    fn stale_cleanup_waits_for_process_death() {
+        let d = TestDir::new();
+        let target = d.join("new.qvault");
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "fs::tests::temporary_producer_child",
+            ])
+            .env("QV_TEMP_LEASE_FIXTURE", &target)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !target.with_extension("ready").exists() && std::time::Instant::now() < deadline {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let ready = target.with_extension("ready").exists();
+        let count = || {
+            std::fs::read_dir(d.path())
+                .unwrap()
+                .filter(|e| {
+                    e.as_ref()
+                        .unwrap()
+                        .file_name()
+                        .as_encoded_bytes()
+                        .starts_with(b".new.qvault.tmp-")
+                })
+                .count()
+        };
+        let before = count();
+        let cleanup = remove_stale_temps(&target);
+        let during = count();
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(ready);
+        cleanup.unwrap();
+        assert_eq!(before, 2);
+        assert_eq!(during, 2, "live producer was reclaimed");
+        remove_stale_temps(&target).unwrap();
+        assert_eq!(count(), 0);
+    }
+
+    #[test]
+    #[ignore = "child process for cleanup_does_not_release_sqlite_posix_locks"]
+    fn sqlite_lock_probe_child() {
+        let path = PathBuf::from(std::env::var_os("QV_SQLITE_LEASE_FIXTURE").unwrap());
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.busy_timeout(std::time::Duration::ZERO).unwrap();
+        let error = conn
+            .query_row("SELECT x FROM fixture", [], |r| r.get::<_, i64>(0))
+            .unwrap_err();
+        assert_eq!(
+            error.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::DatabaseBusy)
+        );
+    }
+
+    // 0012 §1: Live SQLite copying
+    #[test]
+    fn cleanup_does_not_release_sqlite_posix_locks() {
+        let d = TestDir::new();
+        let target = d.join("new.qvault");
+        let (lease, temp) = create_temp(&target).unwrap();
+        let conn = rusqlite::Connection::open(&temp).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE fixture(x); INSERT INTO fixture VALUES(1); BEGIN EXCLUSIVE;",
+        )
+        .unwrap();
+        let alias = d.join(".new.qvault.tmp-0123456789abcdef");
+        std::fs::hard_link(&temp, &alias).unwrap();
+        assert_eq!(err(open_existing(&alias)), StoreError::Locked);
+        assert_eq!(err(open_private_ro(&alias)), StoreError::Locked);
+        remove_stale_temps(&target).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "fs::tests::sqlite_lock_probe_child"])
+            .env("QV_SQLITE_LEASE_FIXTURE", &temp)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "cleanup dropped the live SQLite lock");
+        conn.execute_batch("ROLLBACK").unwrap();
+        drop(conn);
+        drop(lease);
+        remove_stale_temps(&target).unwrap();
+        assert!(!temp.exists() && !alias.exists());
+    }
+
+    #[test]
+    fn temporary_leases_preserve_private_parent_aliases() {
+        let d = TestDir::new();
+        let real = d.subdir("private", 0o700);
+        let alias = d.join("alias");
+        symlink(&real, &alias).unwrap();
+        let target = alias.join("new.qvault");
+        let (lease, temp) = create_temp(&target).unwrap();
+        remove_stale_temps(&target).unwrap();
+        assert!(temp.exists());
+        drop(lease);
+        remove_stale_temps(&target).unwrap();
+        assert!(!temp.exists());
     }
 
     #[test]

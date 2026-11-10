@@ -28,24 +28,19 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
         ));
     }
     let session = ctx.unlock()?;
-    let hits = session.search(query)?;
     let paths = Paths::walk(&session)?;
     let mut out = Out::stdout();
     if ctx.json {
         let mut j = Json::new(&mut out);
         j.begin_obj().key("hits").begin_arr();
-        for h in &hits {
+        each(&session, query, &paths, |h| {
             match h {
                 SearchHit::Group(g) => {
                     j.begin_obj();
                     j.key("kind").str("group");
                     j.key("id").str(&g.handle.id_hex());
-                    j.key("path").opt_str(
-                        paths
-                            .get(ItemHandle::Group(g.handle))
-                            .as_deref()
-                            .map(String::as_str),
-                    );
+                    j.key("path");
+                    paths.json(&mut j, ItemHandle::Group(g.handle))?;
                     j.key("name").str(g.name.expose());
                     j.end_obj();
                 }
@@ -54,26 +49,52 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
                     j.begin_obj();
                     j.key("kind").str("entry");
                     j.key("entry");
-                    json_entry(&mut j, e, &paths);
+                    json_entry(&mut j, &e, &paths)?;
                     j.end_obj();
                 }
             }
-            j.flush()?;
-        }
+            j.flush()
+        })?;
         j.end_arr().end_obj();
         out.raw("\n");
     } else {
-        for h in &hits {
+        each(&session, query, &paths, |h| {
             match h {
                 SearchHit::Group(g) => {
-                    out.path(&paths.get(ItemHandle::Group(g.handle)).unwrap_or_default())
-                        .raw("/\n");
+                    paths.human(&mut out, ItemHandle::Group(g.handle))?;
+                    out.raw("/\n");
                 }
-                SearchHit::Entry(e) => entry_line(&mut out, e, &paths),
+                SearchHit::Entry(e) => entry_line(&mut out, &e, &paths)?,
             }
-            out.flush()?;
-        }
+            out.flush()
+        })?;
     }
+    paths.check()?;
     session.lock();
     out.flush()
+}
+
+fn each(
+    s: &qv_core::Session,
+    query: &str,
+    paths: &Paths<'_>,
+    mut write: impl FnMut(SearchHit) -> Result<(), CliError>,
+) -> Result<(), CliError> {
+    let mut cursor = None;
+    loop {
+        let page = s.search_page(
+            query,
+            cursor,
+            qv_core::PageLimit::default(),
+            &crate::signals::token(),
+        )?;
+        paths.check()?;
+        for hit in page.items {
+            write(hit)?;
+        }
+        cursor = page.next;
+        if cursor.is_none() {
+            return Ok(());
+        }
+    }
 }

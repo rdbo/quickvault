@@ -38,6 +38,9 @@ fn run(h: &Home, extra: &[&str]) -> Output {
 
 struct Yes(Option<String>);
 impl ApproverUi for Yes {
+    fn master_password(&mut self, _: bool) -> Option<MasterPassword> {
+        Some(pw(PASSWORD))
+    }
     fn confirm(&mut self, sas: &str, _: &str) -> bool {
         self.0 = Some(sas.to_owned());
         true
@@ -64,7 +67,6 @@ fn fast() -> LanTimeouts {
         idle: Duration::from_secs(20),
         confirm: Duration::from_secs(60),
         connect: Duration::from_secs(5),
-        probe: Duration::from_secs(1),
     }
 }
 
@@ -296,41 +298,63 @@ fn lan_cli_join_new_device_prompts_for_code_vault_and_password() {
     let (code, out) = p.finish();
     assert_eq!(code, 2, "{out}");
     std::fs::remove_file(&dest).unwrap();
-    let mut yes = Yes(None);
-    std::thread::scope(|s| {
-        let h = s.spawn(|| w.run(&a, &mut yes, None).unwrap());
-        let mut p = Interactive::spawn(b_home.qv([
-            "lan",
-            "join",
-            "--new",
-            &arg(&dest),
-            "--endpoint",
-            &endpoint,
-        ]));
-        p.expect("Code: ");
-        p.line(&manual.to_lowercase());
-        p.expect("comparison code: ");
-        p.expect("Join vault \"Test vault\"? Comparison code ");
-        p.line("y");
-        p.expect("Master password of the joined vault: ");
-        p.line("not the password");
-        p.expect("Wrong password; try again");
-        p.line(PASSWORD);
-        let (code, out) = p.finish();
-        assert_eq!(code, 0, "{out}");
-        assert!(out.contains("created: "), "{out}");
-        assert!(!out.contains("paired: "), "{out}");
-        // The typed code is not echoed.
-        assert!(!out.to_lowercase().contains(&manual.to_lowercase()));
-        assert!(matches!(
-            h.join().unwrap(),
-            Served::Joined {
-                peer_confirmed: true,
-                ..
+    let mut first = Some((w, manual, endpoint));
+    for wrong in [true, false] {
+        let (w, manual, endpoint) = first.take().unwrap_or_else(|| {
+            let w = a
+                .open_sync_window(window_options(ListenScope::AllInterfaces))
+                .unwrap();
+            let c = w.code(&[ip]).unwrap();
+            let manual = String::from_utf8(c.manual.expose_secret().to_vec()).unwrap();
+            let endpoint = SocketAddr::new(ip, c.port).to_string();
+            (w, manual, endpoint)
+        });
+        let mut yes = Yes(None);
+        std::thread::scope(|s| {
+            let h = s.spawn(|| w.run(&a, &mut yes, None));
+            let mut p = Interactive::spawn(b_home.qv([
+                "lan",
+                "join",
+                "--new",
+                &arg(&dest),
+                "--endpoint",
+                &endpoint,
+            ]));
+            p.expect("Code: ");
+            p.line(&manual.to_lowercase());
+            p.expect("Use recovery words instead of the vault password?");
+            p.line("n");
+            p.expect("Master password of the joined vault: ");
+            p.line(if wrong { "not the password" } else { PASSWORD });
+            p.expect("comparison code: ");
+            if !wrong {
+                p.expect("Join vault \"Test vault\"? Comparison code ");
+                p.line("y");
             }
-        ));
-    });
-    assert!(yes.0.is_some(), "the offering device compared codes");
+            let (exit, out) = p.finish();
+            // A wrong receiver password is one remote attempt. A fresh code,
+            // rather than a local prompt retry, is required for the next one.
+            if wrong {
+                assert_eq!(exit, 7, "{out}");
+                assert!(!dest.exists());
+                assert!(!out.contains("created: "));
+                assert!(h.join().unwrap().is_err());
+            } else {
+                assert_eq!(exit, 0, "{out}");
+                assert!(out.contains("created: "));
+                assert!(!out.contains("paired: "));
+                assert!(matches!(
+                    h.join().unwrap().unwrap(),
+                    Served::Joined {
+                        peer_confirmed: true,
+                        ..
+                    }
+                ));
+            }
+            assert!(!out.to_lowercase().contains(&manual.to_lowercase()));
+        });
+        assert!(yes.0.is_some(), "the offering device compared codes");
+    }
     let b = b_home.unlock();
     assert_eq!(titles(&b), ["only on a"]);
 }

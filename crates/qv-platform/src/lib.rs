@@ -36,10 +36,14 @@ pub enum PlatformError {
     Unavailable,
     /// The operation was cancelled.
     Cancelled,
+    /// Clipboard ownership was lost before delivery could be confirmed.
+    ClipboardReplaced,
     /// Invalid request (for example non-text clipboard content).
     InvalidInput,
     /// A request exceeds its public budget.
     LimitExceeded,
+    /// Filesystem space, quota or OS file-size capacity is exhausted.
+    StorageCapacity,
     /// Another instance holds the lock.
     Busy,
     /// An OS operation failed.

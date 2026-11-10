@@ -90,7 +90,15 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches, restore: bool) -> Result<(), CliErr
     if cmd == "purge" {
         if !ctx.yes && !term::stdio_tty()?.confirm("Purge local history, including current heads if later dominated? Unseen concurrent history and independent copies may remain; no secure erasure.")? { return Err(CliError::cancelled()); }
         crate::signals::check()?;
-        s.purge_history(e)?;
+        let copy = super::trash::recovery_copy(ctx, &s, None)?;
+        let result = s.purge_history(e);
+        let finished = s.finish_destructive(copy);
+        result?;
+        if finished.is_err() {
+            crate::out::eprint(
+                "qv: history purge committed; its recovery snapshot remains on disk pending reclassification\n",
+            );
+        }
         let mut out = Out::stdout();
         out.raw("Local history suppressed. Active heads remain; they are suppressed if later dominated.\nNo server acknowledgement applies; snapshots, unseen concurrent history and independent copies may remain. No secure-erasure guarantee.\n");
         out.flush()?;

@@ -71,6 +71,14 @@ conflicts, an edit requires explicit resolution of all heads. Automated
 operations MUST preserve conflicts. Receiving data alone MUST NOT create
 a synthetic version, new timestamp or new encryption of an existing version.
 
+Before admitting a candidate state, ensure that each record's active-head
+writer union, including the actual local writer that would resolve it, fits
+0004's 256-writer limit. Per-head validity alone is insufficient. Refuse an
+unrepresentable candidate atomically; never truncate causal components or
+silently increase the budget. New-replica restore/enrollment uses its new local
+writer for this check. Existing states remain readable/exportable; authoring or
+baseline changes that cannot satisfy this bound fail without changing data.
+
 1.3. Writer IDs and monotonic counter reservations live in private application
 state outside archives. Reserve counters durably before use. Import/restore on
 another installation creates a new writer ID. If writer state is missing or
@@ -356,6 +364,15 @@ LAN synchronization. No new crypto profile or message layout is selected here.
 The protocol is [0013](0013-lan-sync-protocol.md) (Accepted 2026-10-30). It
 resolves Open Questions 3–6. Release still requires the 0012 §3 LAN gate.
 
+### 7. LAN authentication and view acceptance follow-up (0047)
+
+New direct LAN connections follow 0013 §15 (lan/2) and 0014: one admitted
+connection, ephemeral credential authentication and final-key exchange. A code
+alone never releases VK. View-cache residency is not an additional merge or
+publication budget (0004 §7); all causal/object limits and atomic acceptance
+requirements remain. Receipt, key disclosure and durable local commit are
+distinct outcomes, and LAN does not advance server base/outbox state.
+
 ## Security Considerations
 
 Possession of VK allows forging vault objects and checkpoint MACs. Device
@@ -442,6 +459,10 @@ Resource budgets and transactional acceptance apply even to authenticated data.
    link removal with one-use sync codes and transcript-bound VK proofs.
 
 ## Changelog
+
+- 2026-11-09: Require admitted head-clock unions to remain resolvable by the
+  actual local writer within the finite writer limit (T3-09, plan0050).
+- 2026-11-09: Apply lan/2 authentication and cache-independent acceptance without altering merge budgets.
 
 - 2026-11-06: Accepted 0014 (owner, plan 0042): §6.2 approval is a one-use
   code per session plus a VK proof, with no stored pairing; §5.4 notes that

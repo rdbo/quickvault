@@ -74,14 +74,14 @@ impl core::fmt::Debug for FillValues {
     }
 }
 
-fn entry_of(body: RecordBody) -> Option<Entry> {
+pub(crate) fn entry_of(body: RecordBody) -> Option<Entry> {
     match body {
         RecordBody::Live(Payload::Entry(e)) if e.deleted_at.is_none() => Some(e),
         _ => None,
     }
 }
 
-fn identifies(e: &Entry, requester: &Requester) -> bool {
+pub(crate) fn identifies(e: &Entry, requester: &Requester) -> bool {
     e.fields.iter().any(|f| {
         f.kind == FieldKind::Url
             && StoredIdentity::parse(f.value.expose_secret())
@@ -126,9 +126,31 @@ fn copy_value(v: &FieldValue) -> Result<Option<SecretBytes>, CoreError> {
     .map(Some)
 }
 
+pub(crate) fn candidate(
+    entry: EntryHandle,
+    version: VersionId,
+    e: Entry,
+    conflicted: bool,
+) -> FillCandidate {
+    let username = match username_field(&e) {
+        Some(f) if !f.protected => std::str::from_utf8(f.value.expose_secret())
+            .ok()
+            .and_then(|s| Text::new(s).ok()),
+        _ => None,
+    };
+    FillCandidate {
+        entry,
+        version,
+        title: e.title,
+        username,
+        conflicted,
+    }
+}
+
 impl Session {
     /// Live entry heads whose `url` fields exactly match `requester`. Titles
     /// and labels are never compared. Order: title, then entry, then head.
+    #[cfg(any(test, feature = "test-eager-views"))]
     pub fn autofill_candidates(
         &self,
         requester: &Requester,
@@ -151,19 +173,7 @@ impl Session {
                     if !identifies(&e, requester) {
                         continue;
                     }
-                    let username = match username_field(&e) {
-                        Some(f) if !f.protected => std::str::from_utf8(f.value.expose_secret())
-                            .ok()
-                            .and_then(|s| Text::new(s).ok()),
-                        _ => None,
-                    };
-                    out.push(FillCandidate {
-                        entry: ctx.entry_handle(*id),
-                        version,
-                        title: e.title,
-                        username,
-                        conflicted,
-                    });
+                    out.push(candidate(ctx.entry_handle(*id), version, e, conflicted));
                 }
             }
             out.sort_by(|a, b| {

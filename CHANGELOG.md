@@ -9,6 +9,72 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-10: Enforce verified recovery copies inside core for destructive
+  operations and protect recovery pins/temporary producers across processes.
+  Preserve SQLite locks during cleanup and tolerate verified snapshot completion
+  races. Stream authenticated audio/video/image previews through bounded protected
+  buffers; defer expensive image decoding until explicitly loaded. Desktop
+  playback/seeking/revocation pass; Android media packaging is ready but device
+  qualification remains open. Align fuzz dependency resolution, document actual
+  audit debt and remove the maintained desktop build's ambient Bun invocation.
+  Plan0050 records all fifteen implementation dispositions and validation limits.
+
+- 2026-11-09: Begin owner-authorized plan 0050 for all remaining assessment
+  repairs, with correctness delegated, functional media and bounded/on-demand
+  preview memory. Require non-mutating vault identification before SQLite
+  journal-changing hardening, explicit saved/anchor-pending and capacity
+  outcomes, independent-anchor warnings and damaged-anchor recovery guidance.
+  Bound admitted clock unions including the local resolver; restore trash by
+  deletion-operation IDs. Report clipboard replacement before confirmed
+  delivery and show dangerous bidi/invisible controls without altering edited
+  values. Other repairs and final validation remain in progress.
+
+- 2026-11-09: Plan 0049 for Android's missing vault-file picker without a
+  manual path box. Propose bounded, authenticated import to a fresh private
+  local replica; copy versus in-place semantics and their spec amendments await
+  owner approval after the current validation checkpoint is committed.
+
+- 2026-11-09: Continue plan 0048 on the attended phone: isolated native
+  input/lifecycle and QR boundary checks pass; a Class3 keystore repeat passes
+  after an unresolved initial seal failure. Owner reports no fingerprint
+  flicker during that repeat. Verify the exact regular Android UI omits the
+  validation-only vault-path field; remove temporary test packages afterward.
+  Record the missing Android external-vault picker flow. Retain incomplete
+  device and independent-review gates.
+
+- 2026-11-09: Execute the local validation work in plan 0048: prepare a pinned
+  LAN/2 independent-review package and dependency-debt inventory; benchmark the
+  final dependency tree on Linux and the connected POCO X7 Pro, including an
+  actually populated near-1-GiB vault. Record paged-search and atomic-mutation
+  memory costs with reproducible disposable harnesses. Retain the failed app UI
+  run and owner-observed fingerprint flicker; prepare a separate-UID validation
+  package after finding automatic unlock could race the ordinary test runner.
+  Full app/device qualification, independent review and release remain open.
+
+- 2026-11-09: Harden public password-slot serialization: newly installed slots
+  and self-contained backup descriptors omit encrypted record extensions, while
+  encrypted records preserve them. Restore and LAN staging compare public
+  projections. Add authenticated move/copy regressions. Replace aggregate text
+  eligibility with a bounded evictable cache, snapshot-bound pages and streamed
+  app/CLI consumers; a stock67.5 MiB searchable-text fixture exercises normal
+  open/edit/search/archive/restore/rotation, both LAN enrollment methods and
+  synthetic quick unlock. Implement credential-authenticated
+  LAN enrollment with password entry on both devices or independent recovery
+  words, final-key confirmation before grant, one admitted connection, absolute
+  deadlines and verified publication without retaining the typed password. Old
+  LAN peers are incompatible; vault/archive formats stay unchanged. Clear spent
+  codes, reject stale UI answers and report disclosure/publication after cancel
+  or lock. Final local validation/review pass; D12 and physical device qualification
+  remain release gates, tracked in follow-up0048. The cache ceiling is not a total
+  memory ceiling; bulk mutation preparation retains separate decoded payloads.
+  Upgrade the bundled SQLite engine to3.54.1 via rusqlite0.41.0 to repair
+  RUSTSEC-2026-0459, retaining hardening flags and exact development audit debt.
+
+- 2026-11-09: Begin owner-approved plan 0047; amend requirements for ephemeral
+  lan/2 credential authentication, one admitted connection and absolute deadlines,
+  public-slot projection, cache-independent large-vault pages and authenticated
+  move/copy policy. Implementation and readiness verification are in progress.
+
 - 2026-11-08: Plan the three discussed assessment follow-ups in 0047: large-vault
   views without an aggregate text cap, documented move/copy policy, and LAN
   credential authentication with owner-selected ephemeral v4. LAN work is first;

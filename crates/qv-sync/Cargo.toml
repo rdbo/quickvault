@@ -17,7 +17,7 @@ qv-store.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
-qv-crypto = { workspace = true, features = ["test-vectors"] }
+qv-crypto = { workspace = true, features = ["test-vectors", "test-kdf-limit"] }
 
 [lints]
 workspace = true

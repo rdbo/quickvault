@@ -197,6 +197,36 @@ impl Session {
             Ok(result?)
         })
     }
+    /// Reads at most64 KiB of the exact live attachment version into protected
+    /// memory. Use full verification first; a range does not verify the whole hash.
+    pub fn attachment_range(
+        &self,
+        handle: AttachmentHandle,
+        offset: u64,
+        length: usize,
+        cancel: Option<&CancelToken>,
+    ) -> Result<qv_crypto::SecretBytes, CoreError> {
+        if length > qv_crypto::CHUNK_BYTES {
+            return Err(CoreError::LimitExceeded);
+        }
+        self.read(|ctx| {
+            validate(ctx, handle)?;
+            let cancelled =
+                || ctx.check_cancel().is_err() || cancel.is_some_and(CancelToken::is_cancelled);
+            let result = ctx.open.vault.read_attachment_range(
+                handle.record,
+                handle.version,
+                offset,
+                length,
+                &cancelled,
+            );
+            if cancelled() {
+                return Err(CoreError::Cancelled);
+            }
+            Ok(result?)
+        })
+    }
+
     /// Permanently removes this attachment using the existing causal tombstone path.
     pub fn remove_attachment(&self, handle: AttachmentHandle) -> Result<(), CoreError> {
         self.mutate(|ctx| {
@@ -332,7 +362,7 @@ mod tests {
         std::fs::write(&env.anchors, b"block directory access").unwrap();
         assert_eq!(
             err(s.add_attachment(e, "durable", "x", &mut &b"abc"[..], None)),
-            CoreError::Store(qv_store::StoreError::Io)
+            CoreError::Store(qv_store::StoreError::CommittedAnchorPending)
         );
         assert_eq!(s.overview().unwrap().local_seq, before + 1);
         let items = s.attachments(e).unwrap();
@@ -467,7 +497,7 @@ mod tests {
     #[test]
     fn attachment_read_errors_cancel_and_purge() {
         let env = Env::new();
-        let s = env.unlock();
+        let s = env.unlock_with(Some(env.snapshot_policy()));
         let e = entry(&s);
         struct Fail;
         impl Read for Fail {
@@ -503,7 +533,7 @@ mod tests {
             CoreError::Cancelled
         );
         s.delete(crate::ItemHandle::Entry(e), false).unwrap();
-        s.purge(&[crate::ItemHandle::Entry(e)]).unwrap();
+        crate::testutil::destructive(&s, || s.purge(&[crate::ItemHandle::Entry(e)])).unwrap();
         s.read(|ctx| {
             let role = ctx.open.vault.manifest().record(h.record).unwrap();
             assert!(role.history().is_empty());

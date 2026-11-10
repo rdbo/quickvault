@@ -40,10 +40,7 @@ pub(crate) struct Out {
 
 /// Whether `c` is printed as an escape sequence.
 fn needs_escape(c: char) -> bool {
-    matches!(c,
-        '\\' | '\u{0}'..='\u{1f}' | '\u{7f}'..='\u{9f}'
-        | '\u{61c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}'
-        | '\u{2066}'..='\u{2069}' | '\u{2028}' | '\u{2029}')
+    c == '\\' || qv_core::is_display_control(c)
 }
 
 /// The longest escape of one scalar: `\u{NNNN}` (8 bytes).
@@ -215,9 +212,13 @@ impl Out {
     /// JSON-escaped string with quotes (RFC 8259): `"`, `\`, controls,
     /// DEL, C1 and the bidi controls as escapes; other text as is.
     pub(crate) fn json_str(&mut self, b: &[u8]) -> &mut Self {
-        self.reserve(b.len().saturating_mul(6).saturating_add(2));
+        self.raw("\"").json_piece(b).raw("\"")
+    }
+
+    /// Escaped bytes inside an already-open JSON string.
+    pub(crate) fn json_piece(&mut self, b: &[u8]) -> &mut Self {
+        self.reserve(b.len().saturating_mul(6));
         let buf = &mut *self.buf;
-        buf.push(b'"');
         let mut tmp = [0u8; 4];
         scalars(b, |r| match r {
             Ok('"') => buf.extend_from_slice(b"\\\""),
@@ -236,7 +237,6 @@ impl Out {
             // JSON strings are Unicode: an invalid byte becomes U+FFFD.
             Err(_) => buf.extend_from_slice("\u{fffd}".as_bytes()),
         });
-        buf.push(b'"');
         self
     }
 
@@ -332,6 +332,10 @@ mod tests {
             "\\u{2066}\\u{200f}\\u{061c}\\u{2028}"
         );
         assert_eq!(esc(b"back\\slash"), "back\\\\slash");
+        assert_eq!(
+            esc("a\u{200b}\u{2060}\u{feff}فارسی\u{200c}\u{200d}".as_bytes()),
+            "a\\u{200b}\\u{2060}\\u{feff}فارسی\u{200c}\u{200d}"
+        );
         assert_eq!(esc(b"bad\xff\xfeutf"), "bad\\xff\\xfeutf");
         assert_eq!(esc(b"cut\xe2\x82"), "cut\\xe2\\x82");
         assert_eq!(escape_str("x\u{1b}y"), "x\\x1by");

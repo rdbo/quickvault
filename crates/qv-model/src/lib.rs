@@ -63,6 +63,7 @@ mod ids;
 mod merge;
 mod payload;
 mod record;
+mod summary;
 mod text;
 mod time;
 mod totp;
@@ -71,8 +72,8 @@ mod tree;
 pub use clock::{Causality, Clock, MAX_WRITERS};
 pub use error::ModelError;
 pub use ids::{
-    AttachmentId, FieldId, ObjectId, RandomId, RecordId, SlotId, VaultId, VersionId, WriterId,
-    attachment_id,
+    AttachmentId, DeleteOperationId, FieldId, ObjectId, RandomId, RecordId, SlotId, VaultId,
+    VersionId, WriterId, attachment_id,
 };
 pub use merge::{
     HistoryFloor, MAX_HEADS, Merged, RecordStatus, Versioned, View, merge, merge_record,
@@ -83,6 +84,7 @@ pub use payload::{
     Settings, VaultMeta,
 };
 pub use record::{Deletion, RecordBody, RecordKind, RecordVersion};
+pub use summary::{HeadSummary, merge_summaries};
 pub use text::{Extensions, FieldValue, MAX_RECORD_BYTES, MAX_TEXT_BYTES, SecretText, Text};
 pub use time::Timestamp;
 pub use totp::{Totp, TotpError};

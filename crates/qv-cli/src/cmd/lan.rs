@@ -128,6 +128,11 @@ struct ApproverTty<'t> {
 }
 
 impl ApproverUi for ApproverTty<'_> {
+    fn admitted(&mut self) {
+        let _ = self
+            .tty
+            .say("\x1b[2J\x1b[HConnection accepted. Checking vault credentials…\n");
+    }
     fn confirm(&mut self, sas: &str, vault_name: &str) -> bool {
         let shown = format!(
             "\nA new device asks to join vault \"{}\" (it will receive this vault).\n",
@@ -138,6 +143,16 @@ impl ApproverUi for ApproverTty<'_> {
                 .tty
                 .confirm(&format!("Do both devices show {}?", grouped(sas)))
                 .unwrap_or(false)
+    }
+    fn master_password(&mut self, retry: bool) -> Option<MasterPassword> {
+        if retry {
+            let _ = self.tty.say("Wrong local password; try again.\n");
+        }
+        let typed = self
+            .tty
+            .secret("This vault's master password: ", term::MAX_PASSWORD_BYTES)
+            .ok()?;
+        MasterPassword::from_utf8(typed.expose()).ok()
     }
 }
 
@@ -197,11 +212,16 @@ fn open(ctx: &Ctx, s: &ArgMatches) -> Result<(), CliError> {
         match served {
             Served::Synced(r) => finish_report(&r),
             Served::Joined {
+                key_disclosed,
                 peer_confirmed,
                 failure,
             } => {
                 let mut out = Out::stdout();
-                out.raw("joined\n");
+                out.raw(if key_disclosed {
+                    "vault-key disclosure: possible (grant sealed; delivery may be unknown)\n"
+                } else {
+                    "authenticated receiver already holds the vault key\n"
+                });
                 out.raw(if peer_confirmed {
                     "peer receipt: confirmed\n"
                 } else {
@@ -220,12 +240,43 @@ fn open(ctx: &Ctx, s: &ArgMatches) -> Result<(), CliError> {
 }
 
 /// The joining user's terminal (0013 §4.5, §10 step 4).
-struct JoinerTty<'t> {
-    tty: &'t Tty<'static>,
+struct JoinerTty {
+    tty: Tty<'static>,
     attempts: usize,
 }
 
-impl JoinerUi for JoinerTty<'_> {
+impl JoinerUi for JoinerTty {
+    fn set_deadline(&mut self, expires: std::time::Instant) {
+        self.tty.cap(expires);
+    }
+    fn credentials(&mut self) -> Option<qv_core::EnrollmentCredential> {
+        if self
+            .tty
+            .confirm("Use recovery words instead of the vault password?")
+            .ok()?
+        {
+            let typed = self
+                .tty
+                .secret("Vault recovery words: ", term::MAX_PASSWORD_BYTES)
+                .ok()?;
+            let phrase = qv_core::SecretBytes::try_init(typed.expose().len(), |out| {
+                out.copy_from_slice(typed.expose());
+                Ok::<(), ()>(())
+            })
+            .ok()?;
+            Some(qv_core::EnrollmentCredential::RecoveryPhrase(phrase))
+        } else {
+            self.master_password()
+                .map(qv_core::EnrollmentCredential::Password)
+        }
+    }
+    fn confirm_recovered_vault(&mut self, vault_name: &[u8]) -> bool {
+        let name = escape_str(&String::from_utf8_lossy(vault_name));
+        self.tty
+            .confirm(&format!("Join vault \"{name}\" using the recovery words?"))
+            .unwrap_or(false)
+    }
+
     fn show_code(&mut self, sas: &Sas) -> bool {
         let code = sas_text(sas);
         self.tty
@@ -306,10 +357,7 @@ fn join(ctx: &Ctx, s: &ArgMatches) -> Result<(), CliError> {
     let cancel = crate::signals::token();
     let code = read_code(&tty)?;
     let core = crate::select::core()?;
-    let mut ui = JoinerTty {
-        tty: &tty,
-        attempts: 0,
-    };
+    let mut ui = JoinerTty { tty, attempts: 0 };
     let session =
         core.join_new_device(code, path, sync_options(endpoints), &mut ui, Some(&cancel))?;
     session.lock();

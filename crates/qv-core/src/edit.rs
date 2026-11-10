@@ -17,7 +17,7 @@
 //!
 //! [`commit`] then builds one causal version per record (the store's head
 //! clocks joined and advanced with a reserved counter, 0005 §1.2), checks
-//! the model rules and the view budget, stops if a lock was requested, and
+//! the model rules and compact projection, stops if a lock was requested, and
 //! commits all of them in one store transaction (0004 §5.2). Once the
 //! commit is durable the index follows it, even if the anchor update then
 //! failed (the store reports that error).
@@ -35,10 +35,10 @@ use qv_model::{
 };
 
 use crate::error::{CoreError, data, input};
-use crate::index::{Data, RecordInfo};
+use crate::index::{Data, RecordInfo, ViewData};
 use crate::order::key_after;
 use crate::session::{Ctx, EntryHandle, GroupHandle, ItemHandle, Session, SessionTag};
-use crate::views::{child_groups, decrypt, record};
+use crate::views::{decrypt, record};
 
 /// One record's new version, before it has a clock.
 pub(crate) struct Change {
@@ -88,7 +88,9 @@ pub(crate) fn commit_with(
         // decoded copy is exactly what a later unlock will index.
         let encoded = v.encode().map_err(input)?;
         let copy = RecordVersion::decode(&encoded).map_err(data)?;
-        infos.push((ch.record, RecordInfo::from_heads(ch.kind, vec![copy])?));
+        let mut info = RecordInfo::from_heads(ch.kind, vec![copy])?;
+        info.discard_view();
+        infos.push((ch.record, info));
         w.put_local(ch.record, v)?;
     }
     open.index.check(infos.iter().map(|(id, i)| (*id, i)))?;
@@ -341,7 +343,10 @@ fn save_entry_in(ctx: &mut Ctx<'_>, d: EntryDraft) -> Result<EntryHandle, CoreEr
     ctx.own(d.session)?;
     check_base(ctx, d.record, RecordKind::Entry, d.base)?;
     let mut e = d.entry;
-    if e.created_at != d.base_created || e.deleted_at != d.base_deleted {
+    if e.created_at != d.base_created
+        || e.deleted_at != d.base_deleted
+        || e.delete_operation.is_some()
+    {
         return Err(CoreError::NotAllowed);
     }
     if (e.group != d.base_group || d.base.is_none()) && !live_group(ctx, e.group) {
@@ -357,7 +362,7 @@ fn save_group_in(ctx: &mut Ctx<'_>, d: GroupDraft) -> Result<GroupHandle, CoreEr
     ctx.own(d.session)?;
     check_base(ctx, d.record, RecordKind::Group, d.base)?;
     let g = d.group;
-    if g.deleted_at != d.base_deleted {
+    if g.deleted_at != d.base_deleted || g.delete_operation.is_some() {
         return Err(CoreError::NotAllowed);
     }
     if d.record == ctx.open.index.root {
@@ -383,7 +388,7 @@ fn subtree(ctx: &Ctx<'_>, group: RecordId) -> (Vec<RecordId>, Vec<RecordId>) {
     let mut groups = vec![group];
     let mut i = 0;
     while let Some(&g) = groups.get(i) {
-        groups.extend(child_groups(index, g));
+        groups.extend(index.tree.children(g));
         i += 1;
     }
     let set: BTreeSet<RecordId> = groups.iter().copied().collect();
@@ -408,17 +413,22 @@ fn set_deleted(
     entries: &[RecordId],
     deleted_at: Option<Timestamp>,
 ) -> Result<(), CoreError> {
+    let operation = deleted_at
+        .map(|_| qv_model::DeleteOperationId::generate().map_err(rng))
+        .transpose()?;
     let mut changes = Vec::with_capacity(groups.len() + entries.len());
     for &id in groups {
         ctx.check_cancel()?;
         let (_, mut g, ext) = load_group(ctx, id)?;
         g.deleted_at = deleted_at;
+        g.delete_operation = operation;
         changes.push(group_change(id, g, ext));
     }
     for &id in entries {
         ctx.check_cancel()?;
         let (_, mut e, ext) = load_entry(ctx, id)?;
         e.deleted_at = deleted_at;
+        e.delete_operation = operation;
         changes.push(entry_change(id, e, ext));
     }
     commit(ctx, changes)
@@ -483,20 +493,24 @@ fn trashed_info(ctx: &Ctx<'_>, item: ItemHandle) -> Result<(RecordId, RecordKind
     Ok((id, kind))
 }
 
-fn deleted_at_of(r: &RecordInfo) -> Option<Timestamp> {
+fn delete_operation_of(r: &RecordInfo) -> Option<qv_model::DeleteOperationId> {
     match &r.data {
-        Data::Entry(e) => e.deleted_at,
-        Data::Group(g) => g.deleted_at,
+        Data::Entry(e) => e.delete_operation,
+        Data::Group(g) => g.delete_operation,
         _ => None,
     }
 }
 
-/// The trashed records deleted together with group `g` (same `deleted_at`,
-/// reaching `g` through such groups by their source parents).
-fn deleted_with(ctx: &Ctx<'_>, g: RecordId, at: Timestamp) -> (Vec<RecordId>, Vec<RecordId>) {
+/// Trashed records from the same explicit deletion, connected by source parents.
+fn deleted_with(
+    ctx: &Ctx<'_>,
+    g: RecordId,
+    operation: qv_model::DeleteOperationId,
+) -> (Vec<RecordId>, Vec<RecordId>) {
     let index = &ctx.open.index;
-    let same =
-        |r: &RecordInfo| r.status.in_trash && !r.status.conflict && deleted_at_of(r) == Some(at);
+    let same = |r: &RecordInfo| {
+        r.status.in_trash && !r.status.conflict && delete_operation_of(r) == Some(operation)
+    };
     let mut children: BTreeMap<RecordId, Vec<RecordId>> = BTreeMap::new();
     let mut entries_of: BTreeMap<RecordId, Vec<RecordId>> = BTreeMap::new();
     for (id, r) in &index.records {
@@ -534,6 +548,12 @@ fn deleted_with(ctx: &Ctx<'_>, g: RecordId, at: Timestamp) -> (Vec<RecordId>, Ve
 /// Final deletion of trashed records and the attachments their entries
 /// own (0007 §2.2).
 fn purge_in(ctx: &mut Ctx<'_>, items: &[(RecordId, RecordKind)]) -> Result<(), CoreError> {
+    if !items.is_empty() {
+        if ctx.open.read_only {
+            return Err(qv_store::StoreError::NoAnchor.into());
+        }
+        crate::snapshot::require_recovery(ctx)?;
+    }
     let index = &ctx.open.index;
     let entries: BTreeSet<RecordId> = items
         .iter()
@@ -604,6 +624,7 @@ impl Session {
                     created_at: now,
                     modified_at: now,
                     deleted_at: None,
+                    delete_operation: None,
                     ext: Extensions::new(),
                 },
                 ext: Extensions::new(),
@@ -645,14 +666,15 @@ impl Session {
                 return Err(CoreError::NotFound);
             }
             let index = &ctx.open.index;
-            let last = child_groups(index, parent.record)
-                .into_iter()
-                .filter_map(|id| match index.get(id).map(|r| &r.data) {
-                    Some(Data::Group(g)) => Some(g.order.expose().to_owned()),
-                    _ => None,
-                })
-                .max()
-                .unwrap_or_default();
+            let mut last = zeroize::Zeroizing::new(String::new());
+            for id in index.tree.children(parent.record) {
+                let view = ctx.view(id)?;
+                if let ViewData::Group(g) = &**view
+                    && g.order.expose() > last.as_str()
+                {
+                    last = zeroize::Zeroizing::new(g.order.expose().to_owned());
+                }
+            }
             Ok(GroupDraft {
                 session: ctx.tag(),
                 record: RecordId::generate().map_err(rng)?,
@@ -666,6 +688,7 @@ impl Session {
                     icon: None,
                     order: text(&key_after(&last))?,
                     deleted_at: None,
+                    delete_operation: None,
                     ext: Extensions::new(),
                 },
                 ext: Extensions::new(),
@@ -790,13 +813,11 @@ impl Session {
             if kind == RecordKind::Entry {
                 return set_deleted(ctx, &[], &[id], None);
             }
-            let at = ctx
-                .open
-                .index
-                .get(id)
-                .and_then(deleted_at_of)
-                .ok_or(CoreError::Conflict)?;
-            let (groups, entries) = deleted_with(ctx, id, at);
+            let Some(operation) = ctx.open.index.get(id).and_then(delete_operation_of) else {
+                // Missing legacy identity never groups independent deletions by time.
+                return set_deleted(ctx, &[id], &[], None);
+            };
+            let (groups, entries) = deleted_with(ctx, id, operation);
             set_deleted(ctx, &groups, &entries, None)
         })
     }
@@ -909,7 +930,8 @@ impl Session {
     /// must write and pin its recovery snapshot with
     /// [`Session::begin_destructive`] first and reclassify it with
     /// [`Session::finish_destructive`] after this returns (0007 §3.2; the CLI
-    /// enforces that order). Soft deletes take no snapshot.
+    /// provides that flow). Core enforces a verified copy of the exact current
+    /// state before destroying data. Soft deletes take no snapshot.
     pub fn empty_trash(&self) -> Result<PurgeReport, CoreError> {
         self.mutate(|ctx| {
             let mut list = Vec::new();
@@ -1349,6 +1371,78 @@ mod trash_tests {
 
     const DAY: i64 = 86_400_000;
 
+    // 0012 §1: Deleted-entry resurrection
+    #[test]
+    fn trash_restore_does_not_group_separate_deletions_at_identical_times() {
+        let env = Env::new();
+        let s = env.unlock();
+        let a = add_group(&s, s.root().unwrap(), "A");
+        let b = add_group(&s, a, "separately deleted group");
+        let e = add_entry(&s, a, "separately deleted entry");
+        add_entry(&s, b, "child of separate deletion");
+        let restored = add_entry(&s, a, "same operation");
+        // The fixed clock never advances across these independent operations.
+        s.delete(ItemHandle::Entry(e), false).unwrap();
+        s.delete(ItemHandle::Group(b), true).unwrap();
+        s.delete(ItemHandle::Group(a), true).unwrap();
+        drop(s);
+        // Identity survives storage/reopen and cache reconstruction.
+        let s = env.unlock();
+        let a = s
+            .trash()
+            .unwrap()
+            .into_iter()
+            .find(|r| r.name.expose() == "A")
+            .unwrap()
+            .item;
+        s.restore(a).unwrap();
+        assert_eq!(
+            trash_names(&s),
+            [
+                "child of separate deletion",
+                "separately deleted entry",
+                "separately deleted group"
+            ]
+        );
+        s.read(|ctx| {
+            let (_, entry, _) = load_entry(ctx, restored.record)?;
+            assert!(entry.deleted_at.is_none());
+            assert!(entry.delete_operation.is_none());
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    // 0012 §1: Deleted-entry resurrection
+    #[test]
+    fn trash_group_without_operation_restores_only_itself() {
+        let env = Env::new();
+        let s = env.unlock();
+        let a = add_group(&s, s.root().unwrap(), "A");
+        let b = add_group(&s, a, "B");
+        let e = add_entry(&s, b, "e");
+        s.delete(ItemHandle::Group(a), true).unwrap();
+        s.mutate(|ctx| {
+            let mut changes = Vec::new();
+            for id in [a.record, b.record] {
+                let (_, mut group, ext) = load_group(ctx, id)?;
+                group.delete_operation = None;
+                changes.push(group_change(id, group, ext));
+            }
+            let (_, mut entry, ext) = load_entry(ctx, e.record)?;
+            entry.delete_operation = None;
+            changes.push(entry_change(e.record, entry, ext));
+            commit(ctx, changes)
+        })
+        .unwrap();
+        s.restore(ItemHandle::Group(a)).unwrap();
+        assert_eq!(trash_names(&s), ["B", "e"]);
+        s.restore(ItemHandle::Group(b)).unwrap();
+        assert_eq!(trash_names(&s), ["e"]);
+        s.restore(ItemHandle::Entry(e)).unwrap();
+        assert!(trash_names(&s).is_empty());
+    }
+
     fn trash_names(s: &Session) -> Vec<String> {
         let mut v: Vec<String> = s
             .trash()
@@ -1432,7 +1526,7 @@ mod trash_tests {
     fn trash_purge_and_empty() {
         let env = Env::new();
         let (keep, gone, att) = {
-            let s = env.unlock();
+            let s = env.unlock_with(Some(env.snapshot_policy()));
             let root = s.root().unwrap();
             let keep = add_entry(&s, root, "keep");
             let gone = add_entry(&s, root, "gone");
@@ -1456,7 +1550,7 @@ mod trash_tests {
                         mime: Text::new("text/plain").unwrap(),
                         size: 0,
                         chunk_object_ids: Vec::new(),
-                        content_hash: [0; 32],
+                        content_hash: *qv_crypto::ContentHasher::new().finalize().expose_secret(),
                         ext: Extensions::new(),
                     })),
                     ext: Extensions::new(),
@@ -1467,7 +1561,7 @@ mod trash_tests {
             .unwrap();
             (keep.record, gone.record, att)
         };
-        let s = env.unlock();
+        let s = env.unlock_with(Some(env.snapshot_policy()));
         let h = |r| s.read(|ctx| Ok(ctx.entry_handle(r))).unwrap();
         let (keep, gone) = (h(keep), h(gone));
         let before = seq(&s);
@@ -1491,7 +1585,7 @@ mod trash_tests {
             err(s.purge(&[ItemHandle::Entry(keep)])),
             CoreError::Conflict
         );
-        let report = s.empty_trash().unwrap();
+        let report = crate::testutil::destructive(&s, || s.empty_trash()).unwrap();
         assert_eq!(
             report,
             PurgeReport {
@@ -1523,7 +1617,7 @@ mod trash_tests {
         assert_eq!(trash_names(&s), ["keep"]);
         assert!(s.search("gone").unwrap().is_empty());
         drop(s);
-        let s = env.unlock();
+        let s = env.unlock_with(Some(env.snapshot_policy()));
         check(&s);
         assert_eq!(trash_names(&s), ["keep"]);
         let o = s.overview().unwrap();
@@ -1574,7 +1668,8 @@ mod property_tests {
     use crate::testutil::{Env, add_entry, add_group};
 
     fn summary(s: &Session) -> Vec<String> {
-        s.read(|ctx| Ok(ctx.open.index.summary())).unwrap()
+        s.read(|ctx| ctx.open.index.summary(Some(&ctx.open.vault)))
+            .unwrap()
     }
 
     fn pick<T: Copy>(v: &[T], i: usize) -> Option<T> {
@@ -1659,7 +1754,7 @@ mod property_tests {
             }
             _ => {
                 if j.is_multiple_of(3) {
-                    s.empty_trash().unwrap();
+                    crate::testutil::destructive(s, || s.empty_trash()).unwrap();
                 } else if let Some(t) = pick(
                     &s.trash()
                         .unwrap()
@@ -1668,7 +1763,7 @@ mod property_tests {
                         .collect::<Vec<_>>(),
                     i,
                 ) {
-                    ok(s.purge(&[t]));
+                    ok(crate::testutil::destructive(s, || s.purge(&[t])));
                 }
             }
         }
@@ -1686,7 +1781,7 @@ mod property_tests {
             let mut groups = Vec::new();
             let mut entries = Vec::new();
             let incremental = {
-                let s = env.unlock();
+                let s = env.unlock_with(Some(env.snapshot_policy()));
                 let root = s.root().unwrap();
                 groups.push(add_group(&s, root, "start"));
                 for (op, i, j) in ops {
@@ -1694,7 +1789,7 @@ mod property_tests {
                 }
                 summary(&s)
             };
-            let s = env.unlock();
+            let s = env.unlock_with(Some(env.snapshot_policy()));
             prop_assert_eq!(incremental, summary(&s));
         }
     }

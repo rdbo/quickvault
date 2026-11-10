@@ -1,0 +1,20 @@
+Synthetic device test logs: /tmp/qv-android-tests-43nlg7gm
+
+org.quickvault.app.PlatformTest:
+Failure in testSecureWindowKeyboardSettingsLifecycleAndEngineBoundary:
+junit.framework.AssertionFailedError: Synthetic device stage: mode 1; expected locked create form, observed unlocked workspace; metadata redacted
+	at org.quickvault.app.PlatformTest.awaitJs(PlatformTest.java:48)
+	at org.quickvault.app.PlatformTest.runSyntheticFlows(PlatformTest.java:181)
+	at org.quickvault.app.PlatformTest.testSecureWindowKeyboardSettingsLifecycleAndEngineBoundary(PlatformTest.java:285)
+	at android.test.InstrumentationTestCase.runMethod(InstrumentationTestCase.java:220)
+	at android.test.InstrumentationTestCase.runTest(InstrumentationTestCase.java:205)
+	at android.test.AndroidTestRunner.runTest(AndroidTestRunner.java:195)
+	at android.test.AndroidTestRunner.runTest(AndroidTestRunner.java:181)
+	at android.test.InstrumentationTestRunner.onStart(InstrumentationTestRunner.java:563)
+	at android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2628)
+
+Test results for InstrumentationTestRunner=.F
+Time: 32.416
+
+FAILURES!!!
+Tests run: 1,  Failures: 1,  Errors: 0

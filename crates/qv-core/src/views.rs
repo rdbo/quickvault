@@ -16,11 +16,21 @@ use qv_model::{
 use zeroize::Zeroizing;
 
 use crate::error::{CoreError, data};
-use crate::index::{Data, EntryInfo, GroupInfo, Index, RecordInfo};
+use crate::index::{Data, EntryInfo, GroupInfo, Index, RecordInfo, ViewData};
 use crate::session::{Ctx, EntryHandle, FieldHandle, GroupHandle, ItemHandle, Session};
 
 /// The longest search query, in bytes.
 pub const MAX_QUERY_BYTES: usize = 1024;
+
+/// Controls requiring visible escapes in human-facing vault text (0009 §1).
+/// A GUI may preserve ordinary newline/tab layout; editors keep original text.
+pub fn is_display_control(c: char) -> bool {
+    c.is_control()
+        || matches!(c,
+        '\u{00ad}' | '\u{034f}' | '\u{061c}' | '\u{180e}' | '\u{200b}'
+        | '\u{200e}' | '\u{200f}' | '\u{2028}' | '\u{2029}'
+        | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}')
+}
 
 /// How far in the future a timestamp may be before trash expiry reports a
 /// clock anomaly (development value).
@@ -57,6 +67,8 @@ pub struct EntrySummary {
     pub title: Text,
     /// Its type hint (`login`, `note`, …); UI only.
     pub type_hint: Text,
+    /// Lowercased type hint for bounded frontend classification; counted in page text.
+    pub type_key: Zeroizing<String>,
     /// Its icon name.
     pub icon: Option<Text>,
     /// Its non-protected text, URL and e-mail fields, in order.
@@ -83,6 +95,8 @@ pub struct GroupSummary {
     pub repaired: bool,
     /// Whether it has conflicting versions.
     pub conflict: bool,
+    /// Live entries in this displayed group and its descendants.
+    pub entries: usize,
 }
 
 /// The direct children of a group.
@@ -136,6 +150,43 @@ pub struct ExpiryReport {
     pub clock_anomaly: bool,
 }
 
+/// Scalar expiry state, without collecting confidential item names.
+#[derive(Clone, Copy, Debug)]
+pub struct ExpirySummary {
+    /// Expired non-conflicted groups and entries.
+    pub expired: usize,
+    /// Some authenticated timestamp is ahead of this device's clock.
+    pub clock_anomaly: bool,
+}
+
+fn for_expired(ctx: &Ctx<'_>, mut visit: impl FnMut(ItemHandle)) -> Result<bool, CoreError> {
+    let index = &ctx.open.index;
+    let now = ctx.now();
+    let days = index
+        .meta()
+        .map_or(qv_model::DEFAULT_TRASH_RETENTION_DAYS, |m| m.retention_days);
+    let cutoff = now.0.saturating_sub(i64::from(days).saturating_mul(DAY_MS));
+    let mut clock_anomaly = false;
+    for (&id, info) in &index.records {
+        ctx.check_cancel()?;
+        clock_anomaly |= info.latest.0 > now.0.saturating_add(CLOCK_TOLERANCE_MS);
+        if !info.status.in_trash || info.status.conflict {
+            continue;
+        }
+        let deleted = match &info.data {
+            Data::Entry(e) => e.deleted_at,
+            Data::Group(g) => g.deleted_at,
+            _ => None,
+        };
+        if deleted.is_some_and(|d| d.0 <= cutoff)
+            && let Some(item) = item_handle(ctx, id, info)
+        {
+            visit(item);
+        }
+    }
+    Ok(clock_anomaly)
+}
+
 /// The vault at a glance (0011 `info --full`).
 pub struct Overview {
     /// The vault's name.
@@ -148,6 +199,8 @@ pub struct Overview {
     pub in_trash: usize,
     /// Records with conflicting versions.
     pub conflicts: usize,
+    /// Live entries whose displayed group is missing or deleted.
+    pub recovered: usize,
     /// The local commit sequence number.
     pub local_seq: u64,
     /// The latest timestamp in the vault (display only).
@@ -279,6 +332,7 @@ pub(crate) fn entry_summary(
         handle: ctx.entry_handle(id),
         title: copy(&e.title)?,
         type_hint: copy(&e.type_hint)?,
+        type_key: lower(e.type_hint.expose()),
         icon: copy_opt(e.icon.as_ref())?,
         fields: e
             .fields
@@ -310,18 +364,19 @@ pub(crate) fn group_summary(
         order: copy(&g.order)?,
         repaired: ctx.open.index.tree.is_repaired(id),
         conflict: r.status.conflict,
+        entries: ctx.open.index.group_counts.get(&id).copied().unwrap_or(0),
     })
 }
 
-fn item_name(r: &RecordInfo) -> Option<&Text> {
-    match &r.data {
-        Data::Entry(e) => Some(&e.title),
-        Data::Group(g) => Some(&g.name),
+pub(crate) fn item_name(view: &ViewData) -> Option<&Text> {
+    match view {
+        ViewData::Entry(e) => Some(&e.title),
+        ViewData::Group(g) => Some(&g.name),
         _ => None,
     }
 }
 
-fn item_handle(ctx: &Ctx<'_>, id: RecordId, r: &RecordInfo) -> Option<ItemHandle> {
+pub(crate) fn item_handle(ctx: &Ctx<'_>, id: RecordId, r: &RecordInfo) -> Option<ItemHandle> {
     match r.kind {
         RecordKind::Entry => Some(ItemHandle::Entry(ctx.entry_handle(id))),
         RecordKind::Group => Some(ItemHandle::Group(ctx.group_handle(id))),
@@ -329,8 +384,13 @@ fn item_handle(ctx: &Ctx<'_>, id: RecordId, r: &RecordInfo) -> Option<ItemHandle
     }
 }
 
-fn trash_item(ctx: &Ctx<'_>, id: RecordId, r: &RecordInfo) -> Result<Option<TrashItem>, CoreError> {
-    let (Some(item), Some(name)) = (item_handle(ctx, id, r), item_name(r)) else {
+pub(crate) fn trash_item(
+    ctx: &Ctx<'_>,
+    id: RecordId,
+    r: &RecordInfo,
+) -> Result<Option<TrashItem>, CoreError> {
+    let view = ctx.view(id)?;
+    let (Some(item), Some(name)) = (item_handle(ctx, id, r), item_name(&view)) else {
         return Ok(None);
     };
     let deleted_at = match &r.data {
@@ -348,6 +408,7 @@ fn trash_item(ctx: &Ctx<'_>, id: RecordId, r: &RecordInfo) -> Result<Option<Tras
 
 /// Live entries placed in `group` (or under recovered items for `None`),
 /// sorted by (lowercased title, ID).
+#[cfg(any(test, feature = "test-eager-views"))]
 fn entries_in(ctx: &Ctx<'_>, place: Option<RecordId>) -> Result<Vec<EntrySummary>, CoreError> {
     let index = &ctx.open.index;
     let mut found: Vec<(Zeroizing<String>, RecordId)> = Vec::new();
@@ -358,7 +419,11 @@ fn entries_in(ctx: &Ctx<'_>, place: Option<RecordId>) -> Result<Vec<EntrySummary
                 qv_model::EntryPlace::Recovered => None,
             };
             if at == place {
-                found.push((lower(e.title.expose()), *id));
+                let view = ctx.view(*id)?;
+                let ViewData::Entry(view) = &**view else {
+                    return Err(CoreError::Internal);
+                };
+                found.push((lower(view.title.expose()), *id));
             }
         }
     }
@@ -367,34 +432,34 @@ fn entries_in(ctx: &Ctx<'_>, place: Option<RecordId>) -> Result<Vec<EntrySummary
         .iter()
         .map(|(_, id)| {
             let r = index.get(*id).ok_or(CoreError::Internal)?;
-            match &r.data {
-                Data::Entry(e) => entry_summary(ctx, *id, r, e),
+            let view = ctx.view(*id)?;
+            match &**view {
+                ViewData::Entry(e) => entry_summary(ctx, *id, r, e),
                 _ => Err(CoreError::Internal),
             }
         })
         .collect()
 }
 
-fn group_info(r: &RecordInfo) -> Option<&GroupInfo> {
-    match &r.data {
-        Data::Group(g) => Some(g),
+#[cfg(any(test, feature = "test-eager-views"))]
+fn group_info(view: &ViewData) -> Option<&GroupInfo> {
+    match view {
+        ViewData::Group(g) => Some(g),
         _ => None,
     }
 }
 
 /// The displayed children of `group`, by (order, ID).
-pub(crate) fn child_groups(index: &Index, group: RecordId) -> Vec<RecordId> {
-    let mut kids: Vec<(&str, RecordId)> = index
-        .tree
-        .children(group)
-        .into_iter()
-        .filter_map(|id| {
-            let g = index.get(id).and_then(group_info)?;
-            Some((g.order.expose(), id))
-        })
-        .collect();
-    kids.sort();
-    kids.into_iter().map(|(_, id)| id).collect()
+#[cfg(any(test, feature = "test-eager-views"))]
+pub(crate) fn child_groups(ctx: &Ctx<'_>, group: RecordId) -> Result<Vec<RecordId>, CoreError> {
+    let mut kids = Vec::new();
+    for id in ctx.open.index.tree.children(group) {
+        let view = ctx.view(id)?;
+        let g = group_info(&view).ok_or(CoreError::Internal)?;
+        kids.push((Zeroizing::new(g.order.expose().to_owned()), id));
+    }
+    kids.sort_by(|a, b| (a.0.as_str(), a.1).cmp(&(b.0.as_str(), b.1)));
+    Ok(kids.into_iter().map(|(_, id)| id).collect())
 }
 
 /// Decrypts one head of `id`.
@@ -491,12 +556,17 @@ impl Session {
     pub fn overview(&self) -> Result<Overview, CoreError> {
         self.read(|ctx| {
             let index = &ctx.open.index;
+            let view = ctx.view(index.vault_meta)?;
+            let ViewData::Meta(meta) = &**view else {
+                return Err(CoreError::Internal);
+            };
             let mut o = Overview {
-                name: copy(&index.meta().ok_or(CoreError::Internal)?.name)?,
+                name: copy(&meta.name)?,
                 entries: 0,
                 groups: 0,
                 in_trash: 0,
                 conflicts: 0,
+                recovered: index.recovered_count,
                 local_seq: ctx.open.vault.local_seq(),
                 last_modified: None,
             };
@@ -518,12 +588,28 @@ impl Session {
         })
     }
 
+    /// Live entry handles and complete active-head identities; no display text.
+    /// Intended for bounded sync-receipt comparison, not searchable metadata storage.
+    pub fn entry_states(&self) -> Result<Vec<(EntryHandle, Vec<VersionId>)>, CoreError> {
+        self.read(|ctx| {
+            Ok(ctx
+                .open
+                .index
+                .records
+                .iter()
+                .filter(|(_, r)| r.kind == RecordKind::Entry && r.status.live)
+                .map(|(id, r)| (ctx.entry_handle(*id), r.heads.clone()))
+                .collect())
+        })
+    }
+
     /// The root group.
     pub fn root(&self) -> Result<GroupHandle, CoreError> {
         self.read(|ctx| Ok(ctx.group_handle(ctx.open.index.root)))
     }
 
     /// The displayed children of a live group (0003 §4).
+    #[cfg(any(test, feature = "test-eager-views"))]
     pub fn list(&self, group: GroupHandle) -> Result<Listing, CoreError> {
         self.read(|ctx| {
             ctx.own(group.session)?;
@@ -533,11 +619,12 @@ impl Session {
                 // In the trash (or not in the tree at all).
                 return Err(CoreError::NotFound);
             }
-            let groups = child_groups(index, group.record)
+            let groups = child_groups(ctx, group.record)?
                 .into_iter()
                 .map(|id| {
                     let r = index.get(id).ok_or(CoreError::Internal)?;
-                    let g = group_info(r).ok_or(CoreError::Internal)?;
+                    let view = ctx.view(id)?;
+                    let g = group_info(&view).ok_or(CoreError::Internal)?;
                     group_summary(ctx, id, r, g)
                 })
                 .collect::<Result<_, CoreError>>()?;
@@ -548,11 +635,13 @@ impl Session {
     }
 
     /// Live entries whose group is missing or deleted (0003 §4.2).
+    #[cfg(any(test, feature = "test-eager-views"))]
     pub fn recovered(&self) -> Result<Vec<EntrySummary>, CoreError> {
         self.read(|ctx| entries_in(ctx, None))
     }
 
     /// Every entry and group in the trash, newest deletion first.
+    #[cfg(any(test, feature = "test-eager-views"))]
     pub fn trash(&self) -> Result<Vec<TrashItem>, CoreError> {
         self.read(|ctx| {
             let mut out = Vec::new();
@@ -570,6 +659,7 @@ impl Session {
 
     /// Every entry and group with conflicting versions. Conflicts are shown,
     /// not resolved, in this phase (0005 §2.3).
+    #[cfg(any(test, feature = "test-eager-views"))]
     pub fn conflicts(&self) -> Result<Vec<ConflictSummary>, CoreError> {
         self.read(|ctx| {
             let mut out = Vec::new();
@@ -577,7 +667,8 @@ impl Session {
                 if !r.status.conflict {
                     continue;
                 }
-                if let (Some(item), Some(name)) = (item_handle(ctx, *id, r), item_name(r)) {
+                let view = ctx.view(*id)?;
+                if let (Some(item), Some(name)) = (item_handle(ctx, *id, r), item_name(&view)) {
                     out.push(ConflictSummary {
                         item,
                         name: copy(name)?,
@@ -595,6 +686,7 @@ impl Session {
     /// Protected values, notes and other fields are never searched, and no
     /// search index is kept (0008 §1.2). Groups come first, then entries,
     /// each sorted as in listings.
+    #[cfg(any(test, feature = "test-eager-views"))]
     pub fn search(&self, query: &str) -> Result<Vec<SearchHit>, CoreError> {
         if query.is_empty() || query.len() > MAX_QUERY_BYTES {
             return Err(CoreError::InvalidInput);
@@ -609,14 +701,15 @@ impl Session {
                 if !r.status.live {
                     continue;
                 }
-                match &r.data {
-                    Data::Group(g) if index.tree.parent(*id).is_some() => {
+                let view = ctx.view(*id)?;
+                match &**view {
+                    ViewData::Group(g) if index.tree.parent(*id).is_some() => {
                         let name = lower(g.name.expose());
                         if name.contains(q.as_str()) {
                             groups.push((name, *id));
                         }
                     }
-                    Data::Entry(e) => {
+                    ViewData::Entry(e) => {
                         let title = lower(e.title.expose());
                         let hit = title.contains(q.as_str())
                             || e.fields
@@ -634,12 +727,14 @@ impl Session {
             let mut out = Vec::with_capacity(groups.len() + entries.len());
             for (_, id) in groups {
                 let r = index.get(id).ok_or(CoreError::Internal)?;
-                let g = group_info(r).ok_or(CoreError::Internal)?;
+                let view = ctx.view(id)?;
+                let g = group_info(&view).ok_or(CoreError::Internal)?;
                 out.push(SearchHit::Group(group_summary(ctx, id, r, g)?));
             }
             for (_, id) in entries {
                 let r = index.get(id).ok_or(CoreError::Internal)?;
-                if let Data::Entry(e) = &r.data {
+                let view = ctx.view(id)?;
+                if let ViewData::Entry(e) = &**view {
                     out.push(SearchHit::Entry(entry_summary(ctx, id, r, e)?));
                 }
             }
@@ -680,9 +775,31 @@ impl Session {
         })
     }
 
+    /// Expiry counts without decrypted names or an all-results text allocation.
+    pub fn expiry_summary(&self) -> Result<ExpirySummary, CoreError> {
+        self.read(|ctx| {
+            let mut expired = 0;
+            let clock_anomaly = for_expired(ctx, |_| expired += 1)?;
+            Ok(ExpirySummary {
+                expired,
+                clock_anomaly,
+            })
+        })
+    }
+
+    /// Structural IDs for an explicit bulk-expiry action; no plaintext names.
+    pub fn expired_handles(&self) -> Result<Vec<ItemHandle>, CoreError> {
+        self.read(|ctx| {
+            let mut items = Vec::new();
+            for_expired(ctx, |item| items.push(item))?;
+            Ok(items)
+        })
+    }
+
     /// Trash items past the vault's retention period (0007 §2.1), and
     /// whether the clock looks wrong. Conflicted items are never listed: they
     /// need an explicit resolution first.
+    #[cfg(any(test, feature = "test-eager-views"))]
     pub fn expired_trash(&self) -> Result<ExpiryReport, CoreError> {
         self.read(|ctx| {
             let now = ctx.now();
@@ -713,6 +830,14 @@ impl Session {
         })
     }
 
+    /// Count payload-bearing entry heads without decrypting their display values.
+    pub fn entry_version_count(&self, entry: EntryHandle) -> Result<usize, CoreError> {
+        self.read(|ctx| {
+            ctx.own(entry.session)?;
+            Ok(record(&ctx.open.index, entry.record, RecordKind::Entry)?.payload_heads)
+        })
+    }
+
     /// Decrypts an entry's representative version (the live one, else the
     /// one in the trash). Protected values are left out.
     pub fn entry(&self, entry: EntryHandle) -> Result<EntryDetail, CoreError> {
@@ -727,6 +852,7 @@ impl Session {
 
     /// Decrypts every head of an entry that holds an entry payload (more
     /// than one when it is in conflict, 0005 §2.3).
+    #[cfg(any(test, feature = "test-eager-views"))]
     pub fn entry_versions(&self, entry: EntryHandle) -> Result<Vec<EntryDetail>, CoreError> {
         self.read(|ctx| {
             ctx.own(entry.session)?;
@@ -820,7 +946,7 @@ mod tests {
     #[test]
     fn views_find_by_id_prefix() {
         let env = Env::new();
-        let s = env.unlock();
+        let s = env.unlock_with(Some(env.snapshot_policy()));
         let root = s.root().unwrap();
         let g = add_group(&s, root, "G");
         let e = add_entry(&s, g, "E");
@@ -850,7 +976,7 @@ mod tests {
         assert!(s.find_id(&g_id, false).unwrap().is_empty());
         assert_eq!(s.find_id(&g_id, true).unwrap(), [ItemHandle::Entry(gone)]);
         assert!(s.find_id(&id, true).unwrap().is_empty());
-        s.purge(&[ItemHandle::Entry(gone)]).unwrap();
+        crate::testutil::destructive(&s, || s.purge(&[ItemHandle::Entry(gone)])).unwrap();
         assert!(s.find_id(&g_id, true).unwrap().is_empty());
         assert!(s.find_id(&g_id, false).unwrap().is_empty());
     }

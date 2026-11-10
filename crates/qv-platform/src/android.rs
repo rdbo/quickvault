@@ -242,7 +242,7 @@ impl Clipboard for AndroidPlatform {
             }
             if backend.owned(token) == Some(false) {
                 // Replaced by another copy: no longer ours to clear.
-                return Ok(());
+                return Err(PlatformError::ClipboardReplaced);
             }
             std::thread::sleep(left.min(Duration::from_millis(250)));
         }
@@ -492,7 +492,7 @@ mod tests {
         });
         std::thread::sleep(Duration::from_millis(60));
         n2.set("other").unwrap();
-        hold.join().unwrap().unwrap();
+        assert_eq!(hold.join().unwrap(), Err(PlatformError::ClipboardReplaced));
         assert_eq!(native.cleared.load(SeqCst), 2);
         assert_eq!(native.clip.lock().unwrap().as_ref().unwrap().0, "other");
         assert!(

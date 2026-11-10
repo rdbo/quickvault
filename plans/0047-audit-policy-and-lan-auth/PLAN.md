@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Proposed | 2026-11-08 | Scope and v4 direction authorized by owner; detailed implementation plan pending review | 0001 SG2/SG3/SG6/SG9, 0002 §1/§3/§4/§6–8, 0003 §2/§4–5, 0004 §1/§4–6, 0005 §2/§5–6, 0008 §1–2/§4–5, 0009 §1, 0011 §2–4, 0012 §1–3, 0013 §1–12, 0014 §1–8 |
+| Reviewed | 2026-11-08 | 2026-11-09 — owner: “You can implement now” | 0001 SG2/SG3/SG6/SG9, 0002 §1/§3/§4/§6–8, 0003 §2/§4–5, 0004 §1/§4–6, 0005 §2/§5–6, 0008 §1–2/§4–5, 0009 §1, 0011 §2–4, 0012 §1–3, 0013 §1–12, 0014 §1–8 |
 
 ## Intent
 
@@ -87,8 +87,20 @@ one valid hello. No further choice between v3/v4 is pending.
    from the diagram. D12 independent composition review gates LAN release.
 3. This is an audit follow-up, not a fresh “next phase” session. The initial
    implementation approval in 0046 remains intact; this plan does not replace
-   or falsely complete roadmap/release reviews. Planning is authorized now;
-   this detailed plan is Proposed until its implementation handoff is approved.
+   or falsely complete roadmap/release reviews. The owner approved this detailed implementation handoff on 2026-11-09.
+
+### Execution blocker discovered 2026-11-09
+
+The fixed Ristretto suite does not use the integer operations flagged by
+RUSTSEC-2026-0387; the exact-suite source trace supports a narrow advisory
+exception. The owner preferred retaining/documenting an engine change with no
+security benefit. After the separate question about missing cargo-vet records,
+the owner instructed “contineu”; implementation treats this as approval for the
+proposed exact-version **development-only** exemptions. These are unaudited debt,
+not genuine review evidence or LAN release approval. See
+[DEPENDENCIES.md](DEPENDENCIES.md). RNG/KSF scratch, engine state lifetimes and
+Android readiness still require step2 evidence before step4; D12 and genuine
+dependency review remain release gates.
 
 ## Design
 
@@ -274,6 +286,21 @@ impl VaultFile {
 }
 ```
 
+Step4 wrapper refinement (2026-11-09, within these ownership sketches):
+`PasswordAuthClient::start(password, T0)` returns protected KE1 and opaque
+one-shot state; `PasswordAuthServer::start(verified_password, T0, KE1)` performs
+fresh local setup/registration and returns protected KE2 and opaque state.
+Client finishing consumes its state and password borrow, returns KE3 plus an
+opaque AuthSecret; server finishing consumes its state and KE3 to return the
+same secret. No state serialization or secret-byte accessor crosses qv-crypto.
+Exact lengths are checked before engine parsing. Internal inter-flight state
+uses protected serialization; all component outputs and export keys are wiped.
+A central checked-OS-RNG operation discards every protected result if any draw
+fails, including a component-success result. Invalid remote credentials map to
+fixed authentication/integrity errors; the wire driver must not distinguish
+wrong password from component decoding. The local slot/password snapshot and
+release policy remain core's job in step7, outside this component wrapper.
+
 Prompt traits return protected password/phrase values or cancellation. Fixed
 UI question enums carry comparison/name and prompt purpose but never secrets;
 secret answers use protected storage, session/form epochs and immediate cleanup.
@@ -325,8 +352,8 @@ pub struct PageLimit { /* validated rows <= 32, bytes <= 2 MiB */ }
 Baseline algorithm: scan structural IDs, decode only needed representatives,
 match with existing case-insensitive rules, and select the next bounded set
 using a bounded top-k heap of sort keys/IDs. Keep the current sort semantics:
-group listings by order/ID; entries by lowercased title/ID; search groups then
-entries by their current respective order. Account Unicode expansion in the
+group listings by order/ID; entries by lowercased title/ID; search groups by
+lowercased name/ID, then entries by lowercased title/ID. Account Unicode expansion in the
 sort-key budget. Materialize page rows only after selection; cursor advances
 only past returned rows. Repeated scans trade CPU/I/O for bounded memory;
 benchmark before adding a more complicated index. The 32-row candidate-key
@@ -365,7 +392,10 @@ Research checked 2026-11-08: [versioned package metadata](https://docs.rs/crate/
 [upstream audit statement](https://github.com/meta/opaque-ke#audit).
 Stage 2 verifies advisories, provenance, transitive unsafe footprint, secret
 lifetimes, Android/MSRV support and licenses; `cargo deny`/`cargo vet` results
-are evidence, not a substitute for security review. No dependency added now.
+are evidence, not a substitute for security review. Candidate dependencies
+were added on2026-11-09 for readiness checks. Advisory reachability and the
+owner-approved development baseline are recorded in DEPENDENCIES.md. Genuine
+dependency review remains a release gate; adapter readiness still gates step4.
 
 ## Steps
 
@@ -375,7 +405,7 @@ result. Keep these steps in one plan and resume through its execution log.
 
 ### Step 1 — Amend requirements and specify exact contracts
 
-- [ ] **Do:** Record owner choices; amend the specs identified above before
+- [x] **Do:** Record owner choices; amend the specs identified above before
   behavior changes. Write the exact LAN profile/encoding/key/state/error table,
   timeout/deadline semantics and the paged-view contract. Include method versus
   intent, grant disclosure point, descriptor projection and authenticated
@@ -391,14 +421,15 @@ result. Keep these steps in one plan and resume through its execution log.
 
 ### Step 2 — Resolve engine/dependency and secret-lifetime evidence
 
-- [ ] **Do:** Inspect pinned sources/features and historic audit scope; assess
+- [x] **Do:** Inspect pinned sources/features and historic audit scope; assess
   version-family bridges, KDF parameters, zeroization, serialization sizes and
   fallible OS randomness. Record exact suite and direct/bridge versions before
   implementation. Add only the approved minimal dependencies/lockfile entries.
   Review this evidence and step 1's composition before step 4; unresolved
   security issues return to architect. Track external D12 separately.
 - **Files:** this directory/DEPENDENCIES.md, LAN-CONTRACT.md; Cargo.toml,
-  Cargo.lock, crates/qv-crypto/Cargo.toml; supply-chain/ only with real evidence.
+  Cargo.lock, crates/qv-crypto/Cargo.toml; deny.toml for exact transitive-license
+  policy; supply-chain/ with real evidence or the owner-approved exact-version development baseline; never invented certifications.
 - **Done when:** Selected suite builds on stable/MSRV and Android, license and
   advisory checks pass, exact lengths/profile are fixed, secret cleanup and RNG
   behavior are understood. No invented audit or blanket vet exemption.
@@ -408,7 +439,7 @@ result. Keep these steps in one plan and resume through its execution log.
 
 ### Step 3 — Document filesystem decision and isolate public slot encoding
 
-- [ ] **Do:** Close the QV-013 policy discussion with the accepted limitation;
+- [x] **Do:** Close the QV-013 policy discussion with the accepted limitation;
   retain existing runtime protections. Add a defined-field public-descriptor
   projection for restore/LAN/backup boundaries. Compare descriptor projections,
   not whole encrypted-record encodings. Preserve unknown encrypted extensions
@@ -424,13 +455,13 @@ result. Keep these steps in one plan and resume through its execution log.
 
 ### Step 4 — Implement ephemeral authentication and final-key derivation
 
-- [ ] **Do:** Add qv-crypto wrappers for local ephemeral registration, one-shot
+- [x] **Do:** Add qv-crypto wrappers for local ephemeral registration, one-shot
   client/server authentication, exact contexts and KDF settings, independent
   key-method MAC/schedule keys, final directional keys and FinishedB. Maintain
   typed epoch transitions/counters; no state serialization API. Add component
   vectors and mutation tests, not only self-roundtrips.
 - **Files:** crates/qv-crypto/src/{lan,profile,lib}.rs; new
-  crates/qv-crypto/src/lan_auth.rs; protected wrappers/tests/vectors as needed.
+  crates/qv-crypto/src/{lan_auth,lan_auth_engine,lan_v2}.rs; protected wrappers/tests/vectors as needed.
 - **Done when:** Wrong passwords, reflected/cross-session/wrong-profile proofs
   and modified engine messages fail before producing usable final channels;
   RNG/KDF errors release no messages; abort/drop cleanup is reviewed.
@@ -439,11 +470,11 @@ result. Keep these steps in one plan and resume through its execution log.
 
 ### Step 5 — Add bounded v2 wire messages and explicit record epochs
 
-- [ ] **Do:** Encode/decode new hello method+intent, authentication flights,
+- [x] **Do:** Encode/decode new hello method+intent, authentication flights,
   FinishedB and descriptor/head-bound grants. Enforce exact sizes before engine
   parsing; bind AAD and sequence numbers to epochs; reject old-key fallback,
   reordered/duplicated epoch records and counter exhaustion.
-- **Files:** crates/qv-protocol/src/{lan,registry,message,error}.rs;
+- **Files:** crates/qv-protocol/src/{lan,lan_v2,registry,message,frame,oob}.rs;
   crates/qv-sync/src/lan/{transport,steps,vectors}.rs; frame tests/fuzz targets.
 - **Done when:** Frozen v2 vectors cover every message/transcript and both
   directions; malformed arity/length/profile cannot allocate beyond bounds.
@@ -452,7 +483,7 @@ result. Keep these steps in one plan and resume through its execution log.
 
 ### Step 6 — Close all admission after one valid hello
 
-- [ ] **Do:** Replace Used/second-hello monitoring with a single accepted-stream
+- [x] **Do:** Replace Used/second-hello monitoring with a single accepted-stream
   handoff and explicit listener ownership drop; close advertisements too. Keep
   the pre-accept failure budget and absolute expiry. Remove probe-timeout state
   made obsolete by listener closure. Do not keep a hidden clone listening.
@@ -466,7 +497,7 @@ result. Keep these steps in one plan and resume through its execution log.
 
 ### Step 7 — Integrate credential authentication and atomic grant policy
 
-- [ ] **Do:** Drive v4 on both methods/intents. A reauthenticates outside long
+- [x] **Do:** Drive v4 on both methods/intents. A reauthenticates outside long
   session critical sections, then revalidates the snapshot before replying.
   Bind its ephemeral state to the exact slot/head. Verify KE3 and FinishedB
   before the atomic grant operation. B verifies its slot before transfer and
@@ -483,13 +514,13 @@ result. Keep these steps in one plan and resume through its execution log.
 
 ### Step 8 — Publish password/phrase enrollments without another password gate
 
-- [ ] **Do:** Replace the password-only creation capability with method-bound
+- [x] **Do:** Replace the password-only creation capability with method-bound
   verified enrollment proof. Stream and fully validate staging; verify the
   granted descriptor/head against the staged record. Create/reopen the result
   through protected VK without keeping or prompting for B's password again.
   Phrase mode preserves its password records; fresh replica/writer/anchor state
   is local. Preflight candidate validity before destination publication.
-- **Files:** crates/qv-store/src/{lan_staging,restore,vault}.rs and tests;
+- **Files:** crates/qv-store/src/{lan_staging,restore,vault,crash}.rs and tests;
   crates/qv-core/src/{lan,session,setup}.rs.
 - **Done when:** Correct password or phrase enrollment publishes a complete,
   openable vault, including a fingerprint-unlocked source; incomplete or
@@ -500,7 +531,7 @@ result. Keep these steps in one plan and resume through its execution log.
 
 ### Step 9 — Implement the two-device prompts and recovery choice
 
-- [ ] **Do:** Add protected A-side password approval and early B-side password
+- [x] **Do:** Add protected A-side password approval and early B-side password
   or phrase input. Show comparison/selected vault meaningfully; retain final
   received-name/destination confirmation. Clear forms/answer buffers and discard
   late responses on cancel, lock, timeout and Android background. Update CLI
@@ -518,7 +549,7 @@ result. Keep these steps in one plan and resume through its execution log.
 
 ### Step 10 — Review LAN composition and exercise hostile peers
 
-- [ ] **Do:** Complete the attack matrix below, source-check all key lifetimes
+- [x] **Do:** Complete the attack matrix below, source-check all key lifetimes
   and v2 vectors, and run both LAN initiation directions without Internet or
   server state. Record a reviewer verdict for the LAN delivery boundary and
   prepare a D12 review package locally; do not send it without authorization.
@@ -532,7 +563,7 @@ result. Keep these steps in one plan and resume through its execution log.
 
 ### Step 11 — Replace aggregate-text index eligibility with compact metadata
 
-- [ ] **Do:** Introduce structural summaries and bounded view cache; validate
+- [x] **Do:** Introduce structural summaries and bounded view cache; validate
   heads one at a time while preserving model projection. Migrate structural
   consumers (edits, conflicts, history, settings, autofill, archive/LAN merges,
   all unlock paths) so titles/search values no longer have to remain resident.
@@ -548,7 +579,7 @@ result. Keep these steps in one plan and resume through its execution log.
 
 ### Step 12 — Add complete paged views and cancellation
 
-- [ ] **Do:** Implement snapshot-bound page APIs and bounded top-k selection,
+- [x] **Do:** Implement snapshot-bound page APIs and bounded top-k selection,
   on-demand searchable-field reads, cursor cleanup and stale-state rejection.
   Cover list/search/All items, trash/conflicts/recovered and metadata consumers;
   preserve Unicode matching, group order, recovered groups and duplicate-title
@@ -563,7 +594,7 @@ result. Keep these steps in one plan and resume through its execution log.
 
 ### Step 13 — Bound CLI and app consumers end to end
 
-- [ ] **Do:** Replace eager app All items/sidebar/search collections with
+- [x] **Do:** Replace eager app All items/sidebar/search collections with
   page-driven views and bounded adjacent-page retention. Stream CLI listing,
   recursive paths, search and JSON through page APIs; remove full-text path
   maps and frontend collection fallback. Migrate public API callers in tests.
@@ -578,7 +609,7 @@ result. Keep these steps in one plan and resume through its execution log.
 
 ### Step 14 — Validate large vaults across all creation/acceptance paths
 
-- [ ] **Do:** Add a production-budget fixture with more than 64 MiB searchable
+- [x] **Do:** Add a production-budget fixture with more than 64 MiB searchable
   text, using ordinary authoring APIs after step 11, without patched constants.
   Exercise open/edit/restore/archive merge and v4 LAN join on both credential
   routes. Check 1 GiB reference-budget arithmetic/boundary with streamed or
@@ -596,7 +627,7 @@ result. Keep these steps in one plan and resume through its execution log.
 
 ### Step 15 — Final review, gates and documentation handoff
 
-- [ ] **Do:** Run full final-tree gates; review spec/code/secret-lifetime/crash
+- [x] **Do:** Run full final-tree gates; review spec/code/secret-lifetime/crash
   conformance with quickvault-reviewer. Update assessment dispositions only
   where evidence supports closure. Update architecture diagrams, user docs,
   spec statuses/Changelogs and plan indexes. Keep D12/device release gaps honest.
@@ -709,19 +740,32 @@ does not prove security; D12 and target evidence remain required.
 
 ## Documentation
 
-- [ ] CHANGELOG.md — exact behavioral scope and compatibility consequences.
-- [ ] ARCHITECTURE.md §3–6/diagram — ephemeral auth and view/cache boundaries;
+- [x] CHANGELOG.md — exact behavioral scope and compatibility consequences.
+- [x] ARCHITECTURE.md §3–6/diagram — ephemeral auth and view/cache boundaries;
   no new crate, stored verifier or file/archive format migration.
-- [ ] Specs and index — amendments from step 1, exact profile/registry and
+- [x] Specs and index — amendments from step 1, exact profile/registry and
   testing requirements, preserve partially implemented/Draft statuses honestly.
-- [ ] CLI/app docs — password on both devices, recovery, new-peer-version
+- [x] CLI/app docs — password on both devices, recovery, new-peer-version
   requirement, cache meaning, large-vault latency and truthful partial outcomes.
-- [ ] 0046 decisions/findings — supersede historical recommendations, retain
+- [x] 0046 decisions/findings — supersede historical recommendations, retain
   audit evidence and distinguish owner-accepted limitation from repaired code.
-- [ ] This plan/index/validation/review — evidence, remaining steps and D12 gaps.
-- [ ] AGENTS.md/skills — no workflow change expected.
+- [x] This plan/index/validation/review — final gates/results and approved SQLite repair.
+- [x] AGENTS.md/skills — no workflow change expected.
 
 ## Revisions
+
+- 2026-11-09: Owner explicitly approved the discovered SQLite advisory fix.
+  Extend remaining step15 to rusqlite0.41.0/libsqlite3-sys0.39.1 (SQLite3.54.1),
+  including the private mutable harden-connection adapter and callers in
+  qv-store/src/{sqlite,creation,vault,schema,error,lib}.rs, with unchanged
+  features/compile flags and existing exact development-audit
+  policy. Accepted0004 §1/§5 hostile-parser/durability requirements apply; this
+  is a dependency implementation fix, with no normative vault/wire behavior
+  change. Alternative of retaining only WAL refusal was rejected in favor of
+  upstream repair. Files: Cargo.toml/Cargo.lock, supply-chain/config.toml,
+  ARCHITECTURE.md §6, CHANGELOG.md and0047 evidence. Done when API/compile-option
+  compatibility, crash/storage regressions and final dependency/workspace/native
+  gates pass. No completed step is rewritten; owner approval already received.
 
 - 2026-11-08: Initial plan requested for the three discussed assessment topics.
   Found newly staged v4, asked the concrete product choice, and recorded the
@@ -742,3 +786,292 @@ does not prove security; D12 and target evidence remain required.
   spec index's non-normative planning note and 0046's superseded decision
   ledger; normative spec text, production code, dependencies and staged
   diagram source/exports remain unchanged. No Cargo commands or staging actions.
+
+- 2026-11-09: Owner explicitly approved implementation of 0047. Clean working
+  tree at `780733c`; set Approved then In progress. Applying developer skill;
+  beginning exact-contract and pinned-engine readiness work before production
+  cryptographic changes. No commit or staging actions authorized or taken.
+- 2026-11-09: Wrote normative 0013 §15 with exact array/label/derivation/state
+  registry and paging/filesystem/public-slot requirements in the related specs.
+  Draft 0008/0009 scope authorization is recorded explicitly. Added contract
+  checklist and architecture target boundaries; actual lan/2 remains pending.
+  Pinned source inspected outside the repo for serializer and RNG/KSF evidence.
+  SPDX and diff whitespace pass; no Cargo used for this document-only work.
+  Step 1 is not yet complete: engine length assertions and local contract review
+  must confirm the registry before cryptographic implementation.
+- 2026-11-09: Step 3 public-slot hardening implemented across restore, LAN
+  staging, self-contained export and password staging/adoption. Discovered the
+  latter two share write.rs; included only the necessary projection call sites.
+  Regression covers unknown encrypted extensions through adoption/backup/restore/
+  LAN and legitimate authenticated pre-open copy/move. Component suite passed
+  (crypto/model/store; final gates still pending). Corrected descriptor byte
+  length from172 to171 using the compiled canonical codec test.
+- 2026-11-09: Step 2 blocked on dependency evidence: cargo-deny reports
+  RUSTSEC-2026-0387 (crypto-bigint0.5.5) plus the dalek BSD license; locked vet
+  has20 unvetted additions, refreshed temporary imports still17. No exemptions,
+  advisory ignores, audit certifications or repo import changes made. Asked
+  owner exception-versus-engine-revision choice; no cryptographic wrappers
+  proceed. Independent step11 preparation continues with streamed compact head
+  summaries. Actual eager search sorts group hits by lowercase name, not group
+  order; corrected the remaining-step contract to preserve existing behavior.
+- 2026-11-09: Spec contract pass completed after compiled suite sizes were
+  checked (96/320/64). Step1 complete; step3 focused suites passed. Step11
+  partial: compact HeadSummary binds full canonical content with a protected
+  digest and ordinary causal merge, and from_manifest reads one full head at
+  a time then rechecks its representative reread. Cache eviction/paged APIs
+  and frontend migration are not implemented; aggregate64MiB cap stays active.
+  Full-tree verification and local partial-work review are running.
+  Set plan Blocked at step2 pending the owner advisory/engine decision and
+  genuine dependency evidence; no cryptographic wrappers or runtime LAN-profile
+  change is implemented. Independent preparation is recorded, not marked done.
+- 2026-11-09: Architect revision to remaining step2: include deny.toml for
+  the exact dalek4.1.3 BSD-3-Clause license exception discovered by the required
+  gate. This is the selected engine's transitive license, not a blanket allowlist
+  or advisory waiver. Existing policy already uses per-package license exceptions.
+  Advisory decision and missing audit evidence remain blockers. No vendor fork.
+- 2026-11-09: Final partial-tree gates: SPDX, fmt, clippy all-targets/-Dwarnings,
+  security matrix and86 local Markdown targets pass. Initial full tests stopped
+  at a missing Xvfb dependency; fetched/extracted Alpine Xvfb and libraries into
+  /tmp/qv-0047-xvfb, without changing tests or system packages. All3 clipboard
+  tests then pass; full suite reruns with QV_TEST_XVFB pointing to that wrapper.
+  cargo-deny now passes licenses/bans/sources but still rejects the timing
+  advisory. cargo-vet --locked still lacks20 safe-to-deploy entries. No waivers
+  or invented audit evidence. Local reviewer records partial scope and blockers.
+- 2026-11-09: Full final Rust tree passes `QV_TEST_XVFB=/tmp/qv-0047-xvfb/run
+  QV_TEST_KDF_JOBS=2 cargo test --locked`: 935 passed,0 failed,2 existing
+  ignored tests. fmt, clippy, SPDX, matrix and whitespace checks passed on this
+  Rust tree; subsequent edits are documentation only. Verified the inspected
+  opaque-ke archive SHA-256 against Cargo.lock. Dependency gates still fail
+  for the documented advisory and20 missing vet entries; no policy weakening
+  or audit claim. Final local review is partial/blocked, not plan completion.
+- 2026-11-09: Final documentation-only handoff reconciliation:88 local
+  Markdown targets exist; SPDX and diff whitespace pass again. Architecture
+  §6 records the candidate engine dependency and blocked integration. No Rust,
+  manifest, lockfile, test or policy inputs changed after the passing full suite.
+- 2026-11-09: Checkpoint completed (935 passing tests); continuing independent
+  cache/paging integration while the LAN gate is unresolved. Earlier full-tree
+  results describe that checkpoint, not subsequent cache changes. Split
+  structural metadata from evictable representative text; cache residency is
+  no longer a candidate eligibility veto. Frontends/paging are still being
+  migrated, so no end-to-end large-vault completion claim yet.
+- 2026-11-09: Owner answered the advisory question: accept an easy security
+  improvement if it benefits this product; otherwise document and avoid churn.
+  Retain the selected engine if reachability review confirms the flagged math
+  is not used. This does not waive dependency audits or permit false evidence.
+
+- 2026-11-09: Interpreted the owner's “contineu”, following the separate
+  dependency-baseline question, as approval for the proposed development-only
+  exemptions. Recorded all20 exact additions as unaudited debt; no audit
+  certifications or whole-package safety claims. This does not waive D12,
+  dependency review before LAN release, RNG/KSF adapter review or target tests.
+  Narrow unused-code advisory exception passes cargo-deny. Cache/paging/app/CLI
+  work continues independently; runtime LAN authentication is still pending.
+- 2026-11-09: Implemented structural cache and snapshot-bound views with
+  forward/backward pages, type/group counts, cancellation and short batch reads.
+  App All items, group/subtree lists, sidebar types/groups, search/palette,
+  Trash, all-kind conflicts and autofill now use three replaceable page lanes.
+  Query/state/epoch/serial changes discard late results; equal-priority newer
+  overlays preempt older owners. Legacy eager GUI utilities are test-only.
+  CLI list/search/trash/addressing/mkdir/show stream pages/path components,
+  preserving recursive group/entry order and JSON schemas. Path continuations
+  retain IDs, not every ancestor name or text-bearing cursor per depth.
+- 2026-11-09: LAN receipts now retain active-head IDs instead of all titles;
+  only bounded displayed titles are loaded. This also detects same-timestamp
+  edits. Entry version-count checks use compact metadata rather than decoding
+  all full heads just to count them. These are existing-LAN view changes, not
+  the new authentication profile.
+- 2026-11-09: Stock67.5 MiB searchable-text fixture passes ordinary save,
+  password/phrase open, edit, complete45-page search, archive import, snapshot
+  restore and rotation. Debug665.96s; optimized16.96s, including0.532s complete
+  paged search. See LARGE-VAULT-VALIDATION.md for exact commands/categories and
+  unfulfilled device/RSS/new-LAN evidence. No1 GiB runtime claim.
+- 2026-11-09: Focused paging9 tests and page-reader2 tests pass; clippy passed
+  before subsequent engine candidate/fixture changes. Native real-window flow
+  found action disabling incorrectly used the delayed busy-indicator flag;
+  fixed to immediate busy while preserving delayed progress. Its script also
+  still targeted the modal after the0044 docked-receipt redesign; updated it
+  to check the actual receipt and a validation-only peer-open completion bit,
+  retaining successful join/secret-clearing checks. Manual real-window flow
+  now passes. Full final/native gate reruns remain required.
+- 2026-11-09: Selected OPAQUE suite passes Android library check. Added a
+  test-only readiness adapter with explicit Argon2 parameters, wiped scratch
+  guard and checked RNG termination poison; injected failure/selected scalar
+  and real-KDF matching-context/rejection tests pass. This module is not yet
+  production authentication. Android all-target check hit host disk exhaustion;
+  cleaned this session's generated release artifacts, not source/user data.
+  Remaining checks/builds will use a task-specific /tmp target directory with
+  debug symbols disabled if host space remains insufficient. Review and full
+  final-tree gates are pending; historical935-test results are not current.
+
+- 2026-11-09: Step2 readiness checkpoint complete for development: host and
+  Android all-target suite/adapter builds pass, checked RNG/real-KDF tests pass,
+  explicit parameters/lengths fixed and source/lifetime limits reviewed in
+  DEPENDENCIES.md and REVIEW.md. The selected all-ff termination poison is
+  discarded unconditionally after a latched OS failure; production wrappers
+  must centralize that condition and wipe raw outputs. No fallback RNG or
+  complete-erasure claim. D12/device and genuine dependency review remain
+  release gates. Production step4 is authorized to proceed under those
+  documented conditions; final whole-plan review is still pending.
+
+- 2026-11-09: Step4 implementation started after the local readiness review.
+  PasswordAuthClient/Server consume protected inter-flight state, validate exact
+  message lengths and centralize failed-OS-RNG rejection; local registration
+  uses the fixed role/context/profile and retains no verifier. Focused matching,
+  wrong-password/context/modified-response and fresh-registration tests pass.
+  Added lan_v2.rs under lan::v2 to keep the new schedules/explicit epochs
+  isolated while legacy callers migrate. AuthSecret binds method and outer
+  transcript; key mode exposes A's identity-proof capability only after B's
+  proof verifies. No runtime driver or grant policy is wired yet.
+
+- 2026-11-09: Step4 focused evidence: independent Python cryptography/cbor2/
+  libsodium KATs match all three J variants, outer/final directional keys,
+  FinishedB, key proofs, commitments/SAS, AAD and encrypted frames. Published
+  opaque-ke4.0.1 serialized Ristretto component fixture also matches client
+  finalization/session/export and server verification; its Identity KSF is
+  explicitly test-only, distinct from the production Argon2 suite. Exact
+  source commit/hash and generator provenance are retained with fixtures.
+  Added per-operation RNG failure injection through every client/server draw;
+  made injection thread-local after concurrent tests exposed shared counters.
+  Both Argon2 families now share a test-only slot so full-profile tests stay
+  within QV_TEST_KDF_JOBS. No production serialization API or raw-Z accessor.
+- 2026-11-09: Full checkpoint suite passed app/CLI/core (including130 core
+  tests and the large fixture), then failed the new model property fixture:
+  it generated unsorted writer-clock pairs. Sorted the fixture's input to the
+  model's canonical constructor; retained the regression seed. All79 model
+  tests now pass, as do132 crypto unit tests plus integration/doc tests.
+  New component fixture adds another passing test afterward. Final gates must
+  include subsequent crypto/wire code and are still pending.
+- 2026-11-09: Step5 codecs started alongside legacy callers, not wired yet.
+  Exact v2 labels, modes, credential bounds, head/descriptor-bound grant and
+  nested transcripts added. Credential frames have a distinct4112-byte cap
+  (4096 plaintext +16 tag) before allocation. Corrected an obvious draft QR
+  element-count typo: §4.2 lists five fields, so §15.2 now says five; no field
+  was added/removed. Strict new QR decoding rejects old labels/profiles.
+
+- 2026-11-09: Resumed the approved tree at the owner's continuation. Latest
+  crypto/protocol checkpoint passes (including typed epoch/binding changes).
+  Driver refinement within steps5–8: an initial-epoch channel is consumed
+  on transition to a final-epoch channel; bulk exchange accepts only final
+  channels. Core owns a private one-use grant authorization capability, passed
+  through an associated ApproverVault type and bound to the session/T0/head/slot
+  and original deadline. Grant sealing occurs under the session mutex with
+  the final sealer's binding/sequence checked. A completed seal is reported as
+  possible disclosure even if cancellation drops the frame before delivery.
+  Admission is a separate scoped operation: the acceptor owns the listener
+  by value, stops and joins before the accepted connection continues. No
+  discovery advertisements exist in the current implementation.
+
+- 2026-11-09: Runtime lan/2 driver integration now compiles through core;
+  legacy tests are being migrated to the new handshake and silent credential
+  failure policy. First-final-State validation uses the credential frame cap
+  and machine deadline before A enables exchange responses. Core preflights
+  private staging before publication; the store returns a data-free
+  PublicationIncomplete outcome after a published destination cannot complete
+  or reopen. CLI/app must report that the file exists, with no overwrite retry.
+  Test configuration refinement: enable a development-only shared KDF limiter
+  in qv-crypto (also when built as a test dependency), via qv-sync/core and
+  frontend dev features. This keeps both Argon2 families within the test memory
+  rule now that one LAN attempt performs work on both threads. Product builds
+  do not enable it; no dependency/version or production cost change.
+
+- 2026-11-09: LAN checkpoint passes44 sync tests,12 existing core LAN tests,
+  four new production grant-boundary/race tests and seven headless app LAN
+  tests. Fixed the staging scope comparison (a grant has no local archive ID)
+  and send-error/close ordering found by these tests. Credential failures now
+  intentionally produce silence, while confirmed exchange failures retain
+  accurate error/commit reporting. New app prompts are instance-bound to reject
+  late answers/input; secret replies clear on cancel. Final/native gates pending.
+  Step12 refinement: retire eager plaintext collection APIs behind the explicit
+  test-eager-views development feature, preserving reference fixtures but
+  excluding them from normal builds. Migrate the public offline integration
+  lifecycle to page traversal; keep structural ID/count APIs in production.
+
+- 2026-11-09: Runtime/validation checkpoint: crypto component and independently
+  generated v2 wire/schedule fixtures pass; core phrase enrollment preserves the
+  source password and publishes a writable session. Store grant/head/source
+  mismatch and injected post-rename failure tests pass. Source admission clears
+  displayed codes before credential work. App prompts are bound to monotonic
+  instance IDs; source disclosure and received-file outcomes survive lock.
+  Full native rerun passes94 app unit tests plus all3 GTK/WebKit window tests,
+  including offering-device password entry and secret cleanup. Fixed a deadlock
+  in validation by sending B's reveal/KE1 before its comparison UI wait; fixed
+  stale QR validation fixtures to profile2 without weakening decoder checks.
+- 2026-11-09: Local review found cancellation after publication could still return
+  an unlocked Session. Added checks immediately after store publication and
+  after platform binding; both discard new key/session state and report
+  PublicationIncomplete while retaining the file. A deterministic barrier test
+  covers both completion points and proves local password reopen/write works.
+  Final clippy, normal frontend build, SPDX/fmt/matrix and Android crypto
+  all-target checks pass; final workspace tests restarted to include this fix.
+- 2026-11-09: Expanded the stock67.5 MiB fixture to both LAN authentication
+  routes and synthetic keystore quick unlock, with structural/reference/cache
+  counters and process RSS/HWM. The standalone optimized checkpoint passed in
+  28.42s with339628 KiB peak RSS. A repeat under concurrent native/debug workload
+  failed at archive merge with Store(Io) while temporary disk was nearly full;
+  retained the failure log and reclaimed only this session's generated build
+  artifacts and abandoned interrupted-test fixtures. Final repeat remains due.
+  Found, not fixed: bulk mutation preparation can retain many decoded records;
+  it is outside the paged-view/cache residency contract, not a64 MiB RSS bound.
+- 2026-11-09: Fresh final cargo-deny discovers RUSTSEC-2026-0459 in the existing
+  libsqlite3-sys0.38.2 / SQLite3.53.2 baseline. Current WAL/SHM pre-open refusal
+  mitigates the described crafted-sidecar route; no advisory ignore was added.
+  Upstream patched SQLite requires rusqlite0.41 / libsqlite3-sys>=0.39. Asked
+  whether to expand this plan's fixed dependency scope for that upgrade; work
+  independent of the answer continues. Locked cargo-vet still passes its
+  authorized development baseline, not a new audit. D12/device gates stay open.
+
+- 2026-11-09: Steps4–13 local implementation and review evidence recorded in
+  LAN-VALIDATION.md and REVIEW.md. Both final native94+3 and normal frontend
+  builds pass. Independent/physical checks are explicitly retained as release
+  gaps under this plan's missing-evidence rule. Step14 final fixture repeat and
+  step15 full-suite/dependency gate remain open; no Reviewed/completion claim.
+
+- 2026-11-09: Final-tree optimized expanded fixture passes28.55s after reclaiming
+  incremental artifacts (no source/model/test reduction). Test-process peak is
+  340084 KiB; command-level589328 KiB includes its83s compiler rebuild and is
+  not presented as vault RSS. Both credential routes and synthetic quick unlock
+  are included. Final full debug workspace lifecycle is still running; step14
+  will close after its ordinary gate and evidence update, with physical targets
+  explicitly unqualified.
+
+- 2026-11-09: Full workspace run passes136 core tests including the expanded
+  large lifecycle (core suite1141.94s),133 crypto tests plus1 existing ignored,
+  79 model and29 protocol tests, along with app/CLI and earlier targets. Store
+  then reports234 passed and1 failed: the newly added exact1 GiB fixture wrongly
+  expected the canonical encoder to validate semantic budgets. Production
+  validation already rejects +1 byte. Corrected the fixture to require rejection
+  by validation, decoding well-formed over-budget CBOR, and manifest sealing.
+  The focused corrected boundary test passes; no assertion of the actual budget
+  was removed and no production limit/code changed. Repeating affected store
+  targets and the not-yet-run sync/doctest targets; unchanged core/native/other
+  target results remain current per AGENTS.md's affected-check rule. Final
+  clippy rerun passes. Step14's local evidence is complete; physical targets
+  remain explicitly unqualified. Step15 depends on remaining gates/SQLite.
+
+- 2026-11-09: Owner approved the SQLite fix and requested a prompt wrap-up.
+  Scope amendment: pin rusqlite0.41.0 with patched libsqlite3-sys0.39.x /
+  SQLite>=3.54.0, preserving the exact trimmed feature/compile-option policy
+  and vault formats. Review API compatibility, source/provenance and actual
+  resolved versions; carry the existing two exact development-only vet baseline
+  entries forward as unaudited debt, without claiming new audits. No new broad
+  advisory exception. Update architecture/Changelog/dependency evidence and
+  run final deny/vet, all-target clippy and full workspace/native tests.
+  Use optimized test compilation with debug assertions and overflow checks
+  explicitly enabled to avoid another19-minute unoptimized fixture run; this
+  changes only build invocation, not source profiles, cost or test coverage.
+
+- 2026-11-09: Final closure after owner-approved SQLite repair: full
+  `cargo test --locked` exits0 on the final tree, including136 core,133 crypto
+  (+1 existing ignored),79 model,29 protocol,235 store,46 sync main unit tests,
+  plus frontend/integration/doctests. Test profile opt-level1 explicitly retains
+  debug assertions/overflow checks; no source profile, cost or coverage reduction.
+  All-target clippy exits0. Native app94 unit +3 actual-window tests pass.
+  Fresh deny and locked vet pass; header/fmt/matrix/whitespace checks pass.
+  SQLite3.54.1 compiled-version/options assertions and crash/storage tests pass;
+  mutable callback installation is the sole private API compatibility change.
+  Local reviewer verdict Approved after fixes; set Implemented then
+  Reviewed. The owner requested closure and a follow-up plan:0048 (Proposed)
+  carries independent D12, genuine audits, physical targets, representative/
+  actual1 GiB qualification and bulk-mutation memory decisions. These remain
+  release gates; no claim of release security or independent review. No commit,
+  staging, branch, push, external contact or device access.

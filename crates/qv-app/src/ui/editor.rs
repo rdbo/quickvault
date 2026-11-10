@@ -12,7 +12,7 @@ use super::pages::strength_label;
 use super::shell::{Unreadable, act};
 use crate::controller::{Controller, FormEpoch};
 use crate::editor::{ADD_KINDS, HUES, ItemType, SECURITY_CHOICES, kind_label};
-use crate::views::{self, CardFace, EntryFormView, FormRow, Role};
+use crate::views::{CardFace, EntryFormView, FormRow, Role};
 use crate::workspace::{GenFlag, GenMode, RevealKey, WsAction, WsField};
 use dioxus::prelude::*;
 use qv_core::{FieldKind, GroupHandle};
@@ -142,36 +142,52 @@ fn StartStep(
     }
 }
 
-/// The groups an entry can be saved in: the root, the top-level groups and
-/// the entry's own group if it is nested deeper.
-pub(crate) fn group_choices(
-    controller: &Controller,
+/// A bounded top-level group picker, preserving an existing nested selection.
+#[component]
+pub(crate) fn GroupChoices(
+    controller: Controller,
     epoch: FormEpoch,
     current: GroupHandle,
-) -> Vec<(GroupHandle, String, &'static str)> {
-    controller
-        .read(epoch, |s| {
-            let root = s.root()?;
-            let mut out = vec![(root, "No group".to_owned(), "h11")];
-            for g in views::top_groups(s)? {
-                out.push((
-                    g.handle,
-                    g.name.to_string(),
-                    item_hue(g.colour, &g.handle.id_hex()),
-                ));
+    on_pick: EventHandler<GroupHandle>,
+) -> Element {
+    let root = controller.read(epoch, |s| s.root()).and_then(Result::ok);
+    let (owner, read) = super::use_page(
+        &controller,
+        epoch,
+        crate::page_read::Lane::Groups,
+        2,
+        crate::page_read::Spec::Groups {
+            parent: root,
+            query: Zeroizing::new(String::new()),
+        },
+    );
+    let page = read.as_ref().and_then(|r| r.page.clone());
+    let groups = match page.as_deref().map(|p| &p.rows) {
+        Some(crate::page_read::Rows::Groups(groups)) => groups.as_slice(),
+        _ => &[],
+    };
+    let extra = if root != Some(current) && groups.iter().all(|g| g.handle != current) {
+        controller
+            .read(epoch, |s| {
+                s.group(current).map(|g| crate::views::z(g.name.expose()))
+            })
+            .and_then(Result::ok)
+    } else {
+        None
+    };
+    rsx! {
+        if let Some(root) = root { button { r#type: "button", class: "mi", role: "menuitem",
+            onclick: move |_| on_pick.call(root), "No group" } }
+        for group in groups.iter().cloned() {
+            button { r#type: "button", class: "mi", role: "menuitem", onclick: move |_| on_pick.call(group.handle),
+                span { class: "ie-dot {item_hue(group.colour, &group.handle.id_hex())}" } "{group.name.as_str()}"
+                if group.handle == current { span { class: "sub", Svg { icon: Icon::Check } } }
             }
-            if out.iter().all(|(h, _, _)| *h != current)
-                && let Some(name) = views::browse(s, Some(current))?
-                    .crumbs
-                    .last()
-                    .map(|c| c.1.to_string())
-            {
-                out.push((current, name, super::icons::id_hue(&current.id_hex())));
-            }
-            Ok(out)
-        })
-        .and_then(Result::ok)
-        .unwrap_or_default()
+        }
+        if let Some(name) = extra { button { r#type: "button", class: "mi", role: "menuitem",
+            onclick: move |_| on_pick.call(current), "{name.as_str()}" span { class: "sub", Svg { icon: Icon::Check } } } }
+        if let (Some(owner), Some(read)) = (owner, read) { super::PageNav { controller, epoch, owner, read } }
+    }
 }
 
 #[component]
@@ -185,8 +201,17 @@ fn Editor(controller: Controller, epoch: FormEpoch, revision: u64, form: EntryFo
     let kind = form.kind.unwrap_or(ItemType::Other);
     let is_note = form.kind == Some(ItemType::Note);
     let hue = item_hue(form.colour, &form.id);
-    let groups = group_choices(&controller, epoch, form.group);
-    let group = groups.iter().find(|g| g.0 == form.group).cloned();
+    let group = controller
+        .read(epoch, |s| {
+            let root = s.root()?;
+            let name = if root == form.group {
+                Zeroizing::new("No group".to_owned())
+            } else {
+                crate::views::z(s.group(form.group)?.name.expose())
+            };
+            Ok((form.group, name, super::icons::id_hue(&form.group.id_hex())))
+        })
+        .and_then(Result::ok);
     let save = act(&controller, epoch, WsAction::SaveEntry);
     // A save refused for a missing title or field name keeps the typed
     // (uncontrolled) values, such as a new password; app.js clears only on
@@ -234,7 +259,7 @@ fn Editor(controller: Controller, epoch: FormEpoch, revision: u64, form: EntryFo
             }
         }
         if let Some(name) = form.removed.as_ref() {
-            div { class: "ie-undo", role: "status", span { "Removed “{name.as_str()}”" } button { id: "undo-remove", onclick: act(&controller, epoch, WsAction::UndoRemoveField), "Undo" } }
+            div { class: "ie-undo", role: "status", span { "Removed “{crate::views::z(name).as_str()}”" } button { id: "undo-remove", onclick: act(&controller, epoch, WsAction::UndoRemoveField), "Undo" } }
         }
         {adder(&controller, epoch, kind, form.new_kind, pop, adding, add_kind)}
     };
@@ -292,20 +317,15 @@ fn Editor(controller: Controller, epoch: FormEpoch, revision: u64, form: EntryFo
                         div { class: "pop-anchor",
                             button { class: "ie-chip", id: "group-chip", "aria-haspopup": "menu",
                                 onclick: move |_| pop.set(if pop() == Some(Pop::Group) { None } else { Some(Pop::Group) }),
-                                if let Some((_, name, h)) = group.clone() { span { class: "ie-dot {h}" } "{name}" } else { "Group" }
+                                if let Some((_, name, h)) = group.clone() { span { class: "ie-dot {h}" } "{name.as_str()}" } else { "Group" }
                                 Svg { icon: Icon::ChevronDown }
                             }
                             if pop() == Some(Pop::Group) {
                                 {scrim(pop)}
                                 div { class: "menu pop", role: "menu",
                                     div { class: "label", "SAVE IN" }
-                                    for (g, name, h) in groups.clone() {
-                                        button { class: "mi", role: "menuitem",
-                                            onclick: { let c = controller.clone(); move |_| { pop.set(None); c.act(epoch, WsAction::SetGroup(g)); } },
-                                            span { class: "ie-dot {h}" } "{name}"
-                                            if g == form.group { span { class: "sub", Svg { icon: Icon::Check } } }
-                                        }
-                                    }
+                                    GroupChoices { controller: controller.clone(), epoch, current: form.group,
+                                        on_pick: { let c = controller.clone(); move |group| { pop.set(None); c.act(epoch, WsAction::SetGroup(group)); } } }
                                 }
                             }
                         }
@@ -320,7 +340,7 @@ fn Editor(controller: Controller, epoch: FormEpoch, revision: u64, form: EntryFo
                 div { class: "ie-wifi",
                     span { class: "ie-qr", Svg { icon: Icon::Qr, large: true } }
                     div { class: "min0",
-                        b { if w.name.is_empty() { "Network name" } else { "{w.name.as_str()}" } }
+                        b { if w.name.is_empty() { "Network name" } else { "{crate::views::z(&w.name).as_str()}" } }
                         span { "After you save, the item's page can show a code that phones scan to join." }
                         span { class: "ie-sec", "{security_label(&w.security)}" }
                     }
@@ -389,7 +409,7 @@ pub(crate) fn card_face(card: &CardFace, hue: &'static str) -> Element {
             div { class: "num live", "aria-hidden": "true" }
             div { class: "num", "{number}" }
             div { class: "row2",
-                div { class: "min0", small { "Card holder" } b { if card.name.is_empty() { "Your name" } else { "{card.name.as_str()}" } } }
+                div { class: "min0", small { "Card holder" } b { if card.name.is_empty() { "Your name" } else { "{crate::views::z(&card.name).as_str()}" } } }
                 div { class: "r", small { "Expires" } b { if card.expiry.is_empty() { "MM/YY" } else { "{card.expiry.as_str()}" } } }
             }
         }
@@ -445,7 +465,7 @@ fn field_row(
             }
         }
     } else {
-        rsx! { label { class: "ie-label", r#for: super::items::dom_id(if row.protected { WsField::Replacement(i) } else { WsField::FieldValue(i) }), title: "{row.name.as_str()}", "{row.name.as_str()}" } }
+        rsx! { label { class: "ie-label", r#for: super::items::dom_id(if row.protected { WsField::Replacement(i) } else { WsField::FieldValue(i) }), title: "{crate::views::z(&row.name).as_str()}", "{crate::views::z(&row.name).as_str()}" } }
     };
     let keep = {
         let c = controller.clone();
@@ -538,7 +558,7 @@ fn field_row(
             div { class: "ie-box",
                 // A card number shows what is typed (grouped in fours, like the
                 // card), so the user can check it; it is still stored protected.
-                Input { controller: controller.clone(), epoch, field: WsField::Replacement(i), label: row.name.to_string(), kind: if showing || card_number { Kind::Line } else { Kind::Secret }, value: None, disabled: false, bare: true, class: "mono", placeholder: placeholder(&row), autofocus: changing().contains(&i), format: card_format }
+                Input { controller: controller.clone(), epoch, field: WsField::Replacement(i), label: crate::views::z(&row.name).to_string(), kind: if showing || card_number { Kind::Line } else { Kind::Secret }, value: None, disabled: false, bare: true, class: "mono", placeholder: placeholder(&row), autofocus: changing().contains(&i), format: card_format }
                 if let Some((t, class)) = check.clone() { span { class, "{t}" } }
                 if card_number {
                 } else if showing {
@@ -556,7 +576,7 @@ fn field_row(
         // A protected multi-line value (recovery codes): typed in a textarea.
         rsx! {
             div { class: "ie-box",
-                Input { controller: controller.clone(), epoch, field: WsField::Replacement(i), label: row.name.to_string(), kind: Kind::Multi, value: None, disabled: false, bare: true, placeholder: if row.stored { "Saved. Type to replace it" } else { "" } }
+                Input { controller: controller.clone(), epoch, field: WsField::Replacement(i), label: crate::views::z(&row.name).to_string(), kind: Kind::Multi, value: None, disabled: false, bare: true, placeholder: if row.stored { "Saved. Type to replace it" } else { "" } }
             }
         }
     } else if row.role == Role::Security {
@@ -567,7 +587,7 @@ fn field_row(
             .unwrap_or_default()
             .to_owned();
         rsx! {
-            div { class: "ie-seg", role: "radiogroup", "aria-label": "{row.name.as_str()}",
+            div { class: "ie-seg", role: "radiogroup", "aria-label": "{crate::views::z(&row.name).as_str()}",
                 for (v, label) in SECURITY_CHOICES {
                     button { role: "radio", class: if current.eq_ignore_ascii_case(v) { "on" } else { "" }, "aria-checked": if current.eq_ignore_ascii_case(v) { "true" } else { "false" }, onclick: set(controller, epoch, WsField::FieldValue(i), v), "{label}" }
                 }
@@ -578,7 +598,7 @@ fn field_row(
         let mono: &'static str = if row.role == Role::Expiry { "mono" } else { "" };
         rsx! {
             div { class: "ie-box",
-                Input { controller: controller.clone(), epoch, field: WsField::FieldValue(i), label: row.name.to_string(), kind: if multi { Kind::Multi } else { Kind::Line }, value: Some(row.value.as_deref().map(String::as_str).unwrap_or_default().to_owned()), disabled: false, bare: true, class: mono, placeholder: placeholder(&row), autofocus: focus }
+                Input { controller: controller.clone(), epoch, field: WsField::FieldValue(i), label: crate::views::z(&row.name).to_string(), kind: if multi { Kind::Multi } else { Kind::Line }, value: Some(row.value.as_deref().map(String::as_str).unwrap_or_default().to_owned()), disabled: false, bare: true, class: mono, placeholder: placeholder(&row), autofocus: focus }
                 if let Some((t, class)) = check.clone() { span { class, "{t}" } }
             }
         }
@@ -597,7 +617,7 @@ fn field_row(
             {label}
             {value}
             div { class: "pop-anchor",
-                button { class: "ie-ib ie-more", id: "field-more-{i}", "aria-label": "Options for {row.name.as_str()}", "aria-haspopup": "menu", "aria-expanded": if open { "true" } else { "false" },
+                button { class: "ie-ib ie-more", id: "field-more-{i}", "aria-label": "Options for {crate::views::z(&row.name).as_str()}", "aria-haspopup": "menu", "aria-expanded": if open { "true" } else { "false" },
                     onclick: move |_| pop.set(if open { None } else { Some(Pop::Field(i)) }),
                     Svg { icon: Icon::More }
                 }

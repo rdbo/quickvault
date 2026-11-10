@@ -114,12 +114,23 @@ pub(crate) fn params(profile: PasswordKdfProfile) -> Result<Params, CryptoError>
         .map_err(|_| CryptoError::Internal)
 }
 
+/// Full-profile test KDFs share one slot, including the OPAQUE compatibility
+/// engine. One is within every valid QV_TEST_KDF_JOBS bound and avoids parallel
+/// 256 MiB allocations in this binary; this mutex never exists in production.
+#[cfg(any(test, feature = "test-kdf-limit"))]
+pub(crate) fn kdf_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 /// Runs the password KDF. `salt` is the slot's random 32-byte KDF salt.
 pub(crate) fn derive_master_key(
     password: &MasterPassword,
     salt: &[u8; 32],
     profile: PasswordKdfProfile,
 ) -> Result<MasterKey, CryptoError> {
+    #[cfg(any(test, feature = "test-kdf-limit"))]
+    let _kdf = kdf_test_guard();
     let params = params(profile)?;
     let mut blocks = vec![Block::new(); params.block_count()];
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);

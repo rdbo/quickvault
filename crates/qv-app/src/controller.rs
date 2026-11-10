@@ -107,6 +107,18 @@ impl AppError {
             Self::Core(CoreError::Store(qv_core::StoreError::WrongPassword)) => {
                 "The password or recovery phrase is incorrect."
             }
+            Self::Core(CoreError::Store(qv_core::StoreError::PublicationIncomplete)) => {
+                "The vault file was created, but completion failed. Open the created file locally; do not repeat enrollment at the same path."
+            }
+            Self::Core(CoreError::Store(qv_core::StoreError::CommittedAnchorPending)) => {
+                "Your change is saved. Its rollback record could not be updated. Restore access to device storage and reopen the vault; do not repeat the change."
+            }
+            Self::Core(CoreError::Store(qv_core::StoreError::StorageCapacity)) => {
+                "Storage is full or a storage quota or file-size limit was reached. Resolve it and reopen the vault before retrying."
+            }
+            Self::Core(CoreError::Store(qv_core::StoreError::DamagedAnchor)) => {
+                "The local rollback record is damaged. Keep both files. Use explicit recovery to authenticate and inspect the vault read-only before accepting a new baseline."
+            }
             Self::Core(CoreError::Store(qv_core::StoreError::Integrity)) => {
                 "The vault failed its integrity check. Keep the original and recover from a verified backup."
             }
@@ -122,6 +134,9 @@ impl AppError {
                 "The mandatory recovery snapshot does not fit the snapshot budget. Nothing was changed."
             }
             Self::Core(CoreError::Cancelled) => "The operation was cancelled.",
+            Self::Core(CoreError::ClipboardReplaced) => {
+                "The clipboard changed before delivery could be confirmed. Copy again if needed."
+            }
             Self::Core(CoreError::Lan(e)) => lan_message(e),
             Self::Core(_) => {
                 "The vault operation could not be completed. Check protection status and the selected vault."
@@ -197,24 +212,21 @@ fn lan_message(e: qv_core::LanError) -> &'static str {
         L::Timeout => "The other device stopped responding. Try again with a new code.",
         L::Cancelled => "The operation was cancelled.",
         L::PeerCancelled => "The other device cancelled.",
-        L::CodeObserved => {
-            "Another device used this code, so it may have been seen. Open a new code."
-        }
         L::TooManyAttempts => "Unexpected connection attempts closed the code. Open a new one.",
         L::WindowExpired => "The code expired. Open a new code on the other device.",
         L::VaultMismatch => "The other device has a different vault or key generation.",
         L::Unsupported => "The other device uses an unsupported version of QuickVault.",
-        L::Limit => {
-            "The other device's vault is larger than the allowed limits. Nothing was accepted."
+        L::Limit => "The vault data exceeds an allowed size limit.",
+        L::Integrity => {
+            "Authentication or received-data verification failed. Start a new code and check the vault credentials."
         }
-        L::Integrity => "Data from the other device failed verification. Nothing was accepted.",
         L::Busy | L::StateChanged => {
             "The other device's vault changed or is busy. Try again with a new code."
         }
         L::Keyslot => {
             "Resolve this vault's password conflict on the other device first, then try again."
         }
-        L::Protocol => "The other device sent something unexpected. Nothing was accepted.",
+        L::Protocol => "The other device sent something unexpected.",
         L::Io => {
             "A network error stopped the connection. Check that both devices are on the same network."
         }
@@ -435,6 +447,7 @@ pub(crate) struct State {
     /// The password just used to unlock, kept only until the quick-unlock
     /// offer runs as the next operation (0009 §1.8, plan 0045).
     quick_offer: Option<MasterPassword>,
+    pub(crate) pages: crate::page_read::Reads,
 }
 impl State {
     fn clear_inputs(&mut self) {
@@ -445,6 +458,7 @@ impl State {
         }
     }
     pub(crate) fn invalidate(&mut self) {
+        self.pages.clear();
         crate::preview::close();
         if let Some(scan) = self.scan.take() {
             scan.cancel.cancel();
@@ -506,6 +520,9 @@ pub(crate) struct Inner {
     pub(crate) services: Arc<dyn PlatformServices>,
     state: Mutex<State>,
     pub(crate) working: AtomicBool,
+    // Component IDs are only requested by the optional native UI reader.
+    #[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+    pub(crate) page_owner: AtomicU64,
     /// Worker permits released; part of the view revision because reads that
     /// were refused while busy become available (lock-free, so a guard may be
     /// dropped while the state lock is held).
@@ -604,8 +621,10 @@ impl Controller {
                 lan: None,
                 scan: None,
                 quick_offer: None,
+                pages: crate::page_read::Reads::default(),
             }),
             working: AtomicBool::new(false),
+            page_owner: AtomicU64::new(0),
             released: AtomicU64::new(0),
             monitoring: AtomicBool::new(false),
             watch: Mutex::new(None),
@@ -747,6 +766,9 @@ impl Controller {
         .map_err(|_| AppError::Unavailable)?;
         private_dir(&controller.0.base.join("exports"))?;
         controller.0.fixture.store(true, Ordering::SeqCst);
+        if crate::validation_media::enabled() {
+            crate::validation_media::install(&controller)?;
+        }
         #[cfg(target_os = "linux")]
         crate::documents::force_no_picker();
         Ok(controller)

@@ -33,6 +33,31 @@ fn until<T>(env: &Env, what: &str, f: impl Fn(&LanView) -> Option<T>) -> T {
     }
 }
 
+fn answer(env: &Env, yes: bool) {
+    let v = env.c.lan_view(env.epoch()).unwrap();
+    env.c.lan_answer(env.epoch(), v.question_id, yes);
+}
+fn give(env: &Env, password: &str, offering: bool, retry: bool) {
+    let id = until(env, "the credential prompt", |v| match v.question {
+        Some(Question::Password {
+            retry: r,
+            offering: a,
+        }) if a == offering && r == retry => Some(v.question_id),
+        _ => None,
+    });
+    let mut typed = password.to_owned();
+    env.c.lan_secret(env.epoch(), id, &mut typed);
+    assert!(typed.is_empty(), "framework input is wiped");
+    env.c.lan_answer(env.epoch(), id, true);
+}
+fn choose_password(env: &Env) {
+    until(env, "the credential choice", |v| {
+        matches!(v.question, Some(Question::ChooseCredential)).then_some(())
+    });
+    answer(env, true);
+    give(env, PASSWORD, false, false);
+}
+
 fn titles(env: &Env) -> Vec<String> {
     env.read(|s| views::browse(s, None))
         .entries
@@ -56,7 +81,7 @@ fn offer(a: &Env) -> (String, String) {
 }
 
 /// B joins A as a new device through the locked screen's Join mode; returns
-/// B unlocked. The joiner's first password is wrong when `wrong` is set; a
+/// B unlocked. A corrects its local password typo when `wrong` is set; a
 /// scanned code with endpoints starts the join by itself.
 fn join_new(a: &Env, wrong: bool, scanned: bool) -> Env {
     a.c.navigate(a.epoch(), Screen::Devices);
@@ -91,7 +116,8 @@ fn join_new(a: &Env, wrong: bool, scanned: bool) -> Env {
         b.fill(InputField::LanEndpoint, &endpoint);
         b.c.submit(b.epoch(), Action::JoinDevice, true).unwrap();
     }
-    // A compares the code; B confirms the vault and gives its password.
+    // B supplies its credential before connecting; A compares and reauthenticates.
+    choose_password(&b);
     let sas = until(a, "the approval question", |v| match &v.question {
         Some(Question::Approve { sas, vault, .. }) => {
             assert_eq!(vault, "My vault");
@@ -99,10 +125,21 @@ fn join_new(a: &Env, wrong: bool, scanned: bool) -> Env {
         }
         _ => None,
     });
+    let admitted = a.c.lan_view(a.epoch()).unwrap();
+    assert!(
+        admitted.code.is_none() && admitted.qr.is_none(),
+        "admission consumes the displayed code"
+    );
     // The new device shows the same code prominently while it waits.
     let waiting = until(&b, "the new device's code", |v| v.sas.clone());
     assert_eq!(waiting, sas, "the new device shows the comparison code");
-    a.c.lan_answer(a.epoch(), true);
+    answer(a, true);
+    if wrong {
+        give(a, "not the password", true, false);
+        give(a, PASSWORD, true, true);
+    } else {
+        give(a, PASSWORD, true, false);
+    }
     let shown = until(&b, "the vault question", |v| match &v.question {
         Some(Question::JoinVault { vault, sas }) => {
             assert_eq!(vault, "My vault");
@@ -111,29 +148,17 @@ fn join_new(a: &Env, wrong: bool, scanned: bool) -> Env {
         _ => None,
     });
     assert_eq!(shown, sas, "both screens show the same comparison code");
-    b.c.lan_answer(b.epoch(), true);
-    let give = |password: &str, retry: bool| {
-        until(&b, "the password question", |v| match v.question {
-            Some(Question::Password { retry: r }) if r == retry => Some(()),
-            _ => None,
-        });
-        let mut typed = password.to_owned();
-        b.c.lan_secret(b.epoch(), &mut typed);
-        assert!(typed.is_empty(), "the framework string is cleared");
-        b.c.lan_answer(b.epoch(), true);
-    };
-    if wrong {
-        give("not the password", false);
-        give(PASSWORD, true);
-    } else {
-        give(PASSWORD, false);
-    }
+    answer(&b, true);
     b.wait();
     assert_eq!(b.c.snapshot().phase, Phase::Unlocked);
     a.wait();
     let done = until(a, "the join outcome", |v| v.done.clone());
     assert!(done.error.is_none(), "{done:?}");
-    assert_eq!(done.lines[0], "A new device joined this vault.");
+    assert!(done.lines[1].contains("grant was sealed"));
+    assert_eq!(
+        done.lines[0],
+        "The receiving device confirmed complete receipt."
+    );
     assert!(
         a.c.lan_view(a.epoch()).unwrap().qr.is_none(),
         "finished QR cleared"
@@ -288,10 +313,11 @@ fn lan_app_join_refused_by_the_approver_creates_nothing() {
     b.fill(InputField::LanCode, &code);
     b.fill(InputField::LanEndpoint, &endpoint);
     b.c.submit(b.epoch(), Action::JoinDevice, true).unwrap();
+    choose_password(&b);
     until(&a, "the approval question", |v| {
         matches!(v.question, Some(Question::Approve { .. })).then_some(())
     });
-    a.c.lan_answer(a.epoch(), false);
+    answer(&a, false);
     b.wait();
     assert_eq!(b.c.snapshot().phase, Phase::Locked);
     assert!(b.c.snapshot().error.is_some());
@@ -379,7 +405,7 @@ fn lan_receipt_lists_changes_and_closes_only_when_clean() {
     env.act(WsAction::TrashMany(vec![gone]));
     env.add_entry("New", "4");
     let after = env.read(|s| Ok(crate::lan::summary(s).unwrap()));
-    let c = crate::lan::changes(&before, &after);
+    let c = env.read(|s| Ok(crate::lan::changes(s, &before, &after)));
     assert_eq!(c.counts, [1, 1, 1]);
     assert_eq!(c.added[0].title.as_str(), "New");
     assert_eq!(c.updated[0].title.as_str(), "Edited");
@@ -393,7 +419,11 @@ fn lan_receipt_lists_changes_and_closes_only_when_clean() {
             .all(|x| x.entry != Some(keep))
     );
     // Nothing changed: an empty list.
-    assert_eq!(crate::lan::changes(&after, &after).total(), 0);
+    assert_eq!(
+        env.read(|s| Ok(crate::lan::changes(s, &after, &after)))
+            .total(),
+        0
+    );
     // Clean receipts close; conflicts, a missing confirmation or an error stay.
     let report = |conflicts, peer_confirmed| qv_core::SyncReport {
         local: qv_core::LocalAcceptance::Committed,

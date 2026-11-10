@@ -58,6 +58,7 @@ reject invalid control transitions rather than guessing replacements.
 | icon | text? | built-in icon name, or the app colour token `hue:<0–11>` (see 5.5) |
 | order | text | fractional index for stable manual ordering under concurrent edits |
 | deleted_at | timestamp? | soft delete → trash (0007) |
+| delete_operation | ID? | optional shared deletion operation; CBOR key 6, bstr 16 UUIDv4 |
 
 4.1. Project group representatives (0005) into a display tree without writing
 synthetic edits. Set the root parent to null; re-parent every non-root with a
@@ -84,6 +85,12 @@ UI limits collapse presentation rather than dropping groups.
 | expires_at | timestamp? | |
 | created_at / modified_at | timestamp | |
 | deleted_at | timestamp? | soft delete → trash |
+| delete_operation | ID? | optional shared deletion operation; CBOR key 10, bstr 16 UUIDv4 |
+
+`delete_operation` is present only when `deleted_at` is present. New deletion
+edits use one random operation ID for all records deleted by that operation.
+Restoration clears both fields. Older payloads without the operation ID remain
+readable; timestamps never identify a recursive deletion (0007 §2.1).
 
 **Field**
 
@@ -133,9 +140,15 @@ metadata: sanitize explicit save paths, do not execute/open attachments or fetch
 external resources automatically.
 
 6.4. **In-app preview** (owner request, 2026-11-07). On the user's explicit
-action, a client may show an attachment inside the app. It decrypts the
-complete content into protected memory and accepts it only after the content
-hash verifies. The type is identified from the content's bytes, never from
+action, a client may show an attachment inside the app. It verifies the complete
+content hash by streaming with bounded protected buffers before accepting a
+preview, then reads individually authenticated ranges on demand, at most64 KiB
+per application range buffer. Range reads alone do not establish the complete
+content hash. Keep no detached vault key: every read remains bound to the exact
+unlocked session and attachment version, and closing/navigating/locking revokes
+the source. Retain at most a1 MiB text prefix, with truncation clearly shown;
+never silently collect a whole large attachment. The type is identified from
+the content's bytes, never from
 the stored MIME or name, and only an allow-list is rendered:
 - images: PNG, JPEG, GIF, WebP;
 - audio: MP3, Ogg, WAV, FLAC, MP4 audio (M4A/AAC);
@@ -144,7 +157,19 @@ the stored MIME or name, and only an allow-list is rendered:
 
 SVG, HTML, PDF, scripts and every other type are not rendered. The plaintext
 never touches the disk unless the user saves a copy: no temporary or cache
-file, no external app, no network fetch. Webview decoders still parse
+file, no external app, no remote fetch. Browser-compatible playback may use the
+app's existing numeric loopback listener, with an unguessable per-preview route,
+strict Host/origin/range checks, bounded headers/connections and exact CSP origin.
+Do not reuse the edit transport's secret in media URLs. Responses are no-store;
+the adapter writes protected chunks directly rather than making plaintext Vec
+response copies. Malformed/multiple/unsatisfiable ranges fail416 without a full
+content fallback. Media is on demand, with no autoplay and preload none.
+
+Before automatic image decoding, inspect bounded PNG/JPEG/GIF/WebP dimension
+headers. If the RGBA lower-bound size exceeds64 MiB or the dimensions cannot be
+established within64 KiB, show size/dimensions where known and require explicit
+"Load image" for that preview. Ordinary images need no extra confirmation.
+File size alone is not a decoded-memory bound. Webview decoders still parse
 untrusted bytes, a residual risk; framework and decoder copies follow 0008's
 best-effort cleanup limits.
 
@@ -152,6 +177,26 @@ best-effort cleanup limits.
 
 Not in v1. Nested groups cover organization. The CBOR model leaves room to add
 `tags: list<text>` to entries later without migration.
+
+### 8. Public password-slot projection and view metadata (0047)
+
+8.1. The public password-slot descriptor is an allowlisted projection of the
+encrypted keyslot payload: only integer keys 0–6 (slot ID, KDF profile,
+salt, wrap profile, KEK commitment, nonce, wrapped VK). Canonically encode
+those defined fields; with current profiles its encoded size is 171 bytes.
+Unknown optional record keys remain encrypted and preserved on rewrites under
+§2.2, but MUST NOT be copied into a newly written clear local slot, archive
+password descriptor or LAN grant. Compare projections, not opaque whole-record
+encodings, when binding a verified record to a public descriptor. Existing
+stored header bytes remain authenticated as stored; do not silently project
+or rewrite them before verifying their MAC.
+
+8.2. View residency is separate from record validity (0004 §4.5). Compact head
+summaries MUST preserve existing kind, representative, conflict, trash,
+tombstone and tree projection semantics. Decode/validate each required head
+without retaining all full head payloads simultaneously. Cache only the
+non-protected metadata needed for views; protected fields and notes are not
+searchable. Paging MUST NOT silently omit records, fields or conflicts.
 
 ## Security Considerations
 
@@ -167,6 +212,12 @@ Not in v1. Nested groups cover organization. The CBOR model leaves room to add
    proposed in 0010 §5.
 
 ## Changelog
+
+- 2026-11-09: Specify bounded verified preview streams and explicit expensive
+  image-decode consent; retain attachment eligibility limits (plan0050).
+- 2026-11-09: Define optional encrypted deletion-operation UUIDs at group key6
+  and entry key10, independent of timestamps (QV-004, plan0050).
+- 2026-11-09: Define allowlisted public slot projection and equivalent compact view metadata.
 
 - 2026-10-14: Initial draft.
 - 2026-10-14: Protected-field defaults (§5.3). Status → Accepted.

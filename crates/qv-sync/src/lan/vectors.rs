@@ -3,8 +3,8 @@
 //! Development interoperability vectors for LAN sessions (0013 Testing
 //! Requirements; plans 0037 step 8, 0038 step 7, 0042 step 5).
 //!
-//! One deterministic new-device pairing and one deterministic sync-mode
-//! handshake run through the same step functions the drivers use, with fixed
+//! Historical profile1 new-device and sync-mode fixtures remain for prior
+//! primitive/encoding regressions only; runtime uses strict profile2. Fixed
 //! inputs. X-Wing uses draft-11 vector 1's seeds
 //! through the `test-vectors` feature. The test renders every message,
 //! derivation and transcript and compares them with

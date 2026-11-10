@@ -140,6 +140,30 @@ parties can verify them. A failed gate blocks the affected feature, not
 permission to silently weaken its protocol. Hosted admission, witness services
 and a second server DB require their own evidence before enabling them.
 
+### 4. Audit follow-up validation (0047)
+
+Before implementing 0013 §15's cryptographic wrappers, source-review the exact
+engine suite, serializer sizes, fixed KDF parameters, randomness adapter,
+secret lifetimes and complete composition contract. Independently reviewing
+that contract locally does not satisfy the external §3 composition release gate.
+
+Test malicious code holders that skip all frontend prompts, wrong password/
+phrase/VK, cross-profile/method/intent/session/role substitution, reflected or
+modified engine messages, old-key fallback, premature final-key traffic and
+replayed/reordered counters. Cover listener/advertisement shutdown, queued
+connections, absolute deadline across prompts/KDF/transfer and all grant-seal/
+password-change orderings. Inject RNG failure and publication/anchor faults;
+verify outputs distinguish possible disclosure, receipt and local durability.
+Assert that unknown encrypted keyslot extensions never enter new clear slots.
+
+Use a stock-budget fixture exceeding 64 MiB searchable text through ordinary
+authoring APIs, with complete paged results and bounded cache/frontend residency.
+Cover every unlock/acceptance/publication route, stale cursors, Unicode expansion,
+uncacheable rows and lock/cancel. Retain the existing 1 GiB ciphertext limit;
+arithmetic-boundary fixtures do not count as real 1 GiB device measurements.
+Record unavailable physical-device or external evidence honestly. Passing tests,
+self-generated vectors and spec conformance do not prove security.
+
 ## Security Considerations
 
 Specification review cannot establish implementation security. The requirements
@@ -154,6 +178,8 @@ None for the acceptance process. Concrete benchmark/audit results are required
 implementation evidence, not claims that this repository already has them.
 
 ## Changelog
+
+- 2026-11-09: Require lan/2 engine/composition readiness and hostile-peer/large-vault evidence.
 
 - 2026-11-07: §3: optional Android quick unlock and autofill are on wherever
   the device supports them instead of disabled until validated; validation

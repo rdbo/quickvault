@@ -120,6 +120,18 @@ impl<'a> Json<'a> {
         self
     }
 
+    /// Stream a quoted value without assembling the complete string.
+    pub(crate) fn string_parts(
+        &mut self,
+        write: impl FnOnce(&mut Out) -> Result<(), crate::exit::CliError>,
+    ) -> Result<(), crate::exit::CliError> {
+        self.sep();
+        self.out.raw("\"");
+        write(self.out)?;
+        self.out.raw("\"");
+        Ok(())
+    }
+
     pub(crate) fn opt_str(&mut self, s: Option<&str>) -> &mut Self {
         match s {
             Some(s) => self.str(s),
@@ -165,6 +177,34 @@ impl<'a> Json<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fragmented_strings_preserve_escaping_and_container_state() {
+        let mut normal = Out::stdout();
+        let mut streamed = Out::stdout();
+        {
+            let mut j = Json::new(&mut normal);
+            j.begin_obj()
+                .key("path")
+                .str("a\\/b/\"\nİ\u{202e}")
+                .key("next")
+                .bool(true)
+                .end_obj();
+        }
+        {
+            let mut j = Json::new(&mut streamed);
+            j.begin_obj().key("path");
+            j.string_parts(|out| {
+                for piece in ["a\\/b", "/", "\"\nİ\u{202e}"] {
+                    out.json_piece(piece.as_bytes());
+                }
+                Ok(())
+            })
+            .unwrap();
+            j.key("next").bool(true).end_obj();
+        }
+        assert_eq!(streamed.contents(), normal.contents());
+    }
 
     #[test]
     fn json_writer_nests_and_separates() {

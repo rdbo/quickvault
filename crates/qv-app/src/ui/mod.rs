@@ -96,6 +96,23 @@ fn fixture_report(controller: &Controller) -> impl FnMut(FormEvent) + 'static {
     let c = controller.clone();
     move |event: FormEvent| {
         let value = event.value();
+        if crate::validation_media::enabled()
+            && let Some(stage) = value
+                .strip_prefix("MEDIA-STAGE:")
+                .and_then(|n| n.parse::<u8>().ok())
+        {
+            println!("synthetic media stage {stage}");
+            return;
+        }
+        if crate::validation_media::enabled()
+            && let Some(facts) = value.strip_prefix("MEDIA-FACTS:")
+            && facts.len() == 11
+            && facts.split(',').count() == 6
+            && facts.bytes().all(|b| b.is_ascii_digit() || b == b',')
+        {
+            println!("synthetic media facts {facts}");
+            return;
+        }
         #[cfg(target_os = "linux")]
         if value == "LAN-PEER" {
             crate::lan::fixture::start(&c);
@@ -106,6 +123,24 @@ fn fixture_report(controller: &Controller) -> impl FnMut(FormEvent) + 'static {
             .and_then(|n| n.parse::<u8>().ok())
         {
             eprintln!("synthetic flow stage {stage} failed");
+            if let Some(v) = c.lan_view(c.snapshot().epoch) {
+                if let Some(d) = v.done {
+                    let confirmed = d
+                        .lines
+                        .first()
+                        .is_some_and(|s| s == "A new device joined this vault.");
+                    eprintln!(
+                        "synthetic LAN receipt: confirmed={confirmed} error={:?}",
+                        d.error
+                    );
+                } else {
+                    eprintln!("synthetic LAN is still active");
+                }
+            }
+        }
+        if crate::validation_media::enabled() {
+            crate::validation_media::finish(&c, value == "PASS");
+            return;
         }
         c.finish_fixture(value == "PASS")
     }
@@ -122,6 +157,17 @@ pub(crate) fn is_fixture(controller: &Controller) -> bool {
     #[cfg(not(feature = "validation"))]
     {
         let _ = controller;
+        false
+    }
+}
+/// Validation fixtures expose only a non-secret completion bit to the driver.
+pub(crate) fn fixture_peer_opened() -> bool {
+    #[cfg(all(feature = "validation", target_os = "linux"))]
+    {
+        crate::lan::fixture::complete()
+    }
+    #[cfg(not(all(feature = "validation", target_os = "linux")))]
+    {
         false
     }
 }
@@ -230,6 +276,8 @@ fn Root(controller: Controller, revision: u64) -> Element {
             shell::ResizeHandles {}
             input { id: "qv-activity", class: "qv-activity", r#type: "text", tabindex: "-1", "aria-hidden": "true", maxlength: 0,
                 oninput: { let c = controller.clone(); move |e: FormEvent| { e.stop_propagation(); c.activity(epoch); } } }
+            input { id: "qv-preview-stop", class: "qv-activity", r#type: "text", tabindex: "-1", "aria-hidden": "true", maxlength: 0,
+                oninput: { let c = controller.clone(); move |e: FormEvent| { e.stop_propagation(); c.act(epoch, crate::workspace::WsAction::ClosePreview); } } }
         }
     }
 }
@@ -245,6 +293,7 @@ pub(crate) struct ShellView {
     pub(crate) revision: u64,
     pub(crate) live: crate::workspace::Live,
     pub(crate) busy: bool,
+    pub(crate) busy_shown: bool,
     pub(crate) scanning: bool,
     pub(crate) reduced_lifecycle: bool,
     /// Seconds left in a LAN window: part of the props so its countdown
@@ -258,7 +307,9 @@ impl From<&View> for ShellView {
             revision: v.revision,
             live: v.live,
             lan_seconds: v.lan_seconds,
-            busy: v.busy_shown,
+            // Disable actions immediately; only progress indicators use the delayed flag.
+            busy: v.busy,
+            busy_shown: v.busy_shown,
             scanning: v.scanning,
             reduced_lifecycle: v.reduced_lifecycle,
         }
@@ -1004,11 +1055,7 @@ mod tests {
         let c = p.controller;
         let epoch = c.snapshot().epoch;
         let screen = c.screen(epoch).unwrap();
-        let all = c
-            .read(epoch, crate::views::all_items)
-            .and_then(Result::ok)
-            .unwrap();
-        rsx! { items::ListPane { controller: c.clone(), epoch, revision: 0, list: crate::workspace::Screen::Browse(None), screen, all, busy: false, conflicts: 0 } }
+        rsx! { items::ListPane { controller: c.clone(), epoch, revision: c.snapshot().revision, list: crate::workspace::Screen::Browse(None), screen, busy: false, conflicts: 0 } }
     }
 
     #[test]
@@ -1029,6 +1076,16 @@ mod tests {
             },
         );
         dom.rebuild_to_vec();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while env.c.state().pages.main_items() != 2 {
+            assert!(
+                std::time::Instant::now() < until,
+                "paged list did not load its duplicate rows"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        dom.mark_dirty(ScopeId::APP);
+        dom.render_immediate_to_vec();
         // Selecting one re-renders the list; duplicate row keys panicked
         // in the keyed diff.
         env.c
@@ -1098,5 +1155,54 @@ mod tests {
                 .any(|m| matches!(m, Mutation::ReplaceWith { .. } | Mutation::Remove { .. })),
             "{changed:?}"
         );
+    }
+}
+
+/// One cancellable page owner. Hooks keep only its non-secret identity; page
+/// text lives in the controller's three bounded slots, never in `use_last`.
+pub(crate) fn use_page(
+    controller: &Controller,
+    epoch: FormEpoch,
+    lane: crate::page_read::Lane,
+    priority: u8,
+    spec: crate::page_read::Spec,
+) -> (
+    Option<crate::page_read::Owner>,
+    Option<crate::page_read::Read>,
+) {
+    let owner = use_hook(|| controller.page_owner(lane, priority));
+    let cleanup = controller.clone();
+    use_drop(move || {
+        if let Some(owner) = owner {
+            cleanup.release_page(owner);
+        }
+    });
+    let read = owner.and_then(|owner| controller.page(epoch, owner, spec));
+    (owner, read)
+}
+
+#[component]
+pub(crate) fn PageNav(
+    controller: Controller,
+    epoch: FormEpoch,
+    owner: crate::page_read::Owner,
+    read: crate::page_read::Read,
+) -> Element {
+    let previous = read.page.as_ref().is_some_and(|p| p.previous.is_some());
+    let next = read.page.as_ref().is_some_and(|p| p.next.is_some());
+    let loading = read.loading;
+    let serial = read.serial;
+    let back = controller.clone();
+    rsx! {
+        if let Some(error) = read.error { p { class: "banner warn", "{error.message()}" } }
+        if previous || next || loading {
+            div { class: "actions start",
+                button { r#type: "button", class: "btn subtle", disabled: loading || !previous,
+                    onclick: move |_| back.page_turn(epoch, owner, serial, false), "Previous" }
+                if loading { span { class: "muted", "Loading…" } }
+                button { r#type: "button", class: "btn subtle", disabled: loading || !next,
+                    onclick: move |_| controller.page_turn(epoch, owner, serial, true), "Next" }
+            }
+        }
     }
 }

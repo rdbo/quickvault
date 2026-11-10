@@ -25,6 +25,8 @@ use crate::registry::LanProfile;
 
 /// The QR payload's label.
 pub const QR_LABEL: &str = "qv/lan-pair-qr/v1";
+/// Credential-authenticated profile2 QR label; no legacy QR fallback.
+pub const QR_LABEL_V2: &str = "qv/lan-pair-qr/v2";
 /// Largest accepted QR payload.
 pub const MAX_QR_BYTES: usize = 1024;
 /// Most endpoints in one QR payload.
@@ -90,7 +92,10 @@ pub fn encode_qr(
         return Err(ProtocolError::Malformed);
     }
     let out = qv_encoding::encode_array(|a| {
-        a.text(QR_LABEL);
+        a.text(match profile {
+            LanProfile::V1 => QR_LABEL,
+            LanProfile::V2 => QR_LABEL_V2,
+        });
         a.uint(profile.id());
         a.bytes(secret);
         write_endpoints(a, endpoints)?;
@@ -107,12 +112,33 @@ pub fn encode_qr(
 /// Decodes a QR payload: bounded, canonical, exact shape. Any failure is
 /// [`ProtocolError::Malformed`].
 pub fn decode_qr(bytes: &[u8]) -> Result<QrPayload<'_>, ProtocolError> {
+    decode_qr_label(bytes, QR_LABEL)
+}
+
+/// Strict profile2 QR decoder, with exactly the five existing payload fields.
+/// Old labels/profiles are refused before the caller attempts any connection.
+pub fn decode_qr_v2(bytes: &[u8]) -> Result<QrPayload<'_>, ProtocolError> {
+    let qr = decode_qr_label(bytes, QR_LABEL_V2)?;
+    if qr.profile != LanProfile::V2.id() {
+        return Err(ProtocolError::Unsupported);
+    }
+    Ok(qr)
+}
+fn decode_qr_label<'a>(bytes: &'a [u8], label: &str) -> Result<QrPayload<'a>, ProtocolError> {
     if bytes.len() > MAX_QR_BYTES {
         return Err(ProtocolError::Malformed);
     }
     let mut d = Decoder::new(bytes).map_err(bad)?;
-    if d.array().map_err(bad)? != 5 || d.text().map_err(bad)? != QR_LABEL {
+    if d.array().map_err(bad)? != 5 {
         return Err(ProtocolError::Malformed);
+    }
+    let found = d.text().map_err(bad)?;
+    if found != label {
+        return Err(if label == QR_LABEL_V2 && found == QR_LABEL {
+            ProtocolError::Unsupported
+        } else {
+            ProtocolError::Malformed
+        });
     }
     let profile = d.uint().map_err(bad)?;
     let secret: &[u8; 16] = d.bytes().map_err(bad)?.try_into().map_err(bad)?;

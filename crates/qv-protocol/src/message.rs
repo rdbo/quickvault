@@ -53,6 +53,26 @@ macro_rules! labels {
 }
 
 labels! {
+    /// §15.2 profile2 hello: body7 + MAC.
+    PairHelloV2 = "qv/lan-pair-hello/v2", 8;
+    /// §15.2 profile2 accept: body6 + MAC.
+    PairAcceptV2 = "qv/lan-pair-accept/v2", 7;
+    /// §15.3 reveal nonce and exact KE1.
+    PakeStart = "qv/lan-pake-start/v2", 3;
+    /// §15.3 exact KE2.
+    PakeResponse = "qv/lan-pake-response/v2", 2;
+    /// §15.3 exact KE3, last epoch0 record.
+    PakeFinish = "qv/lan-pake-finish/v2", 2;
+    /// §15.3 FinishedB, first B epoch1 record.
+    Finished = "qv/lan-finished/v2", 2;
+    /// §15.3 descriptor/head-bound credential-authenticated grant.
+    PairGrantV2 = "qv/lan-pair-grant/v2", 9;
+    /// §15.4 B's independent-key proof.
+    KeyProve = "qv/lan-key-prove/v2", 2;
+    /// §15.4 A's authenticated identity and proof.
+    KeyProved = "qv/lan-key-proved/v2", 4;
+    /// §15.5 error record, same code namespace.
+    ErrorV2 = "qv/lan-error/v2", 2;
     /// §4.3 PairHello: body (6) + MAC.
     PairHello = "qv/lan-pair-hello/v1", 7;
     /// §4.4 PairAccept: body (3) + MAC.
@@ -299,6 +319,16 @@ mod tests {
         assert_eq!(
             arities,
             [
+                ("qv/lan-pair-hello/v2", 8),
+                ("qv/lan-pair-accept/v2", 7),
+                ("qv/lan-pake-start/v2", 3),
+                ("qv/lan-pake-response/v2", 2),
+                ("qv/lan-pake-finish/v2", 2),
+                ("qv/lan-finished/v2", 2),
+                ("qv/lan-pair-grant/v2", 9),
+                ("qv/lan-key-prove/v2", 2),
+                ("qv/lan-key-proved/v2", 4),
+                ("qv/lan-error/v2", 2),
                 ("qv/lan-pair-hello/v1", 7),
                 ("qv/lan-pair-accept/v1", 4),
                 ("qv/lan-pair-reveal/v1", 2),
@@ -317,7 +347,7 @@ mod tests {
             assert_eq!(Label::parse(l.as_str()), Some(*l));
         }
         for bad in [
-            "qv/lan-pair-hello/v2",
+            "qv/lan-pair-hello/v3",
             "QV/LAN-PAIR-HELLO/V1",
             // Retired by 0014 (0013 §5, §8.5).
             "qv/lan-hello/v1",

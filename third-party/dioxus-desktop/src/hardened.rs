@@ -17,43 +17,69 @@ use std::sync::{
 pub struct HardenedWebview {
     /// Absolute local route → (MIME type, compiled bytes).
     pub assets: BTreeMap<&'static str, (&'static str, &'static [u8])>,
-    /// In-memory content for `/preview/…` routes (QuickVault plan 0044):
-    /// called with the path and the `Range` header; `None` is 404. Never a
-    /// file, never cached (`no-store`).
+    /// Revocable protected streaming content for capability media routes.
     pub preview: Option<Preview>,
 }
-/// The preview provider: path and optional `Range` header in, content out.
-pub type Preview = std::sync::Arc<dyn Fn(&str, Option<&str>) -> Option<Served> + Send + Sync>;
-/// The route prefix the provider answers.
+/// The preview provider. Unknown or revoked capabilities return None.
+pub type Preview = Arc<dyn Fn(&str) -> Option<Served> + Send + Sync>;
+/// The exact media route prefix.
 pub const PREVIEW_PREFIX: &str = "/preview/";
-/// One preview response: the exact MIME type, the full length, and the
-/// bytes from `start` (all of them unless a range was served).
-pub struct Served {
-    /// Exact content type (sniffed by the provider, never guessed here).
-    pub mime: &'static str,
-    /// Full content length.
-    pub total: u64,
-    /// Offset of `body` in the content.
-    pub start: u64,
-    /// The served bytes.
-    pub body: Vec<u8>,
+/// An application-owned stream; the adapter never collects its plaintext.
+pub trait PreviewBody: Send + Sync {
+    /// Whether this source is still authorized before sending response headers.
+    fn available(&self) -> bool;
+    /// Writes exactly a validated range with bounded protected buffers.
+    /// Implementations check revocation between writes and do not hold session
+    /// locks during transport I/O. A failure closes the response immediately.
+    fn write_range(
+        &self,
+        offset: u64,
+        length: u64,
+        output: &mut dyn std::io::Write,
+    ) -> std::io::Result<()>;
 }
-impl Served {
-    /// Whether this is a partial (206) response.
-    pub fn partial(&self) -> bool {
-        self.start != 0 || (self.body.len() as u64) != self.total
+/// Fixed metadata and an opaque source; never a plaintext response vector.
+pub struct Served {
+    /// Content-sniffed allow-listed type.
+    pub mime: &'static str,
+    /// Authenticated complete content length.
+    pub total: u64,
+    /// Revocable source bound to the unlocked session.
+    pub body: Arc<dyn PreviewBody>,
+}
+static PREVIEW_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+pub(crate) fn preview_port(port: u16) {
+    PREVIEW_PORT.store(port, Ordering::SeqCst);
+}
+/// Resolves a capability route on this process's existing numeric loopback
+/// listener. No edit-transport credential is included in a media URL.
+pub fn preview_url(path: &str) -> Option<String> {
+    let token = path.strip_prefix(PREVIEW_PREFIX)?;
+    if token.len() != 32
+        || !token
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return None;
     }
+    let port = PREVIEW_PORT.load(Ordering::SeqCst);
+    (port != 0).then(|| format!("http://127.0.0.1:{port}{path}"))
 }
 /// Parses a single `bytes=a-b`, `bytes=a-` or `bytes=-n` range against
 /// `total` into inclusive offsets; anything else (several ranges, garbage,
-/// out of bounds) is `None`, which serves the whole content.
+/// out of bounds) is `None`, which MUST receive416, never a full fallback.
 pub fn byte_range(header: &str, total: u64) -> Option<(u64, u64)> {
+    if header.len() > 256 {
+        return None;
+    }
     let spec = header.trim().strip_prefix("bytes=")?;
     if spec.contains(',') || total == 0 {
         return None;
     }
     let (a, b) = spec.split_once('-')?;
-    let (a, b) = (a.trim(), b.trim());
+    if !a.bytes().all(|c| c.is_ascii_digit()) || !b.bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
     let (start, end) = if a.is_empty() {
         let n: u64 = b.parse().ok()?;
         if n == 0 {
@@ -62,7 +88,11 @@ pub fn byte_range(header: &str, total: u64) -> Option<(u64, u64)> {
         (total.saturating_sub(n), total - 1)
     } else {
         let start: u64 = a.parse().ok()?;
-        let end = if b.is_empty() { total - 1 } else { b.parse::<u64>().ok()?.min(total - 1) };
+        let end = if b.is_empty() {
+            total - 1
+        } else {
+            b.parse::<u64>().ok()?.min(total - 1)
+        };
         (start, end)
     };
     (start <= end && start < total).then_some((start, end))
@@ -88,7 +118,12 @@ pub fn navigation(uri: &str, loaded: &AtomicBool) -> bool {
 pub fn csp(edits: &str) -> String {
     // edits is constructed by the framework from its own listener, not IPC.
     let endpoint = edits.split('/').take(3).collect::<Vec<_>>().join("/");
-    format!("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; font-src 'self'; connect-src 'self' {endpoint}; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'")
+    let media = endpoint
+        .strip_prefix("ws://127.0.0.1:")
+        .filter(|port| port.parse::<u16>().is_ok_and(|n| n != 0))
+        .map(|port| format!(" http://127.0.0.1:{port}"))
+        .unwrap_or_default();
+    format!("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'{media}; media-src 'self'{media}; font-src 'self'; connect-src 'self' {endpoint}; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'")
 }
 
 // Reject duplicate object keys at every level instead of silently taking the last.
@@ -243,17 +278,25 @@ mod tests {
         assert_eq!(byte_range("bytes=90-", 100), Some((90, 99)));
         assert_eq!(byte_range("bytes=-10", 100), Some((90, 99)));
         assert_eq!(byte_range("bytes=50-500", 100), Some((50, 99)));
-        for bad in ["bytes=100-", "bytes=9-1", "bytes=0-1,4-5", "items=0-1", "bytes=-0", "bytes=a-b", "bytes=-"] {
+        for bad in [
+            "bytes=100-",
+            "bytes=9-1",
+            "bytes=0-1,4-5",
+            "items=0-1",
+            "bytes=-0",
+            "bytes=a-b",
+            "bytes=-",
+        ] {
             assert_eq!(byte_range(bad, 100), None, "{bad}");
         }
         assert_eq!(byte_range("bytes=0-1", 0), None);
-        let full = Served { mime: "image/png", total: 3, start: 0, body: vec![1, 2, 3] };
-        assert!(!full.partial());
-        let part = Served { mime: "image/png", total: 3, start: 1, body: vec![2] };
-        assert!(part.partial());
         let policy = csp("/edits");
         assert!(policy.contains("media-src 'self';") && policy.contains("img-src 'self';"));
-        assert!(policy.contains("script-src 'self';") && !policy.contains("data:") && !policy.contains("blob:"));
+        assert!(
+            policy.contains("script-src 'self';")
+                && !policy.contains("data:")
+                && !policy.contains("blob:")
+        );
     }
     #[test]
     fn hardened_events_are_an_allow_list() {
@@ -268,7 +311,14 @@ mod tests {
         };
         assert!(event(mouse("click")).is_some());
         assert!(event(mouse("contextmenu")).is_some());
-        for name in ["mouseenter", "mousemove", "pointerdown", "dragstart", "play", "wheel"] {
+        for name in [
+            "mouseenter",
+            "mousemove",
+            "pointerdown",
+            "dragstart",
+            "play",
+            "wheel",
+        ] {
             assert!(event(mouse(name)).is_none(), "{name}");
         }
     }

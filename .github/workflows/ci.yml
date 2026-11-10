@@ -97,6 +97,8 @@ jobs:
         run: |
           cargo install --locked cargo-deny --version 0.20.2
           cargo install --locked cargo-vet --version 0.10.3
+      - name: Exact dependency and prebuilt artifact baseline
+        run: python3 scripts/check-supply-chain.py
       - name: cargo deny
         run: cargo deny check
       - name: cargo vet

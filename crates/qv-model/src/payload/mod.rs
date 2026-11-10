@@ -75,6 +75,13 @@ impl Payload {
         if !ids_ok {
             return Err(ModelError::Malformed);
         }
+        if match self {
+            Self::Entry(e) => e.delete_operation.is_some() && e.deleted_at.is_none(),
+            Self::Group(g) => g.delete_operation.is_some() && g.deleted_at.is_none(),
+            _ => false,
+        } {
+            return Err(ModelError::Malformed);
+        }
         match self {
             Self::Entry(e) => entry::check(e),
             Self::AttachmentMeta(a) => attachment::check(a),

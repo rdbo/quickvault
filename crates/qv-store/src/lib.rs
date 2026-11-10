@@ -280,7 +280,12 @@ pub use header::Header;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use incoming::VerifiedIncoming;
 #[cfg(any(target_os = "linux", target_os = "android"))]
-pub use lan_staging::{LanStaging, PasswordProof, Planned, StagedKeyslot, VerifiedLanStaging};
+#[cfg(test)]
+pub use lan_staging::PasswordProof;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub use lan_staging::{
+    LanEnrollmentProof, LanPasswordGrant, LanStaging, Planned, StagedKeyslot, VerifiedLanStaging,
+};
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use lan_store::LanServeState;
 pub use limits::{
@@ -359,7 +364,7 @@ mod tests {
                 "{present} missing: {opts:?}"
             );
         }
-        assert_eq!(rusqlite::version(), "3.53.2");
+        assert_eq!(rusqlite::version(), "3.54.1");
     }
 }
 

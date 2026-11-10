@@ -6,6 +6,12 @@
 
 ## Summary
 
+**0047 amendment (2026-11-09):** new connections use the credential-authenticated
+lan/2 contract in §15. It supersedes the historical lan/1 grant/monitor/proof
+flow below. Password enrollment requires the password on both devices; recovery
+words prove independently known VK. Implementation readiness is still gated by
+plan0047's dependency review; Accepted text is not a release security claim.
+
 Account-free synchronization between two devices on the same network:
 - **Discovery:** endpoints come from a pairing QR, manual entry or DNS-SD
   advertisements made only while a user-opened window is open. No address
@@ -18,7 +24,8 @@ Account-free synchronization between two devices on the same network:
   key with MACs bound to the session transcript, then run one exchange.
   There is no comparison code.
 - **New-device mode:** a committed six-digit comparison code is confirmed
-  on both screens before VK is transferred.
+  on both screens with password authentication before VK is transferred;
+  recovery enrollment instead proves independently known VK (§15).
 - **Keys:** each session gets forward secrecy and hybrid post-quantum
   confidentiality from a fresh X-Wing exchange mixed with the code's
   secret.
@@ -625,15 +632,275 @@ no stored approvals, always-empty link set).
 | §6.6: no server checkpoint or publication | §7.8 |
 | §6.7 and OQ3–OQ6 | §3, §4, §6, §8, §9, §12 |
 
+### 15. Credential-authenticated LAN profile (0047, owner approved 2026-11-09)
+
+This section replaces §1.1, §1.3's legacy wait classification, §2's mode selection,
+§4, §6, §8.2–8.3,
+§9.4 and §10 for new connections. The old `lan/1` definitions above are
+historical: new code MUST reject profile 1 and MUST NOT fall back to a
+code-only grant. Exchange messages and merge rules in §7 remain, within the
+new authenticated record layer. This amendment also supersedes contradictory
+0014 language. No vault/archive format or persistent credential is added.
+
+#### 15.1. Profiles, encoding and bounds
+
+Use `lan/2`: X-Wing draft-11, HKDF-SHA-512, MAC/1, SHA-256 and
+XChaCha20-Poly1305. Password authentication uses `lan-pake/1`:
+OPAQUE-3DH, ristretto255 OPRF and AKE groups, SHA-512, with Argon2id v1.3
+stretching: memory 262144 KiB, iterations 3, lanes 4, 64-byte output,
+16 zero salt bytes (the engine supplies a fresh OPRF-derived input). NFC
+normalize passwords with the existing input bounds. No peer selects work
+parameters. Registration and client finishing use these same explicit values;
+the engine's default KSF or identity KSF MUST NOT be used.
+
+`method` is uint 0=password, 1=key. `intent` is uint 0=enroll, 1=sync.
+Only (0,0), (1,0), (1,1) are valid. Define `J=[2, pake, method, intent]`,
+where `pake=1` for password and 0 for key. Roles are text `"a"` and `"b"`;
+directions are `"a2b"` and `"b2a"`. Fixed identities inside the password
+engine are UTF-8 `qv/lan-offerer/v2` (server) and `qv/lan-joiner/v2` (client);
+the credential identifier is UTF-8 `qv/lan-credential/v2`.
+The engine context is canonical `["qv/lan-pake-context/v2", J, T0]`.
+Local registration uses the same fixed role identities. Never accept a
+registration or server setup supplied by B.
+
+Canonical arrays, no trailing elements, bounded decoding, TCP framing,
+endpoint policy and all §1.3 frame maxima remain. Opaque engine messages
+are exact byte strings: KE1=96, KE2=320, KE3=64 bytes; engine session output
+Z=64 bytes. Check lengths before engine decoding. A credential plaintext
+is at most 4096 bytes; Finished is subject to that same bound. Grant is
+at most 4096 bytes; its descriptor is exactly 171 canonical bytes under the
+currently supported password profiles. Reject unsupported profiles/lengths.
+Do not allocate or concatenate two frames to implement a single network flight.
+The suite's serializer lengths MUST be asserted in implementation and vectors.
+
+#### 15.2. Admission and outer keys
+
+All changed labels are exact UTF-8 strings below. `H(x)` is SHA-256 over
+canonical CBOR x; hashes embedded into arrays are bstr(32). MAC is MAC/1
+on the complete canonical indicated array. HKDF means the §1.2 definition.
+
+Generate P (16 secret random bytes) and derive:
+
+```
+pairing_id = HKDF(P, empty, ["qv/lan-pair-id/v2"], 16)
+K_hello = HKDF(P, pairing_id, ["qv/lan-pair-mac/v2", "hello"], 32)
+K_accept = HKDF(P, pairing_id, ["qv/lan-pair-mac/v2", "accept"], 32)
+```
+
+QR is the five-element §4.2 array with label `qv/lan-pair-qr/v2` and profile
+2; manual P encoding is unchanged. Discovery advertises the supported profile
+2, using TXT `v=2` and the four-byte tag from
+`HKDF(P, pairing_id, ["qv/lan-pair-tag/v2"], 4)`; old-profile hints do not
+cause a fallback. Hints grant no authority.
+
+B generates nonce_B(32) and an X-Wing keypair. Send an eight-element array:
+
+```
+commit_B = H(["qv/lan-pair-commit/v2", nonce_B])
+hello_body = ["qv/lan-pair-hello/v2", 2, pairing_id, method, intent,
+              commit_B, ek_B]                         # ek_B: bstr(1216)
+hello = hello_body ++ [MAC(K_hello, canonical(hello_body))]
+```
+
+A validates bound, canonical shape, profile/method/intent, pairing_id and
+constant-time MAC before KEM work, then validates the encapsulation key.
+A failed attempt closes unanswered; 16 such failures close admission.
+The first fully valid hello atomically consumes P for admission and closes
+**all** listening sockets and advertisements before proceeding. Drop queued
+streams and listener clones. Retain P only for this accepted session's
+schedules. There is no second-hello detector and no background acceptor.
+No retry of credential authentication or reuse of this code is permitted.
+A fresh attempt needs an explicit new window/code.
+
+A draws nonce_A(32), encapsulates to ek_B, and sends:
+
+```
+accept_body = ["qv/lan-pair-accept/v2", 2, method, intent, nonce_A, ct]
+accept = accept_body ++ [MAC(K_accept,
+               canonical(["qv/lan-pair-accept-mac/v2", H(hello), accept_body]))]
+T0 = H(["qv/lan-pair-th/v2", J, H(hello), H(accept)])
+k0_d = HKDF(ss || P, T0, ["qv/lan-key/v2", J, 0, d, T0], 32)
+```
+
+ct is bstr(1120), ss is secret 32 bytes. B checks the echoed profile/method/
+intent and MAC before decapsulation. Thereafter use epoch 0, both counters 0.
+The method is not negotiated after this point.
+
+#### 15.3. Password/enroll authentication
+
+1. B obtains its password before KE1. It sends
+   `R=["qv/lan-pake-start/v2", nonce_B:bstr(32), KE1:bstr(96)]` in epoch 0.
+   A verifies the nonce commitment. Both show six digits from
+   `u32be(H(["qv/lan-pair-sas/v2", J, T0, nonce_B])[0..4]) mod 1000000`.
+2. A shows its selected vault name and comparison code. Approval requires the
+   user to confirm the matching codes **and** enter the vault password.
+   Check A's password against the working local slot and require one matching,
+   unconflicted encrypted keyslot head. Snapshot session tag, identity,
+   generation, slot, record/version/object identity and digest. A may correct
+   local typos within the deadline, without a network reply or remote retry.
+3. Outside the session mutex, create fresh local server setup and registration
+   from that verified password; run server login on B's KE1 using §15.1's
+   context/identities. Wipe A's typed password, MK/KEK and registration scratch.
+   Recheck the snapshot/lock/deadline before sending
+   `S=["qv/lan-pake-response/v2", KE2:bstr(320)]` in epoch 0. Nothing from
+   the registration is persisted, exported, cached across sessions or synced.
+4. B authenticates KE2 and finishes the engine. Failure aborts with no KE3.
+   Let `F=["qv/lan-pake-finish/v2", KE3:bstr(64)]`. Define
+   `TA=H(["qv/lan-auth-th/v2", J, T0, R, S, F])`. Z is the engine's
+   64-byte session key, not its export key. Send F as the last epoch-0 record.
+   Switch to epoch 1 and send FinishedB in the same flight, separately framed.
+5. A checks KE3 to obtain Z, derives the final keys, permanently drops epoch-0
+   keys and opens FinishedB. Only then may A authorize/seal the grant.
+
+Final derivations for either method (key method supplies its own Z):
+
+```
+k1_d  = HKDF(ss || P || Z, TA, ["qv/lan-key/v2", J, 1, d, TA], 32)
+fin_b = HKDF(ss || P || Z, TA, ["qv/lan-finished-key/v2", J, "b", TA], 32)
+finished_body = ["qv/lan-finished-mac/v2", J, "b", TA]
+FinishedB = ["qv/lan-finished/v2", MAC(fin_b, canonical(finished_body))]
+```
+
+A's grant is its first epoch-1 record:
+
+```
+["qv/lan-pair-grant/v2", vault_id:bstr(16), generation:uint, VK:bstr(32),
+ public_descriptor:bstr(171), control_record_id:bstr(16),
+ head_version_id:bstr(16), head_object_id:bstr(16), head_object_hash:bstr(32)]
+```
+
+The descriptor is 0003 §2.4's projection. Validate UUIDv4 IDs, supported
+profiles and generation; descriptor/head identity is not peer-selected on A.
+One short operation under the existing core session mutex rechecks snapshot,
+working slot/head, policy, session validity, deadline, lock and cancellation,
+and seals this grant once under the final sealer. No network/user/KDF waits
+are allowed under that mutex. A successful seal counts as possible key
+disclosure even if delivery is unconfirmed. Recheck cancellation before return
+and send; discard pending output if cancelled, but never rewind/reseal/retry.
+A password change after sealing cannot revoke buffered bytes.
+
+B authenticates the grant (implicitly confirming A's final keys), verifies the
+descriptor using its typed password, unwraps VK, and constant-time compares it
+with the grant VK **before bulk transfer**. Wipe its password/MK/KEK then;
+retain protected VK and an unforgeable method/session-bound proof tying the
+slot projection and head to this grant. There is no FinishedA or GrantAccepted.
+B's subsequent exchange State is the acknowledgment of all grant checks.
+
+#### 15.4. Key authentication (key/enroll or key/sync)
+
+B independently obtains VK from recovery words or an existing unlocked copy.
+There is no password prompt or VK grant. Define:
+
+```
+z_mac = HKDF(VK, T0, ["qv/lan-key-auth/v2", J, "mac", T0], 32)
+Z     = HKDF(VK, T0, ["qv/lan-key-auth/v2", J, "schedule", T0], 64)
+PB = ["qv/lan-key-prove/v2",
+      MAC(z_mac, canonical(["qv/lan-key-proof/v2", J, "b", T0]))]
+M = [vault_id:bstr(16), generation:uint]
+PA = ["qv/lan-key-proved/v2", vault_id, generation,
+      MAC(z_mac, canonical(["qv/lan-key-proof/v2", J, "a", T0, H(M)]))]
+TA = H(["qv/lan-auth-th/v2", J, T0, PB, PA])
+```
+
+B sends PB in epoch 0. A verifies it before disclosing M or any VK-derived
+response. A sends PA in epoch 0, then permanently drops epoch-0 keys.
+B verifies PA and (for sync) compares M with its known vault/generation;
+phrase enrollment adopts the authenticated identity. B switches to epoch 1
+and sends exchange State first. A MUST authenticate this first record before
+sending any epoch-1 record or vault data. For key/enroll, B's authenticated
+empty state is allowed without a password-method grant. No comparison code
+or reveal is required for this method; commit_B remains in the outer transcript.
+
+#### 15.5. Record epochs and failure states
+
+Nonce remains 16 zero bytes followed by u64be(seq), seq not sent. AAD is
+canonical `["qv/lan-record/v2", J, epoch, direction, transcript, seq]`,
+where transcript is T0 in epoch 0 and TA in epoch 1. Counters begin at zero
+under each new distinct directional key and abort at 2^32 records. An expected
+state fixes the epoch; never trial-decrypt with an old key or fall back. Erase
+ss/P and component state after the final schedule no longer needs them.
+On any tag, counter, shape, proof, state, deadline or cancellation failure:
+abort, drop channels/ephemeral credentials/staging and leave uncommitted state
+unchanged. Committed or published state is reported accurately.
+
+State order is outer hello/accept → password R/S/F/FinishedB/grant or key
+PB/PA → final-key exchange. A sends no epoch-1 record before authenticating
+one from B. Each credential attempt is one-shot. Unknown methods/profiles or
+required features fail closed. §11's codes 1–9 remain and error label becomes
+`qv/lan-error/v2`; credential failures close the session without a distinct
+wrong-password/engine-decoding oracle. Local UI can report its own failed
+reauthentication without exposing that distinction to the peer. Do not send
+an epoch-0 error after switching or an epoch-1 response before peer confirmation.
+
+#### 15.6. Deadline, enrollment and disclosure reporting
+
+A's original window expiry remains an absolute deadline after admission;
+closing admission does not reset it. B has one absolute ten-minute deadline
+starting before its first candidate connection attempt. Both include prompts,
+KDF, transfer and pre-publication validation. Use the earlier of remaining
+time and 10 s for machine-message/connect work, or 60 s for transfer idle.
+The expected message fixes the wait category (each capped by the remaining
+absolute deadline):
+
+| Receiver/state | Maximum wait |
+|----------------|--------------|
+| Connect, clear hello/accept |10 s |
+| A awaiting password R (B may be typing) |Remaining absolute time |
+| B awaiting password S (A comparison/password approval and registration) |Remaining absolute time |
+| A awaiting key PB for enroll (B may be entering recovery words) |Remaining absolute time |
+| A awaiting key PB for sync; B awaiting PA |10 s |
+| A awaiting password F then FinishedB; B awaiting grant |10 s per separately framed record |
+| A awaiting the first final-key State after grant/PA |10 s |
+| Exchange transfer states |60 s idle |
+| B local received-name/destination confirmation and pre-publication work |Remaining absolute time |
+
+There is no user confirmation inserted into a machine-only wait. B may enter
+its password/phrase before connecting, but once connecting begins its deadline
+never resets. Local processing checks the same absolute deadline on both sides.
+Check cancellation between safe
+work units and before sends/publication; an uninterruptible KDF may overrun
+until its next check, but must not emit its result afterwards.
+
+Receive into private staging. Authenticate the complete manifest and every
+object/record, enforce all model/storage budgets, and require a unique verified
+password record. Password enrollment additionally checks its identity and
+projected descriptor against the grant proof. Phrase enrollment preserves
+that same shared password record without requiring, changing or resetting the
+password. Neither route retains B's password through transfer or asks it again
+merely to create/reopen the file. Do not expose a raw-key frontend publication
+API: use a private source/method-bound validated enrollment capability.
+
+Confirm the received vault name and destination before publication. Construct
+fresh local replica/writer/anchor state and no peer rows; verify and preflight
+the private candidate before fsync/no-replace publication and anchor completion.
+Preserve existing crash recovery and no-overwrite protections. A publication
+or anchor failure after a durable action must disclose that action. A received
+Done records receipt, not proof of B's local publication. Report grant sealing,
+peer receipt, local commit and local publication separately; loss of a receipt
+does not undo a completed action. Exchange never advances server base/outbox.
+
+#### 15.7. Secret and validation obligations
+
+Use reviewed pinned components, no hand-built primitives. Application-owned
+secret buffers/states are protected and zeroizing, with no secret formatting,
+serialization, logs, argv or persisted preferences. Audit dependency-owned
+scratch separately. RNG failure aborts before any resulting message escapes;
+no panic, zero-seed or weaker-RNG fallback. Erase registration/setup/engine
+state on success, failure, lock, cancel and expiry. GUI/framework copies retain
+0008's explicitly documented best-effort cleanup limits. Exact suite lengths,
+component vectors, transcript/key vectors, hostile code-holder tests, epoch/
+replay/reflection tests and concurrent grant/password-change tests are required.
+0012 §3's independent composition review still gates release; a component
+audit or passing tests does not establish this composition's security.
+
 ## Security Considerations
 
 - **The pairing secret** has 128 bits. Offline search against an observed
   hello or accept MAC is infeasible. Observing the QR is the realistic
-  threat. In new-device mode the single-hello rule and the committed
-  comparison code (§4.3, §4.5) cover it; a user who confirms codes without
-  comparing them is the residual risk, as in 0006. In sync mode an observer
-  without VK can take the window's one hello and then fails §4.8: denial of
-  service only, and A sends no proof first.
+  threat. In lan/2 (§15) a code observer can consume admission, but cannot
+  obtain VK without password authentication or independently held VK. Password
+  approval also compares the committed code; A verifies its local password
+  before replying. Key mode verifies B's proof before any VK-derived reply.
 - **Approval** is the window: a user action on an unlocked device, one
   session, at most 10 minutes. Nothing outlives it, so nothing needs
   revoking. A party with VK but no code cannot connect.
@@ -641,11 +908,15 @@ no stored approvals, always-empty link set).
   place of the intended device. 0001 already concedes same-generation state
   to any VK holder; the intended device then fails to connect. Rotation is
   the recovery (§12.3).
-- **Post-quantum.** Authentication is symmetric (MAC/1). Confidentiality
-  and VK transfer use hybrid X-Wing (SG6). Session keys also mix in `P`.
+- **Post-quantum.** Outer transport uses hybrid X-Wing. Final keys compose
+  the outer secret, P and credential authentication. Key mode uses symmetric
+  VK-based derivations; the password engine is a classical exception (0001 SG6).
+  An approved malicious code holder may gain a future offline password-guessing
+  route if that engine is broken; no PQ password-authentication claim is made.
 - **Denial of service** is limited to the windows: they are short,
-  explicit and abort after 16 failures. No KEM or KDF work happens before
-  a MAC check.
+  explicit and close admission after 16 failures or one valid hello. The
+  accepted session continues under its original absolute deadline; no monitor
+  survives. No KEM or KDF work happens before a code MAC check.
 - **Metadata.** Network observers see addresses, timing, frame sizes (which
   approximate the manifest size and object counts) and, during windows,
   an advertisement with no vault data (accepted leakage, 0001). There is no
@@ -664,16 +935,16 @@ Release evidence for the 0012 §3 LAN gate and the 0012 §1 LAN rows:
 
 | Requirement | Evidence |
 |-------------|----------|
-| Byte-level interoperability | Vectors for every message, key derivation, transcript and error record (§4–§7, §11), produced by the implementation and checked independently |
-| LAN discovery mistaken for trust | Spoofed advertisements and endpoints, and a raced or second pairing hello: no key release, no state change |
+| Byte-level interoperability | Vectors for current messages, key derivations, transcripts and error records (§15; exchange §7), produced by the implementation and checked independently |
+| LAN discovery mistaken for trust | Spoofed advertisements/endpoints and a raced code holder: no credential-free key release; all admission closes on the first valid hello |
 | Context substitution | A swapped vault ID, generation, profile, mode or role label; a reflected hello; a replayed hello: all fail |
 | Comparison-code grinding | A man in the middle who knows `P` cannot force equal codes (a test of the ordering) |
 | Hostile unauthenticated peers | Oversized frames, garbage, slow peers: bounded memory and time, no reply before authentication |
 | LAN partial acceptance | Interrupt, lock, duplicate and retry at every message boundary and at the commit/anchor crash points; local edits and anchor preserved, no partial manifest |
 | Peer state rollback | A removed row planted back, or a modified row, is detected (§9.1) |
 | Generation transitions | Old-generation copies fail the sync proof after rotation; new-device join of the new generation works; the old copy stays untouched |
-| Sync proof binding and order | Wrong VK, vault ID or generation on either side fails with `vault_mismatch` and commits nothing; A sends no `proved` after a failed or missing `prove`; B sends no exchange message before verifying `proved`; a `prove` from one session fails in another |
-| One use | After one completed or aborted session the window refuses further hellos |
+| Sync proof binding and order | Wrong VK, vault ID/generation, role, method or transcript fails before exchange; no A identity/proof before valid PB; no A final-key data before valid B State; a captured proof fails in another session (§15) |
+| One use | First valid hello closes all admission/advertisements; completion/failure never reopens the spent code |
 | No peer state | After sync and join the `lan_link` set is empty; an older file with rows opens, and its next commit clears them |
 | Removed messages | SyncHello, SyncAccept, the address-only QR and the old `proved`/`grant` shapes are refused |
 | Account-dependent LAN sync | LAN-only operation without Internet, account or server; either side initiates |
@@ -693,6 +964,14 @@ Release evidence for the 0012 §3 LAN gate and the 0012 §1 LAN rows:
    and per session. A device can still hold several vaults.
 
 ## Changelog
+
+- 2026-11-09: Reconcile current testing rows with §15 key proofs and v2 vectors; legacy byte descriptions remain historical.
+
+- 2026-11-09: Correct §15.2's QR element count to five, matching the explicitly listed §4.2 fields; no QR field is added or removed.
+- 2026-11-09: Owner-approved 0047 §15 replaces code-only LAN enrollment with
+  ephemeral credential authentication, separate methods/intents, final-key
+  epochs, one admitted connection, absolute deadlines and verified publication.
+  Retire lan/1 for new connections; no file/archive-format migration.
 
 - 2026-11-08: §1.4 clarifies one shared endpoint policy, mapped-address
   classification and unscoped link-local rejection (audit QV-003/009, plan 0046;

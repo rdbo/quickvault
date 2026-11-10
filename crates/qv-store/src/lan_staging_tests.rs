@@ -434,7 +434,11 @@ fn lan_merge_acceptance_crash_points_leave_old_or_new_state() {
         );
         assert_eq!(
             u.accept_lan(&mut staged, &mut proposed, &|| false),
-            Err(StoreError::Internal),
+            Err(if committed {
+                StoreError::CommittedAnchorPending
+            } else {
+                StoreError::Internal
+            }),
             "{point:?}"
         );
         assert!(!disarm(), "{point:?}");

@@ -31,7 +31,9 @@ pub(crate) struct PlatformPolicy {
 pub(crate) fn error(error: PlatformError) -> CoreError {
     match error {
         PlatformError::Cancelled => CoreError::Cancelled,
+        PlatformError::ClipboardReplaced => CoreError::ClipboardReplaced,
         PlatformError::LimitExceeded => CoreError::LimitExceeded,
+        PlatformError::StorageCapacity => qv_store::StoreError::StorageCapacity.into(),
         PlatformError::InvalidInput => CoreError::InvalidInput,
         PlatformError::Unavailable | PlatformError::Busy | PlatformError::Denied => {
             CoreError::NotAllowed

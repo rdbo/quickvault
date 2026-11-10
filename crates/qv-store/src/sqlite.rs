@@ -190,16 +190,10 @@ pub(crate) fn open_connection(path: &Path) -> Result<Connection, StoreError> {
 
 /// Applies and verifies every hardening setting, then installs the step
 /// budget. Must run before anything reads the schema.
-pub(crate) fn harden(conn: &Connection, budget: &StepBudget) -> Result<(), StoreError> {
+pub(crate) fn harden(conn: &mut Connection, budget: &StepBudget) -> Result<(), StoreError> {
+    harden_reads(conn, budget)?;
     let e = |e: rusqlite::Error| sqlite_err(&e);
-    for &(flag, name, value) in DB_CONFIG {
-        conn.set_db_config(flag, value).map_err(e)?;
-        check(name, conn.db_config(flag).map_err(e)? == value)?;
-    }
-    for &(limit, name, value) in LIMITS {
-        conn.set_limit(limit, value).map_err(e)?;
-        check(name, conn.limit(limit).map_err(e)? == value)?;
-    }
+
     for (name, set, expect) in int_pragmas() {
         conn.pragma_update(None, name, set).map_err(e)?;
         let got: i64 = conn
@@ -216,7 +210,20 @@ pub(crate) fn harden(conn: &Connection, budget: &StepBudget) -> Result<(), Store
         .pragma_update_and_check(None, "journal_mode", "DELETE", |r| r.get(0))
         .map_err(e)?;
     check("journal_mode", mode.eq_ignore_ascii_case("delete"))?;
+    Ok(())
+}
 
+/// Connection-only defenses, installed before the first schema/pragma read.
+fn harden_reads(conn: &mut Connection, budget: &StepBudget) -> Result<(), StoreError> {
+    let e = |e: rusqlite::Error| sqlite_err(&e);
+    for &(flag, name, value) in DB_CONFIG {
+        conn.set_db_config(flag, value).map_err(e)?;
+        check(name, conn.db_config(flag).map_err(e)? == value)?;
+    }
+    for &(limit, name, value) in LIMITS {
+        conn.set_limit(limit, value).map_err(e)?;
+        check(name, conn.limit(limit).map_err(e)? == value)?;
+    }
     let b = budget.clone();
     let granularity = i32::try_from(STEP_GRANULARITY).map_err(|_| StoreError::Internal)?;
     conn.progress_handler(granularity, Some(move || b.spend()))
@@ -224,17 +231,157 @@ pub(crate) fn harden(conn: &Connection, budget: &StepBudget) -> Result<(), Store
     Ok(())
 }
 
+/// Identify the catalog without journal recovery or database writes. The URI
+/// is constructed only from the already checked/locked path, never caller URI
+/// syntax. Immutable mode also avoids creating WAL shared-memory sidecars.
+pub(crate) fn identify_existing(path: &Path) -> Result<(), StoreError> {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut uri = String::from("file:");
+    for &byte in path.as_os_str().as_encoded_bytes() {
+        if byte.is_ascii_alphanumeric() || b"/._-".contains(&byte) {
+            uri.push(char::from(byte));
+        } else {
+            uri.push('%');
+            uri.push(char::from(HEX[usize::from(byte >> 4)]));
+            uri.push(char::from(HEX[usize::from(byte & 15)]));
+        }
+    }
+    uri.push_str("?mode=ro&immutable=1");
+    let mut conn = Connection::open_with_flags(
+        uri,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_URI
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_EXRESCODE,
+    )
+    .map_err(|e| sqlite_err(&e))?;
+    harden_reads(&mut conn, &StepBudget::new())?;
+    crate::schema::identify_schema(&conn)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::fs::test_dir::{TestDir, write_file};
 
+    // 0012 §1: Hostile SQLite/CBOR
+    #[test]
+    fn rejected_foreign_wal_and_hardlink_are_byte_identical() {
+        let dir = TestDir::new();
+        // URI metacharacters must remain literal path bytes in the probe.
+        let path = dir.join("foreign #?%.sqlite");
+        write_file(&path, b"", 0o600);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE foreign_data (x TEXT); INSERT INTO foreign_data VALUES ('synthetic');").unwrap();
+        drop(conn); // checkpoints/removes WAL; the database still has WAL mode.
+        let alias = dir.join("alias.qvault");
+        std::fs::hard_link(&path, &alias).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        assert_eq!(before[18], 2);
+        for selected in [&path, &alias] {
+            assert!(matches!(
+                crate::VaultFile::open(selected),
+                Err(StoreError::NotAVault)
+            ));
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            assert_eq!(std::fs::read(&alias).unwrap(), before);
+        }
+        assert!(!dir.join("alias.qvault-wal").exists());
+        assert!(!dir.join("alias.qvault-shm").exists());
+    }
+
+    // 0012 §1: Hostile SQLite/CBOR
+    #[test]
+    fn rejected_spoofed_vault_catalog_does_not_change_wal_mode() {
+        let dir = TestDir::new();
+        let path = dir.join("spoofed.qvault");
+        write_file(&path, b"", 0o600);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE foreign_data (x TEXT);")
+            .unwrap();
+        conn.pragma_update(None, "application_id", crate::schema::APPLICATION_ID)
+            .unwrap();
+        conn.pragma_update(
+            None,
+            "user_version",
+            i64::try_from(crate::header::FORMAT).unwrap(),
+        )
+        .unwrap();
+        drop(conn);
+        let before = std::fs::read(&path).unwrap();
+        assert!(matches!(
+            crate::VaultFile::open(&path),
+            Err(StoreError::Integrity)
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(before[18], 2);
+    }
+
+    #[test]
+    #[ignore = "child process for rejected_foreign_hot_journal_is_not_recovered"]
+    fn foreign_hot_journal_writer() {
+        let path = std::env::var_os("QV_FOREIGN_JOURNAL_FIXTURE").unwrap();
+        let path = std::path::PathBuf::from(path);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; CREATE TABLE foreign_data (x BLOB); INSERT INTO foreign_data VALUES (zeroblob(32768));").unwrap();
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        conn.execute_batch("PRAGMA cache_size=1; PRAGMA cache_spill=ON; BEGIN IMMEDIATE; UPDATE foreign_data SET x=zeroblob(32769);").unwrap();
+        std::fs::write(path.with_extension("ready"), b"ready").unwrap();
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+
+    // 0012 §1: Hostile SQLite/CBOR
+    #[test]
+    fn rejected_foreign_hot_journal_is_not_recovered() {
+        let dir = TestDir::new();
+        let path = dir.join("foreign.sqlite");
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "sqlite::tests::foreign_hot_journal_writer",
+            ])
+            .env("QV_FOREIGN_JOURNAL_FIXTURE", &path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !path.with_extension("ready").exists() && std::time::Instant::now() < deadline {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let ready = path.with_extension("ready").exists();
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(
+            ready,
+            "synthetic writer reached its uncommitted transaction"
+        );
+        let journal = dir.join("foreign.sqlite-journal");
+        let before = std::fs::read(&path).unwrap();
+        let journal_before = std::fs::read(&journal).unwrap();
+        assert!(journal_before.len() > 512);
+        assert!(matches!(
+            crate::VaultFile::open(&path),
+            Err(StoreError::NotAVault)
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(std::fs::read(&journal).unwrap(), journal_before);
+    }
+
     fn fresh(d: &TestDir) -> (Connection, StepBudget) {
         let p = d.join("t.qvault");
         write_file(&p, b"", 0o600);
-        let conn = open_connection(&p).unwrap();
+        let mut conn = open_connection(&p).unwrap();
         let budget = StepBudget::new();
-        harden(&conn, &budget).unwrap();
+        harden(&mut conn, &budget).unwrap();
         (conn, budget)
     }
 
@@ -286,16 +433,16 @@ mod tests {
             "journal_mode",
         ] {
             FAIL_SETTING.with(|f| f.set(Some(name)));
-            let conn = open_connection(&p).unwrap();
+            let mut conn = open_connection(&p).unwrap();
             assert_eq!(
-                harden(&conn, &StepBudget::new()),
+                harden(&mut conn, &StepBudget::new()),
                 Err(StoreError::Hardening),
                 "{name}"
             );
         }
         FAIL_SETTING.with(|f| f.set(None));
-        let conn = open_connection(&p).unwrap();
-        assert_eq!(harden(&conn, &StepBudget::new()), Ok(()));
+        let mut conn = open_connection(&p).unwrap();
+        assert_eq!(harden(&mut conn, &StepBudget::new()), Ok(()));
     }
 
     #[test]

@@ -233,7 +233,7 @@ fn conflict_all_kinds_resolve_complete_versions_and_keep_unseen_edits() {
             s.resolve_version(&h, Some(&pw("remote changed password")), None)
                 .unwrap();
         } else {
-            s.resolve_version(&h, None, None).unwrap();
+            crate::testutil::destructive(&s, || s.resolve_version(&h, None, None)).unwrap();
         }
         assert_eq!(s.overview().unwrap().local_seq, before + 1);
         assert_eq!(err(s.conflict_version(&h)), CoreError::StaleHandle);
@@ -326,7 +326,7 @@ fn conflict_final_entry_refuses_other_conflicts_and_finalizes_unseen_owned_attac
         }
         let remote = branch(&env, &s, "remote");
         s.delete(ItemHandle::Entry(entry), false).unwrap();
-        s.purge(&[ItemHandle::Entry(entry)]).unwrap();
+        crate::testutil::destructive(&s, || s.purge(&[ItemHandle::Entry(entry)])).unwrap();
         edit(&remote, id, |v| {
             if let RecordBody::Live(Payload::Entry(e)) = &mut v.body {
                 e.title = Text::new("concurrent edit").unwrap();
@@ -387,10 +387,10 @@ fn conflict_final_entry_refuses_other_conflicts_and_finalizes_unseen_owned_attac
                 .into_iter()
                 .find(|h| s.conflict_version(h).unwrap().state == Deletion::Final)
                 .unwrap();
-            s.resolve_version(&h, None, None).unwrap();
+            crate::testutil::destructive(&s, || s.resolve_version(&h, None, None)).unwrap();
         }
         assert_eq!(
-            s.resolve_version(&final_head, None, None)
+            crate::testutil::destructive(&s, || s.resolve_version(&final_head, None, None))
                 .unwrap()
                 .conflicts,
             0

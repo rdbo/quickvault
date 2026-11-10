@@ -61,6 +61,8 @@ model_ids! {
     FieldId;
     /// An encrypted object's ID (0004 §2.1).
     ObjectId;
+    /// One explicit soft-deletion operation (0007 §2.1).
+    DeleteOperationId;
 }
 
 macro_rules! random_id {
@@ -93,7 +95,8 @@ random_id!(
     VersionId,
     WriterId,
     FieldId,
-    ObjectId
+    ObjectId,
+    DeleteOperationId
 );
 
 /// The attachment ID of an `attachment_meta` record: its record ID

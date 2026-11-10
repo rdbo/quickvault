@@ -33,6 +33,10 @@ pub fn run() -> ! {
     crate::android::initialize();
     #[cfg(target_os = "linux")]
     let _instance = guard;
+    #[cfg(feature = "validation")]
+    if crate::validation_media::enabled() {
+        launch("QuickVault synthetic media", MEDIA_SCRIPT.as_bytes());
+    }
     launch("QuickVault", include_bytes!("../assets/app.js"))
 }
 
@@ -48,7 +52,14 @@ pub fn run_preview() -> ! {
 /// Actual shared screens and core operations, using only synthetic fixture data.
 #[cfg(feature = "validation")]
 pub fn run_flow_fixture() -> ! {
-    let _ = crate::ui::ACTIVE.set(Controller::validation_fixture());
+    let fixture = Controller::validation_fixture();
+    if crate::validation_media::enabled()
+        && let Err(error) = fixture
+    {
+        eprintln!("synthetic media setup failed: {}", error.message());
+        std::process::exit(1);
+    }
+    let _ = crate::ui::ACTIVE.set(fixture);
     const SCRIPT: &str = concat!(
         include_str!("../assets/app.js"),
         "\n",
@@ -59,8 +70,17 @@ pub fn run_flow_fixture() -> ! {
         eprintln!("full UI fixture timeout");
         std::process::exit(2)
     });
+    if crate::validation_media::enabled() {
+        launch("QuickVault synthetic media", MEDIA_SCRIPT.as_bytes());
+    }
     launch("QuickVault synthetic flow", SCRIPT.as_bytes())
 }
+#[cfg(feature = "validation")]
+const MEDIA_SCRIPT: &str = concat!(
+    include_str!("../assets/app.js"),
+    "\n",
+    include_str!("bin/media.js")
+);
 /// The initial window size. Validation builds accept `QV_UI_SIZE=WxH` so
 /// screenshots can cover the narrow and mid layouts (plan 0040).
 fn window_size() -> (f64, f64) {
@@ -84,7 +104,7 @@ fn launch(title: &'static str, script: &'static [u8]) -> ! {
         ("text/css", include_bytes!("../assets/app.css")),
     );
     policy.assets.insert("/app.js", ("text/javascript", script));
-    // Attachment previews: from memory only (0003 §6.4, plan 0044).
+    // Revocable bounded media ranges on the existing listener (0003 §6.4, plan0050).
     policy.preview = Some(std::sync::Arc::new(crate::preview::serve));
     let (width, height) = window_size();
     let config = dioxus_desktop::Config::new()

@@ -167,6 +167,7 @@ fn entry_version(
             created_at: Timestamp(1_700_000_000_000),
             modified_at: Timestamp(1_700_000_000_000 + round as i64),
             deleted_at: None,
+            delete_operation: None,
             ext: Extensions::new(),
         })),
         ext: Extensions::new(),
@@ -307,10 +308,15 @@ fn sample(dir: &Path) -> R<String> {
     let t = Instant::now();
     let root = session.root().map_err(err("root"))?;
     let first = session
-        .list(root)
-        .map_err(err("list"))?
-        .entries
-        .first()
+        .all_items_page(
+            None,
+            qv_core::PageLimit::new(1, qv_core::MAX_PAGE_TEXT_BYTES).map_err(err("page limit"))?,
+            &qv_core::CancelToken::new(),
+        )
+        .map_err(err("first entry page"))?
+        .items
+        .into_iter()
+        .next()
         .map(|e| e.handle);
     let draft = match first {
         Some(entry) => {

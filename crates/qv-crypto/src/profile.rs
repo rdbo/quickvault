@@ -164,6 +164,20 @@ mod tests {
         }
     }
 
+    // 0012 §1: Unpinned crypto
+    #[test]
+    fn lan_pake_candidate_serializer_lengths_match_contract() {
+        use opaque_ke::generic_array::typenum::Unsigned;
+        use opaque_ke::{CredentialFinalizationLen, CredentialRequestLen, CredentialResponseLen};
+        type Suite = crate::lan_auth_engine::Suite;
+        assert_eq!(CredentialRequestLen::<Suite>::USIZE, 96);
+        assert_eq!(CredentialResponseLen::<Suite>::USIZE, 320);
+        assert_eq!(CredentialFinalizationLen::<Suite>::USIZE, 64);
+        let parameters = argon2_opaque::Params::new(262144, 3, 4, Some(64)).unwrap();
+        assert_eq!(parameters.block_count(), 262144);
+        assert_eq!(parameters.output_len(), Some(64));
+    }
+
     #[test]
     fn profile_ids_round_trip() {
         assert_eq!(PasswordKdfProfile::from_id(1), Ok(PasswordKdfProfile::V1));

@@ -25,7 +25,10 @@
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
+
+static NEXT_QUESTION: AtomicU64 = AtomicU64::new(1);
 use std::time::{Duration, Instant};
 
 use qv_core::{
@@ -67,8 +70,19 @@ pub enum Question {
         /// The comparison code.
         sas: String,
     },
+    /// Choose a locally supplied credential before connecting.
+    ChooseCredential,
+    /// Protected recovery words; never copied to question metadata.
+    RecoveryPhrase,
+    /// Confirm authenticated name after independent key enrollment.
+    JoinRecoveredVault {
+        /// Authenticated display name.
+        vault: String,
+    },
     /// New device: the joined vault's master password.
     Password {
+        /// Password reauthentication on the offering device.
+        offering: bool,
         /// A previous attempt was wrong.
         retry: bool,
     },
@@ -177,68 +191,46 @@ impl Changes {
         self.counts.iter().sum()
     }
 }
-/// Live entries by record ID: handle, modification time, conflict, title.
-pub(crate) type Summary = BTreeMap<String, (qv_core::EntryHandle, i64, bool, Zeroizing<String>)>;
-/// Reads the live entries' summaries; a failure yields `None` (the receipt
-/// then shows no list rather than a wrong one).
+/// Live entry IDs and structural change markers only. No vault text retained.
+pub(crate) type Summary = BTreeMap<String, (qv_core::EntryHandle, Vec<qv_core::VersionId>)>;
 pub(crate) fn summary(s: &Session) -> Option<Summary> {
-    let items = crate::views::all_items(s).ok()?;
     Some(
-        items
+        s.entry_states()
+            .ok()?
             .into_iter()
-            .map(|i| {
-                (
-                    i.row.handle.id_hex(),
-                    (i.row.handle, i.modified, i.row.conflict, i.row.title),
-                )
-            })
+            .map(|(h, heads)| (h.id_hex(), (h, heads)))
             .collect(),
     )
 }
 /// Classifies what changed between two summaries.
-pub(crate) fn changes(before: &Summary, after: &Summary) -> Changes {
+pub(crate) fn changes(s: &Session, before: &Summary, after: &Summary) -> Changes {
     let mut out = Changes::default();
-    let mut push = |list: usize, change: Change| {
+    let mut push = |list: usize, handle: qv_core::EntryHandle| {
         out.counts[list] += 1;
         let v = match list {
             0 => &mut out.added,
             1 => &mut out.updated,
             _ => &mut out.trashed,
         };
-        if v.len() < RECEIPT_LIST {
-            v.push(change);
+        if v.len() < RECEIPT_LIST
+            && let Ok(e) = s.entry(handle)
+        {
+            v.push(Change {
+                entry: (list != 2).then_some(handle),
+                title: Zeroizing::new(e.title.expose().to_owned()),
+            });
         }
     };
-    for (id, (h, modified, conflict, title)) in after {
+    for (id, (h, heads)) in after {
         match before.get(id) {
-            None => push(
-                0,
-                Change {
-                    entry: Some(*h),
-                    title: title.clone(),
-                },
-            ),
-            Some((_, m, c, _)) if m != modified || c != conflict => {
-                push(
-                    1,
-                    Change {
-                        entry: Some(*h),
-                        title: title.clone(),
-                    },
-                );
-            }
+            None => push(0, *h),
+            Some((_, old)) if old != heads => push(1, *h),
             Some(_) => {}
         }
     }
-    for (id, (_, _, _, title)) in before {
+    for (id, (h, _)) in before {
         if !after.contains_key(id) {
-            push(
-                2,
-                Change {
-                    entry: None,
-                    title: title.clone(),
-                },
-            );
+            push(2, *h);
         }
     }
     out
@@ -248,6 +240,7 @@ pub(crate) fn changes(before: &Summary, after: &Summary) -> Changes {
 struct Slot {
     answer: Option<bool>,
     password: Option<MasterPassword>,
+    phrase: Option<SecretBytes>,
     closed: bool,
 }
 
@@ -259,6 +252,7 @@ struct Reply {
 /// The running (or finished) LAN operation.
 pub(crate) struct LanRun {
     kind: LanKind,
+    admitted: bool,
     code: Option<SecretBytes>,
     qr: Option<crate::qr::Symbol>,
     endpoints: Vec<String>,
@@ -267,6 +261,7 @@ pub(crate) struct LanRun {
     /// A new device's comparison code, shown large while the vault arrives.
     sas: Option<String>,
     question: Option<Question>,
+    question_id: u64,
     done: Option<LanDone>,
     /// A password typed for [`Question::Password`], until submitted.
     typed: Option<SecretBytes>,
@@ -278,6 +273,7 @@ impl LanRun {
     fn new(kind: LanKind) -> Self {
         Self {
             kind,
+            admitted: false,
             code: None,
             qr: None,
             endpoints: Vec::new(),
@@ -285,6 +281,7 @@ impl LanRun {
             info: None,
             sas: None,
             question: None,
+            question_id: 0,
             done: None,
             typed: None,
             reply: Arc::new(Reply {
@@ -305,6 +302,7 @@ impl LanRun {
             .unwrap_or_else(PoisonError::into_inner);
         slot.closed = true;
         slot.password = None;
+        slot.phrase = None;
         self.reply.cv.notify_all();
         drop(slot);
         self.code = None;
@@ -325,6 +323,7 @@ impl LanRun {
         self.running()
             && !self.cancel.is_cancelled()
             && self.kind == LanKind::Window
+            && !self.admitted
             && self.question.is_none()
             && self.expires.is_some_and(|t| Instant::now() < t)
     }
@@ -363,6 +362,8 @@ pub struct LanView {
     pub sas: Option<String>,
     /// The question waiting for an answer.
     pub question: Option<Question>,
+    /// One prompt instance; stale answers/input never apply to its successor.
+    pub question_id: u64,
     /// The outcome once finished.
     pub done: Option<LanDone>,
     /// Seconds before a clean receipt closes, while it would.
@@ -470,6 +471,9 @@ impl Bridge {
     /// Posts `q` and waits until `take` yields an answer; `None` on cancel or
     /// lock.
     fn ask<T>(&self, q: Question, take: impl Fn(&mut Slot) -> Option<T>) -> Option<T> {
+        let question_id = NEXT_QUESTION
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .ok()?;
         {
             let mut slot = self
                 .reply
@@ -478,8 +482,12 @@ impl Bridge {
                 .unwrap_or_else(PoisonError::into_inner);
             slot.answer = None;
             slot.password = None;
+            slot.phrase = None;
         }
-        self.update(|r| r.question = Some(q));
+        self.update(|r| {
+            r.question = Some(q);
+            r.question_id = question_id;
+        });
         let out = self.wait(take);
         self.update(|r| {
             r.question = None;
@@ -533,11 +541,28 @@ fn grouped(digits: &[u8]) -> String {
 }
 
 impl ApproverUi for Bridge {
+    fn admitted(&mut self) {
+        self.update(|run| {
+            run.admitted = true;
+            run.code = None;
+            run.qr = None;
+            run.info = Some("Connection accepted. Checking vault credentials…".to_owned());
+        });
+    }
     fn confirm(&mut self, sas: &str, vault_name: &str) -> bool {
         self.answer(Question::Approve {
             sas: grouped(sas.as_bytes()),
             vault: vault_name.to_owned(),
         })
+    }
+    fn master_password(&mut self, retry: bool) -> Option<MasterPassword> {
+        self.ask(
+            Question::Password {
+                retry,
+                offering: true,
+            },
+            |s| s.password.take(),
+        )
     }
 }
 
@@ -548,11 +573,33 @@ struct JoinBridge {
 }
 
 impl JoinerUi for JoinBridge {
+    fn set_deadline(&mut self, expires: Instant) {
+        self.bridge.update(|run| run.expires = Some(expires));
+    }
+    fn credentials(&mut self) -> Option<qv_core::EnrollmentCredential> {
+        let password = self
+            .bridge
+            .ask(Question::ChooseCredential, |s| s.answer.take())?;
+        if password {
+            self.master_password()
+                .map(qv_core::EnrollmentCredential::Password)
+        } else {
+            self.bridge
+                .ask(Question::RecoveryPhrase, |s| s.phrase.take())
+                .map(qv_core::EnrollmentCredential::RecoveryPhrase)
+        }
+    }
+    fn confirm_recovered_vault(&mut self, vault_name: &[u8]) -> bool {
+        self.bridge.answer(Question::JoinRecoveredVault {
+            vault: String::from_utf8_lossy(vault_name).into_owned(),
+        })
+    }
+
     fn show_code(&mut self, sas: &Sas) -> bool {
         let sas = grouped(&sas.digits());
         self.bridge.update(|r| {
             r.sas = Some(sas);
-            r.info = Some("Receiving the vault…".to_owned());
+            r.info = Some("Authenticating both devices…".to_owned());
         });
         true
     }
@@ -567,8 +614,13 @@ impl JoinerUi for JoinBridge {
     fn master_password(&mut self) -> Option<MasterPassword> {
         let retry = self.attempts > 0;
         self.attempts += 1;
-        self.bridge
-            .ask(Question::Password { retry }, |s| s.password.take())
+        self.bridge.ask(
+            Question::Password {
+                retry,
+                offering: false,
+            },
+            |s| s.password.take(),
+        )
     }
 }
 
@@ -617,9 +669,19 @@ fn round_receipt(
     if let (Some(round), true) = (done.round.as_mut(), r.local == LocalAcceptance::Committed)
         && let (Some(before), Some(after)) = (before, summary(s))
     {
-        round.changes = changes(&before, &after);
+        round.changes = changes(s, &before, &after);
     }
     done
+}
+
+/// Persist only fixed, data-free action facts across a concurrent lock. The
+/// usual worker/form fence still discards all secret/session-bearing results.
+fn record_locked_action(c: &Controller, generation: u64, message: &'static str) {
+    let mut s = c.state();
+    if s.lock_gen != generation && s.phase == crate::controller::Phase::Locked {
+        s.status = message;
+        s.revision = s.revision.wrapping_add(1);
+    }
 }
 
 /// The finishing effect: stores the outcome, ends the run's secrets.
@@ -723,8 +785,15 @@ pub(crate) fn offer(c: &Controller, epoch: FormEpoch) -> Result<(), AppError> {
         let (mut bridge, cancel) = Bridge::start(ctl, run)?;
         let generation = bridge.generation;
         let before = summary(s);
-        let result = window
-            .run(s, &mut bridge, Some(&cancel))
+        let served=window.run(s,&mut bridge,Some(&cancel));
+        match &served {
+            Ok(Served::Joined{key_disclosed:true,..})=>record_locked_action(ctl,generation,
+                "Locked. A vault-key grant was sealed; the receiver may have obtained this generation’s key. Delivery may be unknown."),
+            Ok(Served::Synced(report)) if report.local==LocalAcceptance::Committed=>record_locked_action(ctl,generation,
+                "Locked. The LAN operation committed changes on this device. Unlock to inspect them; peer receipt may be unknown."),
+            _=>{}
+        }
+        let result = served
             .map_err(AppError::from)
             .map(|served| match served {
                 Served::Synced(r) => round_receipt(
@@ -734,16 +803,15 @@ pub(crate) fn offer(c: &Controller, epoch: FormEpoch) -> Result<(), AppError> {
                     before,
                 ),
                 Served::Joined {
+                    key_disclosed,
                     peer_confirmed,
                     failure,
                 } => LanDone::new(
                     vec![
-                        if peer_confirmed {
-                            "A new device joined this vault."
-                        } else {
-                            "The new device may not have finished joining."
-                        }
-                        .to_owned(),
+                        if peer_confirmed { "The receiving device confirmed complete receipt." }
+                        else { "The receiving device did not confirm complete receipt." }.to_owned(),
+                        if key_disclosed { "A vault-key grant was sealed; delivery may be unknown." }
+                        else { "The authenticated receiver already holds the vault key." }.to_owned(),
                     ],
                     failure.map(|e| AppError::from(qv_core::CoreError::Lan(e))),
                     None,
@@ -814,6 +882,20 @@ pub(crate) fn join_new_device(
         &mut ui,
         Some(&cancel),
     );
+    if session.is_ok()
+        || matches!(
+            session,
+            Err(qv_core::CoreError::Store(
+                qv_core::StoreError::PublicationIncomplete
+            ))
+        )
+    {
+        record_locked_action(
+            c,
+            ui.bridge.generation,
+            "Locked. The received vault file was created. Open it locally; do not repeat enrollment at the same path.",
+        );
+    }
     // The locked screen's run ends with the attempt; an error shows there.
     let mut s = c.state();
     if s.lock_gen == ui.bridge.generation
@@ -855,6 +937,7 @@ impl Controller {
             info: run.info.clone(),
             sas: run.sas.clone(),
             question: run.question.clone(),
+            question_id: run.question_id,
             done: run.done.clone(),
             closes_in: run.done.as_ref().and_then(LanDone::closes_in),
         })
@@ -862,15 +945,41 @@ impl Controller {
 
     /// Answers the current yes/no question. Works while the worker waits for
     /// it; anything stale is ignored.
-    pub fn lan_answer(&self, epoch: FormEpoch, yes: bool) {
+    pub fn lan_answer(&self, epoch: FormEpoch, question_id: u64, yes: bool) {
         let mut s = self.state();
         if s.epoch != epoch.0 {
+            return;
+        }
+        if s.lan
+            .as_ref()
+            .is_none_or(|run| run.question_id != question_id || run.question.is_none())
+        {
             return;
         }
         s.active = Instant::now();
         let Some(run) = s.lan.as_mut() else {
             return;
         };
+        if run.question_id != question_id {
+            return;
+        }
+        if matches!(run.question, Some(Question::RecoveryPhrase)) {
+            let mut slot = run
+                .reply
+                .slot
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if yes {
+                let Some(phrase) = run.typed.take() else {
+                    return;
+                };
+                slot.phrase = Some(phrase);
+            } else {
+                slot.closed = true;
+            }
+            run.reply.cv.notify_all();
+            return;
+        }
         let password = match &run.question {
             Some(Question::Password { .. }) if yes => {
                 let typed = run.typed.take();
@@ -900,15 +1009,22 @@ impl Controller {
 
     /// Takes a typed password for [`Question::Password`] into protected
     /// state, clearing the framework string.
-    pub fn lan_secret(&self, epoch: FormEpoch, value: &mut String) {
+    pub fn lan_secret(&self, epoch: FormEpoch, question_id: u64, value: &mut String) {
         {
             let mut s = self.state();
             if s.epoch == epoch.0
-                && value.len() <= crate::workspace::LINE_MAX
                 && let Some(run) = s.lan.as_mut()
-                && matches!(run.question, Some(Question::Password { .. }))
+                && run.question_id == question_id
+                && matches!(
+                    run.question,
+                    Some(Question::Password { .. } | Question::RecoveryPhrase)
+                )
             {
-                run.typed = protect(value.as_bytes()).ok();
+                run.typed = if value.len() <= crate::workspace::LINE_MAX {
+                    protect(value.as_bytes()).ok()
+                } else {
+                    None
+                };
                 s.active = Instant::now();
             }
         }
@@ -987,6 +1103,9 @@ pub(crate) mod fixture {
         std::thread::spawn(move || {
             let result = join(&controller);
             if let Err(error) = result {
+                eprintln!("synthetic LAN peer failed: {error:?}");
+            }
+            if let Err(error) = &result {
                 eprintln!("synthetic LAN peer failed: {error:?}");
             }
             let ok = result.is_ok();
@@ -1100,6 +1219,73 @@ mod repair_tests {
 
     // 0012 §1: LAN partial acceptance
     #[test]
+    fn lan_app_fixed_action_facts_survive_lock_without_restoring_stale_session_results() {
+        let env = Env::new();
+        let generation = env.c.state().lock_gen;
+        env.c.lock();
+        record_locked_action(
+            &env.c,
+            generation,
+            "Locked. A vault-key grant was sealed; delivery may be unknown.",
+        );
+        {
+            let s = env.c.state();
+            assert_eq!(
+                s.status,
+                "Locked. A vault-key grant was sealed; delivery may be unknown."
+            );
+            assert!(s.session.is_none() && s.lan.is_none());
+        }
+        {
+            let mut s = env.c.state();
+            s.phase = Phase::Unlocked;
+            s.status = "Current session";
+        }
+        record_locked_action(&env.c, generation, "Stale operation result");
+        assert_eq!(env.c.state().status, "Current session");
+        env.c.lock();
+    }
+
+    // 0012 §1: LAN partial acceptance
+    #[test]
+    fn lan_app_prompt_instance_fences_late_secret_input_and_answers_and_clears_on_close() {
+        let env = Env::new();
+        let mut run = LanRun::new(LanKind::Join);
+        run.question = Some(Question::Password {
+            retry: false,
+            offering: false,
+        });
+        run.question_id = 2;
+        env.c.state().lan = Some(run);
+        let mut stale = "synthetic stale password".to_owned();
+        env.c.lan_secret(env.epoch(), 1, &mut stale);
+        assert!(stale.is_empty());
+        env.c.lan_answer(env.epoch(), 1, true);
+        assert!(env.c.state().lan.as_ref().unwrap().typed.is_none());
+        let mut typed = "synthetic accepted password".to_owned();
+        env.c.lan_secret(env.epoch(), 2, &mut typed);
+        assert!(typed.is_empty());
+        env.c.lan_answer(env.epoch(), 1, true);
+        assert!(env.c.state().lan.as_ref().unwrap().typed.is_some());
+        let mut oversized = "x".repeat(crate::workspace::LINE_MAX + 1);
+        env.c.lan_secret(env.epoch(), 2, &mut oversized);
+        assert!(oversized.is_empty());
+        assert!(env.c.state().lan.as_ref().unwrap().typed.is_none());
+        let mut typed = "synthetic accepted password".to_owned();
+        env.c.lan_secret(env.epoch(), 2, &mut typed);
+        env.c.lan_answer(env.epoch(), 2, true);
+        let mut state = env.c.state();
+        let run = state.lan.as_mut().unwrap();
+        assert!(run.reply.slot.lock().unwrap().password.is_some());
+        run.reply.slot.lock().unwrap().phrase = Some(protect(b"synthetic recovery words").unwrap());
+        run.close();
+        let slot = run.reply.slot.lock().unwrap();
+        assert!(slot.password.is_none() && slot.phrase.is_none() && slot.closed);
+        assert!(run.typed.is_none());
+    }
+
+    // 0012 §1: LAN partial acceptance
+    #[test]
     fn lan_app_wait_expires_clears_secrets_and_idle_locks_without_ui_polling() {
         for idle in [false, true] {
             let env = Env::new();
@@ -1160,7 +1346,13 @@ mod repair_tests {
             let mut run = LanRun::new(kind);
             run.expires = Some(Instant::now() + Duration::from_secs(60));
             assert_eq!(run.defers_idle(), kind == LanKind::Window);
-            run.question = Some(Question::Password { retry: false });
+            run.admitted = true;
+            assert!(!run.defers_idle());
+            run.admitted = false;
+            run.question = Some(Question::Password {
+                retry: false,
+                offering: false,
+            });
             assert!(!run.defers_idle());
             run.question = None;
             run.expires = Some(Instant::now() - Duration::from_secs(1));

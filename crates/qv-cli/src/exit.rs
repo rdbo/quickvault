@@ -14,7 +14,7 @@
 //! | 7 | integrity or rollback failure | `Integrity`, `Rollback`, `NoAnchor` |
 //! | 8 | unresolved conflict | `CoreError::Conflict` |
 //! | 9 | resource or safety limit | `LimitExceeded`, `CoreError::SnapshotOverBudget`, input over a bound |
-//! | 10 | LAN peer unavailable | `LanError::{NoPeer, Timeout, PeerCancelled, CodeObserved, TooManyAttempts, WindowExpired, VaultMismatch, Io}` |
+//! | 10 | LAN peer unavailable | `LanError::{NoPeer, Timeout, PeerCancelled, TooManyAttempts, WindowExpired, VaultMismatch, Io}` |
 //!
 //! Other LAN failures map as 0011 §6 says: `Integrity`/`Protocol` 7,
 //! `Keyslot` 8, `Limit` 9, `Busy`/`StateChanged` 6, `Cancelled`/`Unsupported`
@@ -79,7 +79,10 @@ pub(crate) fn store_code(e: StoreError) -> u8 {
         StoreError::WrongPassword | StoreError::WrongPhrase => AUTH,
         StoreError::NotFound => NOT_FOUND,
         StoreError::Locked | StoreError::Replaced | StoreError::Changed => BUSY,
-        StoreError::Integrity | StoreError::Rollback | StoreError::NoAnchor => INTEGRITY,
+        StoreError::Integrity
+        | StoreError::Rollback
+        | StoreError::NoAnchor
+        | StoreError::DamagedAnchor => INTEGRITY,
         StoreError::LimitExceeded => LIMIT,
         _ => OTHER,
     }
@@ -105,7 +108,6 @@ pub(crate) fn lan_code(e: qv_core::LanError) -> u8 {
         L::NoPeer
         | L::Timeout
         | L::PeerCancelled
-        | L::CodeObserved
         | L::TooManyAttempts
         | L::WindowExpired
         | L::VaultMismatch
@@ -131,6 +133,15 @@ pub(crate) fn crypto_code(e: CryptoError) -> u8 {
 /// An extra line for errors the user can act on.
 fn hint(e: CoreError) -> Option<&'static str> {
     match e {
+        CoreError::Store(StoreError::CommittedAnchorPending) => Some(
+            "do not repeat the change; restore access to the state directory and reopen the vault to complete its rollback record",
+        ),
+        CoreError::Store(StoreError::StorageCapacity) => Some(
+            "free space or resolve the filesystem quota/file-size limit, then reopen before retrying",
+        ),
+        CoreError::Store(StoreError::DamagedAnchor) => Some(
+            "preserve the vault and its rollback record; use explicit `qv recover <path>` to authenticate and inspect read-only before deliberately accepting a baseline",
+        ),
         CoreError::Store(StoreError::NoAnchor) => Some(
             "this device has no record of the vault's last state (it was copied here, or the \
              state directory was lost); use explicit `qv recover <path>` with your recovery phrase to accept a baseline",
@@ -205,6 +216,7 @@ mod tests {
             StoreError::Integrity,
             StoreError::Rollback,
             StoreError::NoAnchor,
+            StoreError::DamagedAnchor,
         ] {
             assert_eq!(store(e), 7, "{e:?}");
         }
@@ -221,7 +233,6 @@ mod tests {
             L::NoPeer,
             L::Timeout,
             L::PeerCancelled,
-            L::CodeObserved,
             L::TooManyAttempts,
             L::WindowExpired,
             L::VaultMismatch,
@@ -258,6 +269,8 @@ mod tests {
             CoreError::Totp(TotpError::InvalidUri),
             CoreError::Store(StoreError::UnsafeFile),
             CoreError::Store(StoreError::Io),
+            CoreError::Store(StoreError::StorageCapacity),
+            CoreError::Store(StoreError::CommittedAnchorPending),
             CoreError::Store(StoreError::NotAVault),
         ] {
             assert_eq!(core(e), 1, "{e:?}");
@@ -268,6 +281,17 @@ mod tests {
 
     #[test]
     fn exit_messages_are_fixed_and_hinted() {
+        let committed = CliError::from(StoreError::CommittedAnchorPending);
+        assert_eq!(committed.code, OTHER);
+        assert!(committed.message.contains("change is saved"));
+        assert!(committed.message.contains("do not repeat"));
+        let capacity = CliError::from(StoreError::StorageCapacity);
+        assert_eq!(capacity.code, OTHER);
+        assert!(capacity.message.contains("quota"));
+        let damaged = CliError::from(StoreError::DamagedAnchor);
+        assert_eq!(damaged.code, INTEGRITY);
+        assert!(damaged.message.contains("preserve"));
+        assert!(damaged.message.contains("read-only"));
         let e = CliError::from(StoreError::NoAnchor);
         assert!(
             e.message

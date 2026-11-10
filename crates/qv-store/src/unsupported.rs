@@ -165,6 +165,8 @@ impl SnapshotDir {
     pub fn reclassify_as_ordinary(
         &self,
         _entry: &SnapshotEntry,
+        _scope: crate::ArchiveScope,
+        _vk: &VaultKey,
     ) -> Result<SnapshotEntry, StoreError> {
         match self.0 {}
     }
@@ -251,6 +253,11 @@ impl PublishedSnapshot {
 }
 
 impl AnchorDir {
+    /// Unreachable: no `AnchorDir` exists on this target.
+    pub fn independence_warning(&self, _vault: &Path) -> bool {
+        match self.0 {}
+    }
+
     /// Always [`StoreError::Unsupported`] on this target.
     pub fn open(_dir: &Path) -> Result<AnchorDir, StoreError> {
         Err(StoreError::Unsupported)
@@ -500,6 +507,18 @@ impl UnlockedVault {
         _sink: &mut impl std::io::Write,
         _cancelled: &impl Fn() -> bool,
     ) -> Result<(), StoreError> {
+        match self.0 {}
+    }
+
+    /// Unreachable: no UnlockedVault exists on this target.
+    pub fn read_attachment_range(
+        &self,
+        _record: RecordId,
+        _version: VersionId,
+        _offset: u64,
+        _length: usize,
+        _cancelled: &impl Fn() -> bool,
+    ) -> Result<qv_crypto::SecretBytes, StoreError> {
         match self.0 {}
     }
 

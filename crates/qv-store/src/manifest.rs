@@ -539,6 +539,15 @@ impl Manifest {
         &self.records
     }
 
+    /// Admission-only bound: every active conflict remains resolvable locally.
+    /// Keep separate from decoding so old states can still be read/exported.
+    pub(crate) fn check_resolvable(&self, writer: qv_model::WriterId) -> Result<(), StoreError> {
+        for record in &self.records {
+            Clock::check_resolution(record.heads.iter().map(VersionRef::clock), writer)?;
+        }
+        Ok(())
+    }
+
     /// One record.
     pub fn record(&self, id: RecordId) -> Option<&RecordEntry> {
         self.records
@@ -1980,6 +1989,62 @@ pub(crate) mod tests {
             });
         }
         m
+    }
+
+    // 0012 §1: Budget inconsistency
+    #[test]
+    fn manifest_total_ciphertext_accepts_exactly_one_gib_and_rejects_one_byte_more() {
+        // Reference arithmetic only: no claim that a 1 GiB vault was read on a device.
+        let mut m = worst_case();
+        let total: u64 = m.references.iter().map(ObjectRef::length).sum();
+        let mut remaining = MAX_TOTAL_CIPHERTEXT - total;
+        for r in &mut m.references {
+            let add = remaining.min(MAX_RECORD_CIPHERTEXT as u64 - r.length);
+            r.length += add;
+            remaining -= add;
+            if remaining == 0 {
+                break;
+            }
+        }
+        assert_eq!(remaining, 0);
+        assert_eq!(
+            m.references.iter().map(ObjectRef::length).sum::<u64>(),
+            MAX_TOTAL_CIPHERTEXT
+        );
+        m.validate().unwrap();
+        let encoded = m.encode().unwrap();
+        Manifest::decode(&encoded).unwrap();
+        let reference = m
+            .references
+            .iter_mut()
+            .find(|r| r.length < MAX_RECORD_CIPHERTEXT as u64)
+            .unwrap();
+        reference.length += 1;
+        assert_eq!(m.validate().err(), Some(StoreError::LimitExceeded));
+        // Encoding is deliberately only a canonical codec. Acceptance and
+        // sealing enforce the budget, including on otherwise well-formed CBOR.
+        let over = m.encode().unwrap();
+        assert_eq!(
+            Manifest::decode(&over).err(),
+            Some(StoreError::LimitExceeded)
+        );
+        let h = header();
+        let scope = Scope {
+            vault_id: h.vault_id,
+            key_generation: h.key_generation,
+        };
+        let key = VaultKey::generate()
+            .unwrap()
+            .purpose_key::<purpose::Manifest>(
+                scope.vault_id,
+                scope.key_generation,
+                DerivationProfile::V1,
+            )
+            .unwrap();
+        assert_eq!(
+            seal_manifest(&key, scope, StoredDataProfile::V1, &m).err(),
+            Some(StoreError::LimitExceeded)
+        );
     }
 
     // 0012 §1: Budget inconsistency

@@ -198,11 +198,11 @@ pub(crate) fn scan_frame(frame: &[u8]) -> Option<SecretBytes> {
 }
 
 #[cfg(test)]
-pub(crate) const TEST_PAIR: &[u8] = b"\x85\x71qv/lan-pair-qr/v1\x01\x50synthetic-secret\x80\x60";
+pub(crate) const TEST_PAIR: &[u8] = b"\x85\x71qv/lan-pair-qr/v2\x02\x50synthetic-secret\x80\x60";
 /// [`TEST_PAIR`] with the endpoint hint 198.51.100.7:7777 (TEST-NET-2).
 #[cfg(test)]
 pub(crate) const TEST_PAIR_ADDR: &[u8] =
-    b"\x85\x71qv/lan-pair-qr/v1\x01\x50synthetic-secret\x81\x82\x44\xc6\x33\x64\x07\x19\x1e\x61\x60";
+    b"\x85\x71qv/lan-pair-qr/v2\x02\x50synthetic-secret\x81\x82\x44\xc6\x33\x64\x07\x19\x1e\x61\x60";
 /// The retired address-only QR (0014): refused like any foreign code.
 #[cfg(test)]
 pub(crate) const TEST_ADDR: &[u8] =

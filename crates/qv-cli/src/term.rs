@@ -138,8 +138,12 @@ impl<'a> Tty<'a> {
 
     /// Bound prompts by the lifetime of their pairing window.
     pub(crate) fn until(mut self, deadline: std::time::Instant) -> Self {
-        self.deadline = Some(deadline);
+        self.cap(deadline);
         self
+    }
+    /// Shortens prompt lifetime without allowing a later state to reset it.
+    pub(crate) fn cap(&mut self, deadline: std::time::Instant) {
+        self.deadline = Some(self.deadline.map_or(deadline, |old| old.min(deadline)));
     }
 
     /// Frontend callback waits must also end when their session locks.

@@ -92,7 +92,22 @@ network content is not generated from protected-value searches.
 | Temp files | No plaintext; explicit plaintext export is a separately confirmed operation to a user-selected path |
 | Autofill | Match verified app identity/web origin, not display labels or URL substrings; require choosing conflicted credentials |
 
+When clipboard ownership is replaced before completed delivery is established,
+report `ClipboardReplaced`, separately from ordinary expiry and cancellation.
+For X11, count only a successful text-property/notify delivery or the successful
+INCR terminator after all data acknowledgements; metadata requests do not count.
+Android cannot confirm consumption and reports observed replacement explicitly.
+Expiry means the value was offered for that interval, not proof of a paste.
+Cleanup must never clear a successor's selection.
+
 ### 4. Frontend boundary and webview contract
+
+Preview transport follows 0003 §6.4: protected per-range buffers, a Weak session
+binding, no detached vault key or plaintext response Vec, and revocation on
+close/navigation/lock. Do not hold a session lock during socket writes. In-flight
+kernel/renderer copies cannot be recalled or deterministically wiped. Loopback
+capabilities never enter logs and are separate from edit-transport credentials.
+These bounds constrain application-owned buffers, not total renderer/GPU RSS.
 
 4.1. The trusted client includes Rust crypto/model/store/sync code, platform
 adapters and any frontend that handles secret input or can request reveal.
@@ -139,6 +154,27 @@ Test lock during sync/reveal/autofill, all secret-input error paths, redacted
 logging, malicious HTML/URLs, blocked navigation/bridge access, swap/hibernation
 configuration reporting and clipboard ownership races on each supported target.
 
+### 6. LAN credential and paged-view lifetimes (0047)
+
+The owner approved implementation of this section and its references to
+§1/§4 for 0047 on 2026-11-09; the rest of this spec remains Draft.
+
+LAN application-owned setup, registration, login, RNG-adapter state and outputs
+are protected, redacted and zeroizing; audit dependency scratch separately.
+A's typed password and derived wrapping keys are wiped after local verification
+and ephemeral registration; B's after authenticating the grant/slot, before
+bulk transfer. Phrase/existing-key enrollment has no password gate. Cancel,
+lock and expiry destroy pending credentials and invalidate late prompt answers.
+Do not promise interruption inside an uninterruptible Argon2 call or complete
+erasure of library/framework/OS copies. RNG failure releases no message and
+uses no panic, zero seed or weaker fallback.
+
+Confidential metadata uses 0004 §7's evictable cache and bounded view pages.
+Zeroize query/sort/cursor/cache/page buffers when discarded; include allocated
+text capacity and normalization copies in accounting. Protected values/notes
+remain outside searching. No persistent plaintext search index or temporary
+plaintext file is permitted.
+
 ## Security Considerations
 
 Best-effort UI/OS cleanup is not proof of physical erasure. The locked-device
@@ -156,6 +192,12 @@ out of scope. Remotely supplied parser/rendering inputs remain in scope.
    evidence that they pass.
 
 ## Changelog
+
+- 2026-11-10: Define bounded protected preview streaming and capability/session
+  lifetimes, including explicit renderer/kernel/GPU cleanup limits (plan0050).
+- 2026-11-09: Report clipboard replacement before confirmed delivery separately
+  from expiry/cancel, tracking direct and INCR completion (T3-03, plan0050).
+- 2026-11-09: Record owner-approved LAN/paging secret lifetimes and explicit cleanup limits.
 
 - 2026-11-01: Owner directs optional Linux OS lock/sleep monitoring. Preserve
   manual/idle locking, clear unavailable-capability reporting and reduced-

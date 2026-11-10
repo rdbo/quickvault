@@ -28,6 +28,7 @@ audit-as-crates-io = false
 [[exemptions.aead]]
 version = "0.6.1"
 criteria = "safe-to-deploy"
+notes = "Plan0050: AEAD traits used by the pinned record/attachment cipher. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.aho-corasick]]
 version = "1.1.5"
@@ -47,8 +48,14 @@ criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.argon2]]
+version = "0.5.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates. Plan0050: password-derived keys with explicitly pinned Argon2id profiles; the 0.5 family bridges OPAQUE, the 0.6 family implements the main profile. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
+
+[[exemptions.argon2]]
 version = "0.6.0"
 criteria = "safe-to-deploy"
+notes = "Plan0050: password-derived keys with explicitly pinned Argon2id profiles; the 0.5 family bridges OPAQUE, the 0.6 family implements the main profile. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.async-io]]
 version = "2.6.0"
@@ -74,9 +81,15 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "1.5.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.base16ct]]
+version = "0.2.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
+
 [[exemptions.base64ct]]
 version = "1.8.3"
 criteria = "safe-to-deploy"
+notes = "Plan0050: constant-time base64 support in the password-hash dependency family. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.bindgen]]
 version = "0.72.1"
@@ -88,8 +101,14 @@ version = "2.13.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.blake2]]
+version = "0.10.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates. Plan0050: Argon2 compression/hash support. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
+
+[[exemptions.blake2]]
 version = "0.11.0"
 criteria = "safe-to-deploy"
+notes = "Plan0050: Argon2 compression/hash support. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.block]]
 version = "0.1.6"
@@ -99,6 +118,7 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 [[exemptions.block-buffer]]
 version = "0.12.1"
 criteria = "safe-to-deploy"
+notes = "Plan0050: digest block buffering. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.bytemuck]]
 version = "1.25.2"
@@ -151,6 +171,7 @@ criteria = "safe-to-deploy"
 [[exemptions.chacha20poly1305]]
 version = "0.11.0"
 criteria = "safe-to-deploy"
+notes = "Plan0050: record and attachment authenticated encryption. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.chrono]]
 version = "0.4.45"
@@ -159,6 +180,7 @@ criteria = "safe-to-deploy"
 [[exemptions.cipher]]
 version = "0.5.2"
 criteria = "safe-to-deploy"
+notes = "Plan0050: symmetric cipher interfaces. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.clang-sys]]
 version = "1.9.1"
@@ -180,6 +202,7 @@ criteria = "safe-to-deploy"
 [[exemptions.cmov]]
 version = "0.5.4"
 criteria = "safe-to-deploy"
+notes = "Plan0050: constant-time selection support. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.cocoa]]
 version = "0.26.1"
@@ -200,6 +223,11 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "2.5.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
+
+[[exemptions.const-oid]]
+version = "0.9.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
 
 [[exemptions.const_format]]
 version = "0.2.37"
@@ -261,18 +289,35 @@ version = "0.8.23"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.crypto-bigint]]
+version = "0.5.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
+
 [[exemptions.crypto-common]]
 version = "0.1.7"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval. Plan0050: cryptographic key/block interfaces. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.crypto-common]]
 version = "0.2.2"
 criteria = "safe-to-deploy"
+notes = "Plan0050: cryptographic key/block interfaces. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.ctutils]]
 version = "0.4.5"
 criteria = "safe-to-deploy"
+notes = "Plan0050: constant-time equality and selection at application boundaries. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
+
+[[exemptions.curve25519-dalek]]
+version = "4.1.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
+
+[[exemptions.curve25519-dalek-derive]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
 
 [[exemptions.darling]]
 version = "0.21.3"
@@ -294,6 +339,16 @@ version = "2.11.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
+[[exemptions.der]]
+version = "0.7.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
+
+[[exemptions.derive-where]]
+version = "1.7.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
+
 [[exemptions.derive_more]]
 version = "0.99.20"
 criteria = "safe-to-deploy"
@@ -302,11 +357,12 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 [[exemptions.digest]]
 version = "0.10.7"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval. Plan0050: hash/MAC interfaces and state. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.digest]]
 version = "0.11.3"
 criteria = "safe-to-deploy"
+notes = "Plan0050: hash/MAC interfaces and state. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.dioxus]]
 version = "0.7.10"
@@ -447,6 +503,11 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "1.19.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.elliptic-curve]]
+version = "0.13.8"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
+
 [[exemptions.endi]]
 version = "1.1.1"
 criteria = "safe-to-deploy"
@@ -475,6 +536,16 @@ criteria = "safe-to-deploy"
 version = "2.5.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
+
+[[exemptions.ff]]
+version = "0.13.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
+
+[[exemptions.fiat-crypto]]
+version = "0.2.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
 
 [[exemptions.field-offset]]
 version = "0.3.6"
@@ -528,10 +599,12 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 [[exemptions.futures-task]]
 version = "0.3.21"
 criteria = "safe-to-deploy"
+notes = "Plan0050: retained delta-audit base, not a currently compiled version. Removing it breaks the imported audit chain for the locked version. See plans/0050-complete-audit-remediation/DEPENDENCIES.md; the unaudited base remains development debt, and imported delta reviews do not audit that base."
 
 [[exemptions.futures-util]]
 version = "0.3.21"
 criteria = "safe-to-deploy"
+notes = "Plan0050: retained delta-audit base, not a currently compiled version. Removing it breaks the imported audit chain for the locked version. See plans/0050-complete-audit-remediation/DEPENDENCIES.md; the unaudited base remains development debt, and imported delta reviews do not audit that base."
 
 [[exemptions.fxhash]]
 version = "0.2.1"
@@ -637,6 +710,11 @@ version = "0.18.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
+[[exemptions.group]]
+version = "0.13.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
+
 [[exemptions.gtk]]
 version = "0.18.2"
 criteria = "safe-to-deploy"
@@ -693,12 +771,24 @@ criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
 [[exemptions.hkdf]]
+version = "0.12.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates. Plan0050: purpose-separated key derivation. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
+
+[[exemptions.hkdf]]
 version = "0.13.0"
 criteria = "safe-to-deploy"
+notes = "Plan0050: purpose-separated key derivation. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
+
+[[exemptions.hmac]]
+version = "0.12.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates. Plan0050: keyed authentication and HKDF support. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.hmac]]
 version = "0.13.0"
 criteria = "safe-to-deploy"
+notes = "Plan0050: keyed authentication and HKDF support. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.html5ever]]
 version = "0.29.1"
@@ -718,6 +808,7 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 [[exemptions.hybrid-array]]
 version = "0.4.15"
 criteria = "safe-to-deploy"
+notes = "Plan0050: fixed-size cryptographic buffers. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.iana-time-zone]]
 version = "0.1.65"
@@ -781,10 +872,12 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 [[exemptions.inout]]
 version = "0.2.5"
 criteria = "safe-to-deploy"
+notes = "Plan0050: cipher input/output buffers. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.itertools]]
 version = "0.10.3"
 criteria = "safe-to-deploy"
+notes = "Plan0050: retained delta-audit base, not a currently compiled version. Removing it breaks the imported audit chain for the locked version. See plans/0050-complete-audit-remediation/DEPENDENCIES.md; the unaudited base remains development debt, and imported delta reviews do not audit that base."
 
 [[exemptions.itertools]]
 version = "0.13.0"
@@ -959,8 +1052,9 @@ criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.libsqlite3-sys]]
-version = "0.38.2"
+version = "0.39.1"
 criteria = "safe-to-deploy"
+notes = "Plan 0047: owner-approved SQLite advisory repair (2026-11-09); carry forward the existing exact development baseline as unaudited debt, not certification or release approval."
 
 [[exemptions.libxdo]]
 version = "0.6.0"
@@ -1141,6 +1235,12 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 [[exemptions.once_cell]]
 version = "1.12.0"
 criteria = "safe-to-deploy"
+notes = "Plan0050: retained delta-audit base, not a currently compiled version. Removing it breaks the imported audit chain for the locked version. See plans/0050-complete-audit-remediation/DEPENDENCIES.md; the unaudited base remains development debt, and imported delta reviews do not audit that base."
+
+[[exemptions.opaque-ke]]
+version = "4.0.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
 
 [[exemptions.openssl]]
 version = "0.10.81"
@@ -1181,6 +1281,11 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "0.9.12"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.password-hash]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
 
 [[exemptions.pastey]]
 version = "0.2.3"
@@ -1264,6 +1369,7 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 [[exemptions.poly1305]]
 version = "0.9.1"
 criteria = "safe-to-deploy"
+notes = "Plan0050: AEAD authenticator. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.potential_utf]]
 version = "0.1.6"
@@ -1425,6 +1531,7 @@ criteria = "safe-to-deploy"
 [[exemptions.region]]
 version = "4.0.1"
 criteria = "safe-to-deploy"
+notes = "Plan0050: best-effort protected-memory OS adapter; not a full memory-erasure guarantee. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.rfd]]
 version = "0.17.2"
@@ -1437,12 +1544,14 @@ criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.rusqlite]]
-version = "0.40.2"
+version = "0.41.0"
 criteria = "safe-to-deploy"
+notes = "Plan 0047: owner-approved SQLite advisory repair (2026-11-09); carry forward the existing exact development baseline as unaudited debt, not certification or release approval."
 
 [[exemptions.rustix]]
 version = "1.1.5"
 criteria = "safe-to-deploy"
+notes = "Plan0050: memory/filesystem/process OS boundaries. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.rustls]]
 version = "0.23.46"
@@ -1477,6 +1586,11 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "1.2.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.sec1]]
+version = "0.7.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
 
 [[exemptions.security-framework]]
 version = "3.7.0"
@@ -1529,15 +1643,17 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 [[exemptions.sha1]]
 version = "0.10.7"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval. Plan0050: legacy TOTP HMAC-SHA-1 compatibility only, not vault authentication. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.sha1]]
 version = "0.11.0"
 criteria = "safe-to-deploy"
+notes = "Plan0050: legacy TOTP HMAC-SHA-1 compatibility only, not vault authentication. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.sha2]]
 version = "0.11.1"
 criteria = "safe-to-deploy"
+notes = "Plan0050: SHA-256/SHA-512 hash and authentication profiles. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.signal-hook]]
 version = "0.3.18"
@@ -1793,6 +1909,7 @@ criteria = "safe-to-deploy"
 [[exemptions.universal-hash]]
 version = "0.6.1"
 criteria = "safe-to-deploy"
+notes = "Plan0050: Poly1305 interfaces. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.url]]
 version = "2.5.8"
@@ -1823,6 +1940,11 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "0.9.5"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.voprf]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
 
 [[exemptions.walkdir]]
 version = "2.5.0"
@@ -1861,6 +1983,7 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 [[exemptions.wasm-bindgen-macro]]
 version = "0.2.99"
 criteria = "safe-to-deploy"
+notes = "Plan0050: retained delta-audit base, not a currently compiled version. Removing it breaks the imported audit chain for the locked version. See plans/0050-complete-audit-remediation/DEPENDENCIES.md; the unaudited base remains development debt, and imported delta reviews do not audit that base."
 
 [[exemptions.wasm-bindgen-macro-support]]
 version = "0.2.129"
@@ -1869,6 +1992,7 @@ criteria = "safe-to-deploy"
 [[exemptions.wasm-bindgen-shared]]
 version = "0.2.100"
 criteria = "safe-to-deploy"
+notes = "Plan0050: retained delta-audit base, not a currently compiled version. Removing it breaks the imported audit chain for the locked version. See plans/0050-complete-audit-remediation/DEPENDENCIES.md; the unaudited base remains development debt, and imported delta reviews do not audit that base."
 
 [[exemptions.web-sys]]
 version = "0.3.106"
@@ -2236,6 +2360,11 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "0.1.8"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.zeroize_derive]]
+version = "1.5.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
 
 [[exemptions.zerotrie]]
 version = "0.2.5"

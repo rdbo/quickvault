@@ -6,12 +6,13 @@
 //! - [`Session::open_sync_window`] then [`SyncWindow::run`]: the offering
 //!   device. The window's code is shown to the user, and the call blocks
 //!   until its one session ends or the window closes. A new device's hello
-//!   asks the user to compare codes ([`ApproverUi`]); a sync needs no input.
+//!   requires comparison and password approval on the password route
+//!   ([`ApproverUi`]); key routes need no password.
 //! - [`Session::sync_with_code`]: an unlocked copy of the same vault proves
 //!   itself to the window and runs one sync round.
 //! - [`Core::join_new_device`]: a device without this vault receives and
-//!   verifies it, confirms it, checks the master password, creates the
-//!   vault at a new path and unlocks it (0013 §10).
+//!   authenticates with a password or recovery phrase before transfer, verifies
+//!   and confirms staging, then publishes an unlocked vault (0013 §15).
 //!
 //! Each side merges through the archive acceptance path and commits
 //! locally; local acceptance and peer receipt are reported separately
@@ -23,8 +24,8 @@
 //! mutex is held only for short reads and commits, never while waiting on
 //! the network or the user. A session lock or the caller's
 //! [`CancelToken`] closes a window, a sync or a join within about 100 ms,
-//! except inside the frontend's own confirmation prompt, which must end
-//! itself on cancel.
+//! except inside uninterruptible KDF work or the frontend's own prompt,
+//! which must end itself on cancel. Safe points recheck the original deadline.
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
@@ -32,19 +33,18 @@ use std::sync::atomic::Ordering;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use qv_crypto::lan::ProofRoot;
 use qv_crypto::{KeyGeneration, MasterPassword, SecretBytes, VaultId};
 use qv_model::ObjectId;
 use qv_store::{LanServeState, LanStaging, StoreError, VaultFile};
 use qv_sync::lan::{
     self as sync, Accepted, Approved, ApproverContext, ApproverVault, Confirm, EndpointPolicy,
-    ExchangeVault, JoinerContext, JoinerVault, Outcome, RoundReport, Sealer,
+    ExchangeVault, JoinerContext, JoinerVault, Outcome, RoundReport,
 };
 
 pub use qv_platform::net::local_addresses;
 pub use qv_sync::lan::{
-    JoinCode, JoinMode, JoinerUi, LanError, LanQrInfo, LanTimeouts, ListenScope,
-    PAIRING_WINDOW_MAX, Sas, parse_endpoint,
+    EnrollmentCredential, JoinCode, JoinMode, JoinerUi, LanError, LanQrInfo, LanTimeouts,
+    ListenScope, PAIRING_WINDOW_MAX, Sas, parse_endpoint,
 };
 
 /// Inspect a scanned LAN code without initiating any network operation.
@@ -114,6 +114,8 @@ pub enum Served {
     /// A new device joined (0013 §4.7). Without `peer_confirmed` it may not
     /// have finished joining; `failure` says why.
     Joined {
+        /// A password grant was sealed; receipt may still be unknown.
+        key_disclosed: bool,
         /// Whether the new device's `Done` arrived.
         peer_confirmed: bool,
         /// Why the transfer failed after the grant, if it did.
@@ -149,9 +151,15 @@ pub struct SyncReport {
 
 /// The offering user's decision for a new device (0013 §4.5).
 pub trait ApproverUi {
+    /// Admission has closed. Remove the one-use code from the display; the
+    /// accepted peer must still authenticate.
+    fn admitted(&mut self) {}
     /// Shows the six-digit `sas` and the vault's name, and returns `true`
     /// once the user confirmed that both screens match.
     fn confirm(&mut self, sas: &str, vault_name: &str) -> bool;
+    /// Reauthenticate the offering device's current password. Local typos may
+    /// be corrected without giving the remote device another attempt.
+    fn master_password(&mut self, retry: bool) -> Option<MasterPassword>;
 }
 
 macro_rules! redacted {
@@ -302,9 +310,11 @@ impl SyncWindow {
             .map_err(CoreError::Lan)?;
         Ok(match served {
             Approved::Joined {
+                key_disclosed,
                 peer_confirmed,
                 failure,
             } => Served::Joined {
+                key_disclosed,
                 peer_confirmed,
                 failure,
             },
@@ -316,9 +326,18 @@ impl SyncWindow {
 struct UiConfirm<'u>(&'u mut dyn ApproverUi);
 
 impl Confirm for UiConfirm<'_> {
+    fn admitted(&mut self) {
+        self.0.admitted();
+    }
     fn confirm(&mut self, sas: &Sas, vault_name: &[u8]) -> bool {
         let name = core::str::from_utf8(vault_name).unwrap_or("");
         self.0.confirm(&digits(sas), name)
+    }
+    fn password(&mut self, sas: &Sas, vault_name: &[u8], retry: bool) -> Option<MasterPassword> {
+        if !retry && !self.confirm(sas, vault_name) {
+            return None;
+        }
+        self.0.master_password(retry)
     }
 }
 
@@ -599,14 +618,11 @@ impl ApproverVault for SessionApprover<'_> {
             .read(|ctx| {
                 let v = &ctx.open.vault;
                 let h = v.header();
-                let name = ctx
-                    .open
-                    .index
-                    .meta()
-                    .ok_or(CoreError::Internal)?
-                    .name
-                    .expose()
-                    .as_bytes();
+                let meta = ctx.view(ctx.open.index.vault_meta)?;
+                let crate::index::ViewData::Meta(meta) = &**meta else {
+                    return Err(CoreError::Internal);
+                };
+                let name = meta.name.expose().as_bytes();
                 Ok(ApproverContext {
                     vault_id: h.vault_id,
                     key_generation: h.key_generation,
@@ -614,31 +630,7 @@ impl ApproverVault for SessionApprover<'_> {
                         o.copy_from_slice(name);
                         Ok::<(), CoreError>(())
                     })?,
-                    root: ProofRoot::derive(
-                        v.vault_key(),
-                        h.vault_id,
-                        h.key_generation,
-                        h.derivation_profile,
-                    )
-                    .map_err(crate::error::crypto)?,
                 })
-            })
-            .map_err(lan)
-    }
-
-    fn grant(&self, seal: &mut Sealer<'_>) -> Result<Vec<u8>, LanError> {
-        // VK is encoded into a wiped buffer and sealed inside this short
-        // read; the driver sends the record after it (0037 finding 4).
-        self.session
-            .read(|ctx| {
-                if self.exchange.cancelled() {
-                    return Err(CoreError::Cancelled);
-                }
-                let v = &ctx.open.vault;
-                let h = v.header();
-                let plaintext = sync::grant_plaintext(v.vault_key(), h.vault_id, h.key_generation)
-                    .map_err(CoreError::Lan)?;
-                seal(&plaintext).map_err(CoreError::Lan)
             })
             .map_err(lan)
     }
@@ -652,13 +644,6 @@ fn proof_root(session: &Session) -> Result<JoinerContext, LanError> {
             Ok(JoinerContext {
                 vault_id: h.vault_id,
                 key_generation: h.key_generation,
-                root: ProofRoot::derive(
-                    v.vault_key(),
-                    h.vault_id,
-                    h.key_generation,
-                    h.derivation_profile,
-                )
-                .map_err(crate::error::crypto)?,
             })
         })
         .map_err(lan)
@@ -670,6 +655,22 @@ struct SessionJoiner<'s> {
 }
 
 impl JoinerVault for SessionJoiner<'_> {
+    fn key_auth(&self, t0: [u8; 32]) -> Result<qv_crypto::lan::v2::KeyAuthentication, LanError> {
+        self.session
+            .read(|ctx| {
+                ctx.check_cancel()?;
+                if self.exchange.cancelled() {
+                    return Err(CoreError::Cancelled);
+                }
+                qv_crypto::lan::v2::KeyAuthentication::new(
+                    ctx.open.vault.vault_key(),
+                    qv_crypto::lan::v2::AuthMode::KeySync,
+                    t0,
+                )
+                .map_err(crate::error::crypto)
+            })
+            .map_err(lan)
+    }
     fn context(&self) -> Result<JoinerContext, LanError> {
         proof_root(self.session)
     }
@@ -677,9 +678,9 @@ impl JoinerVault for SessionJoiner<'_> {
 
 impl Core {
     /// Joins from another device's code as a new device (0013 §4.7, §10):
-    /// receives and verifies the vault into private staging, asks the user
-    /// to confirm the vault and enter its master password, creates it at the
-    /// new path `destination`, and unlocks it. Nothing appears at
+    /// authenticates using the password or recovery words, receives and verifies
+    /// private staging, confirms the vault, and publishes it at `destination`
+    /// without retaining or asking for a publication password. Nothing appears at
     /// `destination` before the last step, and nothing about the other
     /// device is stored.
     pub fn join_new_device(
@@ -698,7 +699,7 @@ impl Core {
         self.platform_gate()?;
         self.check_anchor_location(destination)?;
         let cancelled = || cancel.is_some_and(CancelToken::is_cancelled);
-        let joined = sync::join_new_device(
+        let mut joined = sync::join_new_device(
             code,
             &options.extra_endpoints,
             EndpointPolicy {
@@ -710,16 +711,58 @@ impl Core {
             &cancelled,
         )
         .map_err(CoreError::Lan)?;
-        let password: MasterPassword = joined.password;
-        VaultFile::create_from_lan(
+        let expires = joined.expires;
+        let cancelled = || cancelled() || Instant::now() >= expires;
+        // Core's complete structural projection is checked against the private,
+        // source-bound staging before publication. No cache-residency veto.
+        let manifest = joined.staging.manifest().clone();
+        let preflight = Index::from_manifest(
+            &manifest,
+            &mut |record, version| {
+                joined
+                    .staging
+                    .read_version(&joined.vk, record, version)
+                    .map_err(Into::into)
+            },
+            &cancelled,
+            MAX_VIEW_BYTES,
+        )?;
+        if cancelled() {
+            return Err(CoreError::Cancelled);
+        }
+        let tag = SessionTag::generate()?;
+        let vault = VaultFile::create_from_verified_lan(
             destination,
             joined.staging,
             joined.proof,
-            &joined.vk,
+            joined.vk,
             &self.anchors,
             &cancelled,
         )?;
-        self.unlock(destination, &password, cancel)
+        #[cfg(test)]
+        crate::session::hooks::reached(crate::session::hooks::Point::LanPublished);
+        if cancelled() {
+            return Err(CoreError::Store(StoreError::PublicationIncomplete));
+        }
+        // Any failure after publication must say that the destination exists.
+        let session = Session::open_indexed(
+            vault,
+            preflight,
+            tag,
+            self.time.clone(),
+            qv_store::AnchorStatus::Verified,
+            self.snapshots.clone(),
+            false,
+        );
+        let session = self
+            .bind_platform(session)
+            .map_err(|_| CoreError::Store(StoreError::PublicationIncomplete))?;
+        #[cfg(test)]
+        crate::session::hooks::reached(crate::session::hooks::Point::LanBound);
+        if cancelled() {
+            return Err(CoreError::Store(StoreError::PublicationIncomplete));
+        }
+        Ok(session)
     }
 }
 
@@ -796,15 +839,19 @@ mod repair_tests {
             session: &a,
             exchange: local,
         };
-        let mut sealed = false;
         assert_eq!(
-            approver.grant(&mut |_| {
-                sealed = true;
-                Ok(Vec::new())
-            }),
-            Err(LanError::Cancelled)
+            sync::CredentialApprover::authenticate_password(
+                &approver,
+                crate::testutil::pw(crate::testutil::PASSWORD),
+                &[0; 32],
+                &[0; 96]
+            )
+            .err(),
+            Some(LanError::Timeout)
         );
-        assert!(!sealed);
         assert_eq!(seq(&a), before);
     }
 }
+
+#[path = "lan_auth.rs"]
+mod auth;

@@ -15,10 +15,8 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
 use qv_crypto::SecretBytes;
-use qv_crypto::lan::{RecordOpener, RecordSealer};
 use qv_protocol::ProtocolError;
 use qv_protocol::frame::{FramePhase, read_frame, write_frame};
-use qv_protocol::lan::ErrorMsg;
 
 use super::LanError;
 
@@ -33,9 +31,6 @@ pub(crate) struct Conn<'c> {
     cap: Option<Instant>,
     /// Why the last I/O failed, when it was a deadline or a cancel.
     reason: Option<LanError>,
-    /// The last record of an abort is being sent: only its deadline
-    /// applies, so a cancel can still tell the peer.
-    closing: bool,
 }
 
 impl<'c> Conn<'c> {
@@ -58,7 +53,6 @@ impl<'c> Conn<'c> {
             deadline: Instant::now(),
             cap: None,
             reason: None,
-            closing: false,
         })
     }
 
@@ -74,7 +68,7 @@ impl<'c> Conn<'c> {
     }
 
     fn wait(&mut self) -> std::io::Result<()> {
-        if !self.closing && (self.cancelled)() {
+        if (self.cancelled)() {
             self.reason = Some(LanError::Cancelled);
         } else if Instant::now() >= self.deadline {
             self.reason = Some(LanError::Timeout);
@@ -116,7 +110,7 @@ impl<'c> Conn<'c> {
     /// Writes one frame of `phase`, checking a cancel first (see
     /// [`Self::recv_frame`]).
     pub(crate) fn send_frame(&mut self, phase: FramePhase, body: &[u8]) -> Result<(), LanError> {
-        if !self.closing && (self.cancelled)() {
+        if (self.cancelled)() {
             return Err(LanError::Cancelled);
         }
         self.reason = None;
@@ -168,84 +162,126 @@ impl Write for IoWrite<'_, '_> {
     }
 }
 
-/// Records under one pair of direction keys (0013 §6).
-pub(crate) struct Channel<'c> {
+/// Profile2 channel. Epoch replacement consumes the old channel and preserves
+/// its socket/deadline. Neither receive nor transition ever tries another key.
+/// Bulk exchange takes the default final-epoch specialization only.
+pub(crate) struct V2Channel<'c, E: qv_crypto::lan::v2::Epoch = qv_crypto::lan::v2::FinalEpoch> {
     pub(crate) conn: Conn<'c>,
-    sealer: RecordSealer,
-    opener: RecordOpener,
+    pub(crate) sealer: qv_crypto::lan::v2::RecordSealer<E>,
+    opener: qv_crypto::lan::v2::RecordOpener<E>,
+    role: qv_crypto::lan::v2::Role,
+    phase: FramePhase,
     buf: Vec<u8>,
-    /// The peer sent an error record: answer nothing more.
     peer_failed: bool,
+    errors_allowed: bool,
 }
 
-impl<'c> Channel<'c> {
-    pub(crate) fn new(conn: Conn<'c>, sealer: RecordSealer, opener: RecordOpener) -> Self {
+impl<'c> V2Channel<'c, qv_crypto::lan::v2::InitialEpoch> {
+    pub(crate) fn initial(
+        conn: Conn<'c>,
+        keys: qv_crypto::lan::v2::TrafficKeys<qv_crypto::lan::v2::InitialEpoch>,
+        role: qv_crypto::lan::v2::Role,
+    ) -> Self {
+        let (sealer, opener) = keys.split(role);
         Self {
             conn,
             sealer,
             opener,
+            role,
+            phase: FramePhase::Credential,
             buf: Vec::new(),
             peer_failed: false,
+            errors_allowed: false,
         }
     }
-
-    /// Seals and sends one message within `limit`. A cancel is checked
-    /// before sealing, so a refused send never consumes a sequence number
-    /// that the abort record would then skip.
-    pub(crate) fn send(&mut self, msg: &[u8], limit: Duration) -> Result<(), LanError> {
-        if !self.conn.closing && (self.conn.cancelled)() {
-            return Err(LanError::Cancelled);
+    pub(crate) fn finish(
+        self,
+        keys: qv_crypto::lan::v2::TrafficKeys<qv_crypto::lan::v2::FinalEpoch>,
+    ) -> Result<V2Channel<'c>, LanError> {
+        let (sealer, opener) = keys.split(self.role);
+        if sealer.binding() != self.sealer.binding() {
+            self.conn.close();
+            return Err(LanError::Integrity);
         }
-        let record = self.seal(msg)?;
+        // Moving only the connection drops both epoch0 keys and its buffer.
+        Ok(V2Channel {
+            conn: self.conn,
+            sealer,
+            opener,
+            role: self.role,
+            phase: FramePhase::Credential,
+            buf: Vec::new(),
+            peer_failed: false,
+            errors_allowed: false,
+        })
+    }
+}
+impl V2Channel<'_> {
+    /// Called only after the state-specific credential/final-key checks. This
+    /// permits normal exchange framing and authenticated exchange errors.
+    pub(crate) fn begin_exchange(&mut self) {
+        self.phase = FramePhase::Session;
+        self.errors_allowed = true;
+    }
+}
+impl<E: qv_crypto::lan::v2::Epoch> V2Channel<'_, E> {
+    pub(crate) fn check(&self) -> Result<(), LanError> {
+        if (self.conn.cancelled)() {
+            Err(LanError::Cancelled)
+        } else if self.conn.cap.is_some_and(|cap| Instant::now() >= cap) {
+            Err(LanError::Timeout)
+        } else {
+            Ok(())
+        }
+    }
+    pub(crate) fn send(&mut self, msg: &[u8], limit: Duration) -> Result<(), LanError> {
+        self.check()?;
+        if self.phase == FramePhase::Credential && msg.len() > qv_protocol::lan::v2::CREDENTIAL_MAX
+        {
+            return Err(LanError::Limit);
+        }
+        let record = self.sealer.seal(msg).map_err(|_| LanError::Integrity)?;
         self.send_sealed(&record, limit)
     }
-
-    /// Seals one message into the next record without sending it.
-    pub(crate) fn seal(&mut self, msg: &[u8]) -> Result<Vec<u8>, LanError> {
-        self.sealer.seal(msg).map_err(|_| LanError::Limit)
-    }
-
-    /// Sends a record from [`Self::seal`] within `limit`.
     pub(crate) fn send_sealed(&mut self, record: &[u8], limit: Duration) -> Result<(), LanError> {
+        self.check()?;
         self.conn.within(limit, None);
-        self.conn.send_frame(FramePhase::Session, record)
+        self.conn.send_frame(self.phase, record)
     }
-
-    /// Receives and opens one message within `limit` (and before `cap`). An
-    /// error record from the peer becomes its [`LanError`].
     pub(crate) fn recv(
         &mut self,
         limit: Duration,
-        cap: Option<std::time::Instant>,
+        cap: Option<Instant>,
     ) -> Result<SecretBytes, LanError> {
+        self.check()?;
         self.conn.within(limit, cap);
-        self.conn.recv_frame(FramePhase::Session, &mut self.buf)?;
+        self.conn.recv_frame(self.phase, &mut self.buf)?;
         let msg = self
             .opener
             .open(&self.buf)
             .map_err(|_| LanError::Integrity)?;
-        match ErrorMsg::peek(msg.expose_secret()) {
-            Ok(Some(e)) => {
+        match qv_protocol::lan::v2::ErrorMsg::peek(msg.expose_secret()) {
+            Ok(Some(error)) => {
                 self.peer_failed = true;
-                Err(LanError::from_peer(e.code))
+                Err(LanError::from_peer(error.code))
             }
             Ok(None) => Ok(msg),
             Err(_) => Err(LanError::Protocol),
         }
     }
-
-    /// Aborts after a local failure: sends its error record when it has
-    /// one (best effort, 1 s), closes, and returns the error.
-    pub(crate) fn abort(&mut self, e: LanError) -> LanError {
-        if !self.peer_failed
-            && let Some(code) = e.wire_code()
-            && let Ok(msg) = ErrorMsg::encode(code)
+    pub(crate) fn abort(&mut self, error: LanError) -> LanError {
+        // Credential failures are deliberately silent, including component
+        // decoding/wrong password. A sends no final error before confirming B.
+        if self.errors_allowed
+            && !self.peer_failed
+            && self.check().is_ok()
+            && let Some(code) = error.wire_code()
+            && let Ok(msg) = qv_protocol::lan::v2::ErrorMsg::encode(code)
         {
-            self.conn.closing = true;
             let _ = self.send(&msg, Duration::from_secs(1));
         }
         self.conn.close();
-        e
+        error
     }
 }
 
@@ -274,22 +310,6 @@ pub(crate) fn connect(
             Ok(Err(_)) | Err(RecvTimeoutError::Disconnected) => return Ok(None),
             Err(RecvTimeoutError::Timeout) => {}
         }
-    }
-}
-
-/// Runs `f`; on error, aborts the channel with it.
-pub(crate) fn guarded<T>(
-    ch: &mut Channel<'_>,
-    f: impl FnOnce(&mut Channel<'_>) -> Result<T, LanError>,
-) -> Result<T, LanError> {
-    match f(ch) {
-        Ok(v) => Ok(v),
-        // A peer-reported error or a transport failure: just close.
-        Err(e @ (LanError::Timeout | LanError::Io | LanError::PeerCancelled)) => {
-            ch.conn.close();
-            Err(e)
-        }
-        Err(e) => Err(ch.abort(e)),
     }
 }
 

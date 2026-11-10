@@ -12,8 +12,21 @@ use std::{
     os::fd::OwnedFd,
     path::{Component, Path},
 };
+fn errno_error(e: rustix::io::Errno) -> PlatformError {
+    match e {
+        rustix::io::Errno::NOSPC | rustix::io::Errno::DQUOT | rustix::io::Errno::FBIG => {
+            PlatformError::StorageCapacity
+        }
+        _ => PlatformError::Io,
+    }
+}
+fn io_error(e: std::io::Error) -> PlatformError {
+    e.raw_os_error().map_or(PlatformError::Io, |code| {
+        errno_error(rustix::io::Errno::from_raw_os_error(code))
+    })
+}
 fn directory(fd: &OwnedFd) -> Result<(), PlatformError> {
-    let s = fs::fstat(fd).map_err(|_| PlatformError::Io)?;
+    let s = fs::fstat(fd).map_err(errno_error)?;
     if FileType::from_raw_mode(s.st_mode) != FileType::Directory
         || s.st_mode & 0o022 != 0
         || (s.st_uid != 0 && s.st_uid != rustix::process::geteuid().as_raw())
@@ -45,13 +58,13 @@ fn parent(path: &Path) -> Result<(OwnedFd, OsString), PlatformError> {
         flags,
         Mode::empty(),
     )
-    .map_err(|_| PlatformError::Io)?;
+    .map_err(errno_error)?;
     directory(&fd)?;
     for part in &parts[..parts.len() - 1] {
         match part {
             Component::RootDir | Component::CurDir => {}
             Component::Normal(p) => {
-                fd = fs::openat(&fd, *p, flags, Mode::empty()).map_err(|_| PlatformError::Io)?;
+                fd = fs::openat(&fd, *p, flags, Mode::empty()).map_err(errno_error)?;
                 directory(&fd)?;
             }
             _ => return Err(PlatformError::Io),
@@ -78,8 +91,8 @@ impl Input {
             OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
             Mode::empty(),
         )
-        .map_err(|_| PlatformError::Io)?;
-        let initial = fs::fstat(&fd).map_err(|_| PlatformError::Io)?;
+        .map_err(errno_error)?;
+        let initial = fs::fstat(&fd).map_err(errno_error)?;
         if FileType::from_raw_mode(initial.st_mode) != FileType::RegularFile {
             return Err(PlatformError::Io);
         }
@@ -153,7 +166,7 @@ impl Output {
             OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             Mode::RUSR | Mode::WUSR,
         )
-        .map_err(|_| PlatformError::Io)?;
+        .map_err(errno_error)?;
         Ok(Self {
             file: File::from(fd),
             parent,
@@ -163,14 +176,14 @@ impl Output {
     }
     /// Confirm the path still names this file, then sync file and directory.
     pub fn finish(&self) -> Result<(), PlatformError> {
-        let held = fs::fstat(&self.file).map_err(|_| PlatformError::Io)?;
+        let held = fs::fstat(&self.file).map_err(errno_error)?;
         let named = fs::statat(&self.parent, &self.name, fs::AtFlags::SYMLINK_NOFOLLOW)
-            .map_err(|_| PlatformError::Io)?;
+            .map_err(errno_error)?;
         if (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino) {
             return Err(PlatformError::Io);
         }
-        self.file.sync_all().map_err(|_| PlatformError::Io)?;
-        fs::fsync(&self.parent).map_err(|_| PlatformError::Io)
+        self.file.sync_all().map_err(io_error)?;
+        fs::fsync(&self.parent).map_err(errno_error)
     }
 }
 impl Write for Output {

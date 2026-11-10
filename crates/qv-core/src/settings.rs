@@ -61,12 +61,11 @@ impl Session {
     /// The vault's generator defaults, or the 0010 defaults.
     pub fn generator_defaults(&self) -> Result<GeneratorSettings, CoreError> {
         self.read(|ctx| {
-            Ok(ctx
-                .open
-                .index
-                .meta()
-                .and_then(|m| m.generator.clone())
-                .unwrap_or_default())
+            let view = ctx.view(ctx.open.index.vault_meta)?;
+            let crate::index::ViewData::Meta(meta) = &**view else {
+                return Err(CoreError::Internal);
+            };
+            Ok(meta.generator.clone().unwrap_or_default())
         })
     }
 

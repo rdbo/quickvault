@@ -2,34 +2,25 @@
 
 //! The metadata index (spec 0004 §5.1, 0008 §1.2, 0005 §2.3–2.5, 0003 §4).
 //!
-//! Built once after unlock from every record's decrypted heads, and updated
-//! from the new head after each commit. Per record it keeps the kind, the
-//! head version IDs, the merge status (live, trash, conflict, finally
-//! deleted) and, from the representative version (live view, else trash
-//! view), the **non-protected** metadata that listings and search need:
-//! titles, names, type hints, icons, timestamps, and the values of
-//! non-protected `text`, `url` and `email` fields. Protected values, notes
-//! and other field kinds are never retained; they are decrypted on demand.
-//! Every retained string is a zeroizing [`Text`], and the total is bounded
-//! by a budget ([`MAX_VIEW_BYTES`]). Decrypted versions are dropped as soon
-//! as their record is indexed.
-//!
-//! References inside authenticated data can still dangle (any VK holder can
-//! author records): a missing group puts an entry under recovered items, a
-//! missing attachment owner is ignored.
+//! Structural metadata remains resident; representative text is loaded on demand
+//! into an evictable, zeroizing cache. A valid record that cannot fit the cache
+//! is read transiently. Protected values and notes never enter searchable views.
+//! Conflict heads are summarized one at a time before selecting a representative.
 
 use std::collections::BTreeMap;
 
 use qv_crypto::{GeneratorSettings, RecordId};
 use qv_model::{
-    FieldKind, FieldValue, GroupNode, GroupTree, Payload, RecordBody, RecordKind, RecordStatus,
-    RecordVersion, Text, Timestamp, VersionId, View, merge_record, project_groups,
+    FieldKind, FieldValue, GroupNode, GroupTree, HeadSummary, Payload, RecordBody, RecordKind,
+    RecordStatus, RecordVersion, Text, Timestamp, VersionId, Versioned, View, merge_record,
+    merge_summaries, project_groups,
 };
 use qv_store::UnlockedVault;
 
 use crate::error::{CoreError, data};
+use crate::view_cache::{ViewCache, ViewRef};
 
-/// The most text the index retains (development value, frozen in 1.16).
+/// Ceiling for owned cache, query, sort-key and cursor text (0004 §7).
 pub(crate) const MAX_VIEW_BYTES: usize = 64 * 1024 * 1024;
 
 /// A non-protected field value kept for listings and search.
@@ -48,6 +39,7 @@ pub(crate) struct EntryInfo {
     pub(crate) modified_at: Timestamp,
     pub(crate) expires_at: Option<Timestamp>,
     pub(crate) deleted_at: Option<Timestamp>,
+    pub(crate) delete_operation: Option<qv_model::DeleteOperationId>,
 }
 
 pub(crate) struct GroupInfo {
@@ -56,19 +48,29 @@ pub(crate) struct GroupInfo {
     pub(crate) order: Text,
     pub(crate) parent: Option<RecordId>,
     pub(crate) deleted_at: Option<Timestamp>,
+    pub(crate) delete_operation: Option<qv_model::DeleteOperationId>,
 }
 
-pub(crate) struct MetaInfo {
+pub(crate) struct MetaView {
     pub(crate) name: Text,
     pub(crate) retention_days: u32,
     pub(crate) generator: Option<GeneratorSettings>,
 }
 
+impl Drop for MetaView {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        if let Some(GeneratorSettings::Characters(c)) = &mut self.generator {
+            c.exclude_chars.zeroize();
+        }
+    }
+}
+
 /// What the index keeps of a record's representative.
-pub(crate) enum Data {
+pub(crate) enum ViewData {
     Entry(EntryInfo),
     Group(GroupInfo),
-    Meta(MetaInfo),
+    Meta(MetaView),
     Attachment {
         entry: RecordId,
     },
@@ -76,10 +78,54 @@ pub(crate) enum Data {
     None,
 }
 
+pub(crate) struct EntryMeta {
+    pub(crate) group: RecordId,
+    pub(crate) deleted_at: Option<Timestamp>,
+    pub(crate) delete_operation: Option<qv_model::DeleteOperationId>,
+}
+pub(crate) struct GroupMeta {
+    pub(crate) parent: Option<RecordId>,
+    pub(crate) deleted_at: Option<Timestamp>,
+    pub(crate) delete_operation: Option<qv_model::DeleteOperationId>,
+}
+pub(crate) struct MetaInfo {
+    pub(crate) retention_days: u32,
+}
+/// Text-free structural projection; independent of cache residency.
+pub(crate) enum Data {
+    Entry(EntryMeta),
+    Group(GroupMeta),
+    Meta(MetaInfo),
+    Attachment { entry: RecordId },
+    None,
+}
+impl Data {
+    fn of(view: &ViewData) -> Self {
+        match view {
+            ViewData::Entry(e) => Self::Entry(EntryMeta {
+                group: e.group,
+                deleted_at: e.deleted_at,
+                delete_operation: e.delete_operation,
+            }),
+            ViewData::Group(g) => Self::Group(GroupMeta {
+                parent: g.parent,
+                deleted_at: g.deleted_at,
+                delete_operation: g.delete_operation,
+            }),
+            ViewData::Meta(m) => Self::Meta(MetaInfo {
+                retention_days: m.retention_days,
+            }),
+            ViewData::Attachment { entry } => Self::Attachment { entry: *entry },
+            ViewData::None => Self::None,
+        }
+    }
+}
+
 pub(crate) struct RecordInfo {
     pub(crate) kind: RecordKind,
     /// Head version IDs, ascending.
     pub(crate) heads: Vec<VersionId>,
+    pub(crate) payload_heads: usize,
     pub(crate) status: RecordStatus,
     /// The representative's version ID.
     pub(crate) shown: Option<VersionId>,
@@ -87,7 +133,9 @@ pub(crate) struct RecordInfo {
     pub(crate) latest: Timestamp,
     pub(crate) node: Option<GroupNode>,
     pub(crate) data: Data,
+    #[cfg(test)]
     pub(crate) bytes: usize,
+    pending: Option<ViewData>,
 }
 
 fn copy(t: &Text) -> Result<Text, CoreError> {
@@ -95,25 +143,31 @@ fn copy(t: &Text) -> Result<Text, CoreError> {
 }
 
 fn opt_len(t: Option<&Text>) -> usize {
-    t.map_or(0, |t| t.expose().len())
+    t.map_or(0, Text::allocated_bytes)
 }
 
-impl Data {
-    fn bytes(&self) -> usize {
+impl ViewData {
+    pub(crate) fn bytes(&self) -> usize {
         match self {
             Self::Entry(e) => {
-                e.title.expose().len()
-                    + e.type_hint.expose().len()
+                e.title.allocated_bytes()
+                    + e.type_hint.allocated_bytes()
                     + opt_len(e.icon.as_ref())
                     + e.fields
                         .iter()
-                        .map(|f| f.name.expose().len() + f.value.expose().len())
+                        .map(|f| f.name.allocated_bytes() + f.value.allocated_bytes())
                         .sum::<usize>()
             }
             Self::Group(g) => {
-                g.name.expose().len() + opt_len(g.icon.as_ref()) + g.order.expose().len()
+                g.name.allocated_bytes() + opt_len(g.icon.as_ref()) + g.order.allocated_bytes()
             }
-            Self::Meta(m) => m.name.expose().len(),
+            Self::Meta(m) => {
+                m.name.allocated_bytes()
+                    + match &m.generator {
+                        Some(GeneratorSettings::Characters(c)) => c.exclude_chars.capacity(),
+                        _ => 0,
+                    }
+            }
             Self::Attachment { .. } | Self::None => 0,
         }
     }
@@ -126,7 +180,7 @@ fn searchable(protected: bool, kind: FieldKind) -> bool {
 }
 
 /// Moves what the index keeps out of a decrypted representative.
-fn extract(v: RecordVersion) -> Result<Data, CoreError> {
+fn extract(v: RecordVersion) -> Result<ViewData, CoreError> {
     Ok(match v.body {
         RecordBody::Live(Payload::Entry(e)) => {
             let mut fields = Vec::new();
@@ -139,7 +193,7 @@ fn extract(v: RecordVersion) -> Result<Data, CoreError> {
                     });
                 }
             }
-            Data::Entry(EntryInfo {
+            ViewData::Entry(EntryInfo {
                 title: e.title,
                 type_hint: e.type_hint,
                 icon: e.icon,
@@ -148,22 +202,24 @@ fn extract(v: RecordVersion) -> Result<Data, CoreError> {
                 modified_at: e.modified_at,
                 expires_at: e.expires_at,
                 deleted_at: e.deleted_at,
+                delete_operation: e.delete_operation,
             })
         }
-        RecordBody::Live(Payload::Group(g)) => Data::Group(GroupInfo {
+        RecordBody::Live(Payload::Group(g)) => ViewData::Group(GroupInfo {
             name: g.name,
             icon: g.icon,
             order: g.order,
             parent: g.parent,
             deleted_at: g.deleted_at,
+            delete_operation: g.delete_operation,
         }),
-        RecordBody::Live(Payload::VaultMeta(m)) => Data::Meta(MetaInfo {
+        RecordBody::Live(Payload::VaultMeta(m)) => ViewData::Meta(MetaView {
             retention_days: m.settings.trash_retention_days_or_default(),
             generator: m.settings.generator.map(|g| g.settings),
             name: m.name,
         }),
-        RecordBody::Live(Payload::AttachmentMeta(a)) => Data::Attachment { entry: a.entry },
-        RecordBody::Live(Payload::PasswordKeyslot(_)) | RecordBody::Tombstone(_) => Data::None,
+        RecordBody::Live(Payload::AttachmentMeta(a)) => ViewData::Attachment { entry: a.entry },
+        RecordBody::Live(Payload::PasswordKeyslot(_)) | RecordBody::Tombstone(_) => ViewData::None,
     })
 }
 
@@ -211,22 +267,37 @@ impl RecordInfo {
             .or_else(|| merged.representative(View::Trash))
             .map(|v| v.version_id);
         let head_ids: Vec<VersionId> = merged.heads().iter().map(|v| v.version_id).collect();
+        let heads_count = merged
+            .heads()
+            .iter()
+            .filter(|v| v.deletion() != qv_model::Deletion::Final)
+            .count();
         let (heads, _) = merged.into_parts();
         let data = match heads.into_iter().find(|v| Some(v.version_id) == shown) {
             Some(v) => extract(v)?,
-            None => Data::None,
+            None => ViewData::None,
         };
+        #[cfg(test)]
         let bytes = data.bytes();
+        let structural = Data::of(&data);
         Ok(RecordInfo {
             kind,
             heads: head_ids,
+            payload_heads: heads_count,
             status,
             shown,
             latest,
             node,
-            data,
+            data: structural,
+            #[cfg(test)]
             bytes,
+            pending: Some(data),
         })
+    }
+
+    /// Preflight retains only structural metadata, not every changed view.
+    pub(crate) fn discard_view(&mut self) {
+        self.pending = None;
     }
 
     /// The single head, or [`CoreError::Conflict`].
@@ -244,8 +315,9 @@ pub(crate) struct Index {
     pub(crate) vault_meta: RecordId,
     pub(crate) records: BTreeMap<RecordId, RecordInfo>,
     pub(crate) tree: GroupTree,
-    bytes: usize,
-    budget: usize,
+    pub(crate) group_counts: BTreeMap<RecordId, usize>,
+    pub(crate) recovered_count: usize,
+    pub(crate) cache: ViewCache,
 }
 
 impl Index {
@@ -259,8 +331,9 @@ impl Index {
             vault_meta,
             records: BTreeMap::new(),
             tree: project_groups(root, &BTreeMap::new()).map_err(data)?,
-            bytes: 0,
-            budget,
+            group_counts: BTreeMap::new(),
+            recovered_count: 0,
+            cache: ViewCache::new(budget),
         })
     }
 
@@ -291,59 +364,107 @@ impl Index {
             if cancelled() {
                 return Err(CoreError::Cancelled);
             }
-            let heads = rec
-                .heads()
+            let mut summaries = Vec::with_capacity(rec.heads().len());
+            for head in rec.heads() {
+                if cancelled() {
+                    return Err(CoreError::Cancelled);
+                }
+                let version = read(rec.record_id(), head.version_id())?;
+                if version.version_id != head.version_id() {
+                    return Err(CoreError::Store(qv_store::StoreError::Integrity));
+                }
+                summaries.push(HeadSummary::from_version(&version).map_err(data)?);
+                // Only the compact projection survives this iteration.
+            }
+            let kind = summaries.first().ok_or(CoreError::Internal)?.kind();
+            let latest = summaries
                 .iter()
-                .map(|h| read(rec.record_id(), h.version_id()))
-                .collect::<Result<Vec<_>, _>>()?;
-            let kind = heads.first().ok_or(CoreError::Internal)?.kind();
-            index.insert(rec.record_id(), RecordInfo::from_heads(kind, heads)?)?;
+                .map(HeadSummary::latest)
+                .max()
+                .unwrap_or(Timestamp(0));
+            let merged = merge_summaries(summaries).map_err(data)?;
+            let status = merged.status();
+            let shown = merged
+                .representative(View::Live)
+                .or_else(|| merged.representative(View::Trash));
+            let node = (kind == RecordKind::Group).then(|| GroupNode {
+                parent: shown.and_then(HeadSummary::group_parent),
+                live: status.live,
+            });
+            let content = if let Some(summary) = shown {
+                if cancelled() {
+                    return Err(CoreError::Cancelled);
+                }
+                let version = read(rec.record_id(), summary.version_id())?;
+                if !summary.matches_version(&version).map_err(data)? {
+                    return Err(CoreError::Store(qv_store::StoreError::Integrity));
+                }
+                extract(version)?
+            } else {
+                ViewData::None
+            };
+            let info = RecordInfo {
+                kind,
+                latest,
+                status,
+                node,
+                shown: shown.map(Versioned::version_id),
+                heads: merged.heads().iter().map(Versioned::version_id).collect(),
+                payload_heads: merged
+                    .heads()
+                    .iter()
+                    .filter(|v| v.deletion() != qv_model::Deletion::Final)
+                    .count(),
+                #[cfg(test)]
+                bytes: content.bytes(),
+                data: Data::of(&content),
+                pending: Some(content),
+            };
+            index.insert(rec.record_id(), info)?;
         }
         index.retree()?;
         Ok(index)
     }
 
-    /// The retained-text total after replacing `changes`.
-    fn bytes_after<'a>(
-        &self,
-        changes: impl IntoIterator<Item = (RecordId, &'a RecordInfo)>,
-    ) -> Result<usize, CoreError> {
-        let mut total = self.bytes;
-        for (id, info) in changes {
-            let old = self.records.get(&id).map_or(0, |r| r.bytes);
-            total = total
-                .checked_sub(old)
-                .and_then(|t| t.checked_add(info.bytes))
-                .ok_or(CoreError::Internal)?;
-        }
-        if total > self.budget {
-            return Err(CoreError::LimitExceeded);
-        }
-        Ok(total)
-    }
-
-    /// [`CoreError::LimitExceeded`] if replacing `changes` would exceed the
-    /// budget.
+    /// Checks structural metadata; total text is never an eligibility limit.
     pub(crate) fn check<'a>(
         &self,
         changes: impl IntoIterator<Item = (RecordId, &'a RecordInfo)>,
     ) -> Result<(), CoreError> {
-        self.bytes_after(changes).map(|_| ())
-    }
-
-    /// Inserts or replaces one record (without recomputing the tree).
-    pub(crate) fn insert(&mut self, id: RecordId, info: RecordInfo) -> Result<(), CoreError> {
-        self.bytes = self.bytes_after([(id, &info)])?;
-        self.records.insert(id, info);
+        for (_, info) in changes {
+            if info.heads.is_empty() || info.heads.len() > qv_model::MAX_HEADS {
+                return Err(CoreError::Store(qv_store::StoreError::Integrity));
+            }
+        }
         Ok(())
     }
 
-    /// Replaces one record after a commit whose changes already passed
-    /// [`Self::check`] together.
-    pub(crate) fn replace(&mut self, id: RecordId, info: RecordInfo) {
-        let old = self.records.get(&id).map_or(0, |r| r.bytes);
-        self.bytes = self.bytes.saturating_sub(old).saturating_add(info.bytes);
+    pub(crate) fn insert(&mut self, id: RecordId, info: RecordInfo) -> Result<(), CoreError> {
+        self.check([(id, &info)])?;
+        self.replace(id, info);
+        Ok(())
+    }
+
+    pub(crate) fn replace(&mut self, id: RecordId, mut info: RecordInfo) {
+        self.cache.invalidate(id);
+        if let (Some(version), Some(view)) = (info.shown, info.pending.take()) {
+            self.cache.put(id, version, view);
+        }
         self.records.insert(id, info);
+    }
+
+    /// A verified representative view, either resident or bounded transient data.
+    pub(crate) fn view(&self, vault: &UnlockedVault, id: RecordId) -> Result<ViewRef, CoreError> {
+        let info = self.get(id).ok_or(CoreError::NotFound)?;
+        let version = info.shown.ok_or(CoreError::NotFound)?;
+        if let Some(view) = self.cache.get(id, version) {
+            return Ok(view);
+        }
+        let record = vault.read_version(id, version)?;
+        if record.version_id != version || record.kind() != info.kind {
+            return Err(CoreError::Store(qv_store::StoreError::Integrity));
+        }
+        Ok(self.cache.put(id, version, extract(record)?))
     }
 
     /// Recomputes the display tree from the groups' nodes (0003 §4.1).
@@ -354,6 +475,46 @@ impl Index {
             .filter_map(|(id, r)| r.node.map(|n| (*id, n)))
             .collect();
         self.tree = project_groups(self.root, &nodes).map_err(data)?;
+        let mut children: BTreeMap<RecordId, Vec<RecordId>> = BTreeMap::new();
+        let mut counts: BTreeMap<RecordId, usize> = BTreeMap::new();
+        let mut recovered = 0usize;
+        for (&id, info) in &self.records {
+            if info.kind == RecordKind::Group {
+                if let Some(Some(parent)) = self.tree.parent(id) {
+                    children.entry(parent).or_default().push(id);
+                }
+            } else if info.status.live
+                && let Data::Entry(entry) = &info.data
+            {
+                match self.tree.place_entry(entry.group) {
+                    qv_model::EntryPlace::Group(group) => *counts.entry(group).or_default() += 1,
+                    qv_model::EntryPlace::Recovered => recovered += 1,
+                }
+            }
+        }
+        let mut pending = vec![(self.root, false)];
+        while let Some((id, expanded)) = pending.pop() {
+            if expanded {
+                let mut total = counts.get(&id).copied().unwrap_or(0);
+                for child in children.get(&id).into_iter().flatten() {
+                    total = total
+                        .checked_add(counts.get(child).copied().unwrap_or(0))
+                        .ok_or(CoreError::Internal)?;
+                }
+                counts.insert(id, total);
+            } else {
+                pending.push((id, true));
+                pending.extend(
+                    children
+                        .get(&id)
+                        .into_iter()
+                        .flatten()
+                        .map(|id| (*id, false)),
+                );
+            }
+        }
+        self.group_counts = counts;
+        self.recovered_count = recovered;
         Ok(())
     }
 
@@ -372,17 +533,35 @@ impl Index {
     /// Retained text in bytes.
     #[cfg(test)]
     pub(crate) fn bytes(&self) -> usize {
-        self.bytes
+        self.cache.bytes()
     }
 
     /// A comparable summary of everything indexed (tests: a refreshed index
     /// must equal a rebuilt one).
     #[cfg(test)]
-    pub(crate) fn summary(&self) -> Vec<String> {
-        let mut out = vec![format!("{:?}", self.tree), format!("bytes {}", self.bytes)];
+    pub(crate) fn summary(&self, vault: Option<&UnlockedVault>) -> Result<Vec<String>, CoreError> {
+        let mut out = vec![
+            format!(
+                "{:?} {:?} recovered {}",
+                self.tree, self.group_counts, self.recovered_count
+            ),
+            "logical bytes pending".to_owned(),
+        ];
+        let mut logical_bytes = 0;
         for (id, r) in &self.records {
-            let text = match &r.data {
-                Data::Entry(e) => format!(
+            let view = if r.shown.is_some() {
+                match vault {
+                    Some(vault) => Some(self.view(vault, *id)?),
+                    None => r.shown.and_then(|version| self.cache.get(*id, version)),
+                }
+            } else {
+                None
+            };
+            if let Some(view) = &view {
+                logical_bytes += view.bytes();
+            }
+            let text = match view.as_deref().map(|v| &**v) {
+                Some(ViewData::Entry(e)) => format!(
                     "entry {} {} {:?} {:?} {:?} {:?}",
                     e.title.expose(),
                     e.type_hint.expose(),
@@ -394,23 +573,24 @@ impl Index {
                         .map(|f| format!("{}={}", f.name.expose(), f.value.expose()))
                         .collect::<Vec<_>>()
                 ),
-                Data::Group(g) => format!(
+                Some(ViewData::Group(g)) => format!(
                     "group {} {} {:?} {:?}",
                     g.name.expose(),
                     g.order.expose(),
                     g.parent,
                     g.deleted_at
                 ),
-                Data::Meta(m) => format!("meta {} {}", m.name.expose(), m.retention_days),
-                Data::Attachment { entry } => format!("attachment {entry:?}"),
-                Data::None => "none".into(),
+                Some(ViewData::Meta(m)) => format!("meta {} {}", m.name.expose(), m.retention_days),
+                Some(ViewData::Attachment { entry }) => format!("attachment {entry:?}"),
+                Some(ViewData::None) | None => "none".into(),
             };
             out.push(format!(
                 "{id:?} {:?} {:?} {:?} {:?} {:?} {}",
                 r.kind, r.heads, r.status, r.shown, r.node, text
             ));
         }
-        out
+        out[1] = format!("logical bytes {logical_bytes}");
+        Ok(out)
     }
 }
 
@@ -467,6 +647,7 @@ pub(crate) mod tests {
             created_at: Timestamp(1),
             modified_at: Timestamp(2),
             deleted_at: deleted.then_some(Timestamp(5)),
+            delete_operation: None,
             ext: Extensions::new(),
         }))
     }
@@ -479,6 +660,7 @@ pub(crate) mod tests {
             icon: None,
             order: Text::new("n").unwrap(),
             deleted_at: None,
+            delete_operation: None,
             ext: Extensions::new(),
         }))
     }
@@ -497,7 +679,7 @@ pub(crate) mod tests {
             vec![version(&[(w1, 1)], entry(root, "Bank", false))],
         );
         assert!(live.status.live && !live.status.in_trash && !live.status.conflict);
-        let Data::Entry(e) = &live.data else {
+        let Some(ViewData::Entry(e)) = &live.pending else {
             panic!("not an entry")
         };
         let kept: Vec<_> = e
@@ -630,12 +812,17 @@ pub(crate) mod tests {
         let mut at = Index::new(root, meta, size).unwrap();
         at.insert(e, one()).unwrap();
         assert_eq!(at.bytes(), size);
-        // Replacing the record counts its old size out first.
+        // Replacement invalidates old residency; uncachable rows remain structural.
         at.insert(e, one()).unwrap();
         let mut over = Index::new(root, meta, size - 1).unwrap();
-        assert_eq!(over.insert(e, one()), Err(CoreError::LimitExceeded));
-        assert!(over.records.is_empty());
-        assert_eq!(at.check([(rid(), &one())]), Err(CoreError::LimitExceeded));
+        over.insert(e, one()).unwrap();
+        assert_eq!(over.records.len(), 1);
+        assert_eq!(over.bytes(), 0);
+        assert!(at.check([(rid(), &one())]).is_ok());
+        let another = rid();
+        at.insert(another, one()).unwrap();
+        assert_eq!(at.records.len(), 2);
+        assert!(at.bytes() <= size);
     }
 
     #[test]
@@ -667,7 +854,10 @@ pub(crate) mod tests {
         refreshed.replace(e, info(RecordKind::Entry, dec(&after)));
         refreshed.retree().unwrap();
         let rebuilt = build(&after);
-        assert_eq!(refreshed.summary(), rebuilt.summary());
+        assert_eq!(
+            refreshed.summary(None).unwrap(),
+            rebuilt.summary(None).unwrap()
+        );
         assert_eq!(refreshed.bytes(), rebuilt.bytes());
     }
 

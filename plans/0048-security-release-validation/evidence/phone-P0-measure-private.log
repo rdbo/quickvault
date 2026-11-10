@@ -1,0 +1,4 @@
+profile,unlock_ms,verify_ms,write_ms,peak_rss_kib,file_bytes
+P0,931.0,0.4,23.4,268672,45056
+P0,901.0,0.3,20.2,268928,45056
+P0,1001.1,0.6,20.3,268800,45056

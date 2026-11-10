@@ -389,10 +389,12 @@ impl VaultFile {
         // SQLite rolls back or replays these before any check below.
         fs::check_sidecars(path)?;
         lock.same_as_path(path)?;
-        let conn = open_connection(path)?;
+        crate::sqlite::identify_existing(path)?;
+        lock.same_as_path(path)?;
+        let mut conn = open_connection(path)?;
         lock.same_as_path(path)?;
         let budget = StepBudget::new();
-        harden(&conn, &budget)?;
+        harden(&mut conn, &budget)?;
         let rows = {
             let tx = conn
                 .unchecked_transaction()
@@ -468,6 +470,7 @@ impl VaultFile {
         let (vault, status) = self.unlock_for_recovery(password, anchors)?;
         match status {
             AnchorStatus::Missing => Err(StoreError::NoAnchor),
+            AnchorStatus::Damaged => Err(StoreError::DamagedAnchor),
             AnchorStatus::Mismatch => Err(StoreError::Rollback),
             _ => Ok(vault),
         }
@@ -553,7 +556,7 @@ impl VaultFile {
 
     /// The unlock verification and anchor check, once VK is known and the
     /// header MAC verified.
-    fn finish_unlock(
+    pub(crate) fn finish_unlock(
         self,
         vk: VaultKey,
         anchors: &AnchorDir,
@@ -569,8 +572,11 @@ impl VaultFile {
             tx.commit().map_err(|e| validation_err(&e))?;
             state
         };
-        let anchor = anchors.load(&state.replica.replica_id)?;
-        let status = compare(&state.head, &state.digest, anchor.as_ref());
+        let status = match anchors.load(&state.replica.replica_id) {
+            Ok(anchor) => compare(&state.head, &state.digest, anchor.as_ref()),
+            Err(StoreError::DamagedAnchor) => AnchorStatus::Damaged,
+            Err(e) => return Err(e),
+        };
         let gate = match status {
             AnchorStatus::Verified => WriteGate::Open,
             AnchorStatus::Advanced => {
@@ -579,6 +585,7 @@ impl VaultFile {
                 WriteGate::Open
             }
             AnchorStatus::Missing => WriteGate::Blocked(StoreError::NoAnchor),
+            AnchorStatus::Damaged => WriteGate::Blocked(StoreError::DamagedAnchor),
             _ => WriteGate::Blocked(StoreError::Rollback),
         };
         Ok((
@@ -651,6 +658,7 @@ impl VaultFile {
             Err(e) => return Err(errno_err(e)),
         }
         fs::check_parent(path)?;
+        fs::remove_stale_temps(path)?;
         let (lock, temp) = fs::create_temp(path)?;
         let mut anchored = None;
         let built = build(&temp, password, &name).and_then(|(vk, replica, anchor)| {
@@ -777,7 +785,7 @@ fn build(
     }
     fs::check_sidecars(temp)?;
     let mut conn = open_connection(temp)?;
-    harden(&conn, &StepBudget::new())?;
+    harden(&mut conn, &StepBudget::new())?;
     conn.pragma_update(None, "page_size", 4096)
         .map_err(|e| validation_err(&e))?;
 
@@ -817,6 +825,7 @@ fn build(
             icon: None,
             order: Text::new("a")?,
             deleted_at: None,
+            delete_operation: None,
             ext: Extensions::new(),
         }),
     )?;
@@ -983,7 +992,9 @@ impl UnlockedVault {
 
     /// Location warnings for this vault's path.
     pub fn warnings(&self) -> LocationWarnings {
-        self.file.warnings
+        let mut warnings = self.file.warnings;
+        warnings.anchor_independence = self.anchors.independence_warning(&self.file.path);
+        warnings
     }
 
     /// See [`VaultFile::check_identity`].
@@ -1213,6 +1224,7 @@ pub(crate) mod tests {
                 created_at: Timestamp(1),
                 modified_at: Timestamp(1),
                 deleted_at: None,
+                delete_operation: None,
                 ext: Extensions::new(),
             })),
             ext: Extensions::new(),
@@ -1620,6 +1632,35 @@ pub(crate) mod tests {
             title(&u.read_version(r, head.version_id()).unwrap()),
             "after recovery"
         );
+    }
+
+    // 0012 §1: Anchor crash windows
+    #[test]
+    fn damaged_anchor_allows_only_explicit_authenticated_read_only_inspection() {
+        let (d, a) = (TestDir::new(), TestDir::new());
+        let (p, dir) = copy_fixture(&d, &a, "v.qvault");
+        let anchor_path = dir.path().join(&fixture().anchor.0);
+        write_file(&anchor_path, b"damaged rollback record", 0o600);
+        let before = std::fs::read(&p).unwrap();
+        assert_eq!(err(unlock(&p, &dir, PASSWORD)), StoreError::DamagedAnchor);
+        let (mut u, status) = {
+            let _k = kdf();
+            VaultFile::open(&p)
+                .unwrap()
+                .unlock_for_recovery(&pw(PASSWORD), &dir)
+                .unwrap()
+        };
+        assert_eq!(status, AnchorStatus::Damaged);
+        u.verify_all(&|| false).unwrap();
+        assert_eq!(err(u.write()), StoreError::DamagedAnchor);
+        assert_eq!(std::fs::read(&p).unwrap(), before);
+        assert_eq!(
+            std::fs::read(&anchor_path).unwrap(),
+            b"damaged rollback record"
+        );
+        u.adopt_baseline().unwrap();
+        drop(u);
+        assert!(unlock(&p, &dir, PASSWORD).is_ok());
     }
 
     #[test]

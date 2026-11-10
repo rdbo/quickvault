@@ -49,6 +49,8 @@ pub enum AnchorStatus {
     /// Older, forked, more than one commit ahead, another vault or
     /// generation: rollback evidence. Writes stay blocked.
     Mismatch,
+    /// The external anchor encoding is damaged. Only explicit recovery may inspect.
+    Damaged,
 }
 
 /// An anchor's contents.

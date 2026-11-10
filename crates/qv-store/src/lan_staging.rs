@@ -19,12 +19,11 @@
 //!    role and attachment, exact EOF) before anything is shown or kept.
 //!
 //! [`VerifiedLanStaging`] then answers the §10 questions (the keyslot, the
-//! vault's name, the master password). [`crate::VaultFile::create_from_lan`]
+//! vault's name, the granted head binding). [`crate::VaultFile::create_from_verified_lan`]
 //! builds the vault through the 1.13b creation protocol. No staged byte
 //! reaches SQLite before full verification, and nothing is published before
 //! the last step.
 
-use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 
@@ -72,7 +71,7 @@ pub enum Planned {
 
 /// A staging archive being received.
 pub struct LanStaging {
-    file: File,
+    file: fs::ArchiveFile,
     header: ArchiveHeader,
     plan: Vec<(ObjectId, Planned)>,
     manifest: Manifest,
@@ -211,7 +210,7 @@ impl LanStaging {
             fs::remove_best_effort(&temp);
             return Err(StoreError::Io);
         }
-        let mut file = locked.into_file();
+        let mut file = locked.into_archive_file();
         write_prefix(&mut file)?;
         let header_bytes = header.encode()?;
         if header_bytes.len() > MAX_ARCHIVE_HEADER_BYTES {
@@ -219,8 +218,9 @@ impl LanStaging {
         }
         let len = u32::try_from(header_bytes.len()).map_err(|_| StoreError::Internal)?;
         file.write_all(&len.to_be_bytes())
-            .map_err(|_| StoreError::Io)?;
-        file.write_all(&header_bytes).map_err(|_| StoreError::Io)?;
+            .map_err(crate::error::io_err)?;
+        file.write_all(&header_bytes)
+            .map_err(crate::error::io_err)?;
         crate::archive::write_frame(&mut file, envelope)?;
         Ok(Self {
             file,
@@ -310,10 +310,10 @@ impl LanStaging {
         if self.next != self.plan.len() {
             return Err(StoreError::Integrity);
         }
-        self.file.flush().map_err(|_| StoreError::Io)?;
+        self.file.flush().map_err(crate::error::io_err)?;
         self.file
             .seek(SeekFrom::Start(0))
-            .map_err(|_| StoreError::Io)?;
+            .map_err(crate::error::io_err)?;
         let scope = self.scope();
         let opened = read_archive(&mut self.file, scope, vk, &mut |_| Ok(()), cancelled)?;
         Ok(VerifiedLanStaging {
@@ -423,11 +423,13 @@ impl core::fmt::Debug for VerifiedLanStaging {
 }
 
 /// Proof that a master password unlocks the staged keyslot to the received
-/// VK; consumed by [`crate::VaultFile::create_from_lan`].
+/// VK; retained only for historical unit fixtures.
+#[cfg(test)]
 pub struct PasswordProof {
     pub(crate) body: Zeroizing<Vec<u8>>,
 }
 
+#[cfg(test)]
 impl core::fmt::Debug for PasswordProof {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("PasswordProof(<redacted>)")
@@ -509,6 +511,7 @@ impl VerifiedLanStaging {
     /// Unlocks the unique keyslot with `password` and requires the result
     /// to be `vk`. A wrong password is [`StoreError::WrongPassword`]; a
     /// keyslot that wraps another key is [`StoreError::Integrity`].
+    #[cfg(test)]
     pub fn verify_password(
         &mut self,
         vk: &VaultKey,
@@ -536,16 +539,329 @@ impl VerifiedLanStaging {
             return Err(StoreError::Integrity);
         }
         Ok(PasswordProof {
-            body: descriptor.encode()?,
+            body: descriptor.encode_public_descriptor()?,
         })
     }
 
     /// Rewinds the staging file for the creation pass.
-    pub(crate) fn rewind(&mut self) -> Result<&mut File, StoreError> {
+    pub(crate) fn rewind(&mut self) -> Result<&mut fs::ArchiveFile, StoreError> {
         self.archive
             .file
             .seek(SeekFrom::Start(0))
-            .map_err(|_| StoreError::Io)?;
+            .map_err(crate::error::io_err)?;
         Ok(&mut self.archive.file)
+    }
+}
+
+impl crate::UnlockedVault {
+    /// Allowlisted descriptor of the authenticated operational slot, for a
+    /// short credential snapshot read. The caller must also compare it with
+    /// the unique encrypted control head; no KDF occurs under this read.
+    pub fn lan_working_password_descriptor(&self) -> Result<Zeroizing<Vec<u8>>, StoreError> {
+        self.check_identity()?;
+        Ok(crate::slot::password_slot(&self.file.slots)?
+            .keyslot
+            .encode_public_descriptor()?)
+    }
+}
+
+/// A password grant checked before receiving any bulk data. Its constructor
+/// verifies the public projection and password unwrap against the received key.
+/// It contains no password, master key or key-encryption key.
+pub struct LanPasswordGrant {
+    scope: ArchiveScope,
+    descriptor: Zeroizing<Vec<u8>>,
+    record: qv_model::RecordId,
+    version: qv_model::VersionId,
+    object: ObjectId,
+    hash: [u8; 32],
+    transcript: [u8; 32],
+}
+impl core::fmt::Debug for LanPasswordGrant {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("LanPasswordGrant(<redacted>)")
+    }
+}
+impl LanPasswordGrant {
+    /// Called after final-key grant authentication, while B still has its
+    /// typed password. All identity/profile/width checks precede the fixed KDF.
+    #[allow(clippy::too_many_arguments)] // Exact normative grant plus local credential/binding.
+    pub fn verify(
+        vk: &VaultKey,
+        password: &MasterPassword,
+        vault: [u8; 16],
+        generation: u32,
+        descriptor: &[u8],
+        record: [u8; 16],
+        version: [u8; 16],
+        object: [u8; 16],
+        hash: [u8; 32],
+        transcript: [u8; 32],
+    ) -> Result<Self, StoreError> {
+        let vault = VaultId::from_bytes(vault)?;
+        let record = qv_model::RecordId::from_bytes(record)?;
+        let version = qv_model::VersionId::from_bytes(version)?;
+        let object = ObjectId::from_bytes(object)?;
+        if generation == 0 || descriptor.len() != 171 {
+            return Err(StoreError::Integrity);
+        }
+        let slot = qv_model::Keyslot::decode(descriptor)?;
+        let projection = slot.encode_public_descriptor()?;
+        if projection.as_slice() != descriptor {
+            return Err(StoreError::Integrity);
+        }
+        let scope = ArchiveScope::new(vault, KeyGeneration(generation));
+        let unwrapped = slot.slot.unlock(password, vault, scope.key_generation())?;
+        if !unwrapped.ct_eq(vk) {
+            return Err(StoreError::Integrity);
+        }
+        Ok(Self {
+            scope,
+            descriptor: projection,
+            record,
+            version,
+            object,
+            hash,
+            transcript,
+        })
+    }
+}
+
+/// A source- and method-bound publication capability. Only a fully verified
+/// staging archive can issue it; no public fields or raw-key constructor.
+pub struct LanEnrollmentProof {
+    pub(crate) body: Zeroizing<Vec<u8>>,
+    pub(crate) scope: ArchiveScope,
+    pub(crate) manifest_digest: [u8; 32],
+    // Some = password route, None = independently possessed key route.
+    pub(crate) password_transcript: Option<[u8; 32]>,
+}
+impl core::fmt::Debug for LanEnrollmentProof {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("LanEnrollmentProof(<redacted>)")
+    }
+}
+impl VerifiedLanStaging {
+    /// An authenticated head read for bounded core preflight before publication.
+    pub fn read_version(
+        &mut self,
+        vk: &VaultKey,
+        record: qv_model::RecordId,
+        version: qv_model::VersionId,
+    ) -> Result<qv_model::RecordVersion, StoreError> {
+        let manifest = self.archive.opened.manifest();
+        let entry = manifest.record(record).ok_or(StoreError::Integrity)?;
+        let role = entry
+            .heads()
+            .iter()
+            .find(|head| head.version_id() == version)
+            .ok_or(StoreError::Integrity)?;
+        let header = self.archive.opened.header();
+        let key = vk.purpose_key::<purpose::Record>(
+            header.vault_id(),
+            header.key_generation(),
+            crate::ARCHIVE_DERIVATION_PROFILE,
+        )?;
+        crate::archive_verify::read_version(
+            &mut self.archive.file,
+            header,
+            manifest,
+            &self.archive.opened.frames,
+            &key,
+            record,
+            role,
+        )
+    }
+    /// Verifies the unique encrypted password control record against the early
+    /// grant, or adopts it under an independently authenticated key. No password
+    /// is required or retained at this point for either method.
+    pub fn verify_enrollment(
+        &mut self,
+        vk: &VaultKey,
+        grant: Option<LanPasswordGrant>,
+    ) -> Result<LanEnrollmentProof, StoreError> {
+        if self.keyslot(vk)? != StagedKeyslot::Unique {
+            return Err(StoreError::Integrity);
+        }
+        let record = self.manifest().keyslot_id();
+        let Some(RecordBody::Live(Payload::PasswordKeyslot(slot))) =
+            self.read_head(vk, record)?.map(|v| v.body)
+        else {
+            return Err(StoreError::Integrity);
+        };
+        let body = slot.encode_public_descriptor()?;
+        let password_transcript = if let Some(grant) = grant {
+            let entry = self
+                .manifest()
+                .record(record)
+                .ok_or(StoreError::Integrity)?;
+            let [head] = entry.heads() else {
+                return Err(StoreError::Integrity);
+            };
+            let reference = self
+                .manifest()
+                .reference(head.object_id())
+                .ok_or(StoreError::Integrity)?;
+            if grant.scope.vault_id() != self.scope.vault_id()
+                || grant.scope.key_generation() != self.scope.key_generation()
+                || grant.record != record
+                || grant.version != head.version_id()
+                || grant.object != head.object_id()
+                || grant.hash != *reference.sha256()
+                || grant.descriptor.as_slice() != body.as_slice()
+            {
+                return Err(StoreError::Integrity);
+            }
+            Some(grant.transcript)
+        } else {
+            None
+        };
+        let manifest_digest = object_hash(ObjectHashProfile::V1, &self.manifest().encode()?).0;
+        Ok(LanEnrollmentProof {
+            body,
+            scope: self.scope,
+            manifest_digest,
+            password_transcript,
+        })
+    }
+}
+
+impl LanEnrollmentProof {
+    /// Distinguishes the authenticated enrollment route without exposing any
+    /// secret or allowing modification of its source/method binding.
+    pub fn is_password_enrollment(&self) -> bool {
+        self.password_transcript.is_some()
+    }
+}
+
+#[cfg(test)]
+mod enrollment_tests {
+    #![allow(clippy::unwrap_used, clippy::panic)]
+    use super::*;
+    use crate::fs::test_dir::TestDir;
+    use crate::vault::tests::{PASSWORD, copy_fixture, pw, unlock};
+    use crate::{UnlockedVault, VaultFile};
+
+    fn staged(v: &UnlockedVault, private: &Path) -> VerifiedLanStaging {
+        let state = v.lan_serve_state().unwrap();
+        let mut staging = LanStaging::begin(
+            private,
+            v.vault_key(),
+            v.header().vault_id,
+            v.header().key_generation,
+            state.manifest_hash(),
+            state.envelope(),
+            &|| false,
+        )
+        .unwrap();
+        for object in staging.requested() {
+            staging
+                .add_object(&v.lan_object_envelope(&state, object).unwrap())
+                .unwrap();
+        }
+        staging.finish(v.vault_key(), &|| false).unwrap()
+    }
+    fn grant(v: &UnlockedVault) -> LanPasswordGrant {
+        let record = v.manifest().keyslot_id();
+        let head = &v.manifest().record(record).unwrap().heads()[0];
+        LanPasswordGrant::verify(
+            v.vault_key(),
+            &pw(PASSWORD),
+            v.header().vault_id.0,
+            v.header().key_generation.0,
+            &v.lan_working_password_descriptor().unwrap(),
+            record.0,
+            head.version_id().to_bytes(),
+            head.object_id().to_bytes(),
+            *v.manifest().reference(head.object_id()).unwrap().sha256(),
+            [47; 32],
+        )
+        .unwrap()
+    }
+    fn key(v: &UnlockedVault) -> VaultKey {
+        let phrase = qv_crypto::RecoveryPhrase::from_vault_key(v.vault_key()).unwrap();
+        VaultKey::from_recovery_phrase(phrase.expose_secret().as_bytes()).unwrap()
+    }
+    // 0012 §1: LAN partial acceptance
+    #[test]
+    fn lan_enrollment_grant_head_binding_and_private_staging_source_are_required_before_creation() {
+        let d = TestDir::new();
+        let a = TestDir::new();
+        let (path, anchors) = copy_fixture(&d, &a, "source.qvault");
+        let v = unlock(&path, &anchors, PASSWORD).unwrap();
+        let private = d.subdir("private", 0o700);
+        for field in 0..5 {
+            let mut grant = grant(&v);
+            match field {
+                0 => grant.record = qv_model::RecordId::generate().unwrap(),
+                1 => grant.version = qv_model::VersionId::generate().unwrap(),
+                2 => grant.object = ObjectId::generate().unwrap(),
+                3 => grant.hash[0] ^= 1,
+                _ => grant.descriptor[0] ^= 1,
+            }
+            let mut staging = staged(&v, &private);
+            assert_eq!(
+                staging.verify_enrollment(v.vault_key(), Some(grant)).err(),
+                Some(StoreError::Integrity)
+            );
+        }
+        let mut first = staged(&v, &private);
+        let proof = first
+            .verify_enrollment(v.vault_key(), Some(grant(&v)))
+            .unwrap();
+        assert!(proof.is_password_enrollment());
+        // Even another fully valid staging has a distinct private source ID.
+        // Its ciphertext may be identical; this check binds an authorization
+        // capability to its source, not filesystem copies to an inode.
+        let second = staged(&v, &private);
+        let destination = d.join("mismatched.qvault");
+        assert_eq!(
+            VaultFile::create_from_verified_lan(
+                &destination,
+                second,
+                proof,
+                key(&v),
+                &anchors,
+                &|| false
+            )
+            .err(),
+            Some(StoreError::Integrity)
+        );
+        assert!(!destination.exists());
+    }
+    // 0012 §1: Anchor crash windows
+    #[test]
+    fn lan_enrollment_failure_after_publication_reports_the_created_file_and_preserves_its_anchor()
+    {
+        let d = TestDir::new();
+        let a = TestDir::new();
+        let snapshot = TestDir::new();
+        let (path, anchors) = copy_fixture(&d, &a, "source.qvault");
+        let v = unlock(&path, &anchors, PASSWORD).unwrap();
+        let private = d.subdir("private", 0o700);
+        let mut staging = staged(&v, &private);
+        let proof = staging.verify_enrollment(v.vault_key(), None).unwrap();
+        assert!(!proof.is_password_enrollment());
+        let destination = d.join("published.qvault");
+        crate::crash::test::arm(
+            crate::crash::CrashPoint::LanPublished,
+            &destination,
+            anchors.path(),
+            snapshot.path(),
+        );
+        let result = VaultFile::create_from_verified_lan(
+            &destination,
+            staging,
+            proof,
+            key(&v),
+            &anchors,
+            &|| false,
+        );
+        assert!(!crate::crash::test::disarm());
+        assert_eq!(result.err(), Some(StoreError::PublicationIncomplete));
+        assert!(destination.exists());
+        let mut reopened = unlock(&destination, &anchors, PASSWORD).unwrap();
+        reopened.verify_all(&|| false).unwrap();
+        assert!(reopened.write().is_ok());
     }
 }

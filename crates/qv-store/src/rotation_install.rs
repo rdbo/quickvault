@@ -176,12 +176,12 @@ mod platform {
                 {
                     return Err(StoreError::UnsafeFile);
                 }
-                std::fs::remove_file(path).map_err(|_| StoreError::Io)?;
+                std::fs::remove_file(path).map_err(crate::error::io_err)?;
             }
         }
         let journal = fs::with_suffix(path, "-journal");
         if exists(&journal)? {
-            std::fs::remove_file(&journal).map_err(|_| StoreError::Io)?;
+            std::fs::remove_file(&journal).map_err(crate::error::io_err)?;
         }
         Ok(())
     }
@@ -264,8 +264,8 @@ mod platform {
                 .as_encoded_bytes();
             let dir = fs::parent_of(path);
             let mut found = Leftovers::default();
-            for entry in std::fs::read_dir(dir).map_err(|_| StoreError::Io)? {
-                let entry = entry.map_err(|_| StoreError::Io)?;
+            for entry in std::fs::read_dir(dir).map_err(crate::error::io_err)? {
+                let entry = entry.map_err(crate::error::io_err)?;
                 let name = entry.file_name();
                 match classify(vault, name.as_encoded_bytes()) {
                     Some(Leftover::Removable) => {
@@ -275,7 +275,7 @@ mod platform {
                         {
                             return Err(StoreError::UnsafeFile);
                         }
-                        std::fs::remove_file(entry.path()).map_err(|_| StoreError::Io)?;
+                        std::fs::remove_file(entry.path()).map_err(crate::error::io_err)?;
                         found.removed += 1;
                     }
                     Some(Leftover::Old) => found.retained_old += 1,
@@ -333,7 +333,7 @@ mod platform {
         point(CrashPoint::RotationOldRemoved)?;
         snapshots.remove_inventory(vault_id, old_generation)?;
         point(CrashPoint::RotationInventoryRetired)?;
-        std::fs::remove_file(&paths.marker).map_err(|_| StoreError::Io)?;
+        std::fs::remove_file(&paths.marker).map_err(crate::error::io_err)?;
         fs::sync_dir(paths.dir())?;
         drop(marker);
         point(CrashPoint::RotationJournalRemoved)
@@ -358,7 +358,7 @@ mod platform {
         point(CrashPoint::RollbackCandidateRemoved)?;
         snapshots.remove_inventory(vault_id, new_generation)?;
         point(CrashPoint::RollbackInventoryRemoved)?;
-        std::fs::remove_file(&paths.marker).map_err(|_| StoreError::Io)?;
+        std::fs::remove_file(&paths.marker).map_err(crate::error::io_err)?;
         fs::sync_dir(paths.dir())?;
         drop(marker);
         point(CrashPoint::RotationJournalRemoved)
@@ -369,12 +369,12 @@ mod platform {
     /// journal as published: after the rename succeeded the transition
     /// exists, whatever that fsync returns. The returned descriptor holds
     /// the marker's lock for the rest of the installation.
-    fn publish_marker(marker: &Path, bytes: &[u8]) -> Result<std::fs::File, StoreError> {
+    fn publish_marker(marker: &Path, bytes: &[u8]) -> Result<fs::ArchiveFile, StoreError> {
         use std::io::Write as _;
         let (locked, temp) = fs::create_temp(marker)?;
         let written = (|| {
-            let mut file = locked.into_file();
-            file.write_all(bytes).map_err(|_| StoreError::Io)?;
+            let mut file = locked.into_archive_file();
+            file.write_all(bytes).map_err(crate::error::io_err)?;
             rustix::fs::fsync(&file).map_err(errno_err)?;
             let mut back = Vec::with_capacity(bytes.len());
             std::io::Read::read_to_end(
@@ -384,7 +384,7 @@ mod platform {
                 ),
                 &mut back,
             )
-            .map_err(|_| StoreError::Io)?;
+            .map_err(crate::error::io_err)?;
             if back != bytes {
                 return Err(StoreError::Integrity);
             }

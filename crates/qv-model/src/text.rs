@@ -62,6 +62,11 @@ impl Text {
         Ok(Self(Zeroizing::new(String::from(s))))
     }
 
+    /// Owned UTF-8 allocation capacity, for confidential-memory accounting.
+    pub fn allocated_bytes(&self) -> usize {
+        self.0.capacity()
+    }
+
     /// The text.
     pub fn expose(&self) -> &str {
         &self.0

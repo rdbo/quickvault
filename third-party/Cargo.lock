@@ -570,7 +570,6 @@ dependencies = [
  "image",
  "infer",
  "jni 0.21.1",
- "lazy-js-bundle",
  "libc",
  "muda",
  "ndk",

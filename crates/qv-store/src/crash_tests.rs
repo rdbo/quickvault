@@ -70,7 +70,11 @@ fn crash_every_mutation_point() {
             arm(point, &p, &a.join("anchors"), s.path());
             assert_eq!(
                 crashing_edit(&mut u, r),
-                Err(StoreError::Internal),
+                Err(if new_state {
+                    StoreError::CommittedAnchorPending
+                } else {
+                    StoreError::Internal
+                }),
                 "{point:?}"
             );
             assert!(!disarm(), "{point:?} was not reached");
@@ -127,7 +131,16 @@ fn history_purge_crash_boundaries_preserve_heads_and_atomic_floor() {
                 w.purge_history(r)?;
                 w.commit()
             })();
-            assert_eq!(result, Err(StoreError::Internal));
+            assert_eq!(
+                result,
+                Err(
+                    if matches!(point, Committed | AnchorTempWritten | AnchorReplaced) {
+                        StoreError::CommittedAnchorPending
+                    } else {
+                        StoreError::Internal
+                    }
+                )
+            );
             assert!(!disarm(), "{point:?}");
         }
         let (u, _) = open_snapshot(&s, "v.qvault").unwrap();

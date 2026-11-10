@@ -509,7 +509,19 @@ fn resolve_in(ctx: &Ctx, args: &ArgMatches, s: &Session) -> Result<(), CliError>
         None
     };
     let cancel = crate::signals::token();
-    let result = s.resolve_version(h, password.as_ref(), Some(&cancel))?;
+    let copy = if v.state == Deletion::Final {
+        Some(super::trash::recovery_copy(ctx, s, Some(&cancel))?)
+    } else {
+        None
+    };
+    let result = s.resolve_version(h, password.as_ref(), Some(&cancel));
+    let finished = copy.map(|copy| s.finish_destructive(copy));
+    let result = result?;
+    if matches!(finished, Some(Err(_))) {
+        crate::out::eprint(
+            "qv: resolution committed; its recovery snapshot remains on disk pending reclassification\n",
+        );
+    }
     let mut out = Out::stdout();
     out.raw("local resolution: committed\n")
         .raw(&format!("conflicts: {}\n", result.conflicts));

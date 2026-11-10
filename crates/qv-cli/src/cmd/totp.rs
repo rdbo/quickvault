@@ -23,7 +23,7 @@ pub(crate) fn run(ctx: &Ctx, m: &ArgMatches) -> Result<(), CliError> {
     let session = ctx.unlock()?;
     let addr = m.get_one::<String>("entry").map_or("", String::as_str);
     let handle = address::entry(&session, addr)?;
-    if session.entry_versions(handle)?.len() > 1 {
+    if session.entry_version_count(handle)? > 1 {
         return Err(qv_core::CoreError::Conflict.into());
     }
     let detail = session.entry(handle)?;

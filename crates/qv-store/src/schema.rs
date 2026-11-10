@@ -147,6 +147,19 @@ fn pragma_i64(conn: &Connection, name: &str) -> Result<i64, StoreError> {
 /// Checks the file format, integrity and exact schema; no vault table is
 /// read before this succeeds.
 pub(crate) fn validate_schema(conn: &Connection) -> Result<(), StoreError> {
+    identify_schema(conn)?;
+    let mut stmt = conn.prepare("PRAGMA quick_check(1)").map_err(v)?;
+    let mut rows = stmt.query([]).map_err(v)?;
+    let first = rows.next().map_err(v)?.ok_or(StoreError::Integrity)?;
+    if first.get_ref(0).map_err(v)?.as_str().ok() != Some("ok") || rows.next().map_err(v)?.is_some()
+    {
+        return Err(StoreError::Integrity);
+    }
+    Ok(())
+}
+
+/// Bounded identification only: never reads vault payloads or repairs a file.
+pub(crate) fn identify_schema(conn: &Connection) -> Result<(), StoreError> {
     if pragma_i64(conn, "application_id")? != APPLICATION_ID {
         return Err(StoreError::NotAVault);
     }
@@ -156,35 +169,33 @@ pub(crate) fn validate_schema(conn: &Connection) -> Result<(), StoreError> {
     if u64::try_from(pragma_i64(conn, "page_size")?).ok() != Some(PAGE_SIZE) {
         return Err(StoreError::Integrity);
     }
-    {
-        let mut stmt = conn.prepare("PRAGMA quick_check(1)").map_err(v)?;
-        let mut rows = stmt.query([]).map_err(v)?;
-        let first: Option<String> = match rows.next().map_err(v)? {
-            Some(r) => Some(r.get(0).map_err(v)?),
-            None => None,
-        };
-        if first.as_deref() != Some("ok") || rows.next().map_err(v)?.is_some() {
-            return Err(StoreError::Integrity);
-        }
-    }
     let mut stmt = conn
         .prepare("SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY name LIMIT 17")
         .map_err(v)?;
-    let found: Vec<(String, String, String, Option<String>)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
-        .map_err(v)?
-        .collect::<Result<_, _>>()
-        .map_err(v)?;
-    let exact = found.len() == EXPECTED.len()
-        && found
-            .iter()
-            .zip(EXPECTED.iter())
-            .all(|(f, e)| f.0 == e.0 && f.1 == e.1 && f.2 == e.2 && f.3.as_deref() == e.3);
-    if exact {
-        Ok(())
-    } else {
-        Err(StoreError::Integrity)
+    let mut rows = stmt.query([]).map_err(v)?;
+    for &(kind, name, table, sql) in &EXPECTED {
+        let row = rows.next().map_err(v)?.ok_or(StoreError::Integrity)?;
+        for (column, expected) in [(0, kind), (1, name), (2, table)] {
+            if row.get_ref(column).map_err(v)?.as_str().ok() != Some(expected) {
+                return Err(StoreError::Integrity);
+            }
+        }
+        let actual = row.get_ref(3).map_err(v)?;
+        let matches = match (actual, sql) {
+            (rusqlite::types::ValueRef::Null, None) => true,
+            (rusqlite::types::ValueRef::Text(bytes), Some(expected)) => {
+                bytes == expected.as_bytes()
+            }
+            _ => false,
+        };
+        if !matches {
+            return Err(StoreError::Integrity);
+        }
     }
+    if rows.next().map_err(v)?.is_some() {
+        return Err(StoreError::Integrity);
+    }
+    Ok(())
 }
 
 fn usize_len(n: i64) -> Result<usize, StoreError> {
@@ -617,7 +628,7 @@ pub(crate) mod tests {
         let p = d.join(name);
         write_file(&p, b"", 0o600);
         let mut conn = open_connection(&p).unwrap();
-        harden(&conn, &StepBudget::new()).unwrap();
+        harden(&mut conn, &StepBudget::new()).unwrap();
         conn.pragma_update(None, "page_size", 4096).unwrap();
         let tx = conn.transaction().unwrap();
         install(&tx).unwrap();
@@ -771,8 +782,8 @@ pub(crate) mod tests {
         let d = TestDir::new();
         let p = d.join("p.qvault");
         write_file(&p, b"", 0o600);
-        let conn = open_connection(&p).unwrap();
-        harden(&conn, &StepBudget::new()).unwrap();
+        let mut conn = open_connection(&p).unwrap();
+        harden(&mut conn, &StepBudget::new()).unwrap();
         conn.pragma_update(None, "page_size", 8192).unwrap();
         conn.execute_batch(&format!(
             "PRAGMA application_id = {APPLICATION_ID}; PRAGMA user_version = {SCHEMA_VERSION}; {HEADER_DDL}; {KEYSLOT_DDL};"
@@ -783,15 +794,15 @@ pub(crate) mod tests {
         // A plain SQLite database and a non-database.
         let q = d.join("q.qvault");
         write_file(&q, b"", 0o600);
-        let conn = open_connection(&q).unwrap();
-        harden(&conn, &StepBudget::new()).unwrap();
+        let mut conn = open_connection(&q).unwrap();
+        harden(&mut conn, &StepBudget::new()).unwrap();
         conn.execute_batch("CREATE TABLE t (x)").unwrap();
         assert_eq!(validate_schema(&conn), Err(StoreError::NotAVault));
         let r = d.join("r.qvault");
         write_file(&r, &[0x5a; 8192], 0o600);
-        let conn = open_connection(&r).unwrap();
+        let mut conn = open_connection(&r).unwrap();
         // Hardening may already notice; either way it never validates.
-        let h = harden(&conn, &StepBudget::new()).and_then(|()| validate_schema(&conn));
+        let h = harden(&mut conn, &StepBudget::new()).and_then(|()| validate_schema(&conn));
         assert!(matches!(h, Err(StoreError::Integrity)), "{h:?}");
     }
 
@@ -823,16 +834,16 @@ pub(crate) mod tests {
         }
         let c = d.join("c.qvault");
         write_file(&c, &bad, 0o600);
-        let conn = open_connection(&c).unwrap();
-        let r = harden(&conn, &StepBudget::new()).and_then(|()| check(&conn).map(|_| ()));
+        let mut conn = open_connection(&c).unwrap();
+        let r = harden(&mut conn, &StepBudget::new()).and_then(|()| check(&conn).map(|_| ()));
         assert_eq!(r, Err(StoreError::Integrity));
 
         // Truncated to two pages.
         let t = d.join("t.qvault");
         write_file(&t, &good[..2 * 4096], 0o600);
-        let conn = open_connection(&t).unwrap();
+        let mut conn = open_connection(&t).unwrap();
         // Hardening already reads the file header and may notice first.
-        let r = harden(&conn, &StepBudget::new()).and_then(|()| check(&conn).map(|_| ()));
+        let r = harden(&mut conn, &StepBudget::new()).and_then(|()| check(&conn).map(|_| ()));
         assert_eq!(r, Err(StoreError::Integrity));
     }
 
@@ -975,8 +986,8 @@ pub(crate) mod tests {
              UPDATE sqlite_schema SET sql = replace(sql, ') WITHOUT ROWID', ') STRICT, WITHOUT ROWID') WHERE name = 'keyslot';",
         );
         drop(conn);
-        let conn = open_connection(&p).unwrap();
-        harden(&conn, &StepBudget::new()).unwrap();
+        let mut conn = open_connection(&p).unwrap();
+        harden(&mut conn, &StepBudget::new()).unwrap();
         assert_eq!(check(&conn).err(), Some(StoreError::Integrity));
     }
 }

@@ -3,43 +3,29 @@
 //! The offering device's sync window (0013 §4, §8; plans 0037 decision 6,
 //! 0042).
 //!
-//! [`PairingWindow::run`] runs the protocol on the caller's thread, with the
-//! shared acceptor of `window`:
-//! - while a hello is being checked, other connections close at once,
-//!   unanswered;
-//! - once a valid hello was accepted, the window is used. The acceptor reads
-//!   one frame from each extra connection, never answers, and closes it.
-//!   Identical bytes are refused. A different valid hello means the code was
-//!   observed, so the pairing aborts. Anything else counts as a failed
-//!   attempt;
-//! - the window closes at 16 failed attempts, at its time limit, on cancel
-//!   or lock, or when its one session completes or aborts.
-//!
-//! New-device mode shows the comparison code and needs the user's
-//! confirmation before VK is granted (§4.5, §4.7). Sync mode needs no input:
-//! A verifies B's proof before sending its own, then runs one exchange as
-//! responder (§4.8). Nothing about the peer is stored.
+//! Admission is consumed by the first fully valid hello. The listener closes
+//! before the accepted session proceeds; later sockets cannot interrupt it.
 
 use std::net::{IpAddr, TcpListener, TcpStream};
-use std::sync::PoisonError;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, sync_channel};
 use std::time::{Duration, Instant};
 
-use qv_crypto::lan::{
-    PairNonce, PairingKeys, PairingSecret, ProofRole, ProofRoot, RecordOpener, RecordSealer, Sas,
-};
+use qv_crypto::lan::v2::{PairingKeys, Role as CryptoRole};
+use qv_crypto::lan::{PairNonce, PairingSecret, Sas};
 use qv_crypto::{KeyGeneration, MacTag, SecretBytes, VaultId, random_array};
 use qv_protocol::frame::FramePhase;
-use qv_protocol::lan::{JoinMode, PairProve, PairProved, PairReveal};
+use qv_protocol::lan::v2::{
+    AuthMode, Finished, KeyProve, KeyProved, PakeFinish, PakeResponse, PakeStart,
+};
 use qv_protocol::oob::{WireEndpoint, encode_manual, encode_qr};
 use qv_protocol::registry::LanProfile;
 use zeroize::Zeroizing;
 
 use super::endpoint::{ListenScope, advertisable, bind_addrs};
 use super::exchange::{ExchangeVault, Role, RoundReport};
-use super::steps::{accept_for, check_hello, record_keys, th};
-use super::transport::{Channel, Conn, guarded};
+use super::steps_v2::{accept_for, auth_transcript, check_hello, crypto_mode, outer_transcript};
+use super::transport::{Conn, V2Channel};
 use super::window::{POLL, Phase, Shared, acceptor, closing};
 use super::{LanError, LanTimeouts, PAIRING_WINDOW_MAX, exchange};
 
@@ -51,8 +37,6 @@ pub struct ApproverContext {
     pub key_generation: KeyGeneration,
     /// The vault's name, shown with the comparison code.
     pub vault_name: SecretBytes,
-    /// `K_proof` of this generation.
-    pub root: ProofRoot,
 }
 
 /// The offering device's vault, reached through short calls (qv-core
@@ -60,21 +44,72 @@ pub struct ApproverContext {
 pub trait ApproverVault: ExchangeVault {
     /// The vault's identity and proof key.
     fn context(&self) -> Result<ApproverContext, LanError>;
-    /// Builds the grant plaintext ([`super::grant_plaintext`]), passes it to
-    /// `seal`, and returns the sealed record. The driver sends it after this
-    /// call returns, so no vault lock is held on the network.
-    fn grant(&self, seal: &mut Sealer<'_>) -> Result<Vec<u8>, LanError>;
 }
 
-/// Seals one record of the pairing channel (see [`ApproverVault::grant`]).
-pub type Sealer<'a> = dyn FnMut(&[u8]) -> Result<Vec<u8>, LanError> + 'a;
+/// Credential-authenticated vault boundary (0013 §15). The implementation
+/// owns its private one-use authorization; the network driver cannot forge it.
+pub trait CredentialApprover: ApproverVault {
+    /// Private snapshot/authorization type owned by the core implementation.
+    type Authorization;
+    /// Reauthenticate locally, then create a fresh one-shot server outside
+    /// the session mutex. A local WrongPassword may be corrected without
+    /// sending a network response or creating a second remote attempt.
+    fn authenticate_password(
+        &self,
+        password: qv_crypto::MasterPassword,
+        t0: &[u8; 32],
+        ke1: &[u8],
+    ) -> Result<
+        (
+            qv_crypto::lan_auth::PasswordAuthServer,
+            SecretBytes,
+            Self::Authorization,
+        ),
+        LanError,
+    >;
+    /// Rechecks the captured slot/head/session before emitting KE2.
+    fn check_authorization(&self, authorization: &Self::Authorization) -> Result<(), LanError>;
+    /// Independent key proof state, derived under a short session read.
+    fn key_auth(
+        &self,
+        mode: qv_crypto::lan::v2::AuthMode,
+        t0: [u8; 32],
+    ) -> Result<qv_crypto::lan::v2::KeyAuthentication, LanError>;
+    /// Consumes authorization and seals exactly once with the bound final
+    /// sealer under the same mutex as all policy/head/slot checks.
+    fn authorized_grant(
+        &self,
+        authorization: Self::Authorization,
+        sealer: &mut qv_crypto::lan::v2::RecordSealer<qv_crypto::lan::v2::FinalEpoch>,
+    ) -> Result<SealedGrant, LanError>;
+}
+
+/// A completed seal counts as possible disclosure even if its pending frame
+/// was discarded. This result must never be converted into a pre-grant error.
+pub enum SealedGrant {
+    /// Ready to send once; still check cancellation/deadline before I/O.
+    Ready(Zeroizing<Vec<u8>>),
+    /// Sealing completed, but cancellation/expiry discarded the output.
+    Discarded(LanError),
+}
 
 /// Shows a new device's comparison code and waits for the user (0013 §4.5).
 /// Sync mode never calls it.
 pub trait Confirm {
+    /// Admission is consumed and every listener has been dropped. Clear the
+    /// displayed code; this event does not establish credential authentication.
+    fn admitted(&mut self) {}
     /// `true` once the user confirmed that both devices show `sas`. It must
     /// return promptly when the frontend's cancellation fires.
     fn confirm(&mut self, sas: &Sas, vault_name: &[u8]) -> bool;
+    /// Protected password entry after comparison approval. `retry` reports a
+    /// local typo only; no remote credential retry is permitted.
+    fn password(
+        &mut self,
+        sas: &Sas,
+        vault_name: &[u8],
+        retry: bool,
+    ) -> Option<qv_crypto::MasterPassword>;
 }
 
 /// The window's one session, completed on the offering side.
@@ -82,6 +117,8 @@ pub trait Confirm {
 pub enum Approved {
     /// A new device joined (0013 §4.7).
     Joined {
+        /// A password grant was sealed; delivery may remain unknown.
+        key_disclosed: bool,
         /// Whether the new device sent its `Done`. Otherwise it may not
         /// have finished joining.
         peer_confirmed: bool,
@@ -114,7 +151,7 @@ impl PairingWindow {
             return Err(LanError::Protocol);
         }
         let keys = PairingSecret::generate()
-            .and_then(PairingSecret::keys)
+            .and_then(PairingKeys::new)
             .map_err(|_| LanError::Io)?;
         let listener = bind_addrs(scope, port.unwrap_or(0))
             .into_iter()
@@ -151,7 +188,7 @@ impl PairingWindow {
             .map(|&addr| WireEndpoint { addr, port })
             .collect();
         encode_qr(
-            LanProfile::V1,
+            LanProfile::V2,
             self.keys.secret().expose_secret(),
             &endpoints,
             "",
@@ -165,9 +202,9 @@ impl PairingWindow {
     }
 
     /// Runs the window until its one session ends or the window closes.
-    pub fn run(
+    pub fn run<V: CredentialApprover>(
         self,
-        vault: &dyn ApproverVault,
+        vault: &V,
         confirm: &mut dyn Confirm,
         timeouts: &LanTimeouts,
         cancelled: &(dyn Fn() -> bool + Sync),
@@ -178,69 +215,31 @@ impl PairingWindow {
         let keys = &self.keys;
         let expires = self.expires;
         let listener = self.listener;
-        std::thread::scope(|s| {
+        let (conn, hello) = std::thread::scope(|s| {
             let shared_ref = &shared;
-            s.spawn(move || {
-                acceptor(&listener, shared_ref, &tx, expires, cancelled, &|stream| {
-                    probe(stream, keys, shared_ref, timeouts, expires, cancelled)
-                })
-            });
-            let r = worker(
-                keys, &shared, &rx, vault, confirm, timeouts, expires, cancelled,
-            );
+            s.spawn(move || acceptor(listener, shared_ref, &tx, expires, cancelled));
+            let result = admit(keys, &shared, &rx, timeouts, expires, cancelled);
             shared.finished.store(true, Ordering::SeqCst);
-            r
-        })
-    }
-}
-
-/// Reads one frame from an extra connection while the window is used
-/// (0013 §8.3 clarification); never answers.
-fn probe(
-    stream: TcpStream,
-    keys: &PairingKeys,
-    shared: &Shared,
-    t: &LanTimeouts,
-    expires: Instant,
-    cancelled: &(dyn Fn() -> bool + Sync),
-) {
-    let Ok(mut conn) = Conn::new(stream, cancelled) else {
-        return;
-    };
-    conn.cap(expires);
-    conn.within(t.probe, None);
-    let mut buf = Vec::new();
-    let read = conn.recv_frame(FramePhase::Handshake, &mut buf);
-    conn.close();
-    if read.is_err() {
-        shared.fail();
-        return;
-    }
-    let same = {
-        let g = shared.phase.lock().unwrap_or_else(PoisonError::into_inner);
-        g.1.as_slice() == buf.as_slice()
-    };
-    if same {
-        return;
-    }
-    if check_hello(keys, &buf).is_ok() {
-        shared.observed.store(true, Ordering::SeqCst);
-    } else {
-        shared.fail();
+            result
+        })?;
+        confirm.admitted();
+        // The scope has joined the listener owner. No listener (or clone)
+        // remains when any KEM/credential/session work starts.
+        pair(
+            conn, self.keys, hello, vault, confirm, timeouts, expires, cancelled,
+        )
     }
 }
 
 #[allow(clippy::too_many_arguments)] // the window's shared state and the caller's hooks
-fn worker(
+fn admit<'c>(
     keys: &PairingKeys,
     shared: &Shared,
     rx: &Receiver<TcpStream>,
-    vault: &dyn ApproverVault,
-    confirm: &mut dyn Confirm,
     t: &LanTimeouts,
     expires: Instant,
-    cancelled: &(dyn Fn() -> bool + Sync),
-) -> Result<Approved, LanError> {
+    cancelled: &'c (dyn Fn() -> bool + Sync),
+) -> Result<(Conn<'c>, super::steps_v2::CheckedHello), LanError> {
     loop {
         if let Some(e) = closing(shared, expires, cancelled) {
             return Err(e);
@@ -253,7 +252,7 @@ fn worker(
             }
         };
         let Ok(mut conn) = Conn::new(stream, cancelled) else {
-            shared.set(Phase::Idle, None);
+            shared.set(Phase::Idle);
             continue;
         };
         conn.cap(expires);
@@ -268,130 +267,172 @@ fn worker(
             // idle first means a client that reconnects at once is checked,
             // not refused uncounted while this one is still `Checking`.
             shared.fail();
-            shared.set(Phase::Idle, None);
+            shared.set(Phase::Idle);
             conn.close();
             continue;
         };
-        shared.set(Phase::Used, Some(&buf));
-        return pair(
-            conn, keys, shared, hello, vault, confirm, t, expires, cancelled,
-        );
+        return Ok((conn, hello));
     }
 }
 
-#[allow(clippy::too_many_arguments)] // one pairing's state and the caller's hooks
-fn pair(
+#[allow(clippy::too_many_arguments)] // One accepted connection, original deadline and caller hooks.
+fn pair<V: CredentialApprover>(
     mut conn: Conn<'_>,
-    keys: &PairingKeys,
-    shared: &Shared,
-    hello: super::steps::CheckedHello,
-    vault: &dyn ApproverVault,
+    keys: PairingKeys,
+    hello: super::steps_v2::CheckedHello,
+    vault: &V,
     confirm: &mut dyn Confirm,
     t: &LanTimeouts,
     expires: Instant,
-    cancelled: &(dyn Fn() -> bool + Sync),
+    _cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Result<Approved, LanError> {
-    let observed = || {
-        if shared.observed.load(Ordering::SeqCst) {
-            Err(LanError::CodeObserved)
-        } else {
-            Ok(())
-        }
-    };
-    // Encapsulate only after every hello check passed (§5.1's rule holds
-    // here too: no KEM work before the MAC).
+    let mode = hello.mode;
     let (ss, ct) = hello.ek.encapsulate().map_err(|_| LanError::Io)?;
-    let nonce_a = random_array::<32>().map_err(|_| LanError::Io)?;
-    let (accept, accept_hash) = accept_for(keys, &hello.hash, &nonce_a, &ct)?;
+    let nonce = random_array::<32>().map_err(|_| LanError::Io)?;
+    let (accept, accept_hash) = accept_for(&keys, &hello, nonce, &ct)?;
     conn.within(t.message, Some(expires));
     conn.send_frame(FramePhase::Handshake, &accept)?;
-    let th = th(&hello.hash, &accept_hash)?;
-    let (b2a, a2b) = record_keys(keys, &ss, &th)?;
-    let mut ch = Channel::new(conn, RecordSealer::new(a2b), RecordOpener::new(b2a));
-    let ctx = vault.context();
-    match hello.mode {
-        JoinMode::NewDevice => {
-            let ctx = guarded(&mut ch, |ch| {
-                let ctx = ctx?;
-                let msg = ch.recv(t.message, Some(expires))?;
-                let reveal =
-                    PairReveal::decode(msg.expose_secret()).map_err(|_| LanError::Protocol)?;
-                let nonce_b =
-                    PairNonce::from_bytes(&*reveal.nonce_b).map_err(|_| LanError::Protocol)?;
-                if !nonce_b
-                    .matches(&hello.commit)
-                    .map_err(|_| LanError::Protocol)?
-                {
-                    return Err(LanError::Protocol);
+    let t0 = outer_transcript(mode, &hello.hash, &accept_hash)?;
+    let (schedule, initial) = keys
+        .begin(ss, crypto_mode(mode), t0)
+        .map_err(|_| LanError::Integrity)?;
+    let mut ch = V2Channel::initial(conn, initial, CryptoRole::Offerer);
+    let ctx = vault.context()?;
+    match mode {
+        AuthMode::PasswordEnrollment => {
+            let r = ch.recv(t.confirm, None)?;
+            let start = PakeStart::decode(r.expose_secret()).map_err(|_| LanError::Integrity)?;
+            let nonce = PairNonce::from_bytes(&start.nonce).map_err(|_| LanError::Integrity)?;
+            if qv_crypto::lan::v2::nonce_commitment(&nonce).map_err(|_| LanError::Integrity)?
+                != hello.commit
+            {
+                return Err(LanError::Integrity);
+            }
+            let sas = qv_crypto::lan::v2::comparison_code(crypto_mode(mode), &t0, &nonce)
+                .map_err(|_| LanError::Integrity)?;
+            let mut retry = false;
+            let (server, ke2, authorization) = loop {
+                ch.check()?;
+                let password = confirm
+                    .password(&sas, ctx.vault_name.expose_secret(), retry)
+                    .ok_or(LanError::Cancelled)?;
+                ch.check()?;
+                match vault.authenticate_password(password, &t0, start.ke1) {
+                    Ok(result) => break result,
+                    Err(LanError::Store(qv_store::StoreError::WrongPassword)) => retry = true,
+                    Err(error) => return Err(error),
                 }
-                let sas = Sas::compute(&th, &nonce_b).map_err(|_| LanError::Protocol)?;
-                observed()?;
-                let ok = confirm.confirm(&sas, ctx.vault_name.expose_secret());
-                observed()?;
-                if cancelled() {
-                    return Err(LanError::Cancelled);
-                }
-                if Instant::now() >= expires {
-                    return Err(LanError::WindowExpired);
-                }
-                if !ok {
-                    return Err(LanError::Cancelled);
-                }
-                Ok(ctx)
-            })?;
-            drop(ss);
-            guarded(&mut ch, |ch| {
-                observed()?;
-                let record = vault.grant(&mut |plaintext| ch.seal(plaintext))?;
-                ch.send_sealed(&record, t.message)
-            })?;
-            let failure = guarded(&mut ch, |ch| {
-                exchange::serve(ch, vault, ctx.vault_id, ctx.key_generation, t)
-            })
-            .err();
+            };
+            let s = PakeResponse {
+                ke2: ke2
+                    .expose_secret()
+                    .try_into()
+                    .map_err(|_| LanError::Integrity)?,
+            }
+            .encode()
+            .map_err(|_| LanError::Protocol)?;
+            drop(ke2);
+            vault.check_authorization(&authorization)?;
+            ch.send(&s, t.message)?;
+            let f = ch.recv(t.message, None)?;
+            let finish = PakeFinish::decode(f.expose_secret()).map_err(|_| LanError::Integrity)?;
+            let auth = server.finish(finish.ke3).map_err(|_| LanError::Integrity)?;
+            let ta = auth_transcript(mode, &t0, r.expose_secret(), &s, Some(f.expose_secret()))?;
+            drop((r, s, f));
+            ch.check()?;
+            let (final_keys, finished_key) = schedule
+                .complete(auth, ta)
+                .map_err(|_| LanError::Integrity)?;
+            let mut ch = ch.finish(final_keys)?;
+            let message = ch.recv(t.message, None)?;
+            let finished =
+                Finished::decode(message.expose_secret()).map_err(|_| LanError::Integrity)?;
+            finished_key
+                .verify(&MacTag::from_bytes(*finished.mac))
+                .map_err(|_| LanError::Integrity)?;
+            drop((message, finished_key));
+            ch.check()?;
+            let sealed = vault.authorized_grant(authorization, &mut ch.sealer)?;
+            // From this point every outcome must report possible disclosure.
+            let failure = match sealed {
+                SealedGrant::Discarded(error) => Some(error),
+                SealedGrant::Ready(record) => ch.send_sealed(&record, t.message).err(),
+            };
+            if let Some(error) = failure {
+                ch.conn.close();
+                return Ok(Approved::Joined {
+                    key_disclosed: true,
+                    peer_confirmed: false,
+                    failure: Some(error),
+                });
+            }
+            let result = (|| {
+                let first =
+                    exchange::first_state(&mut ch, ctx.vault_id, ctx.key_generation, true, t)?;
+                exchange::serve(&mut ch, vault, ctx.vault_id, ctx.key_generation, first, t)
+            })();
+            let failure = result.err().map(|error| ch.abort(error));
+            ch.conn.close();
             Ok(Approved::Joined {
+                key_disclosed: true,
                 peer_confirmed: failure.is_none(),
                 failure,
             })
         }
-        JoinMode::Sync => {
-            drop(ss);
-            // B proves first; A sends nothing derived from K_proof before
-            // that proof verifies (§4.8).
-            guarded(&mut ch, |ch| {
-                let ctx = ctx?;
-                let msg = ch.recv(t.message, Some(expires))?;
-                let prove =
-                    PairProve::decode(msg.expose_secret()).map_err(|_| LanError::Protocol)?;
-                if prove.vault_id != ctx.vault_id.0 || prove.key_generation != ctx.key_generation.0
-                {
-                    return Err(LanError::VaultMismatch);
-                }
-                ctx.root
-                    .verify_proof(
-                        &th,
-                        ProofRole::B,
-                        ctx.vault_id,
-                        ctx.key_generation,
-                        &MacTag::from_bytes(prove.proof),
-                    )
-                    .map_err(|_| LanError::VaultMismatch)?;
-                observed()?;
-                let proof = ctx
-                    .root
-                    .proof(&th, ProofRole::A, ctx.vault_id, ctx.key_generation)
-                    .map_err(|_| LanError::Protocol)?;
-                ch.send(
-                    &PairProved::encode(proof.as_bytes()).map_err(|_| LanError::Protocol)?,
-                    t.message,
-                )
-            })?;
-            // The ordinary exchange over the pairing keys, A responding.
-            let round = guarded(&mut ch, |ch| {
-                exchange::exchange(ch, Role::Responder, vault, t)
-            });
+        AuthMode::KeyEnrollment | AuthMode::KeySync => {
+            let first = ch.recv(
+                if mode == AuthMode::KeyEnrollment {
+                    t.confirm
+                } else {
+                    t.message
+                },
+                None,
+            )?;
+            let proof = KeyProve::decode(first.expose_secret()).map_err(|_| LanError::Integrity)?;
+            let verified = vault
+                .key_auth(crypto_mode(mode), t0)?
+                .accept_joiner(&MacTag::from_bytes(*proof.mac))
+                .map_err(|_| LanError::Integrity)?;
+            let (mac, auth) = verified
+                .offer(ctx.vault_id, ctx.key_generation)
+                .map_err(|_| LanError::Integrity)?;
+            let second = KeyProved {
+                vault_id: ctx.vault_id.0,
+                generation: ctx.key_generation.0,
+                mac: *mac.as_bytes(),
+            }
+            .encode()
+            .map_err(|_| LanError::Protocol)?;
+            let ta = auth_transcript(mode, &t0, first.expose_secret(), &second, None)?;
+            ch.send(&second, t.message)?;
+            drop((first, second));
+            let (final_keys, finished) = schedule
+                .complete(auth, ta)
+                .map_err(|_| LanError::Integrity)?;
+            drop(finished);
+            let mut ch = ch.finish(final_keys)?;
+            let first = exchange::first_state(
+                &mut ch,
+                ctx.vault_id,
+                ctx.key_generation,
+                mode == AuthMode::KeyEnrollment,
+                t,
+            )?;
+            let result = if mode == AuthMode::KeySync {
+                exchange::exchange(&mut ch, Role::Responder, vault, Some(first), t)
+                    .map(Approved::Synced)
+            } else {
+                let result =
+                    exchange::serve(&mut ch, vault, ctx.vault_id, ctx.key_generation, first, t);
+                Ok(Approved::Joined {
+                    key_disclosed: false,
+                    peer_confirmed: result.is_ok(),
+                    failure: result.err(),
+                })
+            };
+            let result = result.map_err(|error| ch.abort(error));
             ch.conn.close();
-            round.map(Approved::Synced)
+            result
         }
     }
 }

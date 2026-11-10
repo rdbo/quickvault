@@ -81,7 +81,7 @@ try{
  await tap("lan-cancel");await until(()=>!!$("#lan-dismiss"));
  if($("#lan-code"))throw new Error("synthetic code remained");
  if($("#lan-qr"))throw new Error("synthetic code QR remained");
- await tap("lan-dismiss");await until(()=>!$(".lan"));
+ await tap("lan-dismiss");await until(()=>!$(".lan")&&!$("#lan-receipt"));
  stage=65;await until(()=>!!$("#show-code")&&!$("#show-code").disabled);await tap("show-code");
  await until(()=>(byIdOpt("lan-code")?.textContent||"").length===31);
  input("validation-result","LAN-PEER");
@@ -89,13 +89,16 @@ try{
  await until(()=>!!$("#lan-codes-match")&&$(".lan .notice")?.textContent==="Synthetic peer compared the code.");
  if(!/^\d{3} \d{3}$/.test(byIdOpt("lan-sas")?.textContent||""))throw new Error("synthetic comparison code absent");
  await tap("lan-codes-match");
+ await until(()=>!!$("#lan-password"));
+ input("lan-password",password);await tap("lan-password-submit");
  stage=67;
- await until(()=>!!$("#lan-dismiss"));
- if($(".lan .error")||!$(".lan")?.textContent.includes("A new device joined this vault."))throw new Error("synthetic join failed");
+ // The docked receipt replaced the old modal; wait for its result content.
+ await until(()=>!!$("#lan-dismiss")&&(!!$("#lan-receipt.bad")||$("#lan-receipt-title")?.textContent==="The receiving device confirmed complete receipt."));
+ if($("#lan-receipt.bad")||$("#lan-receipt-title")?.textContent!=="The receiving device confirmed complete receipt.")throw new Error("synthetic join failed");
  if($("#lan-code")||$("#lan-sas"))throw new Error("synthetic code secrets remained");
  stage=68;
- await until(()=>$(".lan .notice")?.textContent==="Synthetic peer opened the vault.");
- await tap("lan-dismiss");await until(()=>!$(".lan"));
+ await until(()=>$("#validation-result")?.getAttribute("data-peer-opened")==="true");
+ await tap("lan-dismiss");await until(()=>!$(".lan")&&!$("#lan-receipt"));
  // Trash and restore.
  await openItem("Synthetic <img");
  stage=7;await tap("entry-menu");await until(()=>!!$("#menu-delete"));await tap("menu-delete");await until(()=>notice().startsWith("Moved to the trash"));

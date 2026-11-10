@@ -1,0 +1,82 @@
+crypto-bigint v0.5.5
+├── crypto-bigint feature "generic-array"
+│   └── elliptic-curve v0.13.8
+│       ├── elliptic-curve feature "arithmetic"
+│       │   ├── elliptic-curve feature "default"
+│       │   │   ├── opaque-ke v4.0.1
+│       │   │   │   ├── opaque-ke feature "argon2"
+│       │   │   │   │   └── qv-crypto v0.0.0 (/home/user/Repos/quickvault/crates/qv-crypto)
+│       │   │   │   │       ├── qv-crypto feature "default" (command-line)
+│       │   │   │   │       │   ├── qv-core v0.0.0 (/home/user/Repos/quickvault/crates/qv-core)
+│       │   │   │   │       │   │   ├── qv-core feature "default" (command-line)
+│       │   │   │   │       │   │   │   ├── qv-app v0.0.0 (/home/user/Repos/quickvault/crates/qv-app)
+│       │   │   │   │       │   │   │   │   └── qv-app feature "default" (command-line)
+│       │   │   │   │       │   │   │   └── qv-cli v0.0.0 (/home/user/Repos/quickvault/crates/qv-cli)
+│       │   │   │   │       │   │   │       └── qv-cli feature "default" (command-line)
+│       │   │   │   │       │   │   │   [dev-dependencies]
+│       │   │   │   │       │   │   │   ├── qv-app v0.0.0 (/home/user/Repos/quickvault/crates/qv-app) (*)
+│       │   │   │   │       │   │   │   └── qv-cli v0.0.0 (/home/user/Repos/quickvault/crates/qv-cli) (*)
+│       │   │   │   │       │   │   ├── qv-core feature "test-eager-views"
+│       │   │   │   │       │   │   │   [dev-dependencies]
+│       │   │   │   │       │   │   │   ├── qv-app v0.0.0 (/home/user/Repos/quickvault/crates/qv-app) (*)
+│       │   │   │   │       │   │   │   └── qv-cli v0.0.0 (/home/user/Repos/quickvault/crates/qv-cli) (*)
+│       │   │   │   │       │   │   └── qv-core feature "test-kdf-limit"
+│       │   │   │   │       │   │       [dev-dependencies]
+│       │   │   │   │       │   │       ├── qv-app v0.0.0 (/home/user/Repos/quickvault/crates/qv-app) (*)
+│       │   │   │   │       │   │       └── qv-cli v0.0.0 (/home/user/Repos/quickvault/crates/qv-cli) (*)
+│       │   │   │   │       │   ├── qv-model v0.0.0 (/home/user/Repos/quickvault/crates/qv-model)
+│       │   │   │   │       │   │   └── qv-model feature "default" (command-line)
+│       │   │   │   │       │   │       ├── qv-core v0.0.0 (/home/user/Repos/quickvault/crates/qv-core) (*)
+│       │   │   │   │       │   │       ├── qv-store v0.0.0 (/home/user/Repos/quickvault/crates/qv-store)
+│       │   │   │   │       │   │       │   └── qv-store feature "default" (command-line)
+│       │   │   │   │       │   │       │       ├── qv-core v0.0.0 (/home/user/Repos/quickvault/crates/qv-core) (*)
+│       │   │   │   │       │   │       │       └── qv-sync v0.0.0 (/home/user/Repos/quickvault/crates/qv-sync)
+│       │   │   │   │       │   │       │           └── qv-sync feature "default" (command-line)
+│       │   │   │   │       │   │       │               └── qv-core v0.0.0 (/home/user/Repos/quickvault/crates/qv-core) (*)
+│       │   │   │   │       │   │       └── qv-sync v0.0.0 (/home/user/Repos/quickvault/crates/qv-sync) (*)
+│       │   │   │   │       │   ├── qv-platform v0.0.0 (/home/user/Repos/quickvault/crates/qv-platform)
+│       │   │   │   │       │   │   └── qv-platform feature "default" (command-line)
+│       │   │   │   │       │   │       └── qv-core v0.0.0 (/home/user/Repos/quickvault/crates/qv-core) (*)
+│       │   │   │   │       │   ├── qv-store v0.0.0 (/home/user/Repos/quickvault/crates/qv-store) (*)
+│       │   │   │   │       │   └── qv-sync v0.0.0 (/home/user/Repos/quickvault/crates/qv-sync) (*)
+│       │   │   │   │       │   [dev-dependencies]
+│       │   │   │   │       │   ├── qv-core v0.0.0 (/home/user/Repos/quickvault/crates/qv-core) (*)
+│       │   │   │   │       │   └── qv-sync v0.0.0 (/home/user/Repos/quickvault/crates/qv-sync) (*)
+│       │   │   │   │       ├── qv-crypto feature "test-kdf-limit"
+│       │   │   │   │       │   [dev-dependencies]
+│       │   │   │   │       │   ├── qv-core v0.0.0 (/home/user/Repos/quickvault/crates/qv-core) (*)
+│       │   │   │   │       │   └── qv-sync v0.0.0 (/home/user/Repos/quickvault/crates/qv-sync) (*)
+│       │   │   │   │       │   └── qv-core feature "test-kdf-limit" (*)
+│       │   │   │   │       └── qv-crypto feature "test-vectors"
+│       │   │   │   │           [dev-dependencies]
+│       │   │   │   │           └── qv-sync v0.0.0 (/home/user/Repos/quickvault/crates/qv-sync) (*)
+│       │   │   │   └── opaque-ke feature "ristretto255"
+│       │   │   │       └── qv-crypto v0.0.0 (/home/user/Repos/quickvault/crates/qv-crypto) (*)
+│       │   │   └── voprf v0.5.0
+│       │   │       ├── voprf feature "danger"
+│       │   │       │   └── opaque-ke v4.0.1 (*)
+│       │   │       ├── voprf feature "ristretto255"
+│       │   │       │   └── voprf feature "ristretto255-ciphersuite"
+│       │   │       │       └── opaque-ke feature "ristretto255" (*)
+│       │   │       └── voprf feature "ristretto255-ciphersuite" (*)
+│       │   └── elliptic-curve feature "hash2curve"
+│       │       ├── opaque-ke v4.0.1 (*)
+│       │       └── voprf v0.5.0 (*)
+│       ├── elliptic-curve feature "default" (*)
+│       ├── elliptic-curve feature "digest"
+│       │   ├── elliptic-curve feature "hash2curve" (*)
+│       │   └── elliptic-curve feature "voprf"
+│       │       └── voprf v0.5.0 (*)
+│       ├── elliptic-curve feature "ff"
+│       │   └── elliptic-curve feature "group"
+│       │       └── elliptic-curve feature "arithmetic" (*)
+│       ├── elliptic-curve feature "group" (*)
+│       ├── elliptic-curve feature "hash2curve" (*)
+│       ├── elliptic-curve feature "sec1"
+│       │   ├── opaque-ke v4.0.1 (*)
+│       │   └── voprf v0.5.0 (*)
+│       └── elliptic-curve feature "voprf" (*)
+├── crypto-bigint feature "rand_core"
+│   └── elliptic-curve v0.13.8 (*)
+└── crypto-bigint feature "zeroize"
+    └── elliptic-curve v0.13.8 (*)

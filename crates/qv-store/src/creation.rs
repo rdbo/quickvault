@@ -42,7 +42,7 @@ pub(crate) fn write_database(
 ) -> Result<(), StoreError> {
     let mut conn = open_connection(temp)?;
     let budget = StepBudget::new();
-    harden(&conn, &budget)?;
+    harden(&mut conn, &budget)?;
     conn.pragma_update(None, "page_size", 4096)
         .map_err(|e| sqlite_err(&e))?;
     let body = header.encode()?;

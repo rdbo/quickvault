@@ -5,13 +5,36 @@ what they say, and behaviour changes start with a spec change.
 
 ## Index
 
+Plan0050 tracks all fifteen remaining assessment repairs under the owner's
+2026-11-09 instruction and delegated correctness decisions. The first amendment
+requires a bounded immutable read-only schema probe before mutable SQLite
+hardening (0004 §1.2), distinct durable/capacity/damaged-anchor reporting
+(0004 §5, 0011 §6), independent-anchor warnings (0004 §1.1), causal admission
+that retains room for the local resolver (0005 §1.2), and explicit encrypted
+deletion identities (0003 §4/§5, 0007 §2.1). This is implementation work, not
+release approval.
+
+The same plan specifies accurate clipboard replacement reporting (0008 §3,
+0011 §3.6) and shared display-only escapes for bidi/invisible controls without
+changing editor or stored values (0009 §1, 0011 §5).
+It also specifies core-enforced recovery-copy authorization and cooperative
+file leases (0004 §6, 0007 §3.2), protected ranged media with separate loopback
+capabilities and exact CSP bounds (0003 §6.4, 0008 §4, 0009 §1.8), and explicit
+loading before large/unmeasured image decoding. Actual device validation remains
+separate from these contracts and local test results.
+
 Audit remediation (plan 0046, 2026-11-08) clarifies 0011 §3.1's terminal
 protection through command exit and 0013 §1.4's shared endpoint classification.
 The three policy discussions now have owner-selected directions recorded in
 [plan 0047](../plans/0047-audit-policy-and-lan-auth/PLAN.md): bounded cache/paged
 views, no persistent filesystem binding, and ephemeral v4 LAN authentication
-with listener closure. Their spec amendments and implementation are planned;
-the normative behavior is unchanged by that plan alone.
+with listener closure. Owner approved implementation on 2026-11-09. Normative amendments are in
+0013 §15, 0014 §10, 0002 §9, 0003 §8 and 0004 §7, with corresponding
+threat/input/validation text. Runtime LAN/2, verified password/phrase enrollment
+and bounded frontend pages are implemented; final local gates pass. Independent
+review and target qualification continue in proposed plan0048. The discovered SQLite advisory is repaired by upgrading the pinned engine,
+with no vault/wire format change or advisory suppression. The named
+0008 §6/0009 §7 sections are approved without promoting their full Draft specs.
 
 0014 (accepted by the owner 2026-11-06, plan 0042) replaces 0013's stored
 device links with one-use sync codes; its amendments are applied to 0013,

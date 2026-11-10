@@ -109,6 +109,9 @@ fn changed(a: &Entry, b: &Entry) -> Result<Changes, CoreError> {
     if a.deleted_at != b.deleted_at {
         props.push(text("deleted_at")?);
     }
+    if a.delete_operation != b.delete_operation {
+        props.push(text("delete_operation")?);
+    }
     if a.created_at != b.created_at {
         props.push(text("created_at")?);
     }
@@ -211,6 +214,7 @@ impl Session {
             }
             e.created_at = current.created_at;
             e.deleted_at = current.deleted_at;
+            e.delete_operation = current.delete_operation;
             e.modified_at = ctx.now();
             crate::edit::commit(
                 ctx,
@@ -356,6 +360,7 @@ impl Session {
             if r.status.finally_deleted {
                 return Err(CoreError::NotFound);
             }
+            crate::snapshot::require_recovery(ctx)?;
             let cancel = ctx.canceller();
             let seq = ctx.open.vault.local_seq();
             let mut w = ctx.open.vault.write()?;
@@ -404,7 +409,7 @@ mod tests {
     #[test]
     fn history_omits_permanent_metadata_after_causal_restore_without_discarding_it() {
         let env = Env::new();
-        let s = env.unlock();
+        let s = env.unlock_with(Some(env.snapshot_policy()));
         let e = create(&s);
         s.mutate(|ctx| {
             let original = ctx
@@ -433,7 +438,7 @@ mod tests {
         })
         .unwrap();
         assert!(s.history(e).unwrap().is_empty());
-        s.purge_history(e).unwrap();
+        crate::testutil::destructive(&s, || s.purge_history(e)).unwrap();
         s.read(|ctx| {
             let history = ctx
                 .open
@@ -453,7 +458,7 @@ mod tests {
     #[test]
     fn history_retention_restore_purge_and_handle_capabilities() {
         let env = Env::new();
-        let s = env.unlock();
+        let s = env.unlock_with(Some(env.snapshot_policy()));
         env.time.set(1_699_999_999_999);
         let e = create(&s);
         let original = s.entry(e).unwrap().version;
@@ -496,7 +501,7 @@ mod tests {
             })
             .unwrap();
         let seq = s.overview().unwrap().local_seq;
-        s.purge_history(e).unwrap();
+        crate::testutil::destructive(&s, || s.purge_history(e)).unwrap();
         assert_eq!(s.overview().unwrap().local_seq, seq + 1);
         assert!(s.history(e).unwrap().is_empty());
         assert_eq!(err(s.history_entry(h)), CoreError::StaleHandle);
@@ -550,7 +555,7 @@ mod tests {
     #[test]
     fn history_conflict_consent_purge_and_durable_anchor_failure() {
         let env = Env::new();
-        let s = env.unlock();
+        let s = env.unlock_with(Some(env.snapshot_policy()));
         let e = create(&s);
         edit(&s, e, 1);
         let h = s.history(e).unwrap()[0].handle;
@@ -577,8 +582,8 @@ mod tests {
         std::fs::write(&env.anchors, b"blocked").unwrap();
         let seq = s.overview().unwrap().local_seq;
         assert_eq!(
-            err(s.purge_history(e)),
-            CoreError::Store(qv_store::StoreError::Io)
+            err(crate::testutil::destructive(&s, || s.purge_history(e))),
+            CoreError::Store(qv_store::StoreError::CommittedAnchorPending)
         );
         assert_eq!(s.overview().unwrap().local_seq, seq + 1);
         assert!(s.history(e).unwrap().is_empty());
@@ -586,7 +591,7 @@ mod tests {
         std::fs::remove_file(&env.anchors).unwrap();
         std::fs::rename(&held, &env.anchors).unwrap();
         s.lock();
-        let s = env.unlock();
+        let s = env.unlock_with(Some(env.snapshot_policy()));
         let e = s.list(s.root().unwrap()).unwrap().entries[0].handle;
         assert!(s.history(e).unwrap().is_empty());
     }

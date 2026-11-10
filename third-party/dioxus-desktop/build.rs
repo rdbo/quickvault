@@ -36,17 +36,16 @@ fn check_gnu() {
     }
 }
 
-fn compile_ts() {
-    // If any TS files change, re-run the build script
-    lazy_js_bundle::LazyTypeScriptBindings::new()
-        .with_watching("./src/ts")
-        .with_binding("./src/ts/native_eval.ts", "./src/js/native_eval.js")
-        .run();
+// QuickVault maintains the exact prebuilt artifact from the hash-verified
+// crates.io 0.7.10 archive. See ../README.md. Builds never invoke ambient Bun
+// or regenerate source; changing this artifact requires provenance review.
+fn track_prebuilt_js() {
+    println!("cargo:rerun-if-changed=src/js/native_eval.js");
 }
 
 fn main() {
     check_gnu();
-    compile_ts();
+    track_prebuilt_js();
 }
 
 const EXAMPLES_TOML: &str = r#"

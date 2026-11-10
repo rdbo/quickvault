@@ -103,12 +103,22 @@ fn exchange_requires_recovery_policy_budget_and_preflight_views_before_acceptanc
         err(s.merge_archive(&source, false, None)),
         CoreError::SnapshotOverBudget { .. }
     ));
-    assert_eq!(
-        err(s.merge_archive_with_budget(&source, true, None, 1)),
-        CoreError::LimitExceeded
+    // Cache residency is independent of candidate validity (0047): even a
+    // one-byte cache must accept the fully authenticated archive and load its
+    // uncachable metadata on demand. Snapshot approval remains explicit.
+    assert!(
+        s.merge_archive_with_budget(&source, true, None, 1)
+            .unwrap()
+            .accepted
     );
-    assert_eq!(s.overview().unwrap().local_seq, seq);
-    assert!(s.merge_archive(&source, true, None).unwrap().accepted);
+    assert!(s.overview().unwrap().local_seq > seq);
+    assert_eq!(s.search("confidential metadata").unwrap().len(), 1);
+    s.read(|ctx| {
+        assert!(ctx.open.index.bytes() <= 1);
+        Ok(())
+    })
+    .unwrap();
+    assert!(!s.merge_archive(&source, true, None).unwrap().accepted);
     assert!(
         s.snapshots()
             .unwrap()

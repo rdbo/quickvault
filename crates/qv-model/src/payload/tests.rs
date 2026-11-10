@@ -136,6 +136,7 @@ fn payload_entry_api_matches_wire_bytes() {
         created_at: Timestamp(1),
         modified_at: Timestamp(2),
         deleted_at: None,
+        delete_operation: None,
         ext: Extensions::new(),
     };
     let encoded = entry_version(entry).encode().unwrap();
@@ -223,13 +224,45 @@ fn payload_unknown_keys_in_entry_and_field() {
         (-2, uint(3)),
     ]);
     let mut p = entry_payload(vec![f]);
-    p.push((10, array(&[uint(1)])));
+    p.push((100, array(&[uint(1)])));
     let v = round_trip(&map(&envelope(2, false, Some(map(&p)))));
     let RecordBody::Live(Payload::Entry(e)) = &v.body else {
         panic!("not an entry");
     };
     assert_eq!(e.ext.len(), 1);
     assert_eq!(e.fields[0].ext.len(), 2);
+}
+
+// 0012 §1: Deleted-entry resurrection
+#[test]
+fn payload_delete_operation_is_optional_bounded_and_bound_to_trash() {
+    let operation = v4(42);
+    for (kind, timestamp_key, operation_key, base) in [
+        (1, 5, 6, group_payload(Some(v4(1)))),
+        (2, 9, 10, entry_payload(vec![])),
+    ] {
+        // Missing legacy identity remains readable and byte-preserving.
+        round_trip(&map(&envelope(kind, false, Some(map(&base)))));
+        let mut deleted = base.clone();
+        deleted.push((timestamp_key, int(123)));
+        deleted.push((operation_key, bytes(&operation)));
+        let version = round_trip(&map(&envelope(kind, false, Some(map(&deleted)))));
+        let id = match version.body {
+            RecordBody::Live(Payload::Entry(e)) => e.delete_operation,
+            RecordBody::Live(Payload::Group(g)) => g.delete_operation,
+            _ => panic!("unexpected payload"),
+        };
+        assert_eq!(id.unwrap().to_bytes(), operation);
+        let mut live = base.clone();
+        live.push((operation_key, bytes(&operation)));
+        assert!(decode(&envelope(kind, false, Some(map(&live)))).is_err());
+        for bad in [vec![0u8; 15], vec![0u8; 16], vec![0u8; 17]] {
+            let mut malformed = base.clone();
+            malformed.push((timestamp_key, int(123)));
+            malformed.push((operation_key, bytes(&bad)));
+            assert!(decode(&envelope(kind, false, Some(map(&malformed)))).is_err());
+        }
+    }
 }
 
 #[test]
@@ -596,6 +629,17 @@ fn payload_keyslot_standalone_codec() {
     assert_eq!(k.ext.len(), 1);
     assert_eq!(k.encode().unwrap().as_slice(), with_ext.as_slice());
 
+    // Clear descriptors must never contain encrypted record extensions.
+    assert_eq!(k.encode_public_descriptor().unwrap().as_slice(), bytes_in);
+    assert_eq!(k.encode_public_descriptor().unwrap().len(), 171);
+    assert_eq!(k.encode().unwrap().as_slice(), with_ext);
+    assert!(
+        Keyslot::decode(&k.encode_public_descriptor().unwrap())
+            .unwrap()
+            .ext
+            .is_empty()
+    );
+
     // Rejections.
     let mut trailing = bytes_in.clone();
     trailing.push(0x00);
@@ -624,4 +668,8 @@ fn payload_keyslot_standalone_codec() {
     let mut k = Keyslot::decode(&bytes_in).unwrap();
     k.slot.slot_id = qv_crypto::SlotId([0; 16]);
     assert_eq!(k.encode().err(), Some(ModelError::Malformed));
+    assert_eq!(
+        k.encode_public_descriptor().err(),
+        Some(ModelError::Malformed)
+    );
 }

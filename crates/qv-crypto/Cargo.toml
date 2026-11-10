@@ -10,6 +10,9 @@ publish.workspace = true
 
 [dependencies]
 argon2.workspace = true
+argon2-opaque.workspace = true
+opaque-ke.workspace = true
+sha2-opaque.workspace = true
 chacha20poly1305.workspace = true
 ctutils.workspace = true
 getrandom.workspace = true
@@ -33,6 +36,8 @@ proptest.workspace = true
 # Derandomized X-Wing for interoperability vectors (plan 0037). Enabled only
 # by dev-dependencies; never in normal builds.
 test-vectors = []
+# Shared Argon2 test memory limit, including when used as another crate’s dependency.
+test-kdf-limit = []
 
 [lints]
 workspace = true

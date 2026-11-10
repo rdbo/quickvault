@@ -6,7 +6,7 @@
 use super::icons::{Icon, Svg, hue_class, initial, item_hue, kind_icon};
 use super::shell::{ReportCard, Unreadable, act, go, kind_label};
 use crate::controller::{Controller, FormEpoch};
-use crate::views::{self, EntryView, FieldRow, ItemRow, kind_name};
+use crate::views::{self, EntryView, FieldRow, kind_name};
 use crate::workspace::{CopyKey, Live, Report, RevealKey, Screen, WsAction, WsField};
 use dioxus::prelude::*;
 use qv_core::{EntryHandle, FieldKind, ItemHandle};
@@ -18,9 +18,9 @@ const MASK: &str = "••••••••";
 type Listed = (views::EntryRow, Zeroizing<String>);
 
 fn text(v: Option<qv_core::SecretBytes>) -> Zeroizing<String> {
-    Zeroizing::new(
-        v.map(|v| String::from_utf8_lossy(v.expose_secret()).into_owned())
-            .unwrap_or_default(),
+    v.map_or_else(
+        || views::z(""),
+        |v| views::z(&String::from_utf8_lossy(v.expose_secret())),
     )
 }
 fn back(c: &Controller, e: FormEpoch) -> impl FnMut(MouseEvent) + 'static {
@@ -213,7 +213,6 @@ pub(crate) fn ListPane(
     revision: u64,
     list: Screen,
     screen: Screen,
-    all: Vec<ItemRow>,
     busy: bool,
     conflicts: usize,
 ) -> Element {
@@ -233,85 +232,59 @@ pub(crate) fn ListPane(
         | Screen::Attachments(e) => Some(*e),
         _ => None,
     };
-    // The open group's listing, kept while an operation owns the vault.
-    let group_listing = super::use_last(match &list {
-        Screen::Browse(Some(g)) => controller
-            .read(epoch, |s| views::browse(s, Some(*g)))
-            .map(|r| r.map(Some)),
-        _ => Some(Ok(None)),
-    })
-    .and_then(Result::ok)
-    .flatten();
     let query = controller
         .peek(epoch, |ws| {
             String::from_utf8_lossy(ws.input(WsField::Query)).into_owned()
         })
         .map(Zeroizing::new)
         .unwrap_or_default();
-    let q = Zeroizing::new(query.to_lowercase());
-    let mut group_view = None;
-    let (title, rows): (String, Vec<(views::EntryRow, Zeroizing<String>)>) = match &list {
-        Screen::Browse(Some(g)) => {
-            let v = group_listing.clone();
-            let name = v
-                .as_ref()
-                .and_then(|v| v.crumbs.last().map(|c| c.1.to_string()))
-                .unwrap_or_default();
-            group_view = v;
-            (
-                name,
-                all.iter()
-                    .filter(|i| i.path.contains(g))
-                    .map(|i| (i.row.clone(), i.kind.clone()))
-                    .collect(),
-            )
-        }
-        Screen::Kind(k) => (
-            kind_label(k),
-            all.iter()
-                .filter(|i| i.kind == *k)
-                .map(|i| (i.row.clone(), i.kind.clone()))
-                .collect(),
-        ),
-        Screen::Recovered => (
-            "Recovered items".into(),
-            controller
-                .read(epoch, views::recovered)
-                .and_then(Result::ok)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|r| (r, Zeroizing::new(String::new())))
-                .collect(),
-        ),
-        Screen::Search => (
-            "Search".into(),
-            controller
-                .read(epoch, |s| views::search(s, &query))
-                .and_then(Result::ok)
-                .map(|(_, e)| e)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|r| (r, Zeroizing::new(String::new())))
-                .collect(),
-        ),
-        _ => (
-            "All items".into(),
-            all.iter()
-                .map(|i| (i.row.clone(), i.kind.clone()))
-                .collect(),
-        ),
+    let spec = crate::page_read::Spec::Items {
+        group: match &list {
+            Screen::Browse(Some(group)) => Some(*group),
+            _ => None,
+        },
+        kind: match &list {
+            Screen::Kind(kind) => Some(kind.clone()),
+            _ => None,
+        },
+        query: query.clone(),
+        recovered: list == Screen::Recovered,
+        full_search: list == Screen::Search,
     };
-    let shown: Vec<(views::EntryRow, Zeroizing<String>)> = if list == Screen::Search || q.is_empty()
-    {
-        rows
-    } else {
-        rows.into_iter()
-            .filter(|(r, _)| {
-                r.title.to_lowercase().contains(q.as_str())
-                    || r.subtitle.to_lowercase().contains(q.as_str())
-            })
-            .collect()
+    let (page_owner, page_read) =
+        super::use_page(&controller, epoch, crate::page_read::Lane::Main, 1, spec);
+    let page = page_read.as_ref().and_then(|r| r.page.clone());
+    let (rows, groups) = match page.as_deref().map(|p| &p.rows) {
+        Some(crate::page_read::Rows::Items { items, groups }) => (
+            items
+                .iter()
+                .map(|i| (i.row.clone(), i.kind.clone()))
+                .collect::<Vec<_>>(),
+            groups.clone(),
+        ),
+        _ => (Vec::new(), Vec::new()),
     };
+    let mut group_view = match &list {
+        Screen::Browse(Some(group)) => controller
+            .read(epoch, |s| views::browse_header(s, Some(*group)))
+            .and_then(Result::ok),
+        _ => None,
+    };
+    if let Some(view) = &mut group_view {
+        view.groups = groups;
+    }
+    let title = match &list {
+        Screen::Browse(Some(_)) => group_view
+            .as_ref()
+            .and_then(|v| v.crumbs.last())
+            .map(|(_, n)| n.to_string())
+            .unwrap_or_default(),
+        Screen::Kind(kind) => kind_label(kind),
+        Screen::Recovered => "Recovered items".to_owned(),
+        Screen::Search => "Search".to_owned(),
+        _ => "All items".to_owned(),
+    };
+    let shown = rows;
     let new_in = match &list {
         Screen::Browse(Some(g)) => Some(*g),
         _ => controller.read(epoch, |s| s.root()).and_then(Result::ok),
@@ -434,15 +407,6 @@ pub(crate) fn ListPane(
             }
         }
     };
-    // Move targets, read only while selecting.
-    let groups = if in_selection {
-        group
-            .or_else(|| controller.read(epoch, |s| s.root()).and_then(Result::ok))
-            .map(|g| super::editor::group_choices(&controller, epoch, g))
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
     let start_selecting = {
         let c = controller.clone();
         move |_| {
@@ -473,12 +437,12 @@ pub(crate) fn ListPane(
                 leave();
             }
         };
-        let move_to = |g: qv_core::GroupHandle| {
+        let move_to = {
             let c = controller.clone();
             let picked = picked.clone();
             let mut leave = leave.clone();
-            move |_| {
-                c.act(epoch, WsAction::MoveMany(picked.clone(), g));
+            move |group| {
+                c.act(epoch, WsAction::MoveMany(picked.clone(), group));
                 leave();
             }
         };
@@ -487,7 +451,7 @@ pub(crate) fn ListPane(
             div { class: "selbar", role: "toolbar", "aria-label": "Selection",
                 button { class: "icon-btn", id: "sel-exit", "aria-label": "Leave selection", title: "Leave selection (Esc)", onclick: move |_| leave_btn(), Svg { icon: Icon::Close } }
                 b { class: "sel-n", if none { "Select items" } else { "{n} selected" } }
-                button { class: if all_on { "icon-btn on" } else { "icon-btn" }, id: "sel-all", title: if all_on { "Clear the selection" } else { "Select all (Ctrl A)" }, "aria-label": if all_on { "Clear the selection" } else { "Select all" },
+                button { class: if all_on { "icon-btn on" } else { "icon-btn" }, id: "sel-all", title: if all_on { "Clear the selection" } else { "Select this page (Ctrl A)" }, "aria-label": if all_on { "Clear the selection" } else { "Select this page" },
                     onclick: { let c = controller.clone(); move |_| c.set_selection(epoch, Some(if all_on { BTreeSet::new() } else { all_ids.clone() })) },
                     Svg { icon: Icon::All }
                 }
@@ -519,8 +483,8 @@ pub(crate) fn ListPane(
                         button { class: "pop-scrim", "aria-label": "Close menu", tabindex: "-1", onclick: move |_| bar_pop.set(None) }
                         div { class: "menu pop end", role: "menu",
                             div { class: "label", "MOVE TO" }
-                            for (g, name, h) in groups.clone() {
-                                button { class: "mi", role: "menuitem", onclick: move_to(g), span { class: "ie-dot {h}" } "{name}" }
+                            if let Some(current) = group.or(new_in) {
+                                super::editor::GroupChoices { controller: controller.clone(), epoch, current, on_pick: move_to }
                             }
                         }
                     }
@@ -541,7 +505,7 @@ pub(crate) fn ListPane(
                     // opens the vault switcher (plan 0045).
                     if let Some(v) = controller.open_vault() {
                         button { class: "vault-avatar tile {super::shell::vault_hue(&v.name)}", id: "vault-chip", disabled: form, "aria-haspopup": "dialog",
-                            "aria-label": "Vault {v.name}. Switch vault", title: "{v.name}",
+                            "aria-label": "Vault {crate::views::z(&v.name).as_str()}. Switch vault", title: "{crate::views::z(&v.name).as_str()}",
                             onclick: move |_| vault_sheet.set(true),
                             "{initial(&v.name)}"
                         }
@@ -574,6 +538,9 @@ pub(crate) fn ListPane(
                 button { class: "icon-btn acc", id: "list-new", "aria-label": "New item", title: "New item (Ctrl N)", disabled: form, onclick: new_entry, Svg { icon: Icon::Plus } }
             }
             }
+            if let (Some(owner), Some(read)) = (page_owner, page_read.clone()) {
+                super::PageNav { controller: controller.clone(), epoch, owner, read }
+            }
             label { class: "filter", Svg { icon: Icon::Search }
                 Input { controller: controller.clone(), epoch, field: WsField::Query, label: if list == Screen::Search { "Search the vault".to_owned() } else { format!("Filter {}", title.to_lowercase()) },
                     placeholder: if list == Screen::Search { "Search titles, usernames, websites".to_owned() } else { format!("Filter {}", title.to_lowercase()) },
@@ -598,8 +565,8 @@ pub(crate) fn ListPane(
             div { class: "rows", id: "rows",
                 if count == 0 {
                     div { class: "empty", div {
-                        div { class: "big", Svg { icon: if q.is_empty() { Icon::Key } else { Icon::Search } } }
-                        if q.is_empty() && list != Screen::Search { "Nothing here yet. Create an item with the + button." } else { "No items match." }
+                        div { class: "big", Svg { icon: if query.is_empty() { Icon::Key } else { Icon::Search } } }
+                        if page.is_none() { "Loading items…" } else if query.is_empty() && list != Screen::Search { "Nothing here yet. Create an item with the + button." } else { "No items match." }
                     } }
                 }
                 for (letter, items) in sections {
@@ -682,7 +649,7 @@ enum BarPop {
 #[component]
 fn RecoveredLink(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
     let _ = revision;
-    let n = super::use_last(controller.read(epoch, |s| views::recovered(s).map(|r| r.len())))
+    let n = super::use_last(controller.read(epoch, |s| s.overview().map(|o| o.recovered)))
         .and_then(Result::ok)
         .unwrap_or(0);
     rsx! {
@@ -831,7 +798,7 @@ fn EntryBody(
     let current = history.is_none();
     let group = view.group.and_then(|g| {
         controller
-            .read(epoch, |s| views::browse(s, Some(g)))
+            .read(epoch, |s| views::browse_header(s, Some(g)))
             .and_then(Result::ok)
             .and_then(|b| {
                 (!b.root)
@@ -847,10 +814,9 @@ fn EntryBody(
     let kind = Zeroizing::new(view.type_hint.to_lowercase());
     let group_hue = view.group.map(|h| {
         let colour = controller
-            .read(epoch, views::top_groups)
+            .read(epoch, |s| s.group(h))
             .and_then(Result::ok)
-            .and_then(|g| g.into_iter().find(|g| g.handle == h))
-            .and_then(|g| g.colour);
+            .and_then(|g| crate::editor::colour(g.icon.as_ref().map(qv_core::Text::expose)));
         item_hue(colour, &h.id_hex())
     });
     let tile = item_hue(view.colour, &view.handle.id_hex());
@@ -1060,10 +1026,24 @@ fn MoveScreen(
     at: Option<qv_core::GroupHandle>,
 ) -> Element {
     let _ = revision;
-    let view = match controller.read(epoch, |s| views::browse(s, at)) {
-        Some(Ok(v)) => v,
+    let mut view = match controller.read(epoch, |s| views::browse_header(s, at)) {
+        Some(Ok(view)) => view,
         other => return rsx! { Unreadable { error: other.and_then(Result::err) } },
     };
+    let (owner, read) = super::use_page(
+        &controller,
+        epoch,
+        crate::page_read::Lane::Groups,
+        2,
+        crate::page_read::Spec::Groups {
+            parent: Some(view.here),
+            query: Zeroizing::new(String::new()),
+        },
+    );
+    let page = read.as_ref().and_then(|r| r.page.clone());
+    if let Some(crate::page_read::Rows::Groups(groups)) = page.as_deref().map(|p| &p.rows) {
+        view.groups = groups.clone();
+    }
     let here = view.here;
     rsx! {
         div { class: "phone-bar", button { class: "icon-btn back", "aria-label": "Cancel", onclick: back(&controller, epoch), Svg { icon: Icon::Close, large: true } } }
@@ -1082,6 +1062,7 @@ fn MoveScreen(
                     }
                 }
             }
+            if let (Some(owner), Some(read)) = (owner, read) { super::PageNav { controller: controller.clone(), epoch, owner, read } }
             div { class: "actions",
                 button { class: "btn subtle", onclick: back(&controller, epoch), "Cancel" }
                 button { class: "btn primary", id: "move-here", onclick: act(&controller, epoch, WsAction::MoveTo(item, here)), "Move here" }
@@ -1140,7 +1121,7 @@ fn HistoryVersion(
         other => return rsx! { Unreadable { error: other.and_then(Result::err) } },
     };
     let conflicted = controller
-        .read(epoch, |s| Ok(s.entry_versions(entry)?.len() > 1))
+        .read(epoch, |s| Ok(s.entry_version_count(entry)? > 1))
         .and_then(Result::ok)
         .unwrap_or(false);
     rsx! {
@@ -1351,10 +1332,17 @@ pub(crate) fn Viewer(
                 if many {
                     button { class: "v-nav prev", "aria-label": "Previous file", onclick: step(-1), Svg { icon: Icon::Back, large: true } }
                 }
-                match (p.kind, p.src.clone(), p.text.clone()) {
+                if let Some(image) = p.image_load {
+                    div { class: "v-none", onclick: |e: MouseEvent| e.stop_propagation(),
+                        div { class: "v-none-glyph", Svg { icon: Icon::File, large: true } }
+                        b { "Load this image?" }
+                        span { "{image.description()}" }
+                        button { class: "btn primary", id: "viewer-load-image", onclick: act(&controller, epoch, WsAction::LoadPreview(p.handle)), "Load image" }
+                    }
+                } else { match (p.kind, p.src.clone(), p.text.clone()) {
                     (Kind::Image, Some(src), _) => rsx! {
                         div { class: if actual() { "v-img actual" } else { "v-img" },
-                            img { src: "{src}", alt: "{p.name.as_str()}", draggable: "false", onclick: move |e: MouseEvent| { e.stop_propagation(); actual.set(!actual()) } }
+                            img { src: "{src.as_str()}", alt: "{p.name.as_str()}", draggable: "false", onclick: move |e: MouseEvent| { e.stop_propagation(); actual.set(!actual()) } }
                         }
                     },
                     (Kind::Audio, Some(src), _) => rsx! {
@@ -1362,11 +1350,11 @@ pub(crate) fn Viewer(
                             div { class: "v-disc", div { class: "v-disc-label", Svg { icon: Icon::File, large: true } } }
                             div { class: "v-eq", "aria-hidden": "true", for _ in 0..24 { i {} } }
                             b { class: "v-track", "{p.name.as_str()}" }
-                            audio { src: "{src}", controls: true, preload: "metadata" }
+                            audio { src: "{src.as_str()}", controls: true, preload: "none" }
                         }
                     },
                     (Kind::Video, Some(src), _) => rsx! {
-                        div { class: "v-video", onclick: |e: MouseEvent| e.stop_propagation(), video { src: "{src}", controls: true, preload: "metadata", "playsinline": "true" } }
+                        div { class: "v-video", onclick: |e: MouseEvent| e.stop_propagation(), video { src: "{src.as_str()}", controls: true, preload: "none", "playsinline": "true" } }
                     },
                     (Kind::Text, _, Some(text)) => rsx! {
                         div { class: "v-text", onclick: |e: MouseEvent| e.stop_propagation(),
@@ -1381,6 +1369,7 @@ pub(crate) fn Viewer(
                             span { "QuickVault shows images, audio, video and text. Other files never open here; save a copy to use them in another app." }
                         }
                     },
+                }
                 }
                 if many {
                     button { class: "v-nav next", "aria-label": "Next file", onclick: step(1), Svg { icon: Icon::Right, large: true } }

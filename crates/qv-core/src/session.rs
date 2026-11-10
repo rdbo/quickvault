@@ -63,6 +63,13 @@ impl core::fmt::Debug for CancelToken {
 /// A session's random tag.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct SessionTag([u8; 16]);
+impl SessionTag {
+    pub(crate) fn generate() -> Result<Self, CoreError> {
+        Ok(Self(
+            qv_crypto::random_array::<16>().map_err(|_| CoreError::Rng)?,
+        ))
+    }
+}
 
 macro_rules! handle_debug {
     ($($t:ident),+) => {$(
@@ -171,7 +178,7 @@ pub(crate) struct Open {
     /// The archive ID of the recovery snapshot an in-progress destructive
     /// operation pins (0007 §3.2). Shared with the operation's handle so
     /// that dropping the handle releases the pin.
-    pub(crate) pin: Arc<Mutex<Option<String>>>,
+    pub(crate) pin: Arc<Mutex<Option<crate::snapshot::RecoveryPin>>>,
 }
 
 impl Open {
@@ -180,7 +187,8 @@ impl Open {
         self.pin
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+            .as_ref()
+            .map(|p| p.archive_id.clone())
     }
 }
 
@@ -214,6 +222,11 @@ impl Canceller<'_> {
 }
 
 impl<'a> Ctx<'a> {
+    pub(crate) fn view(&self, id: RecordId) -> Result<crate::view_cache::ViewRef, CoreError> {
+        self.check_cancel()?;
+        self.open.index.view(&self.open.vault, id)
+    }
+
     /// A lock-request check that outlives borrows of `open`.
     pub(crate) fn canceller(&self) -> Canceller<'a> {
         Canceller(&self.session.locking)
@@ -284,16 +297,33 @@ impl Session {
         read_only: bool,
         cancel: Option<&crate::CancelToken>,
     ) -> Result<Session, CoreError> {
-        let tag = SessionTag(qv_crypto::random_array::<16>().map_err(|_| CoreError::Rng)?);
+        let tag = SessionTag::generate()?;
         let index = Index::build(
             &vault,
             &|| cancel.is_some_and(CancelToken::is_cancelled),
             MAX_VIEW_BYTES,
         )?;
+        Ok(Self::open_indexed(
+            vault, index, tag, time, anchor, snapshots, read_only,
+        ))
+    }
+
+    /// Wraps an already validated private candidate without repeating a fallible
+    /// projection after publication. All fallible preparation precedes creation.
+    #[allow(clippy::too_many_arguments)] // Same session inputs, plus its preflighted index/tag.
+    pub(crate) fn open_indexed(
+        vault: UnlockedVault,
+        index: Index,
+        tag: SessionTag,
+        time: Arc<dyn TimeSource>,
+        anchor: AnchorStatus,
+        snapshots: Option<Arc<SnapshotPolicy>>,
+        read_only: bool,
+    ) -> Session {
         // Without a policy the automatic snapshot is indistinguishable from
         // "disabled"; frontends show that as reduced protection.
         let auto_snapshot = snapshots.is_none().then(SnapshotReport::disabled);
-        Ok(Session {
+        Session {
             tag,
             locking: Arc::new(AtomicBool::new(false)),
             platform_watch: None,
@@ -308,7 +338,7 @@ impl Session {
                 pin: Arc::new(Mutex::new(None)),
             }))),
             time,
-        })
+        }
     }
 
     pub(crate) fn attach_platform(
@@ -455,6 +485,10 @@ impl Session {
     pub fn adopt_baseline(&self) -> Result<(), CoreError> {
         self.mutate(|ctx| {
             ctx.check_cancel()?;
+            if !ctx.open.read_only {
+                return Err(CoreError::NotAllowed);
+            }
+            crate::snapshot::require_recovery(ctx)?;
             ctx.open.vault.adopt_baseline()?;
             ctx.open.read_only = false;
             // The adopted state is the new baseline (0005 §5.4).
@@ -480,6 +514,12 @@ pub(crate) mod hooks {
         BeforeCommit,
         /// A mutation, just after its commit.
         AfterCommit,
+        /// Between view scan batches, without the session mutex.
+        PageBatch,
+        /// Received file is published, before constructing the new session.
+        LanPublished,
+        /// Received session is platform-bound, before returning it.
+        LanBound,
     }
 
     struct Armed {
@@ -630,7 +670,7 @@ mod tests {
         for e in std::fs::read_dir(&env.anchors).unwrap() {
             std::fs::remove_file(e.unwrap().path()).unwrap();
         }
-        let core = env.core();
+        let core = env.core_with(Some(env.snapshot_policy()));
         let _k = kdf();
         assert_eq!(
             err(core.unlock(&env.path, &pw(PASSWORD), None)),
@@ -645,7 +685,8 @@ mod tests {
         let d = s.new_group(root, "Work").unwrap();
         assert_eq!(err(s.save_group(d)), CoreError::Store(StoreError::NoAnchor));
         assert_eq!(seq(&s), 1);
-        s.adopt_baseline().unwrap();
+        assert_eq!(err(s.adopt_baseline()), CoreError::NotAllowed);
+        crate::testutil::destructive(&s, || s.adopt_baseline()).unwrap();
         assert!(!s.is_read_only().unwrap());
         assert_eq!(seq(&s), 2);
         let d = s.new_group(root, "Work").unwrap();
@@ -711,6 +752,31 @@ mod lock_tests {
         locker.join().unwrap();
         assert!(s.is_locked());
         r
+    }
+
+    // 0012 §1: Rotation/purge ambiguity
+    #[test]
+    fn recovery_completion_is_not_masked_by_late_lock() {
+        let env = Env::new();
+        let s = Arc::new(env.unlock_with(Some(env.snapshot_policy())));
+        let copy = s.begin_destructive(false, None).unwrap();
+        let id = copy.summary().archive_id.clone();
+        assert_eq!(
+            race(&s, Point::InCall, move |s| s.finish_destructive(copy)),
+            Ok(())
+        );
+        let again = env.unlock_with(Some(env.snapshot_policy()));
+        assert_eq!(
+            again
+                .snapshots()
+                .unwrap()
+                .snapshots
+                .iter()
+                .find(|r| r.archive_id == id)
+                .unwrap()
+                .kind,
+            qv_store::SnapshotKind::Ordinary
+        );
     }
 
     #[test]
@@ -855,10 +921,11 @@ mod lock_tests {
     fn history_purge_lock_before_and_after_durable_commit() {
         for point in [Point::BeforeCommit, Point::AfterCommit] {
             let env = Env::new();
-            let s = Arc::new(env.unlock());
+            let s = Arc::new(env.unlock_with(Some(env.snapshot_policy())));
             let e = add_entry(&s, s.root().unwrap(), "History");
             s.save_entry(s.edit_entry(e).unwrap()).unwrap();
             let before = seq(&s);
+            let _copy = s.begin_destructive(false, None).unwrap();
             let result = race(&s, point, move |s| s.purge_history(e));
             let durable = point == Point::AfterCommit;
             assert_eq!(
@@ -906,6 +973,33 @@ mod lock_tests {
         });
         assert_eq!(r, Ok(()));
         assert_eq!(err(s.overview()), CoreError::SessionLocked);
+        let again = env.unlock();
+        assert_eq!(seq(&again), before + 1);
+        assert_eq!(again.overview().unwrap().groups, 1);
+    }
+
+    // 0012 §1: Anchor crash windows
+    #[test]
+    fn lock_after_commit_preserves_saved_anchor_pending_outcome() {
+        let env = Env::new();
+        let s = Arc::new(env.unlock());
+        let root = s.root().unwrap();
+        let before = seq(&s);
+        let held = env.dir.path().join("held-anchors");
+        std::fs::rename(&env.anchors, &held).unwrap();
+        std::fs::write(&env.anchors, b"blocked directory").unwrap();
+        let result = race(&s, Point::AfterCommit, move |s| {
+            let draft = s.new_group(root, "saved")?;
+            s.save_group(draft).map(|_| ())
+        });
+        assert_eq!(
+            result,
+            Err(CoreError::Store(
+                qv_store::StoreError::CommittedAnchorPending
+            ))
+        );
+        std::fs::remove_file(&env.anchors).unwrap();
+        std::fs::rename(&held, &env.anchors).unwrap();
         let again = env.unlock();
         assert_eq!(seq(&again), before + 1);
         assert_eq!(again.overview().unwrap().groups, 1);

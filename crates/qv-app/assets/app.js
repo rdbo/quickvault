@@ -10,6 +10,23 @@ function clearControls(){
     }
     clearCardMirror();
 }
+// Revoke renderer playback/buffers as well as Rust's streaming capability.
+// Removed nodes are handled even if a page/test still holds a JS reference.
+function stopMedia(root){
+    const nodes=[];
+    if(root instanceof Element&&root.matches("audio,video,img"))nodes.push(root);
+    if(root.querySelectorAll)nodes.push(...root.querySelectorAll("audio,video,.viewer img"));
+    for(const node of nodes){
+        if(node instanceof HTMLMediaElement){node.pause();node.removeAttribute("src");node.load();}
+        else if(node instanceof HTMLImageElement)node.removeAttribute("src");
+    }
+}
+function revokeHiddenPreview(){
+    if(document.hidden&&document.querySelector(".viewer")){
+        stopMedia(document);
+        document.getElementById("qv-preview-stop")?.dispatchEvent(new Event("input",{bubbles:true}));
+    }
+}
 function clearRevealed(){
     for(const node of document.querySelectorAll(".phrase,.revealed"))node.textContent="";
 }
@@ -28,9 +45,11 @@ function focusInserted(records){
     if(document.activeElement===document.body)document.querySelector("[data-qv-epoch]")?.focus();
 }
 const forms=new MutationObserver(records=>{
+    for(const record of records)for(const node of record.removedNodes)stopMedia(node);
     const epoch=document.querySelector("[data-qv-epoch]")?.getAttribute("data-qv-epoch");
-    if(epoch!==currentFormEpoch){currentFormEpoch=epoch;clearControls();}
+    if(epoch!==currentFormEpoch){currentFormEpoch=epoch;clearControls();stopMedia(document);}
     focusInserted(records);
+    revokeHiddenPreview();
     autoPrompt();
 });
 forms.observe(document,{subtree:true,childList:true,attributes:true,attributeFilter:["data-qv-epoch","data-qv-autoprompt"]});
@@ -49,7 +68,11 @@ function uncover(){
     }));
 }
 document.addEventListener("visibilitychange",()=>{
-    if(document.hidden){clearControls();clearRevealed();document.documentElement.classList.add("qv-cover");}
+    if(document.hidden){
+        clearControls();clearRevealed();stopMedia(document);
+        revokeHiddenPreview();
+        document.documentElement.classList.add("qv-cover");
+    }
     else{uncover();autoPrompt();}
 });
 // Quick unlock opens by itself only once the locked screen is drawn and

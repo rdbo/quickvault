@@ -2,7 +2,7 @@
 
 //! Scanned hints use the existing canonical codecs and production address policy.
 use super::{EndpointPolicy, LanError};
-use qv_protocol::oob::decode_qr;
+use qv_protocol::oob::decode_qr_v2;
 use qv_protocol::registry::LanProfile;
 use std::net::SocketAddr;
 
@@ -20,9 +20,17 @@ impl core::fmt::Debug for LanQrInfo {
 
 /// Validate a canonical code QR and its profile, without network I/O.
 pub fn inspect_lan_qr(bytes: &[u8]) -> Result<LanQrInfo, LanError> {
-    let q = decode_qr(bytes).map_err(|_| LanError::Protocol)?;
+    let q = decode_qr_v2(bytes).map_err(|error| {
+        if error == qv_protocol::ProtocolError::Unsupported {
+            LanError::Unsupported
+        } else {
+            LanError::Protocol
+        }
+    })?;
     let (profile, hints) = (q.profile, q.endpoints);
-    LanProfile::from_id(profile).map_err(|_| LanError::Unsupported)?;
+    if profile != LanProfile::V2.id() {
+        return Err(LanError::Unsupported);
+    }
     let had_hints = !hints.is_empty();
     let mut endpoints = Vec::new();
     for hint in hints {
@@ -52,11 +60,11 @@ mod tests {
             addr: s.parse().unwrap(),
             port: 7777,
         };
-        let code = encode_qr(LanProfile::V1, &[7; 16], &[endpoint("192.0.2.10")], "").unwrap();
+        let code = encode_qr(LanProfile::V2, &[7; 16], &[endpoint("192.0.2.10")], "").unwrap();
         let info = inspect_lan_qr(&code).unwrap();
         assert_eq!(info.endpoints.len(), 1);
         assert_eq!(format!("{info:?}"), "LanQrInfo(<redacted>)");
-        let empty = encode_qr(LanProfile::V1, &[7; 16], &[], "").unwrap();
+        let empty = encode_qr(LanProfile::V2, &[7; 16], &[], "").unwrap();
         assert!(inspect_lan_qr(&empty).unwrap().endpoints.is_empty());
         for ip in [
             "127.0.0.1",
@@ -71,12 +79,12 @@ mod tests {
             "::ffff:255.255.255.255",
             "::ffff:169.254.1.1",
         ] {
-            let q = encode_qr(LanProfile::V1, &[7; 16], &[endpoint(ip)], "").unwrap();
+            let q = encode_qr(LanProfile::V2, &[7; 16], &[endpoint(ip)], "").unwrap();
             assert!(inspect_lan_qr(&q).is_err(), "{ip}");
         }
-        let mut q = encode_qr(LanProfile::V1, &[7; 16], &[endpoint("192.0.2.10")], "").unwrap();
+        let mut q = encode_qr(LanProfile::V2, &[7; 16], &[endpoint("192.0.2.10")], "").unwrap();
         let profile = 2 + qv_protocol::oob::QR_LABEL.len();
-        q[profile] = 2;
+        q[profile] = 3;
         assert_eq!(inspect_lan_qr(&q).err(), Some(LanError::Unsupported));
         assert!(inspect_lan_qr(&[0; 1025]).is_err());
         assert!(inspect_lan_qr(b"https://example.invalid/").is_err());

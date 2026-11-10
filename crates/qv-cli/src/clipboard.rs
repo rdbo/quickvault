@@ -85,6 +85,7 @@ pub(crate) fn hold(value: SecretBytes, options: ClipboardOptions) -> Result<(), 
     }
     match result {
         Err(PlatformError::Cancelled) => Err(CliError::cancelled()),
+        Err(PlatformError::ClipboardReplaced) => Err(qv_core::CoreError::ClipboardReplaced.into()),
         Err(PlatformError::LimitExceeded) => {
             Err(CliError::new(LIMIT, "clipboard value exceeds model limit"))
         }

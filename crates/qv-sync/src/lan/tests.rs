@@ -13,23 +13,26 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
-use qv_crypto::lan::{
-    PairNonce, PairingKeys, PairingSecret, ProofRoot, RecordOpener, RecordSealer, Sas,
-};
+use qv_crypto::lan::{PairNonce, PairingSecret, Sas};
 use qv_crypto::{MasterPassword, SecretBytes, XWingDecapsKey};
 use qv_model::{ObjectId, RandomId, Timestamp};
 use qv_protocol::frame::FramePhase;
-use qv_protocol::lan::{
-    Done, JoinMode, ManifestPart, ObjectMsg, Outcome, PairAccept, PairGrant, PairHello, PairReveal,
-    State, Want,
-};
+use qv_protocol::lan::{Done, JoinMode, ManifestPart, ObjectMsg, Outcome, State, Want};
 use qv_protocol::oob::decode_manual;
 use qv_protocol::registry::{ErrorCode, LanProfile};
 use qv_store::{AnchorDir, LanServeState, StoreError, UnlockedVault, VaultFile};
 
-use super::steps::{check_accept, join_attempt, record_keys, th};
-use super::transport::{Channel, Conn};
+use super::steps_v2::{auth_transcript, check_accept, crypto_mode, join_attempt, outer_transcript};
+use super::transport::{Conn, V2Channel};
 use super::*;
+use qv_crypto::lan::v2::{
+    self as crypto, FinalEpoch, InitialEpoch, KeyAuthentication, OuterSchedule, PairingKeys,
+    TrafficKeys,
+};
+use qv_crypto::lan_auth::{PasswordAuthClient, PasswordAuthServer};
+use qv_protocol::lan::v2::{
+    self as wire, AuthMode, Finished, KeyProve, KeyProved, PakeFinish, PakeResponse, PakeStart,
+};
 
 const PASSWORD: &str = "correct horse battery staple";
 
@@ -283,41 +286,116 @@ impl ApproverVault for Device {
                 Ok::<(), ()>(())
             })
             .unwrap(),
-            root: proof_root(&u),
         })
     }
-    fn grant(&self, seal: &mut Sealer<'_>) -> Result<Vec<u8>, LanError> {
+}
+
+struct TestAuthorization {
+    descriptor: zeroize::Zeroizing<Vec<u8>>,
+    record: qv_model::RecordId,
+    version: qv_model::VersionId,
+    object: ObjectId,
+    hash: [u8; 32],
+    t0: [u8; 32],
+}
+impl CredentialApprover for Device {
+    type Authorization = TestAuthorization;
+    fn authenticate_password(
+        &self,
+        password: MasterPassword,
+        t0: &[u8; 32],
+        ke1: &[u8],
+    ) -> Result<(PasswordAuthServer, SecretBytes, TestAuthorization), LanError> {
+        let authorization = {
+            let u = self.u();
+            let descriptor = u.lan_working_password_descriptor().map_err(store)?;
+            let record = u.manifest().keyslot_id();
+            let [head] = u.manifest().record(record).unwrap().heads() else {
+                return Err(LanError::Keyslot);
+            };
+            TestAuthorization {
+                descriptor,
+                record,
+                version: head.version_id(),
+                object: head.object_id(),
+                hash: *u.manifest().reference(head.object_id()).unwrap().sha256(),
+                t0: *t0,
+            }
+        };
+        let slot = qv_model::Keyslot::decode(&authorization.descriptor).unwrap();
+        let (vault, generation) = self.scope()?;
+        let unwrapped = slot
+            .slot
+            .unlock(&password, vault, generation)
+            .map_err(|_| LanError::Store(StoreError::WrongPassword))?;
+        if !unwrapped.ct_eq(self.u().vault_key()) {
+            return Err(LanError::Integrity);
+        }
+        drop(unwrapped);
+        let (server, ke2) =
+            PasswordAuthServer::start(&password, t0, ke1).map_err(|_| LanError::Integrity)?;
+        drop(password);
+        Ok((server, ke2, authorization))
+    }
+    fn check_authorization(&self, a: &TestAuthorization) -> Result<(), LanError> {
+        let u = self.u();
+        if u.lan_working_password_descriptor()
+            .map_err(store)?
+            .as_slice()
+            != a.descriptor.as_slice()
+        {
+            return Err(LanError::StateChanged);
+        }
+        Ok(())
+    }
+    fn key_auth(
+        &self,
+        mode: crypto::AuthMode,
+        t0: [u8; 32],
+    ) -> Result<KeyAuthentication, LanError> {
+        KeyAuthentication::new(self.u().vault_key(), mode, t0).map_err(|_| LanError::Integrity)
+    }
+    fn authorized_grant(
+        &self,
+        a: TestAuthorization,
+        sealer: &mut crypto::RecordSealer<FinalEpoch>,
+    ) -> Result<SealedGrant, LanError> {
+        self.check_authorization(&a)?;
+        assert_eq!(
+            sealer.binding(),
+            (crypto::AuthMode::PasswordEnrollment, a.t0)
+        );
+        assert_eq!(sealer.next_sequence(), 0);
         let u = self.u();
         let h = u.header();
-        seal(&grant_plaintext(
+        let plaintext = credential_grant_plaintext(
             u.vault_key(),
             h.vault_id,
             h.key_generation,
-        )?)
+            &a.descriptor,
+            a.record,
+            a.version,
+            a.object,
+            &a.hash,
+        )?;
+        Ok(SealedGrant::Ready(
+            sealer.seal(plaintext.expose_secret()).unwrap(),
+        ))
     }
 }
 
 impl JoinerVault for Device {
+    fn key_auth(&self, t0: [u8; 32]) -> Result<KeyAuthentication, LanError> {
+        CredentialApprover::key_auth(self, crypto::AuthMode::KeySync, t0)
+    }
     fn context(&self) -> Result<JoinerContext, LanError> {
         let u = self.u();
         let h = u.header();
         Ok(JoinerContext {
             vault_id: h.vault_id,
             key_generation: h.key_generation,
-            root: proof_root(&u),
         })
     }
-}
-
-fn proof_root(u: &UnlockedVault) -> ProofRoot {
-    let h = u.header();
-    ProofRoot::derive(
-        u.vault_key(),
-        h.vault_id,
-        h.key_generation,
-        h.derivation_profile,
-    )
-    .unwrap()
 }
 
 /// The window's sync report.
@@ -334,6 +412,7 @@ fn joined(r: Approved) -> (bool, Option<LanError>) {
         Approved::Joined {
             peer_confirmed,
             failure,
+            ..
         } => (peer_confirmed, failure),
         other => panic!("not a join: {other:?}"),
     }
@@ -354,7 +433,6 @@ fn fast() -> LanTimeouts {
         idle: Duration::from_secs(10),
         confirm: Duration::from_secs(20),
         connect: Duration::from_secs(2),
-        probe: Duration::from_secs(1),
     }
 }
 
@@ -374,6 +452,9 @@ impl Approve {
     }
 }
 impl Confirm for Approve {
+    fn password(&mut self, sas: &Sas, name: &[u8], _: bool) -> Option<MasterPassword> {
+        self.confirm(sas, name).then(|| pw(PASSWORD))
+    }
     fn confirm(&mut self, sas: &Sas, name: &[u8]) -> bool {
         assert_eq!(name, b"Personal");
         if let Some(f) = &mut self.before {
@@ -434,10 +515,7 @@ const LOOPBACK: EndpointPolicy = EndpointPolicy {
 };
 
 fn keys_of(code: &str) -> PairingKeys {
-    PairingSecret::from_bytes(&*decode_manual(code).unwrap())
-        .unwrap()
-        .keys()
-        .unwrap()
+    PairingKeys::new(PairingSecret::from_bytes(&*decode_manual(code).unwrap()).unwrap()).unwrap()
 }
 
 // 0012 §1: LAN discovery mistaken for trust
@@ -481,11 +559,11 @@ fn lan_enroll_new_device_end_to_end() {
     // B builds its vault (0013 §10 step 5).
     let anchors = AnchorDir::open(&b.join("anchors")).unwrap();
     let path = b.join("joined.qvault");
-    VaultFile::create_from_lan(
+    VaultFile::create_from_verified_lan(
         &path,
         joined.staging,
         joined.proof,
-        &joined.vk,
+        joined.vk,
         &anchors,
         &never,
     )
@@ -559,8 +637,8 @@ fn lan_enroll_vault_substitution_releases_nothing() {
         );
         (h.join().unwrap(), link)
     });
-    assert_eq!(approved.unwrap_err(), LanError::VaultMismatch);
-    assert_eq!(link.unwrap_err(), LanError::VaultMismatch);
+    assert_eq!(approved.unwrap_err(), LanError::Integrity);
+    assert_eq!(link.unwrap_err(), LanError::Timeout);
     assert_eq!((a.u().local_seq(), other.u().local_seq()), (sa, so));
     assert_eq!(a.links() + other.links(), 0);
 }
@@ -611,8 +689,9 @@ fn lan_enroll_spoofed_endpoint_first_is_skipped() {
             conn.within(Duration::from_secs(5), None);
             let mut buf = Vec::new();
             conn.recv_frame(FramePhase::Handshake, &mut buf).unwrap();
-            assert!(PairHello::decode(&buf).is_ok());
-            let fake = PairAccept::encode(&[1; 32], &[2; 1120], &[3; 32]).unwrap();
+            assert!(wire::PairHello::decode(&buf).is_ok());
+            let fake =
+                qv_protocol::lan::PairAccept::encode(&[1; 32], &[2; 1120], &[3; 32]).unwrap();
             let _ = conn.send_frame(FramePhase::Handshake, &fake);
         });
         let h = s.spawn(|| w.run(&a, &mut approve, &fast(), &never));
@@ -631,22 +710,27 @@ fn lan_enroll_spoofed_endpoint_first_is_skipped() {
 
 /// Sends one handshake frame to `addr` and returns whether anything came back.
 fn poke(addr: SocketAddr, frame: &[u8]) -> bool {
-    let stream = TcpStream::connect(addr).unwrap();
+    let Ok(stream) = TcpStream::connect_timeout(&addr, Duration::from_secs(1)) else {
+        return false;
+    };
     let mut conn = Conn::new(stream, &never).unwrap();
     conn.within(Duration::from_secs(3), None);
-    conn.send_frame(FramePhase::Handshake, frame).unwrap();
+    if conn.send_frame(FramePhase::Handshake, frame).is_err() {
+        return false;
+    }
     let mut buf = Vec::new();
     conn.recv_frame(FramePhase::Handshake, &mut buf).is_ok()
 }
 
 fn hello_with(keys: &PairingKeys, profile: u64, pairing_id: [u8; 16], mode: u64) -> Vec<u8> {
     let (_, ek) = XWingDecapsKey::generate().unwrap();
-    let commit = PairNonce::generate().unwrap().commitment().unwrap();
+    let commit = crypto::nonce_commitment(&PairNonce::generate().unwrap()).unwrap();
     let enc = |e: &mut qv_encoding::Encoder| {
-        e.text("qv/lan-pair-hello/v1");
+        e.text("qv/lan-pair-hello/v2");
         e.uint(profile);
         e.bytes(&pairing_id);
         e.uint(mode);
+        e.uint(u64::from(mode == 1));
         e.bytes(&commit);
         e.bytes(ek.as_bytes());
     };
@@ -677,12 +761,12 @@ fn lan_enroll_hostile_hellos_are_silent_and_close_the_window() {
         let h = s.spawn(|| w.run(&a, &mut approve, &fast(), &never));
         // Profile 2, a swapped pairing ID, mode 2, a wrong MAC key, garbage
         // and an oversized frame: no reply, each counted.
-        let other = PairingSecret::from_bytes(&[9; 16]).unwrap().keys().unwrap();
+        let other = PairingKeys::new(PairingSecret::from_bytes(&[9; 16]).unwrap()).unwrap();
         let mut bad = vec![
-            hello_with(&keys, 2, id, 0),
-            hello_with(&keys, 1, [0; 16], 0),
-            hello_with(&keys, 1, id, 2),
-            hello_with(&other, 1, id, 0),
+            hello_with(&keys, 1, id, 0),
+            hello_with(&keys, 2, [0; 16], 0),
+            hello_with(&keys, 2, id, 2),
+            hello_with(&other, 2, id, 0),
             vec![0x80],
         ];
         while bad.len() < 15 {
@@ -707,12 +791,76 @@ fn lan_enroll_hostile_hellos_are_silent_and_close_the_window() {
     assert_eq!(a.links(), 0);
 }
 
-/// A manual joiner that pairs up to the record channel, for hostile-peer and
-/// ordering tests.
+/// Test-only channel adapter to script hostile traffic on either epoch. There
+/// is no such union or key fallback in the product record layer.
+enum TestEpoch<'c> {
+    Initial(V2Channel<'c, InitialEpoch>),
+    Final(V2Channel<'c>),
+}
+struct Channel<'c>(Option<TestEpoch<'c>>);
+impl<'c> Channel<'c> {
+    fn send(&mut self, msg: &[u8], t: Duration) -> Result<(), LanError> {
+        match self.0.as_mut().unwrap() {
+            TestEpoch::Initial(c) => c.send(msg, t),
+            TestEpoch::Final(c) => c.send(msg, t),
+        }
+    }
+    fn recv(&mut self, t: Duration, cap: Option<Instant>) -> Result<SecretBytes, LanError> {
+        match self.0.as_mut().unwrap() {
+            TestEpoch::Initial(c) => c.recv(t, cap),
+            TestEpoch::Final(c) => c.recv(t, cap),
+        }
+    }
+    fn finish(&mut self, keys: TrafficKeys<FinalEpoch>) {
+        let Some(TestEpoch::Initial(ch)) = self.0.take() else {
+            panic!("expected initial epoch")
+        };
+        self.0 = Some(TestEpoch::Final(ch.finish(keys).unwrap()));
+    }
+    fn final_channel(&mut self) -> &mut V2Channel<'c> {
+        let Some(TestEpoch::Final(ch)) = self.0.as_mut() else {
+            panic!("expected final epoch")
+        };
+        ch
+    }
+}
 struct Manual<'c> {
     ch: Channel<'c>,
     hello: Vec<u8>,
     th: [u8; 32],
+    schedule: Option<OuterSchedule>,
+}
+fn manual_outer<'c>(
+    addr: SocketAddr,
+    keys: &PairingKeys,
+    mode: AuthMode,
+) -> (Manual<'c>, PairNonce) {
+    let nonce = PairNonce::generate().unwrap();
+    let (dk, ek) = XWingDecapsKey::generate().unwrap();
+    let attempt = join_attempt(keys, mode, nonce, dk, &ek).unwrap();
+    let mut conn = Conn::new(TcpStream::connect(addr).unwrap(), &never).unwrap();
+    conn.within(Duration::from_secs(10), None);
+    conn.send_frame(FramePhase::Handshake, &attempt.hello)
+        .unwrap();
+    let mut buf = Vec::new();
+    conn.recv_frame(FramePhase::Handshake, &mut buf).unwrap();
+    let (ct, accept_hash) = check_accept(keys, mode, &attempt.hash, &buf).unwrap();
+    let ss = attempt.dk.decapsulate(&ct).unwrap();
+    let th = outer_transcript(mode, &attempt.hash, &accept_hash).unwrap();
+    let owned = PairingKeys::new(PairingSecret::from_bytes(keys.secret().expose_secret()).unwrap())
+        .unwrap();
+    let (schedule, initial) = owned.begin(ss, crypto_mode(mode), th).unwrap();
+    let m = Manual {
+        ch: Channel(Some(TestEpoch::Initial(V2Channel::initial(
+            conn,
+            initial,
+            crypto::Role::Joiner,
+        )))),
+        hello: attempt.hello.to_vec(),
+        th,
+        schedule: Some(schedule),
+    };
+    (m, attempt.nonce)
 }
 
 fn manual<'c>(
@@ -721,83 +869,106 @@ fn manual<'c>(
     mode: JoinMode,
     reveal: Option<[u8; 32]>,
 ) -> Manual<'c> {
-    let nonce = PairNonce::generate().unwrap();
-    let (dk, ek) = XWingDecapsKey::generate().unwrap();
-    let attempt = join_attempt(keys, mode, nonce, dk, &ek).unwrap();
-    let mut conn = Conn::new(TcpStream::connect(addr).unwrap(), &never).unwrap();
-    conn.within(Duration::from_secs(5), None);
-    conn.send_frame(FramePhase::Handshake, &attempt.hello)
+    let mode = if mode == JoinMode::NewDevice {
+        AuthMode::PasswordEnrollment
+    } else {
+        AuthMode::KeySync
+    };
+    let (mut m, nonce) = manual_outer(addr, keys, mode);
+    let th = m.th;
+    if mode == AuthMode::PasswordEnrollment {
+        let password = pw(PASSWORD);
+        let (client, ke1) = PasswordAuthClient::start(&password, &th).unwrap();
+        let r = PakeStart {
+            nonce: reveal.unwrap_or(*nonce.expose_secret()),
+            ke1: ke1.expose_secret().try_into().unwrap(),
+        }
+        .encode()
         .unwrap();
-    let mut buf = Vec::new();
-    conn.recv_frame(FramePhase::Handshake, &mut buf).unwrap();
-    let (ct, accept_hash) = check_accept(keys, &attempt.hello_hash, &buf).unwrap();
-    let ss = attempt.dk.decapsulate(&ct).unwrap();
-    let th = th(&attempt.hello_hash, &accept_hash).unwrap();
-    let (b2a, a2b) = record_keys(keys, &ss, &th).unwrap();
-    let mut ch = Channel::new(conn, RecordSealer::new(b2a), RecordOpener::new(a2b));
-    if mode == JoinMode::NewDevice {
-        let revealed = reveal.unwrap_or(*attempt.nonce_b.expose_secret());
-        ch.send(
-            &PairReveal::encode(&revealed).unwrap(),
-            Duration::from_secs(5),
+        m.ch.send(&r, Duration::from_secs(10)).unwrap();
+        if reveal.is_some() {
+            return m;
+        }
+        let s = m.ch.recv(Duration::from_secs(60), None).unwrap();
+        let response = PakeResponse::decode(s.expose_secret()).unwrap();
+        let (ke3, auth) = client.finish(&password, response.ke2).unwrap();
+        let f = PakeFinish {
+            ke3: ke3.expose_secret().try_into().unwrap(),
+        }
+        .encode()
+        .unwrap();
+        let ta = auth_transcript(mode, &th, &r, s.expose_secret(), Some(&f)).unwrap();
+        m.ch.send(&f, Duration::from_secs(10)).unwrap();
+        let (keys, finished) = m.schedule.take().unwrap().complete(auth, ta).unwrap();
+        m.ch.finish(keys);
+        m.ch.send(
+            &Finished {
+                mac: finished.tag().unwrap().as_bytes(),
+            }
+            .encode()
+            .unwrap(),
+            Duration::from_secs(10),
         )
         .unwrap();
+        m.ch.final_channel().begin_exchange();
     }
-    Manual {
-        ch,
-        hello: attempt.hello.to_vec(),
-        th,
-    }
+    m
 }
 
 // 0012 §1: LAN discovery mistaken for trust
 #[test]
-fn lan_enroll_raced_second_hello_aborts_without_release() {
+fn lan_enroll_admission_is_closed_before_approval_and_later_connections_cannot_interrupt() {
     let a = Device::personal();
+    let b = Dir::new();
+    let private = private_dir(&b);
     let (w, addr, code) = window();
     let keys = keys_of(&code);
-    let racer = hello_with(&keys, 1, *keys.pairing_id(), 0);
-    let mut approve = Approve {
-        answer: true,
-        seen: None,
-        before: Some(Box::new(move || {
-            // Someone else who saw the code connects meanwhile.
-            assert!(!poke(addr, &racer));
-            std::thread::sleep(Duration::from_millis(300));
-        })),
-    };
-    let (approved, mut m) = std::thread::scope(|s| {
+    let racer = hello_with(&keys, 2, *keys.pairing_id(), 0);
+    let mut approve = Approve::yes();
+    approve.before = Some(Box::new(move || {
+        // Even another valid code holder cannot reach a surviving listener.
+        assert!(TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_err());
+        assert!(!poke(addr, &racer));
+        for _ in 0..20 {
+            assert!(!poke(addr, b"junk"));
+        }
+    }));
+    let mut join = Join::yes();
+    let (approved, received) = std::thread::scope(|s| {
         let h = s.spawn(|| w.run(&a, &mut approve, &fast(), &never));
-        let m = manual(addr, &keys, JoinMode::NewDevice, None);
-        (h.join().unwrap(), m)
+        let received = join_new_device(
+            JoinCode::from_manual(&code).unwrap(),
+            &[addr],
+            LOOPBACK,
+            &private,
+            &mut join,
+            &fast(),
+            &never,
+        );
+        (h.join().unwrap(), received)
     });
-    assert_eq!(approved.unwrap_err(), LanError::CodeObserved);
-    // No grant: the joiner receives `cancelled`.
-    assert_eq!(
-        m.ch.recv(Duration::from_secs(5), None).err(),
-        Some(LanError::PeerCancelled)
-    );
+    let (confirmed, failure) = joined(approved.unwrap());
+    assert!(confirmed, "{failure:?}");
+    assert!(received.is_ok());
+    assert!(TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_err());
     assert_eq!(a.links(), 0);
 }
 
 #[test]
-fn lan_enroll_identical_replayed_hello_is_refused_not_observed() {
+fn lan_enroll_identical_replayed_hello_finds_no_listener() {
     let a = Device::personal();
     let (w, addr, code) = window();
     let keys = keys_of(&code);
-    let replay: Mutex<Vec<u8>> = Mutex::new(Vec::new());
-    let mut approve = Approve::yes();
-    approve.answer = false;
+    let stopped = AtomicBool::new(false);
+    let cancel = || stopped.load(Ordering::SeqCst);
     let approved = std::thread::scope(|s| {
-        let h = s.spawn(|| w.run(&a, &mut approve, &fast(), &never));
-        let m = manual(addr, &keys, JoinMode::NewDevice, None);
-        *replay.lock().unwrap() = m.hello.clone();
-        assert!(!poke(addr, &replay.lock().unwrap()));
-        let r = h.join().unwrap();
-        drop(m);
-        r
+        let h = s.spawn(|| w.run(&a, &mut Approve::yes(), &fast(), &cancel));
+        let m = manual(addr, &keys, JoinMode::Sync, None);
+        assert!(!poke(addr, &m.hello));
+        assert!(TcpStream::connect(addr).is_err());
+        stopped.store(true, Ordering::SeqCst);
+        h.join().unwrap()
     });
-    // The pairing ends by the user's rejection, not by an observed code.
     assert_eq!(approved.unwrap_err(), LanError::Cancelled);
 }
 
@@ -814,11 +985,11 @@ fn lan_enroll_reveal_must_open_the_commitment() {
         let m = manual(addr, &keys, JoinMode::NewDevice, Some([7; 32]));
         (h.join().unwrap(), m)
     });
-    assert_eq!(approved.unwrap_err(), LanError::Protocol);
+    assert_eq!(approved.unwrap_err(), LanError::Integrity);
     assert!(approve.seen.is_none());
     assert_eq!(
         m.ch.recv(Duration::from_secs(5), None).err(),
-        Some(LanError::Protocol)
+        Some(LanError::Timeout)
     );
     assert_eq!(a.links(), 0);
 }
@@ -846,7 +1017,7 @@ fn lan_enroll_rejections_on_either_side() {
         (h.join().unwrap(), joined)
     });
     assert_eq!(approved.unwrap_err(), LanError::Cancelled);
-    assert_eq!(joined.unwrap_err(), LanError::PeerCancelled);
+    assert_eq!(joined.unwrap_err(), LanError::Timeout);
     // B rejects.
     let (w, addr, code) = window();
     let mut join = Join::yes();
@@ -866,17 +1037,9 @@ fn lan_enroll_rejections_on_either_side() {
         (h.join().unwrap(), joined)
     });
     assert_eq!(joined.unwrap_err(), LanError::Cancelled);
-    // B cancels right after its reveal while A's user confirms. If A had
-    // not granted yet, its window fails; if it had (A's user approved, which
-    // is what releases VK, §4.7), A reports that the new device did not
-    // finish. Nothing is stored either way.
-    match approved {
-        Err(_) => {}
-        Ok(served) => {
-            let (confirmed, failure) = super::tests::joined(served);
-            assert!(!confirmed && failure.is_some());
-        }
-    }
+    // Without KE3/FinishedB A can never authorize a grant, even if its user
+    // approves the comparison after B cancelled locally.
+    assert!(approved.is_err());
     assert_eq!(a.links(), 0);
 }
 
@@ -892,6 +1055,9 @@ fn lan_enroll_cancel_during_the_confirmation_wait_is_prompt() {
     let wait = &release;
     struct Slow<'r>(&'r AtomicBool);
     impl Confirm for Slow<'_> {
+        fn password(&mut self, sas: &Sas, name: &[u8], _: bool) -> Option<MasterPassword> {
+            self.confirm(sas, name).then(|| pw(PASSWORD))
+        }
         fn confirm(&mut self, _: &Sas, _: &[u8]) -> bool {
             while !self.0.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(20));
@@ -938,8 +1104,8 @@ fn lan_enroll_exchange_refuses_bad_requests_and_tolerates_a_missing_done() {
             let mut m = manual(addr, &keys, JoinMode::NewDevice, None);
             let t = Duration::from_secs(5);
             let grant = m.ch.recv(t, None).unwrap();
-            let g = PairGrant::decode(grant.expose_secret()).unwrap();
-            let (vault, generation) = (g.vault_id, g.key_generation);
+            let g = wire::PairGrant::decode(grant.expose_secret()).unwrap();
+            let (vault, generation) = (g.vault_id, g.generation);
             m.ch.send(&State::encode(&vault, generation, &[0; 32], 0).unwrap(), t)
                 .unwrap();
             let state = State::decode(m.ch.recv(t, None).unwrap().expose_secret()).unwrap();
@@ -995,7 +1161,7 @@ fn lan_enroll_exchange_refuses_bad_requests_and_tolerates_a_missing_done() {
                             Done::decode(m.ch.recv(t, None).unwrap().expose_secret()).unwrap();
                         assert_eq!(done.outcome, Outcome::Unchanged);
                     } else {
-                        m.ch.conn.close();
+                        m.ch.final_channel().conn.close();
                     }
                     None
                 }
@@ -1053,7 +1219,7 @@ fn lan_enroll_codes_and_policies() {
             IpAddr::V4(Ipv4Addr::LOCALHOST),
         ])
         .unwrap();
-    let parsed = qv_protocol::oob::decode_qr(&qr).unwrap();
+    let parsed = qv_protocol::oob::decode_qr_v2(&qr).unwrap();
     assert_eq!(parsed.endpoints.len(), 1);
     let j = JoinCode::from_qr(&qr).unwrap();
     assert!(j.candidates(&[], EndpointPolicy::default()).is_empty());
@@ -1076,10 +1242,10 @@ fn lan_enroll_codes_and_policies() {
         .collect();
     assert_eq!(j.candidates(&many, LOOPBACK).len(), 16);
     // An unknown profile in a QR.
-    let qr2 = qv_protocol::oob::encode_qr(LanProfile::V1, &[1; 16], &[], "").unwrap();
+    let qr2 = qv_protocol::oob::encode_qr(LanProfile::V2, &[1; 16], &[], "").unwrap();
     let mut raw = qr2.to_vec();
-    let pos = raw.iter().position(|b| *b == 0x01).unwrap();
-    raw[pos] = 0x02;
+    let pos = 2 + qv_protocol::oob::QR_LABEL_V2.len();
+    raw[pos] = 3;
     assert_eq!(JoinCode::from_qr(&raw).unwrap_err(), LanError::Unsupported);
     assert_eq!(
         JoinCode::from_manual("short").unwrap_err(),
@@ -1093,6 +1259,38 @@ fn lan_enroll_codes_and_policies() {
     assert_eq!(ErrorCode::from_wire(5), ErrorCode::Cancelled);
 }
 
+/// Authenticated outer acceptance for hostile-emitter scripts.
+fn accept_initial<'c>(
+    stream: TcpStream,
+    keys: PairingKeys,
+) -> (
+    Channel<'c>,
+    OuterSchedule,
+    super::steps_v2::CheckedHello,
+    [u8; 32],
+) {
+    let mut conn = Conn::new(stream, &never).unwrap();
+    conn.within(Duration::from_secs(10), None);
+    let mut buf = Vec::new();
+    conn.recv_frame(FramePhase::Handshake, &mut buf).unwrap();
+    let hello = super::steps_v2::check_hello(&keys, &buf).ok().unwrap();
+    let (ss, ct) = hello.ek.encapsulate().unwrap();
+    let (accept, hash) = super::steps_v2::accept_for(&keys, &hello, [5; 32], &ct).unwrap();
+    conn.send_frame(FramePhase::Handshake, &accept).unwrap();
+    let th = outer_transcript(hello.mode, &hello.hash, &hash).unwrap();
+    let (schedule, keys) = keys.begin(ss, crypto_mode(hello.mode), th).unwrap();
+    (
+        Channel(Some(TestEpoch::Initial(V2Channel::initial(
+            conn,
+            keys,
+            crypto::Role::Offerer,
+        )))),
+        schedule,
+        hello,
+        th,
+    )
+}
+
 /// A hostile approver: pairs correctly, grants `a`'s vault, then runs
 /// `script` instead of the honest exchange.
 fn hostile_approver(
@@ -1103,7 +1301,7 @@ fn hostile_approver(
     let addr = listener.local_addr().unwrap();
     let secret = PairingSecret::generate().unwrap();
     let code = qv_protocol::oob::encode_manual(secret.expose_secret()).to_string();
-    let keys = secret.keys().unwrap();
+    let keys = PairingKeys::new(secret).unwrap();
     let b = Dir::new();
     let private = b.join("private");
     std::fs::DirBuilder::new()
@@ -1113,22 +1311,45 @@ fn hostile_approver(
     std::thread::scope(|s| {
         s.spawn(|| {
             let (stream, _) = listener.accept().unwrap();
-            let mut conn = Conn::new(stream, &never).unwrap();
-            conn.within(Duration::from_secs(5), None);
-            let mut buf = Vec::new();
-            conn.recv_frame(FramePhase::Handshake, &mut buf).unwrap();
-            let hello = super::steps::check_hello(&keys, &buf).ok().unwrap();
-            let (ss, ct) = hello.ek.encapsulate().unwrap();
-            let (accept, accept_hash) =
-                super::steps::accept_for(&keys, &hello.hash, &[5; 32], &ct).unwrap();
-            conn.send_frame(FramePhase::Handshake, &accept).unwrap();
-            let th = th(&hello.hash, &accept_hash).unwrap();
-            let (b2a, a2b) = record_keys(&keys, &ss, &th).unwrap();
-            let mut ch = Channel::new(conn, RecordSealer::new(a2b), RecordOpener::new(b2a));
-            let t = Duration::from_secs(5);
-            ch.recv(t, None).unwrap(); // reveal
-            let record = a.grant(&mut |p| ch.seal(p)).unwrap();
-            ch.send_sealed(&record, t).unwrap();
+            let (mut ch, schedule, _, th) = accept_initial(stream, keys);
+            let t = Duration::from_secs(10);
+            let r = ch.recv(t, None).unwrap();
+            let start = PakeStart::decode(r.expose_secret()).unwrap();
+            let (server, ke2, authorization) = a
+                .authenticate_password(pw(PASSWORD), &th, start.ke1)
+                .unwrap();
+            let response = PakeResponse {
+                ke2: ke2.expose_secret().try_into().unwrap(),
+            }
+            .encode()
+            .unwrap();
+            ch.send(&response, t).unwrap();
+            let f = ch.recv(t, None).unwrap();
+            let finish = PakeFinish::decode(f.expose_secret()).unwrap();
+            let auth = server.finish(finish.ke3).unwrap();
+            let ta = auth_transcript(
+                AuthMode::PasswordEnrollment,
+                &th,
+                r.expose_secret(),
+                &response,
+                Some(f.expose_secret()),
+            )
+            .unwrap();
+            let (keys, finished) = schedule.complete(auth, ta).unwrap();
+            ch.finish(keys);
+            let message = ch.recv(t, None).unwrap();
+            let done = Finished::decode(message.expose_secret()).unwrap();
+            finished
+                .verify(&qv_crypto::MacTag::from_bytes(*done.mac))
+                .unwrap();
+            let SealedGrant::Ready(record) = a
+                .authorized_grant(authorization, &mut ch.final_channel().sealer)
+                .unwrap()
+            else {
+                panic!("expected ready grant")
+            };
+            ch.final_channel().send_sealed(&record, t).unwrap();
+            ch.final_channel().begin_exchange();
             let state = a.serve_state().unwrap();
             State::decode(ch.recv(t, None).unwrap().expose_secret()).unwrap();
             script(&mut ch, &state);
@@ -1266,14 +1487,114 @@ fn lan_enroll_joiner_refuses_a_hostile_approver() {
     assert_eq!(e, LanError::Protocol);
     // A `cancelled` error record instead of the state.
     let e = hostile_approver(&a, |ch, _| {
-        ch.send(
-            &qv_protocol::lan::ErrorMsg::encode(ErrorCode::Cancelled).unwrap(),
-            t,
-        )
-        .unwrap();
+        ch.send(&wire::ErrorMsg::encode(ErrorCode::Cancelled).unwrap(), t)
+            .unwrap();
     });
     assert_eq!(e, LanError::PeerCancelled);
 }
 
 #[path = "sync_tests.rs"]
 mod sync;
+
+// 0012 §1: LAN discovery mistaken for trust
+#[test]
+fn lan_auth_code_holder_with_a_wrong_password_cannot_forge_a_finish_or_reuse_admission() {
+    let a = Device::personal();
+    let (w, addr, code) = window();
+    let keys = keys_of(&code);
+    let (approved, observed) = std::thread::scope(|scope| {
+        let h = scope.spawn(|| w.run(&a, &mut Approve::yes(), &fast(), &never));
+        let (mut m, nonce) = manual_outer(addr, &keys, AuthMode::PasswordEnrollment);
+        let wrong = pw("attacker supplied guess");
+        let (client, ke1) = PasswordAuthClient::start(&wrong, &m.th).unwrap();
+        let r = PakeStart {
+            nonce: *nonce.expose_secret(),
+            ke1: ke1.expose_secret().try_into().unwrap(),
+        }
+        .encode()
+        .unwrap();
+        m.ch.send(&r, Duration::from_secs(10)).unwrap();
+        let s = m.ch.recv(Duration::from_secs(60), None).unwrap();
+        let response = PakeResponse::decode(s.expose_secret()).unwrap();
+        assert!(client.finish(&wrong, response.ke2).is_err());
+        // A custom receiver can ignore its own failed password prompt, but a
+        // forged KE3 still cannot authenticate to A or derive the final keys.
+        m.ch.send(
+            &PakeFinish { ke3: &[71; 64] }.encode().unwrap(),
+            Duration::from_secs(10),
+        )
+        .unwrap();
+        let observed = m.ch.recv(Duration::from_secs(10), None);
+        (h.join().unwrap(), observed)
+    });
+    assert_eq!(approved.unwrap_err(), LanError::Integrity);
+    assert_eq!(observed.err(), Some(LanError::Timeout));
+    assert!(
+        TcpStream::connect(addr).is_err(),
+        "a failed credential attempt spends the code"
+    );
+}
+
+// 0012 §1: LAN discovery mistaken for trust
+#[test]
+fn lan_auth_correct_ke3_without_valid_final_finished_releases_no_grant_or_data() {
+    for omit in [false, true] {
+        let a = Device::personal();
+        let (w, addr, code) = window();
+        let keys = keys_of(&code);
+        let (approved, observed) = std::thread::scope(|scope| {
+            let h = scope.spawn(|| w.run(&a, &mut Approve::yes(), &fast(), &never));
+            let (mut m, nonce) = manual_outer(addr, &keys, AuthMode::PasswordEnrollment);
+            let password = pw(PASSWORD);
+            let (client, ke1) = PasswordAuthClient::start(&password, &m.th).unwrap();
+            let r = PakeStart {
+                nonce: *nonce.expose_secret(),
+                ke1: ke1.expose_secret().try_into().unwrap(),
+            }
+            .encode()
+            .unwrap();
+            m.ch.send(&r, Duration::from_secs(10)).unwrap();
+            let s = m.ch.recv(Duration::from_secs(60), None).unwrap();
+            let response = PakeResponse::decode(s.expose_secret()).unwrap();
+            let (ke3, auth) = client.finish(&password, response.ke2).unwrap();
+            drop(password);
+            let f = PakeFinish {
+                ke3: ke3.expose_secret().try_into().unwrap(),
+            }
+            .encode()
+            .unwrap();
+            let ta = auth_transcript(
+                AuthMode::PasswordEnrollment,
+                &m.th,
+                &r,
+                s.expose_secret(),
+                Some(&f),
+            )
+            .unwrap();
+            m.ch.send(&f, Duration::from_secs(10)).unwrap();
+            let (keys, finished) = m.schedule.take().unwrap().complete(auth, ta).unwrap();
+            m.ch.finish(keys);
+            if !omit {
+                let mut mac = *finished.tag().unwrap().as_bytes();
+                mac[0] ^= 1;
+                m.ch.send(
+                    &Finished { mac: &mac }.encode().unwrap(),
+                    Duration::from_secs(10),
+                )
+                .unwrap();
+            }
+            let observed = m.ch.recv(Duration::from_secs(10), None);
+            (h.join().unwrap(), observed)
+        });
+        assert_eq!(
+            approved.unwrap_err(),
+            if omit {
+                LanError::Timeout
+            } else {
+                LanError::Integrity
+            }
+        );
+        assert_eq!(observed.err(), Some(LanError::Timeout));
+        assert!(TcpStream::connect(addr).is_err());
+    }
+}

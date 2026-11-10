@@ -20,40 +20,45 @@ working tree; verification is recorded in PLAN.md/REVIEW.md.
 | QV-020 | Addressed by the report's documentation option | Explain that raw copies share replica identity and the default anchor, and recommend archive/snapshot export and new-path restore. No anchor-format or copy-detection change. |
 | T3-05 | Fixed documentation | State that dependency-owned keyed HKDF/HMAC states are not zeroized on drop, in addition to padded-key stack intermediates. No claim of complete memory erasure. |
 
-## Discussed policies — owner directions selected, implementation pending
+## Discussed policies — implemented in 0047, final validation/review running
 
 | ID | Status | Concrete decision / evidence |
 |----|--------|------------------------------|
-| T3-08 | Planned in 0047; existing cap unchanged | 64 MiB counts retained index text, not vault size. Owner chose bounded cache residency, on-demand complete search and paged frontend consumption, retaining the 1 GiB ciphertext budget. Stock edits/merges already preflight; the supplied authoring fixture raises the constant, so it is not proof of stock edits crossing the bound. New-device publication-before-index-build remains a source-observed ordering gap, not an execution-reproduced oversized join. Plan 0047 covers that path and ordinary frontends; no raised aggregate-text override is selected. |
-| QV-013 | Owner-accepted pre-start identity limitation; docs/tests planned | The owner accepts valid authenticated copies/moves and responsibility for divergent copies. No remembered directory/inode identity or new ancestor restrictions. Retain current permissions, no-follow, open-file identity, authenticated contents and external-anchor rollback checks. Do not describe this as detecting pre-start directory substitution. |
-| QV-005 | Planned in 0047; LAN behavior unchanged | Owner selected closure of every listener after one fully valid hello instead of ongoing second-hello detection. The accepted stream must authenticate credentials before any grant; v4 password approval uses password input on both devices. Disclosure, receipt and durable commit are reported separately. |
-| QV-006 | Planned in 0047; LAN behavior unchanged | The 16-failure budget will apply only before admission. No detector remains after listener closure; the one accepted stream has independent timeout/cancellation/credential checks. Junk connections must not disable those checks. |
-| QV-009 | Partial: address predicates fixed; remaining lifecycle planned in 0047 | Remove obsolete probe behavior with listener closure, join acceptor teardown and define the accepted session's deadline. Existing code is not yet repaired. |
+| T3-08 | Implemented in 0047; final validation running | Compact structural index, bounded cache/query text, complete paged search and bounded app/CLI consumption replace aggregate-text eligibility. The stock67.5 MiB fixture uses ordinary saves without changing constants. The 1 GiB referenced-ciphertext budget remains; cache residency is not total RSS. Core preflights private enrollment staging before publication. Bulk-mutation payload vectors remain a separate memory cost. |
+| QV-013 | Owner-accepted pre-start identity limitation; docs/tests implemented in 0047 | The owner accepts valid authenticated copies/moves and responsibility for divergent copies. No remembered directory/inode identity or new ancestor restrictions. Retain current permissions, no-follow, open-file identity, authenticated contents and external-anchor rollback checks. Do not describe this as detecting pre-start directory substitution. |
+| QV-005 | Implemented in 0047; final review/release gates remain | First valid hello consumes admission and drops all listeners before continuing. Credentials and B’s final-key confirmation precede the atomic password grant; key routes transfer no VK. Reports distinguish sealing, receipt and durable actions. |
+| QV-006 | Implemented in 0047 | Sixteen failures apply before admission only. No second-hello monitor survives. Later junk finds no listener and cannot disable the accepted session’s credential/deadline checks. Loopback regression passes. |
+| QV-009 | Address and lifecycle fixes implemented; final gates in 0047 | Shared endpoint policy remains; admission owns/drops its listener, joins its acceptor, and preserves the original deadline. Obsolete probe state and observed-code outcome are removed. |
 
-## Remaining repair designs
+## Plan0050 implementation disposition — 2026-11-10
 
-These remain open. They are not closed by the initial batch or by passing gates.
-The owner's repair request authorizes design work; actual payload/format/policy
-choices must be made explicit before implementation, as requested.
+The fifteen remaining implementation repairs have source changes under the
+owner's delegated correctness decisions. Local verification and limitations are
+in [0050 validation](../0050-complete-audit-remediation/VALIDATION.md) and its
+[completion check](../0050-complete-audit-remediation/REVIEW.md). Android media
+qualification is still open; these are implementation dispositions, not an
+independent security assessment or release approval.
 
-| ID | Next concrete design / validation |
-|----|-----------------------------------|
-| VW-02 | Define a committed-but-anchor-pending result all the way from store to core/frontends, repair the in-memory index after durability, and preserve accurate reporting through cancellation. A generic error must not suggest retrying a committed mutation. Re-running `add` as a new process is not inherently idempotent: cross-invocation deduplication requires an explicit operation identity, not equality of titles/payloads. Test real or injected post-COMMIT anchor failure and retry. |
-| T3-09 | Design causal-budget consistency before accepting merges. Reducing `MAX_HEADS` alone is insufficient: a small head set can already have a union of 256 writers. At minimum account for the union plus the local resolving writer; arbitrary future writers and previously oversized states need an explicit policy. Never discard causal components. Regression needs diverse full clocks, not only one writer per head. |
-| QV-004 | Amend 0003 for a shared random delete-operation identity across one recursive delete, preserving `deleted_at` for display/retention. Define legacy missing-ID behavior and authenticated merge compatibility before changing payloads. Timestamp equality cannot establish operation identity. |
-| QV-016 | Add bounded non-mutating vault identification before SQLite's journal-changing hardening. Preserve no-follow/file-identity/sidecar checks and apply hostile-schema limits before parsing. Read-only identification must not recover a foreign hot journal. Test foreign checkpointed WAL bytes and hardlink case unchanged after rejection. |
-| QV-017 | Specify warning vs refusal for anchor nesting and recognized sync/network locations; expose the loss-of-rollback-independence warning through core/CLI/app. Do not silently move or reset anchors. |
-| T3-03 | Define clipboard ownership-lost outcome separately from successful expiry/cancellation. Track completed direct and INCR transfers; report loss before completion without clearing a new owner's selection. Exercise a second X11 client before and during transfer. |
-| T3-07 | Add redacted disk-full/quota classification consistently across SQLite, std I/O and rustix. Keep configured-budget failures separate from ENOSPC/EDQUOT/EFBIG; define CLI code/message and app guidance in the specs. Test each mapping and preserve pre/post-durable outcomes. |
-| T3-10 | Make post-commit recovery-snapshot completion tolerate a concurrently reclassified pin when it is already ordinary, without suppressing real I/O/integrity failures or losing a required copy. Review shared-directory locking with QV-021; test two processes and truthful committed-result reporting. |
-| QV-011 | Define core-enforced destructive-copy authorization bound to the correct session/state, recovery-only baseline adoption and the tombstone-resolution copy policy. Frontend-only preconditions do not protect future embedders. Do not treat any old snapshot as authorization for any later deletion. |
-| QV-015 | Planned in 0047: one absolute bounded joining deadline including candidate attempts, prompts, KDF/transfer and pre-publication work, with safe handling of uninterruptible work and durable outcomes. Per-message idle bounds/cancellation remain. Implementation and tests are pending. |
-| QV-019 | The response/provider currently owns an ordinary byte vector; removing `to_vec()` requires a response-ownership/lifetime design across the vendor boundary. Reject malformed/multiple ranges rather than silently serving the full body. Keep memory-lock failure visible; a 10 MiB preview need not fit an 8 MiB OS memlock limit. |
-| QV-021 | Reclaim archive/restore/anchor crash temporaries only after proving they are stale; blindly calling a cleanup helper can delete another process's live temp. Define locks/names/age/budget accounting, then test concurrent writers plus SIGKILL leftovers. |
-| T3-02 | Decide on functional audio/video transport vs explicitly unsupported media. A `blob:` solution changes the hardened CSP/provider boundary and introduces renderer-owned plaintext, so it needs an explicit design and real WebKit/device tests. |
-| T3-04 | Define readable escaping/marking for bidi and invisible controls across GUI lists, details and conflict comparison, preserving legitimate RTL and joined-script text. Isolation alone does not reveal an override embedded in a title. Reuse CLI policy where appropriate without corrupting stored values or editing controls. |
-| T3-06 | Partial documentation repair: architecture now states restore requires a healthy unlocked source and corrects which password slot is used. A specific damaged-anchor recovery hint and documented preservation/recovery workflow remain open; never advise blind anchor deletion or claim it repairs damaged vault data. |
-| QV-012 | Review exemptions and fuzz/product resolution drift as dependency work; justify notes with actual evidence (not invented audits), remove stale versions using the lockfiles, and define reproducible vendor TypeScript tooling without ambient `bun`. Requires deny/vet, focused vendor tests/provenance review if vendor build behavior changes. A green exemption-based vet result is not an independent dependency audit. |
+| ID | Repair and remaining limit |
+|----|----------------------------|
+| VW-02 | Typed saved/anchor-pending outcome propagates through core and frontends; durable index repair and late-lock tests retain saved state. No cross-process duplicate-operation suppression is claimed. |
+| T3-09 | Check each active-head clock union including the actual local resolver before acceptance, commit and new-replica publication. Refuse without truncating causality; existing states remain inspectable/exportable. |
+| QV-004 | Encrypted random deletion-operation IDs distinguish independent deletes at identical timestamps. Missing legacy identity restores only the selected group; editor/history paths preserve deletion metadata correctly. |
+| QV-016 | Bounded immutable read-only identification precedes mutable hardening; foreign WAL/hot-journal/hardlink rejection preserves bytes. Normal own-journal crash recovery remains tested. |
+| QV-017 | Core, CLI and app show anchor-independence warnings for nesting/recognized risky locations. No automatic relocation or new persistent path binding. |
+| T3-03 | Track completed X11 text/direct/INCR delivery; report replacement before confirmation separately, without clearing a successor. Android consumption remains unverifiable. |
+| T3-07 | OS capacity/quota/file-size exhaustion has a fixed category, distinct from configured budgets, across store and platform outputs/frontends. Opaque provider failures without an errno remain generic failures. Durable outcome takes precedence. |
+| T3-10 | Recovery entries carry private file leases; reclassification verifies already-ordinary copies and preserves real errors. Completion uses the mutation outcome path so a late lock does not turn successful completion into cancellation. |
+| QV-011 | Core verifies a session/current-head/generation-bound recovery copy before final deletion, history purge, recovery-only baseline adoption and final-tombstone resolution. Stale, damaged, missing and foreign cases refuse unchanged; callers/tests use real copies. |
+| QV-019 | Protected bounded range streaming replaces whole-media response vectors. Strict HTTP range/Host/origin/capability tests and native close/lock rejection pass; renderer/kernel copies remain best effort. Android qualification is pending. |
+| QV-021 | Directory creation/cleanup coordination and lifetime file leases protect live temporaries. Process inode tracking avoids extra closes on live SQLite descriptors; killed-producer and actual SQLite-lock regressions pass. Orphan journals without a matching base and rotation-owned families are retained conservatively. |
+| T3-02 | Audio/video playback and seeking work on real GTK/WebKit; images and large-image opt-in work. Exact loopback CSP/transport is implemented. Isolated Android media APK/test build; no phone is connected, so Android playback is unverified. |
+| T3-04 | Display-only escapes cover labels/details/conflicts, paths, autofill candidates and editor display mirrors. Raw editor/copy/storage values and legitimate RTL/joiners remain intact; persistence round-trip regression passes. |
+| T3-06 | Damaged external anchors have distinct status/guidance and authenticated read-only inspection; explicit copied baseline adoption preserves both original files until chosen. No blind deletion advice or data-repair claim. |
+| QV-012 | Fuzz/product shared versions/checksums align; retained crypto exemptions document roles/debt. Six old versions are necessary delta-audit bases, documented and checked rather than blindly deleted. Desktop builds consume the unchanged verified upstream JS without ambient Bun. Deny/locked vet pass; independent dependency/composition review remains0048 debt. |
+
+QV-015's absolute-deadline repair remains in0047. No supplied external campaign
+is represented as rerun by these local regression results.
 
 ## Observations that do not warrant a silent behavior change
 

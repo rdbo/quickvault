@@ -10,6 +10,8 @@ use crate::ProtocolError;
 
 /// Largest frame body before the session keys exist.
 pub const HANDSHAKE_FRAME_MAX: usize = 4096;
+/// Largest encrypted credential/Finished/grant frame:4096 plaintext bytes +16-byte tag.
+pub const CREDENTIAL_FRAME_MAX: usize = 4096 + 16;
 /// Largest frame body afterwards (1 MiB plus 4 KiB).
 pub const SESSION_FRAME_MAX: usize = 1_052_672;
 
@@ -18,6 +20,8 @@ pub const SESSION_FRAME_MAX: usize = 1_052_672;
 pub enum FramePhase {
     /// Cleartext handshake frames.
     Handshake,
+    /// Credential-authentication records, before bulk exchange.
+    Credential,
     /// Records under the session (or pairing) keys.
     Session,
 }
@@ -27,6 +31,7 @@ impl FramePhase {
     pub const fn max(self) -> usize {
         match self {
             Self::Handshake => HANDSHAKE_FRAME_MAX,
+            Self::Credential => CREDENTIAL_FRAME_MAX,
             Self::Session => SESSION_FRAME_MAX,
         }
     }
@@ -115,6 +120,7 @@ mod tests {
         for (phase, len) in [
             (FramePhase::Handshake, 1),
             (FramePhase::Handshake, HANDSHAKE_FRAME_MAX),
+            (FramePhase::Credential, CREDENTIAL_FRAME_MAX),
             (FramePhase::Session, SESSION_FRAME_MAX),
         ] {
             let body = vec![7u8; len];
@@ -130,6 +136,7 @@ mod tests {
     fn oversized_frames_are_refused_before_allocation() {
         for (phase, len) in [
             (FramePhase::Handshake, HANDSHAKE_FRAME_MAX + 1),
+            (FramePhase::Credential, CREDENTIAL_FRAME_MAX + 1),
             (FramePhase::Session, SESSION_FRAME_MAX + 1),
         ] {
             assert_eq!(

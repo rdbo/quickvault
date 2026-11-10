@@ -4,7 +4,6 @@
 
 use crate::{MAX_RECEIPT_PATH_BYTES, StoreError};
 use qv_crypto::SecretBytes;
-use rustix::fd::OwnedFd;
 use rustix::fs::{Mode, OFlags, open, openat};
 use std::{
     os::unix::ffi::{OsStrExt, OsStringExt},
@@ -23,7 +22,7 @@ pub(crate) fn normalize(path: &Path) -> Result<SecretBytes, StoreError> {
         // getcwd is an OS intermediate. Transfer its bytes promptly and wipe
         // application-owned storage; libc/kernel scratch copies are best effort.
         std::env::current_dir()
-            .map_err(|_| StoreError::Io)?
+            .map_err(crate::error::io_err)?
             .into_os_string()
             .into_vec()
     } else {
@@ -72,25 +71,28 @@ pub(crate) fn normalize(path: &Path) -> Result<SecretBytes, StoreError> {
     ))
 }
 
-pub(crate) fn open_source(path: &SecretBytes) -> Result<OwnedFd, StoreError> {
+pub(crate) fn open_source(path: &SecretBytes) -> Result<crate::fs::ArchiveFile, StoreError> {
     // Ancestors are pinned with O_PATH: it needs only search permission, as on
     // Android's `--x` /data, and O_DIRECTORY|O_NOFOLLOW still refuses symlinks.
     let walk = OFlags::PATH | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-    let leaf_flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
     let mut directory = open("/", walk, Mode::empty()).map_err(crate::error::errno_err)?;
     let mut parts = path.expose_secret()[1..].split(|&b| b == b'/').peekable();
     while let Some(part) = parts.next() {
         let leaf = parts.peek().is_none();
+        if leaf {
+            return crate::fs::open_opaque_at(
+                &directory,
+                Path::new(std::ffi::OsStr::from_bytes(part)),
+                false,
+            );
+        }
         let fd = openat(
             &directory,
             std::ffi::OsStr::from_bytes(part),
-            if leaf { leaf_flags } else { walk },
+            walk,
             Mode::empty(),
         )
         .map_err(crate::error::errno_err)?;
-        if leaf {
-            return Ok(fd);
-        }
         directory = fd;
     }
     Err(StoreError::UnsafeFile)

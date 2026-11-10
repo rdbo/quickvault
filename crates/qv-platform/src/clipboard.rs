@@ -68,6 +68,7 @@ struct Owner {
     transfers: Vec<Transfer>,
     chunk: usize,
     acquired_at: u32,
+    delivered: bool,
 }
 impl Owner {
     fn new(cancel: Cancellation) -> Result<Self, PlatformError> {
@@ -125,6 +126,7 @@ impl Owner {
             transfers: Vec::with_capacity(MAX_TRANSFERS),
             chunk,
             acquired_at,
+            delivered: false,
         })
     }
     fn publish(&self) -> Result<(), PlatformError> {
@@ -166,6 +168,7 @@ impl Owner {
             .iter()
             .any(|t| t.window == request.requestor && t.property == property);
         let mut accepted = false;
+        let mut direct = false;
         if request.response_type == SELECTION_REQUEST_EVENT
             && (request.time == CURRENT_TIME
                 || request.time.wrapping_sub(self.acquired_at) < (1 << 31))
@@ -211,6 +214,7 @@ impl Owner {
                         )
                         .ok()
                         .is_some_and(|c| c.check().is_ok());
+                    direct = accepted;
                 } else if self.transfers.len() < MAX_TRANSFERS {
                     let selected = self
                         .conn
@@ -261,8 +265,10 @@ impl Owner {
         if let Ok(cookie) =
             self.conn
                 .send_event(false, request.requestor, EventMask::NO_EVENT, notify)
+            && cookie.check().is_ok()
+            && direct
         {
-            let _ = cookie.check();
+            self.delivered = true;
         }
         backend(self.conn.flush())
     }
@@ -292,6 +298,9 @@ impl Owner {
             .ok()
             .is_some_and(|c| c.check().is_ok());
         if done || !sent {
+            if done && sent {
+                self.delivered = true;
+            }
             self.transfers.swap_remove(i);
         } else {
             transfer.offset = next;
@@ -337,7 +346,11 @@ impl Owner {
                             && e.owner == self.window
                             && e.response_type == SELECTION_CLEAR_EVENT =>
                     {
-                        return Ok(());
+                        return if self.delivered {
+                            Ok(())
+                        } else {
+                            Err(PlatformError::ClipboardReplaced)
+                        };
                     }
                     Event::SelectionRequest(e) => self.request(e, value, end)?,
                     Event::PropertyNotify(e) => self.advance(e, value, end),

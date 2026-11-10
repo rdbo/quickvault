@@ -75,6 +75,22 @@ impl Clock {
         self.pairs.is_empty()
     }
 
+    /// Checks that all heads can be joined and advanced by the actual local
+    /// writer within the same finite writer budget. Does not discard causality.
+    pub fn check_resolution<'a>(
+        heads: impl IntoIterator<Item = &'a Clock>,
+        writer: WriterId,
+    ) -> Result<(), ModelError> {
+        let mut joined = Clock::new();
+        for head in heads {
+            joined = joined.join(head)?;
+        }
+        if joined.pairs.len() == MAX_WRITERS && joined.get(writer) == 0 {
+            return Err(ModelError::LimitExceeded);
+        }
+        Ok(())
+    }
+
     /// Compares componentwise; missing components are zero.
     pub fn compare(&self, other: &Clock) -> Causality {
         let (mut less, mut greater) = (false, false);
@@ -277,6 +293,36 @@ pub(crate) mod test_clock {
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
+
+    // 0012 §1: Budget inconsistency
+    #[test]
+    fn resolution_bounds_the_union_and_the_actual_local_writer() {
+        let mut writers: Vec<_> = (0..MAX_WRITERS + 1)
+            .map(|_| WriterId::generate().unwrap())
+            .collect();
+        writers.sort();
+        let clock =
+            |ids: &[WriterId]| Clock::from_pairs(ids.iter().map(|w| (*w, 1)).collect()).unwrap();
+        let full = clock(&writers[..MAX_WRITERS]);
+        assert_eq!(Clock::check_resolution([&full], writers[0]), Ok(()));
+        assert_eq!(
+            Clock::check_resolution([&full], writers[MAX_WRITERS]),
+            Err(ModelError::LimitExceeded)
+        );
+        let other = clock(&writers[1..]);
+        assert_eq!(
+            Clock::check_resolution([&full, &other], writers[0]),
+            Err(ModelError::LimitExceeded)
+        );
+        // A 255-component union leaves exactly one slot for this writer.
+        let room = clock(&writers[..MAX_WRITERS - 1]);
+        assert_eq!(
+            Clock::check_resolution([&room], writers[MAX_WRITERS]),
+            Ok(())
+        );
+        assert_eq!(full.pairs().len(), MAX_WRITERS);
+        assert_eq!(other.pairs().len(), MAX_WRITERS);
+    }
 
     use super::test_clock::clock;
     use super::*;

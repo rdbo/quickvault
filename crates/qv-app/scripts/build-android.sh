@@ -62,6 +62,7 @@ tests.mkdir(parents=True)
 shutil.copyfile(root/'android/tests/PlatformTest.java',tests/'PlatformTest.java')
 shutil.copyfile(root/'android/tests/QuickUnlockTest.java',tests/'QuickUnlockTest.java')
 shutil.copyfile(root/'android/tests/QuickUnlockUiTest.java',tests/'QuickUnlockUiTest.java')
+shutil.copyfile(root/'android/tests/MediaTest.java',tests/'MediaTest.java')
 fixture_assets=destination/'app/src/androidTest/assets'
 fixture_assets.mkdir(parents=True)
 shutil.copyfile(root/'android/tests/flows.js',fixture_assets/'flows.js')

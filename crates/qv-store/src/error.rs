@@ -49,6 +49,8 @@ pub enum StoreError {
     /// explicit recovery; a missing anchor never resets the baseline
     /// silently (0005 §5.4).
     NoAnchor,
+    /// The external anchor has a damaged encoding; vault authentication is separate.
+    DamagedAnchor,
     /// The vault changed on disk since it was unlocked (0004 §1.3); reopen.
     Changed,
     /// An edit breaks a vault rule (counter, causality, kind or control
@@ -56,6 +58,8 @@ pub enum StoreError {
     InvalidEdit,
     /// A size budget (0004 §4.1) would be exceeded; nothing was changed.
     LimitExceeded,
+    /// Storage capacity, quota or OS file-size limit exhausted.
+    StorageCapacity,
     /// The file is a SQLite database but not a QuickVault vault.
     NotAVault,
     /// An unknown schema version, header format or key, profile or slot
@@ -68,6 +72,11 @@ pub enum StoreError {
     Exists,
     /// A required SQLite hardening setting did not take effect (0004 §1.2).
     Hardening,
+    /// A LAN destination was published but durable completion or reopening
+    /// failed. The created file must be reported, never retried/overwritten.
+    PublicationIncomplete,
+    /// COMMIT is durable, but its anchor could not be completed. Do not repeat.
+    CommittedAnchorPending,
     /// Another I/O or SQLite failure.
     Io,
     /// The operating system random number generator failed.
@@ -87,15 +96,23 @@ impl fmt::Display for StoreError {
             Self::Integrity => "vault integrity check failed",
             Self::Rollback => "vault does not match its last known state (possible rollback)",
             Self::NoAnchor => "no record of this vault's last known state on this device",
+            Self::DamagedAnchor => "the external rollback record is damaged",
             Self::Changed => "vault changed on disk; reopen it",
             Self::InvalidEdit => "edit rejected by a vault rule",
             Self::LimitExceeded => "vault size limit exceeded",
+            Self::StorageCapacity => "storage capacity, quota or file-size limit exhausted",
             Self::NotAVault => "not a QuickVault vault",
             Self::Unsupported => "unsupported vault format or platform",
             Self::UnsafeFile => "vault file or directory is not private",
             Self::Exists => "path already exists",
             Self::Hardening => "database hardening failed",
             Self::Io => "vault input/output error",
+            Self::PublicationIncomplete => {
+                "the vault was created, but completion failed; open the created file locally"
+            }
+            Self::CommittedAnchorPending => {
+                "the change is saved, but its rollback record could not be updated; do not repeat the change"
+            }
             Self::Rng => "operating system random number generator failed",
             Self::Internal => "internal store error",
         })
@@ -138,7 +155,8 @@ pub(crate) fn sqlite_err(e: &rusqlite::Error) -> StoreError {
     match e.sqlite_error_code() {
         Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked) => StoreError::Locked,
         Some(ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase) => StoreError::Integrity,
-        Some(ErrorCode::TooBig | ErrorCode::DiskFull) => StoreError::LimitExceeded,
+        Some(ErrorCode::TooBig) => StoreError::LimitExceeded,
+        Some(ErrorCode::DiskFull) => StoreError::StorageCapacity,
         Some(ErrorCode::OperationInterrupted) => StoreError::LimitExceeded,
         Some(ErrorCode::CannotOpen) => StoreError::Io,
         _ => StoreError::Io,
@@ -152,7 +170,7 @@ const FULL_SLACK_PAGES: u64 = 64;
 /// Maps a SQLite error from a write of at most `growth` bytes.
 /// `SQLITE_FULL` is both "`max_page_count` reached" and "disk full"; it is
 /// [`StoreError::LimitExceeded`] only when this write would take the file to
-/// its page limit, and [`StoreError::Io`] otherwise (plan 0008 review,
+/// its page limit, and [`StoreError::StorageCapacity`] otherwise (plan 0050,
 /// finding 2). Best effort: the page count is read after the failure.
 pub(crate) fn write_err(
     conn: &rusqlite::Connection,
@@ -169,7 +187,7 @@ pub(crate) fn write_err(
     };
     match (read("page_count"), read("max_page_count")) {
         (Some(pages), Some(max)) => full_err(pages, max, growth),
-        _ => StoreError::Io,
+        _ => StoreError::StorageCapacity,
     }
 }
 
@@ -179,7 +197,7 @@ pub(crate) fn full_err(pages: u64, max_pages: u64, growth: u64) -> StoreError {
     if pages.saturating_add(needed) >= max_pages {
         StoreError::LimitExceeded
     } else {
-        StoreError::Io
+        StoreError::StorageCapacity
     }
 }
 
@@ -192,9 +210,20 @@ pub(crate) fn errno_err(e: rustix::io::Errno) -> StoreError {
         Errno::LOOP => StoreError::UnsafeFile,
         Errno::EXIST => StoreError::Exists,
         Errno::WOULDBLOCK => StoreError::Locked,
-        Errno::NOSPC | Errno::FBIG => StoreError::LimitExceeded,
+        Errno::NOSPC | Errno::DQUOT | Errno::FBIG => StoreError::StorageCapacity,
         _ => StoreError::Io,
     }
+}
+
+/// Redacts a standard I/O error, retaining capacity failure classification.
+pub(crate) fn io_err(e: std::io::Error) -> StoreError {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if let Some(code) = e.raw_os_error()
+        && errno_err(rustix::io::Errno::from_raw_os_error(code)) == StoreError::StorageCapacity
+    {
+        return StoreError::StorageCapacity;
+    }
+    StoreError::Io
 }
 
 #[cfg(test)]
@@ -259,7 +288,7 @@ mod tests {
             (ffi::SQLITE_CORRUPT, StoreError::Integrity),
             (ffi::SQLITE_NOTADB, StoreError::Integrity),
             (ffi::SQLITE_TOOBIG, StoreError::LimitExceeded),
-            (ffi::SQLITE_FULL, StoreError::LimitExceeded),
+            (ffi::SQLITE_FULL, StoreError::StorageCapacity),
             (ffi::SQLITE_INTERRUPT, StoreError::LimitExceeded),
             (ffi::SQLITE_IOERR, StoreError::Io),
             (ffi::SQLITE_CANTOPEN, StoreError::Io),
@@ -276,10 +305,13 @@ mod tests {
     #[test]
     fn full_disk_is_not_the_size_budget() {
         let max = 524_288;
-        assert_eq!(full_err(100, max, 4096), StoreError::Io);
+        assert_eq!(full_err(100, max, 4096), StoreError::StorageCapacity);
         assert_eq!(full_err(max - 10, max, 4096), StoreError::LimitExceeded);
         assert_eq!(full_err(max - 300, max, 1 << 20), StoreError::LimitExceeded);
-        assert_eq!(full_err(max - 400, max, 1 << 20), StoreError::Io);
+        assert_eq!(
+            full_err(max - 400, max, 1 << 20),
+            StoreError::StorageCapacity
+        );
     }
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -290,8 +322,8 @@ mod tests {
         let d = TestDir::new();
         let p = d.join("f.qvault");
         write_file(&p, b"", 0o600);
-        let conn = open_connection(&p).unwrap();
-        harden(&conn, &StepBudget::new()).unwrap();
+        let mut conn = open_connection(&p).unwrap();
+        harden(&mut conn, &StepBudget::new()).unwrap();
         conn.execute_batch("CREATE TABLE t (b BLOB)").unwrap();
         conn.pragma_update(None, "max_page_count", 20).unwrap();
         let blob = vec![0u8; 1 << 20];
@@ -299,7 +331,7 @@ mod tests {
             .execute("INSERT INTO t VALUES (?1)", [blob.as_slice()])
             .unwrap_err();
         assert_eq!(err.sqlite_error_code(), Some(rusqlite::ErrorCode::DiskFull));
-        assert_eq!(sqlite_err(&err), StoreError::LimitExceeded);
+        assert_eq!(sqlite_err(&err), StoreError::StorageCapacity);
         assert_eq!(write_err(&conn, &err, 1 << 20), StoreError::LimitExceeded);
         // Other errors keep the ordinary mapping.
         let busy = rusqlite::Error::SqliteFailure(
@@ -318,12 +350,21 @@ mod tests {
             (Errno::LOOP, StoreError::UnsafeFile),
             (Errno::EXIST, StoreError::Exists),
             (Errno::WOULDBLOCK, StoreError::Locked),
-            (Errno::NOSPC, StoreError::LimitExceeded),
-            (Errno::FBIG, StoreError::LimitExceeded),
+            (Errno::NOSPC, StoreError::StorageCapacity),
+            (Errno::FBIG, StoreError::StorageCapacity),
+            (Errno::DQUOT, StoreError::StorageCapacity),
             (Errno::ACCESS, StoreError::Io),
         ];
         for (from, to) in cases {
             assert_eq!(errno_err(from), to, "{from:?}");
+            assert_eq!(
+                io_err(std::io::Error::from_raw_os_error(from.raw_os_error())),
+                if to == StoreError::StorageCapacity {
+                    to
+                } else {
+                    StoreError::Io
+                }
+            );
         }
     }
 }

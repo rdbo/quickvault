@@ -18,8 +18,14 @@ zeroize.workspace = true
 zxcvbn.workspace = true
 
 [dev-dependencies]
+qv-crypto = { workspace = true, features = ["test-kdf-limit"] }
 proptest.workspace = true
 qv-encoding.workspace = true
+
+[features]
+test-kdf-limit = ["qv-crypto/test-kdf-limit"]
+# Eager reference projections for small test fixtures; never production frontends.
+test-eager-views = []
 
 [lints]
 workspace = true

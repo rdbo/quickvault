@@ -275,7 +275,10 @@ fn lan_command() -> Command {
              copy of the same vault) or `lan join --new` (a new device). A code works once. \
              It is typed at a hidden prompt and shown only on the alternate screen; it is \
              never an argument. Addresses are not secret. Nothing about the other device is \
-             stored.",
+             stored. New-device password enrollment requires the vault password on both \
+             devices; recovery words on the receiver provide the other enrollment route. \
+             Existing unlocked copies prove their vault key. Both devices need a compatible \
+             current LAN version.",
         )
         .subcommand_required(true)
         .subcommand(
@@ -515,6 +518,11 @@ pub(crate) fn rotation_hint(
 
 /// Location warnings (0004 §1.1, 0011 *Security Considerations*).
 pub(crate) fn warn_location(w: qv_core::LocationWarnings) {
+    if w.anchor_independence {
+        crate::out::eprint(
+            "qv: warning: the rollback record may be copied or rolled back with this vault; use independent private device storage\n",
+        );
+    }
     if w.sync_folder {
         crate::out::eprint(
             "qv: warning: the vault is in a file-sync folder; synced copies can be rolled back or forked\n",

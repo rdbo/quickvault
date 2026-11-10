@@ -152,6 +152,7 @@ impl UnlockedVault {
             }
         };
         let candidate = build(local, &incoming_manifest, &mut read)?;
+        candidate.check_resolvable(write.writer)?;
         let kinds =
             validate_projection(local, &incoming_manifest, &candidate, &mut read, cancelled)?;
         if receipts.is_none() && candidate == *local {

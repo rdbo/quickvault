@@ -13,6 +13,15 @@ Which clients exist, in what order, and how platform-specific features
 
 ### 1. Clients
 
+Human-facing vault labels, details and conflict comparisons render bidi
+formatting controls and hazardous invisible controls as fixed `\u{NNNN}`
+escapes. Escape C0/C1 controls except layout newlines/tabs in GUI text, U+00AD,
+U+034F, U+061C, U+180E, U+200B, U+200E/F, U+2028/29, U+202A–E,
+U+2060–F and U+FEFF. Preserve legitimate RTL letters and U+200C/D joiners.
+This is display only: editors, persistence, search and copy preserve original
+values. Do not save an escaped label over its source. HTML escaping alone
+does not make these characters visible.
+
 | Client | Crate | Framework | v1 |
 |--------|-------|-----------|----|
 | Desktop app | `qv-app` | Dioxus desktop | ✅ |
@@ -269,11 +278,15 @@ release, but no longer gates the feature.
   the entry's attachments as a shelf with an add tile. Opening one previews
   it in a full-window viewer under 0003 §6.4: images (fit or actual size,
   panning), audio and video (player), text (reader). Other types offer only
-  saving a copy. The decrypted bytes stay in protected memory and reach the
-  webview only from an unguessable one-time route on the app's own origin,
-  never through a file; closing, navigating away, lock and hiding the window
-  wipe them. Images and media load only from the app's origin (CSP
-  `img-src`/`media-src 'self'`).
+  saving a copy. Verify through bounded protected chunks and serve authenticated
+  ranges through an unguessable per-preview route on the app's existing numeric
+  loopback listener (0003 §6.4), never a plaintext file or whole-media response
+  vector. Closing, navigating away, lock and hiding the window revoke the source.
+  CSP img/media allow only self and that exact HTTP listener origin; retain the
+  separate edit websocket policy. Media preload is none, no autoplay. Large or
+  unmeasured image decodes use a size/dimension explanation and explicit Load
+  image action rather than silently consuming a large allocation. Framework,
+  kernel, media-engine and GPU copies retain 0008's best-effort limits.
 - **Android shell** (owner, 2026-11-07; plan 0044). The app's content stays
   clear of the status bar, display cutout, navigation bar and keyboard; the
   system bars use the theme's colours. Back does what Escape does (closes a
@@ -417,6 +430,29 @@ and Apple's [credential-provider extension requirements](https://developer.apple
 remain OS integration work. These sources establish platform mechanisms, not
 QuickVault implementation readiness or validation (consulted 2026-10-24).
 
+### 7. Authenticated LAN and bounded views (0047)
+
+The owner approved this section and applicable §1 LAN/input presentation
+amendments for implementation on 2026-11-09; other Draft scope stays Draft.
+
+For lan/2 password enrollment, B enters the password before authentication;
+A's comparison/vault-name approval also requires its vault password. Verify
+A locally before replying; allow local typo correction within the same absolute
+deadline without a remote credential retry. Recovery words on B select
+key/enroll and require no password on either device. Existing unlocked copies
+use key/sync without comparison/password prompts. All enrollment paths confirm
+the received vault name/destination before publication. Show incompatible-peer
+errors without offering an insecure legacy fallback. Report possible key
+disclosure, peer receipt, local publication/commit and anchor errors accurately.
+Clear controls/pending answers on use, cancellation, lock, background or expiry
+and reject late results by form/session epoch (0008). No secret goes into argv,
+logs or non-secret UI preferences. No extra password prompt after transfer.
+
+Browse/search/sidebar/trash/conflicts/All items consume 0004 §7's bounded page
+APIs; app residency is at most three pages plus selected detail. Do not rebuild
+a full All items vector or accumulate all pages in the frontend. Stale results
+are discarded and a changed-snapshot result is surfaced/restarted explicitly.
+
 ## Security Considerations
 
 OS entry points and native adapters are part of the trusted client, with bounded
@@ -434,6 +470,12 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
    not reconsider native input or a custom engine just for memory-copy concerns.
 
 ## Changelog
+
+- 2026-11-10: Define browser-compatible bounded preview transport, on-demand
+  playback and explicit large-image loading under the exact listener CSP (0050).
+- 2026-11-09: Escape misleading bidi/invisible controls for display while
+  preserving editor/source text and legitimate RTL joiners (T3-04, plan0050).
+- 2026-11-09: Specify two-device LAN password approval, phrase enrollment and bounded frontend pages.
 
 - 2026-11-08: §1.8: the automatic quick-unlock prompt waits until the
   locked screen is drawn, and the app's page is covered while in the

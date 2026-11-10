@@ -1,0 +1,9 @@
+--- a/crates/qv-core/src/edit.rs
++++ b/crates/qv-core/src/edit.rs
+@@ -56,0 +57,6 @@
++    if std::env::var_os("QV_CAPACITY_TRACE").is_some() {
++        let rss = std::fs::read_to_string("/proc/self/status").ok()
++            .and_then(|status| status.lines().find_map(|line| line.strip_prefix("VmRSS:")
++                .and_then(|value| value.split_whitespace().next()?.parse::<u64>().ok())));
++        eprintln!("prepared_changes,{},{rss:?}", changes.len());
++    }

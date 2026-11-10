@@ -61,6 +61,7 @@ impl VaultFile {
     /// step 5): the 1.13b creation protocol; the first head has the empty
     /// link set (0013 §9.1). The password proof must name the staged keyslot.
     /// Stale temporary files from a crashed attempt are removed first.
+    #[cfg(test)]
     pub fn create_from_lan(
         path: &Path,
         mut staging: crate::VerifiedLanStaging,
@@ -80,8 +81,54 @@ impl VaultFile {
             anchors,
             cancelled,
             None,
-            Some(LanFill { proof: &proof }),
+            Some(LanFill { body: &proof.body }),
         )
+    }
+
+    /// Publishes a fully authenticated, source/method-bound LAN enrollment and
+    /// opens it directly through its already verified VK, without a password
+    /// prompt or retained password. Core preflights its projection beforehand.
+    pub fn create_from_verified_lan(
+        path: &Path,
+        mut staging: crate::VerifiedLanStaging,
+        proof: crate::LanEnrollmentProof,
+        vk: VaultKey,
+        anchors: &AnchorDir,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<crate::UnlockedVault, StoreError> {
+        if proof.scope != staging.scope
+            || proof.manifest_digest
+                != qv_crypto::object_hash(
+                    qv_crypto::ObjectHashProfile::V1,
+                    &staging.manifest().encode()?,
+                )
+                .0
+        {
+            return Err(StoreError::Integrity);
+        }
+        fs::remove_stale_temps(path)?;
+        let scope = staging.scope;
+        let descriptor = proof.body;
+        Self::create_from_archive_inner(
+            path,
+            staging.rewind()?,
+            scope,
+            &vk,
+            anchors,
+            cancelled,
+            None,
+            Some(LanFill { body: &descriptor }),
+        )?;
+        let opened = (|| {
+            let file = Self::open(path)?;
+            file.verify_header(&vk)?;
+            let (vault, status) = file.finish_unlock(vk, anchors)?;
+            if status != crate::AnchorStatus::Verified {
+                return Err(StoreError::Integrity);
+            }
+            Ok(vault)
+        })();
+        opened.map_err(|_| StoreError::PublicationIncomplete)
     }
 
     #[allow(clippy::too_many_arguments)] // the shared restore inputs plus the LAN fill
@@ -107,8 +154,8 @@ impl VaultFile {
         }
         fs::check_parent(path)?;
         // An anchor stored/restored beside its vault cannot detect rollback.
-        let parent = std::fs::canonicalize(fs::parent_of(path)).map_err(|_| StoreError::Io)?;
-        let anchor_path = std::fs::canonicalize(anchors.path()).map_err(|_| StoreError::Io)?;
+        let parent = std::fs::canonicalize(fs::parent_of(path)).map_err(crate::error::io_err)?;
+        let anchor_path = std::fs::canonicalize(anchors.path()).map_err(crate::error::io_err)?;
         if parent.starts_with(anchor_path) {
             return Err(StoreError::UnsafeFile);
         }
@@ -126,14 +173,17 @@ impl VaultFile {
         };
         let keys = Keys::derive(vk, &header)?;
         let body = if let Some(slot) = &h.password_slot {
-            slot.clone()
+            qv_model::Keyslot::decode(slot)?.encode_public_descriptor()?
         } else {
             let entry = opened
                 .manifest()
                 .record(opened.manifest().keyslot_id())
                 .ok_or(StoreError::Integrity)?;
             if entry.heads().len() > 1 {
-                zeroize::Zeroizing::new(working.ok_or(StoreError::Integrity)?.body.clone())
+                working
+                    .ok_or(StoreError::Integrity)?
+                    .keyslot
+                    .encode_public_descriptor()?
             } else {
                 let [role] = entry.heads() else {
                     return Err(StoreError::Integrity);
@@ -150,11 +200,11 @@ impl VaultFile {
                 let RecordBody::Live(Payload::PasswordKeyslot(slot)) = version.body else {
                     return Err(StoreError::Integrity);
                 };
-                slot.encode()?
+                slot.encode_public_descriptor()?
             }
         };
         if let Some(fill) = &lan
-            && fill.proof.body.as_slice() != body.as_slice()
+            && fill.body != body.as_slice()
         {
             return Err(StoreError::Integrity);
         }
@@ -206,6 +256,9 @@ impl VaultFile {
             crate::rotation_guard::check(path)?;
             fs::rename_noreplace(&temp, path)?;
             published = true;
+            if lan.is_some() {
+                point(CrashPoint::LanPublished)?;
+            }
             fs::sync_dir(fs::parent_of(path))?;
             Ok(())
         })();
@@ -216,13 +269,17 @@ impl VaultFile {
                 anchors.remove_best_effort(&id);
             }
         }
-        result
+        if result.is_err() && published && lan.is_some() {
+            Err(StoreError::PublicationIncomplete)
+        } else {
+            result
+        }
     }
 }
 
 /// The new-device password proof (0013 §10 step 4).
 struct LanFill<'a> {
-    proof: &'a crate::PasswordProof,
+    body: &'a [u8],
 }
 
 fn build<R: Read + Seek>(
@@ -240,6 +297,9 @@ fn build<R: Read + Seek>(
         writer_id: WriterId::generate()?.to_bytes(),
         next_counter: 1,
     };
+    opened
+        .manifest()
+        .check_resolvable(WriterId::from_bytes(replica.writer_id)?)?;
     creation::write_database(
         temp,
         header,

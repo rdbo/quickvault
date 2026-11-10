@@ -12,7 +12,31 @@ use zeroize::Zeroizing;
 
 /// Owned vault text for one render.
 pub type Z = Zeroizing<String>;
-fn z(s: &str) -> Z {
+pub(crate) fn z(s: &str) -> Z {
+    let escaped = |c| qv_core::is_display_control(c) && !matches!(c, '\n' | '\r' | '\t');
+    // Allocate the exact result once; growing a String would leave old copies.
+    let length = s
+        .chars()
+        .map(|c| if escaped(c) { 8 } else { c.len_utf8() })
+        .sum();
+    let mut out = Zeroizing::new(String::with_capacity(length));
+    for c in s.chars() {
+        if escaped(c) {
+            out.push_str("\\u{");
+            let value = c as u32;
+            for shift in [12, 8, 4, 0] {
+                out.push(char::from(
+                    b"0123456789abcdef"[((value >> shift) & 15) as usize],
+                ));
+            }
+            out.push('}');
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+fn raw(s: &str) -> Z {
     Zeroizing::new(s.to_owned())
 }
 /// UTC date and time for display only.
@@ -59,6 +83,8 @@ pub struct GroupRow {
     pub colour: Option<u8>,
     /// It has conflicting versions.
     pub conflict: bool,
+    /// Live entries in the displayed subtree.
+    pub entries: usize,
 }
 /// An entry row: title plus the first non-protected field.
 #[derive(Clone, PartialEq)]
@@ -74,7 +100,7 @@ pub struct EntryRow {
     /// It has conflicting versions.
     pub conflict: bool,
 }
-fn entry_row(e: &qv_core::EntrySummary) -> EntryRow {
+pub(crate) fn entry_row(e: &qv_core::EntrySummary) -> EntryRow {
     EntryRow {
         handle: e.handle,
         title: z(e.title.expose()),
@@ -86,17 +112,20 @@ fn entry_row(e: &qv_core::EntrySummary) -> EntryRow {
         conflict: e.conflict,
     }
 }
-fn group_row(g: &qv_core::GroupSummary) -> GroupRow {
+pub(crate) fn group_row(g: &qv_core::GroupSummary) -> GroupRow {
     GroupRow {
         handle: g.handle,
         name: z(g.name.expose()),
         colour: crate::editor::colour(g.icon.as_ref().map(Text::expose)),
         conflict: g.conflict,
+        entries: g.entries,
     }
 }
 /// The vault at a glance.
 #[derive(Clone, PartialEq)]
 pub struct OverviewView {
+    /// The local rollback record may travel with the vault.
+    pub anchor_warning: bool,
     /// Vault name.
     pub name: Z,
     /// Live entries.
@@ -107,16 +136,20 @@ pub struct OverviewView {
     pub trash: usize,
     /// Conflicted records.
     pub conflicts: usize,
+    /// Entries whose group is missing/deleted.
+    pub recovered: usize,
 }
 /// Read the overview.
 pub fn overview(s: &Session) -> Result<OverviewView, CoreError> {
     let o = s.overview()?;
     Ok(OverviewView {
+        anchor_warning: s.warnings()?.anchor_independence,
         name: z(o.name.expose()),
         entries: o.entries,
         groups: o.groups,
         trash: o.in_trash,
         conflicts: o.conflicts,
+        recovered: o.recovered,
     })
 }
 /// One group's children with a bounded breadcrumb trail.
@@ -135,7 +168,37 @@ pub struct BrowseView {
     /// Entries whose group is missing (root only).
     pub recovered: usize,
 }
+/// One bounded breadcrumb/detail header; list rows are read separately in pages.
+pub fn browse_header(s: &Session, group: Option<GroupHandle>) -> Result<BrowseView, CoreError> {
+    let root = s.root()?;
+    let here = group.unwrap_or(root);
+    let mut crumbs = Vec::new();
+    let mut at = Some(here);
+    while let Some(g) = at {
+        if crumbs.len() >= 64 {
+            break;
+        }
+        let d = s.group(g)?;
+        crumbs.push((g, z(d.name.expose())));
+        at = d.shown_parent;
+    }
+    crumbs.reverse();
+    Ok(BrowseView {
+        here,
+        root: here == root,
+        crumbs,
+        groups: Vec::new(),
+        entries: Vec::new(),
+        recovered: if here == root {
+            s.overview()?.recovered
+        } else {
+            0
+        },
+    })
+}
+
 /// Read a group listing.
+#[cfg(test)]
 pub fn browse(s: &Session, group: Option<GroupHandle>) -> Result<BrowseView, CoreError> {
     let root = s.root()?;
     let here = group.unwrap_or(root);
@@ -173,18 +236,39 @@ pub struct ItemRow {
     /// The entry's type hint (`login`, `note`, …), lower-cased; UI only.
     pub kind: Z,
     /// Its groups from the top level down to its own; empty at the root.
+    #[cfg(test)]
     pub path: Vec<GroupHandle>,
     /// The top-level group's name, or empty.
+    #[cfg(test)]
     pub top_name: Z,
     /// Last modification (ms since the epoch; display and sync receipts).
+    #[cfg(test)]
     pub modified: i64,
 }
+// Used by native UI page workers; absent from the headless product interface.
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+pub(crate) fn paged_item(e: qv_core::EntrySummary) -> ItemRow {
+    let row = entry_row(&e);
+    ItemRow {
+        row,
+        kind: e.type_key,
+        #[cfg(test)]
+        path: Vec::new(),
+        #[cfg(test)]
+        top_name: z(""),
+        #[cfg(test)]
+        modified: e.modified_at.0,
+    }
+}
+
 /// The groups directly under the root, for the sidebar.
+#[cfg(test)]
 pub fn top_groups(s: &Session) -> Result<Vec<GroupRow>, CoreError> {
     Ok(s.list(s.root()?)?.groups.iter().map(group_row).collect())
 }
 /// Every live entry in the tree (and recovered ones), with its group path,
 /// walked through the existing listings; at most 64 levels deep.
+#[cfg(test)]
 pub fn all_items(s: &Session) -> Result<Vec<ItemRow>, CoreError> {
     let root = s.root()?;
     let mut out = Vec::new();
@@ -217,12 +301,14 @@ pub fn all_items(s: &Session) -> Result<Vec<ItemRow>, CoreError> {
     keyed.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
     Ok(keyed.into_iter().map(|k| k.1).collect())
 }
+#[cfg(test)]
 fn item(e: &qv_core::EntrySummary, path: Vec<GroupHandle>, top_name: Z) -> ItemRow {
     ItemRow {
         row: entry_row(e),
         kind: Zeroizing::new(e.type_hint.expose().to_lowercase()),
         path,
         top_name,
+        #[cfg(test)]
         modified: e.modified_at.0,
     }
 }
@@ -248,11 +334,8 @@ pub fn quick_fields(
         .map(|f| f.handle);
     Ok((user, secret))
 }
-/// Entries whose group is missing.
-pub fn recovered(s: &Session) -> Result<Vec<EntryRow>, CoreError> {
-    Ok(s.recovered()?.iter().map(entry_row).collect())
-}
 /// Search over non-protected data (core bounds the query).
+#[cfg(test)]
 pub fn search(s: &Session, query: &str) -> Result<(Vec<GroupRow>, Vec<EntryRow>), CoreError> {
     let mut groups = Vec::new();
     let mut entries = Vec::new();
@@ -296,7 +379,7 @@ fn field_rows(fields: &[qv_core::FieldDetail]) -> Vec<FieldRow> {
                 .value
                 .as_ref()
                 .filter(|_| !f.protected)
-                .map(|v| Zeroizing::new(String::from_utf8_lossy(v.expose_secret()).into_owned())),
+                .map(|v| z(&String::from_utf8_lossy(v.expose_secret()))),
         })
         .collect()
 }
@@ -350,7 +433,7 @@ fn entry_view(d: &qv_core::EntryDetail, versions: usize, attachments: usize) -> 
 /// Read one entry.
 pub fn entry(s: &Session, e: EntryHandle) -> Result<EntryView, CoreError> {
     let d = s.entry(e)?;
-    let versions = s.entry_versions(e)?.len();
+    let versions = s.entry_version_count(e)?;
     let attachments = s.attachments(e).map(|a| a.len()).unwrap_or(0);
     Ok(entry_view(&d, versions, attachments))
 }
@@ -401,7 +484,19 @@ pub struct TrashView {
     /// Vault dates are ahead of this clock.
     pub clock_anomaly: bool,
 }
+// Used by native UI page workers; absent from the headless product interface.
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+pub(crate) fn trash_row(t: qv_core::TrashItem) -> TrashRow {
+    TrashRow {
+        item: t.item,
+        name: z(t.name.expose()),
+        deleted: t.deleted_at.map(date),
+        conflict: t.conflict,
+    }
+}
+
 /// Read the trash.
+#[cfg(test)]
 pub fn trash(s: &Session) -> Result<TrashView, CoreError> {
     let items = s
         .trash()?
@@ -466,6 +561,17 @@ pub struct ConflictRow {
     /// Active versions.
     pub versions: usize,
 }
+// Used by native UI page workers; absent from the headless product interface.
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+pub(crate) fn conflict_row(r: qv_core::ConflictRecordSummary) -> ConflictRow {
+    ConflictRow {
+        record: r.record.handle.id_hex(),
+        kind: kind_label(r.record.kind),
+        name: r.name.map(|n| z(n.expose())),
+        versions: r.record.versions,
+    }
+}
+
 fn kind_label(k: RecordKind) -> &'static str {
     match k {
         RecordKind::Entry => "Entry",
@@ -476,6 +582,7 @@ fn kind_label(k: RecordKind) -> &'static str {
     }
 }
 /// Read all conflicted records.
+#[cfg(test)]
 pub fn conflicts(s: &Session) -> Result<Vec<ConflictRow>, CoreError> {
     let names: Vec<(String, Z)> = s
         .conflicts()?
@@ -665,7 +772,7 @@ pub fn conflict_compare(s: &Session, record: &str) -> Result<CompareView, CoreEr
     let group_name = |g: Option<GroupHandle>| -> Z {
         match g {
             None => z("Recovered items (group missing)"),
-            Some(g) => browse(s, Some(g))
+            Some(g) => browse_header(s, Some(g))
                 .ok()
                 .and_then(|b| b.crumbs.last().map(|c| c.1.clone()))
                 .map_or_else(
@@ -703,9 +810,7 @@ pub fn conflict_compare(s: &Session, record: &str) -> Result<CompareView, CoreEr
                 ));
                 for d in &detail.fields {
                     let value = match (&d.value, d.protected) {
-                        (Some(v), false) => Ok(Zeroizing::new(
-                            String::from_utf8_lossy(v.expose_secret()).into_owned(),
-                        )),
+                        (Some(v), false) => Ok(z(&String::from_utf8_lossy(v.expose_secret()))),
                         _ => Err(d.handle),
                     };
                     f.push((d.handle.field_id(), z(d.name.expose()), value));
@@ -1025,7 +1130,7 @@ pub struct EntryFormView {
     pub ready: bool,
 }
 fn text_of(f: &qv_core::Field) -> Z {
-    Zeroizing::new(String::from_utf8_lossy(f.value.expose_secret()).into_owned())
+    z(&String::from_utf8_lossy(f.value.expose_secret()))
 }
 fn role(kind: Option<crate::editor::ItemType>, f: &qv_core::Field) -> Role {
     use crate::editor::{CARD_NUMBER, EXPIRES, ItemType, SECURITY, same_slot};
@@ -1137,12 +1242,12 @@ pub(crate) fn entry_form(f: &crate::workspace::EntryForm) -> EntryFormView {
         ready: crate::editor::ready_to_save(f),
         new: f.new,
         id: f.draft.id_hex(),
-        title: z(e.title.expose()),
-        type_hint: z(e.type_hint.expose()),
+        title: raw(e.title.expose()),
+        type_hint: raw(e.type_hint.expose()),
         notes: if f.notes_too_large {
             z("")
         } else {
-            e.notes.as_ref().map_or_else(|| z(""), |n| z(n.expose()))
+            e.notes.as_ref().map_or_else(|| z(""), |n| raw(n.expose()))
         },
         notes_too_large: f.notes_too_large,
         rows: e
@@ -1154,7 +1259,7 @@ pub(crate) fn entry_form(f: &crate::workspace::EntryForm) -> EntryFormView {
                 let too_large = f.too_large.contains(&index);
                 Some(FormRow {
                     index,
-                    name: z(x.name.expose()),
+                    name: raw(x.name.expose()),
                     kind: x.kind,
                     protected: x.protected,
                     value: (!x.protected && !too_large).then(|| {
@@ -1241,7 +1346,7 @@ impl crate::controller::Controller {
             ws.group_form.as_ref().map(|f| GroupFormView {
                 new: f.new,
                 id: f.draft.id_hex(),
-                name: z(f.draft.group().name.expose()),
+                name: raw(f.draft.group().name.expose()),
                 colour: crate::editor::colour(f.draft.group().icon.as_ref().map(Text::expose)),
             })
         })
@@ -1253,11 +1358,11 @@ impl crate::controller::Controller {
             ws.settings.as_ref().map(|d| {
                 let m = d.meta();
                 SettingsView {
-                    name: z(m.name.expose()),
+                    name: raw(m.name.expose()),
                     description: m
                         .description
                         .as_ref()
-                        .map_or_else(|| z(""), |t| z(t.expose())),
+                        .map_or_else(|| z(""), |t| raw(t.expose())),
                     history_depth: m
                         .settings
                         .history_depth
@@ -1336,6 +1441,16 @@ impl crate::controller::Controller {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn displayed_controls_are_visible_while_rtl_joiners_and_editor_text_stay_intact() {
+        let source = "abc\u{202e}xyz\u{200b} \u{2066}\u{feff} עברית فارسی\u{200c}\u{200d}\n\t";
+        let shown = super::z(source);
+        assert_eq!(
+            shown.as_str(),
+            "abc\\u{202e}xyz\\u{200b} \\u{2066}\\u{feff} עברית فارسی\u{200c}\u{200d}\n\t"
+        );
+        assert_eq!(super::raw(source).as_str(), source);
+    }
     #[test]
     fn views_date_is_utc_civil_time() {
         assert_eq!(super::date(qv_core::Timestamp(0)), "1970-01-01 00:00 UTC");
