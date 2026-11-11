@@ -35,6 +35,61 @@ pub struct VaultFile(Never);
 /// An unlocked vault (unavailable on this target).
 pub struct UnlockedVault(Never);
 
+/// A staged import (unavailable on this target).
+pub struct PendingVaultImport(Never);
+
+/// A verified import (unavailable on this target).
+pub struct VerifiedVaultImport(Never);
+
+impl fmt::Debug for PendingVaultImport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("PendingVaultImport(<unavailable>)")
+    }
+}
+impl fmt::Debug for VerifiedVaultImport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("VerifiedVaultImport(<unavailable>)")
+    }
+}
+impl PendingVaultImport {
+    /// Fails closed without touching a directory.
+    pub fn cleanup(_: &Path) -> Result<(), StoreError> {
+        Err(StoreError::Unsupported)
+    }
+    /// Fails closed without reading the input.
+    pub fn stage(
+        _: &Path,
+        _: &mut dyn std::io::Read,
+        _: &dyn Fn() -> bool,
+    ) -> Result<Self, StoreError> {
+        Err(StoreError::Unsupported)
+    }
+    /// Unreachable on this target.
+    pub fn authenticate(
+        &self,
+        _: &MasterPassword,
+        _: &dyn Fn() -> bool,
+    ) -> Result<VerifiedVaultImport, StoreError> {
+        match self.0 {}
+    }
+}
+impl VerifiedVaultImport {
+    /// Unreachable on this target.
+    pub fn vault(&self) -> Result<&UnlockedVault, StoreError> {
+        match self.0 {}
+    }
+    /// Unreachable on this target.
+    pub fn publish(
+        self,
+        _: &Path,
+        _: &AnchorDir,
+        _: qv_model::Timestamp,
+        _: &dyn Fn() -> bool,
+    ) -> Result<UnlockedVault, StoreError> {
+        match self.0 {}
+    }
+}
+
 /// A directory of anchor files (unavailable on this target).
 pub struct AnchorDir(Never);
 
@@ -668,6 +723,14 @@ mod tests {
         let p = Path::new("/nonexistent/v.qvault");
         assert!(matches!(VaultFile::open(p), Err(StoreError::Unsupported)));
         assert!(matches!(AnchorDir::open(p), Err(StoreError::Unsupported)));
+        assert!(matches!(
+            PendingVaultImport::cleanup(p),
+            Err(StoreError::Unsupported)
+        ));
+        assert!(matches!(
+            PendingVaultImport::stage(p, &mut std::io::empty(), &|| false),
+            Err(StoreError::Unsupported)
+        ));
         assert!(matches!(
             AnchorDir::default_dir(),
             Err(StoreError::Unsupported)

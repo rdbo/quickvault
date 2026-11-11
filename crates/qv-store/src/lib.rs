@@ -252,6 +252,8 @@ mod validation;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod vault;
 #[cfg(any(target_os = "linux", target_os = "android"))]
+mod vault_import;
+#[cfg(any(target_os = "linux", target_os = "android"))]
 mod verify;
 #[cfg(test)]
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -298,6 +300,8 @@ pub use receipts::{
     ArchiveReceipts, MAX_ARCHIVE_RECEIPTS, MAX_RECEIPT_CIPHERTEXT, MAX_RECEIPT_ENVELOPE,
     MAX_RECEIPT_PATH_BYTES,
 };
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub use vault_import::{PendingVaultImport, VerifiedVaultImport};
 
 pub use manifest::{MANIFEST_FORMAT, Manifest, ObjectRef, RecordEntry, VersionRef};
 pub use object::ObjectEnvelope;
@@ -316,8 +320,9 @@ pub use snapshot_inventory::{
 };
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 pub use unsupported::{
-    AnchorDir, InterruptedRotation, MAX_ANCHOR_BYTES, PreparedRotation, UnlockedVault,
-    VAULT_EXTENSION, VaultFile, VerifyCounts, Write, needed_passwords, rotation_pending,
+    AnchorDir, InterruptedRotation, MAX_ANCHOR_BYTES, PendingVaultImport, PreparedRotation,
+    UnlockedVault, VAULT_EXTENSION, VaultFile, VerifiedVaultImport, VerifyCounts, Write,
+    needed_passwords, rotation_pending,
 };
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub use vault::{UnlockedVault, VAULT_EXTENSION, VaultFile};

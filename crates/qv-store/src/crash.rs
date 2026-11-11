@@ -14,6 +14,8 @@ use crate::error::StoreError;
 /// An ordering point (plan 0009, *Data and control flow*).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CrashPoint {
+    /// An explicit imported copy was renamed into place, before directory sync.
+    ImportPublished,
     /// `BEGIN IMMEDIATE` and the head re-read are done.
     Begun,
     /// The first new object row is written.

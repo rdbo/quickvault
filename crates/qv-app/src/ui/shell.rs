@@ -169,6 +169,11 @@ pub(crate) fn VaultSwitcher(
             hr {}
             button { class: "mi", id: "switch-create", disabled: editing, onclick: switch(SwitchTo::Mode(Mode::Create)), Svg { icon: Icon::Plus } "Create a new vault" }
             button { class: "mi", id: "switch-join", disabled: editing, onclick: switch(SwitchTo::Mode(Mode::Join)), Svg { icon: Icon::Qr } "Join from another device" }
+            if cfg!(any(target_os = "linux", target_os = "android")) {
+                button { class: "mi", id: "switch-open", disabled: editing,
+                    onclick: { let c = controller.clone(); move |_| { open.set(false); crate::documents::switch_to_file(&c, epoch); } },
+                    Svg { icon: Icon::Folder } "Open a vault file…" }
+            }
             p { class: "note", if editing { "Save or cancel your changes to switch vaults." } else { "Switching locks this vault." } }
         }
     }
@@ -246,6 +251,11 @@ pub(crate) fn VaultCards(controller: Controller, epoch: FormEpoch, open: Signal<
                 div { class: "vmore",
                     button { class: "vact", id: "sheet-create", disabled: editing, onclick: switch(SwitchTo::Mode(Mode::Create)), span { class: "ci", Svg { icon: Icon::Plus } } "New vault" }
                     button { class: "vact", id: "sheet-join", disabled: editing, onclick: switch(SwitchTo::Mode(Mode::Join)), span { class: "ci", Svg { icon: Icon::Qr } } "Join a device" }
+                    if cfg!(any(target_os = "linux", target_os = "android")) {
+                        button { class: "vact", id: "sheet-open", disabled: editing,
+                            onclick: { let c = controller.clone(); move |_| { open.set(false); crate::documents::switch_to_file(&c, epoch); } },
+                            span { class: "ci", Svg { icon: Icon::Folder } } "Open a vault file…" }
+                    }
                 }
                 p { class: "note", if editing { "Save or cancel your changes to switch vaults." } else { "Switching locks the open vault." } }
             }

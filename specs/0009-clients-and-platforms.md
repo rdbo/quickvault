@@ -150,8 +150,10 @@ release, but no longer gates the feature.
 - **Files without typed paths.** Vault files, attachments, archives and
   snapshot-restore targets are chosen through the system picker: the Android
   Storage Access Framework, or the Linux xdg-desktop-portal FileChooser.
-  - Only local `file:` results are accepted.
-  - 0011 §4's no-follow and ownership rules still apply to the chosen path.
+  - Linux accepts only local `file:` results; 0011 §4's no-follow and
+    ownership rules still apply to the chosen path. Android uses native SAF
+    document capabilities, never guessed filesystem paths or broad storage
+    permissions. Document URIs and grants stay in the native adapter.
   - Linux: the portal refuses callers that are not dumpable, and the app is
     non-dumpable (0008 §1.1). The app therefore asks through a short-lived
     helper: its own binary re-executed in a picker mode, which holds no vault
@@ -185,7 +187,15 @@ release, but no longer gates the feature.
     A name is 1–64 characters, without `/`, `\` or control characters, and
     does not start with a dot. An existing file is never replaced.
   - **Import (owner, 2026-11-05):** the system picker references a file
-    where it is, without copying it.
+    where it is on Linux, without copying it. Android's document picker imports
+    an independent private copy (plan 0049, implementation instruction
+    2026-11-10): explain that edits in QuickVault do not update the selected
+    document. Request a closed/exported vault, a valid unused local name, master
+    password and explicit recovery-baseline acknowledgement. Stream bounded
+    ciphertext into private staging, authenticate and fully verify it before
+    fresh-local creation (0004 §5.4). Wrong passwords may retry the same staged
+    candidate. Never overwrite a vault or write back to the provider. Lock,
+    cancellation and stale picker/worker results cannot reopen a session.
   - **The list file:** a separate private file, never the preferences
     file. It is bounded (640 KiB; at most 64 remembered absolute `.qvault`
     paths of at most 4096 bytes, each with a copied name of at most 256
@@ -470,6 +480,9 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
    not reconsider native input or a custom engine just for memory-copy concerns.
 
 ## Changelog
+
+- 2026-11-10: §1.8 permits native Android document capabilities and specifies
+  explicit private-copy/baseline consent for verified vault import (0049).
 
 - 2026-11-10: Define browser-compatible bounded preview transport, on-demand
   playback and explicit large-image loading under the exact listener CSP (0050).

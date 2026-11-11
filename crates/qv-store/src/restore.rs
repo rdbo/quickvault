@@ -54,7 +54,22 @@ impl VaultFile {
         cancelled: &dyn Fn() -> bool,
         working: Option<&LocalSlot>,
     ) -> Result<(), StoreError> {
-        Self::create_from_archive_inner(path, input, expect, vk, anchors, cancelled, working, None)
+        Self::create_from_archive_inner(
+            path, input, expect, vk, anchors, cancelled, working, None, false,
+        )
+    }
+
+    pub(crate) fn create_from_import_archive<R: Read + Seek>(
+        path: &Path,
+        input: &mut R,
+        expect: ArchiveScope,
+        vk: &VaultKey,
+        anchors: &AnchorDir,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), StoreError> {
+        Self::create_from_archive_inner(
+            path, input, expect, vk, anchors, cancelled, None, None, true,
+        )
     }
 
     /// Creates a vault from a verified new-device staging archive (0013 §10
@@ -82,6 +97,7 @@ impl VaultFile {
             cancelled,
             None,
             Some(LanFill { body: &proof.body }),
+            true,
         )
     }
 
@@ -118,6 +134,7 @@ impl VaultFile {
             cancelled,
             None,
             Some(LanFill { body: &descriptor }),
+            true,
         )?;
         let opened = (|| {
             let file = Self::open(path)?;
@@ -141,6 +158,7 @@ impl VaultFile {
         cancelled: &dyn Fn() -> bool,
         working: Option<&LocalSlot>,
         lan: Option<LanFill<'_>>,
+        publication_errors: bool,
     ) -> Result<(), StoreError> {
         crate::rotation_guard::check(path)?;
         check_cancel(cancelled)?;
@@ -258,6 +276,8 @@ impl VaultFile {
             published = true;
             if lan.is_some() {
                 point(CrashPoint::LanPublished)?;
+            } else if publication_errors {
+                point(CrashPoint::ImportPublished)?;
             }
             fs::sync_dir(fs::parent_of(path))?;
             Ok(())
@@ -269,7 +289,7 @@ impl VaultFile {
                 anchors.remove_best_effort(&id);
             }
         }
-        if result.is_err() && published && lan.is_some() {
+        if result.is_err() && published && publication_errors {
             Err(StoreError::PublicationIncomplete)
         } else {
             result

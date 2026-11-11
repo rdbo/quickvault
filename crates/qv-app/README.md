@@ -1,5 +1,22 @@
 # QuickVault shared app foundation
 
+Android's **Open a vault file…** action uses the system document picker. It
+imports an independent private copy: edits in QuickVault do not update the
+selected document. Choose a closed/exported `.qvault`, enter its password and
+an unused local file name, and acknowledge that the file's freshness cannot
+be established on this device. The imported vault keeps its data and history
+with fresh local device state. Wrong passwords can retry the same staged file;
+an existing destination is never overwritten. Linux continues opening selected
+vault files in place.
+
+The Android import/provider qualification package uses the ordinary UI and a
+disposable `org.quickvault.validation49` UID. Build with the usual Android
+environment, then run `python3 plans/0049-android-vault-file-picker/package-android.py`.
+The script only builds and checks artifact identity; it never installs. The
+device command and remaining attended picker evidence are in
+`plans/0049-android-vault-file-picker/VALIDATION.md`. Never install test builds
+over a personal-vault application.
+
 The shared Android/Linux Dioxus UI provides the CLI's offline feature set:
 - create, phrase confirmation or recorded skip, password/phrase unlock,
   snapshot-backed anchor recovery and lock;

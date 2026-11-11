@@ -9,6 +9,15 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-11: Implement Android vault-file selection through the system picker
+  with explicit private-copy/baseline consent, bounded ciphertext staging,
+  complete authentication and verified fresh-local publication. Password retries
+  retain the selected candidate; collisions never overwrite a vault, and lock
+  cancellation cannot reopen a session. Shared vault switchers expose the open
+  action; Linux continues opening selected files in place. Host large-text and
+  >99%-ciphertext-budget imports pass. Device qualification and fresh review
+  remain tracked in plan 0049.
+
 - 2026-11-10: Enforce verified recovery copies inside core for destructive
   operations and protect recovery pins/temporary producers across processes.
   Preserve SQLite locks during cleanup and tolerate verified snapshot completion

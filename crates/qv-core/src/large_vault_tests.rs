@@ -294,4 +294,32 @@ fn large_vault_stock_budget_opens_edits_searches_restores_merges_and_rotates() {
     assert_eq!(session.overview().unwrap().entries, ROWS);
     assert!(session.verify(None).unwrap().ok());
     check(&session);
+    // The raw-document path must preserve the same cache-independent dataset
+    // after rotation, not only generation-one or small archive fixtures.
+    session.lock();
+    let started = Instant::now();
+    let mut input = std::fs::File::open(&env.path).unwrap();
+    let pending = core.stage_vault_import(&mut input, None).unwrap();
+    drop(input);
+    let verified = {
+        let _k = kdf();
+        core.authenticate_vault_import(&pending, &pw("large vault replacement password"), None)
+            .unwrap()
+    };
+    let imported = core
+        .publish_vault_import(
+            verified,
+            &env.dir.path().join("imported-large.qvault"),
+            None,
+        )
+        .unwrap();
+    assert_eq!(imported.overview().unwrap().entries, ROWS);
+    assert_eq!(imported.overview().unwrap().local_seq, 1);
+    check(&imported);
+    assert!(imported.verify(None).unwrap().ok());
+    imported.lock();
+    eprintln!(
+        "large-vault explicit document import: {:?}",
+        started.elapsed()
+    );
 }

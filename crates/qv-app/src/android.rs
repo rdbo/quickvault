@@ -24,6 +24,8 @@ static BRIDGE: OnceLock<(JavaVM, GlobalRef)> = OnceLock::new();
 static ROOT: OnceLock<PathBuf> = OnceLock::new();
 /// The current document pick: request id and whether it creates a document.
 static PICK: Mutex<Option<(i64, bool)>> = Mutex::new(None);
+/// Only this matching picker result can start the locked-screen vault import.
+static VAULT_PICK: Mutex<Option<(i64, FormEpoch)>> = Mutex::new(None);
 static OS: OnceLock<Arc<AndroidPlatform>> = OnceLock::new();
 /// The system picker always backgrounds the activity. A pick started in the
 /// foreground defers only background expiry (decision 1's rule) until the
@@ -74,7 +76,13 @@ impl AndroidClipboardBackend for NativeClipboard {
 }
 /// Ask the user to choose a document; the result is polled by later actions.
 pub(crate) fn request_pick(c: &Controller, epoch: FormEpoch, kind: PickKind, create: bool) {
-    if c.screen(epoch).is_none() || c.snapshot().busy {
+    let view = c.snapshot();
+    let valid = if kind == PickKind::Vault {
+        view.epoch == epoch && view.phase == crate::controller::Phase::Locked && !create
+    } else {
+        c.screen(epoch).is_some()
+    };
+    if !valid || view.busy {
         return;
     }
     let archive = kind == PickKind::Archive;
@@ -92,6 +100,9 @@ pub(crate) fn request_pick(c: &Controller, epoch: FormEpoch, kind: PickKind, cre
     {
         *pick = Some((id, create));
         drop(pick);
+        if let Ok(mut vault) = VAULT_PICK.lock() {
+            *vault = (kind == PickKind::Vault).then_some((id, epoch));
+        }
         // Clear a stale "Chosen" hint at once.
         c.touch();
         let previous = PICK_DEFERRAL
@@ -121,6 +132,28 @@ fn poll_pick(foreground: bool, seen: &mut Option<i64>) {
     {
         *seen = Some(id);
         if let Some(Ok(c)) = crate::ui::ACTIVE.get() {
+            let vault = VAULT_PICK.lock().ok().and_then(|mut v| v.take());
+            if let Some((picked, epoch)) = vault
+                && picked == id
+                && ready(id)
+                && let Ok(id) = u64::try_from(id)
+                && let Err(error) = c.stage_vault_input(epoch, move |token| {
+                    let result = read_document(id, qv_core::MAX_DB_BYTES + 1, token);
+                    match result {
+                        Ok((input, name)) => Ok((
+                            Box::new(VaultReader { id, input }) as Box<dyn Read + Send>,
+                            name.to_string(),
+                        )),
+                        Err(error) => {
+                            release_vault_pick(id);
+                            Err(error)
+                        }
+                    }
+                })
+            {
+                release_vault_pick(id);
+                c.report(epoch, error);
+            }
             c.touch();
         }
     }
@@ -131,6 +164,9 @@ fn poll_pick(foreground: bool, seen: &mut Option<i64>) {
 }
 /// Forget any document choice (lock).
 pub(crate) fn forget_pick() {
+    if let Ok(mut vault) = VAULT_PICK.lock() {
+        *vault = None;
+    }
     if let Ok(mut pick) = PICK.lock() {
         *pick = None;
     }
@@ -235,6 +271,34 @@ pub(crate) fn read_document(
 }
 struct DocWriter {
     token: CancelToken,
+}
+
+/// A vault choice is one-shot: release its native URI as soon as ciphertext
+/// staging ends, including read errors and lifecycle cancellation.
+struct VaultReader {
+    id: u64,
+    input: Box<dyn Read + Send>,
+}
+impl Read for VaultReader {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        self.input.read(out)
+    }
+}
+impl Drop for VaultReader {
+    fn drop(&mut self) {
+        release_vault_pick(self.id);
+    }
+}
+fn release_vault_pick(id: u64) {
+    if let Ok(id) = i64::try_from(id) {
+        let _ = call(|env, a| {
+            env.call_method(a, "qvForgetPickFor", "(J)V", &[JValue::Long(id)])
+                .map(|_| ())
+        });
+    }
+    // Retain the metadata-only Rust request ID until the poller sees foreground
+    // return. Releasing its background deferral before onResume can discard a
+    // valid fast picker result. The native URI itself has already been cleared.
 }
 impl Write for DocWriter {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {

@@ -40,7 +40,9 @@ and validate the exact released schema before reading vault tables. Unexpected
 triggers, views, expression indexes or schema versions are errors.
 See [SQLite security guidance](https://www.sqlite.org/security.html).
 QuickVault never ingests a SQLite file it did not create as part of an
-automatic workflow: snapshots, imports and file exchange use archives (§6).
+automatic workflow: snapshots, automatic imports and file exchange use archives
+(§6). An explicit Android system-picker action may stage a user-selected raw
+vault under §5.4; this exception does not apply to network/automatic ingestion.
 
 Before opening an existing file with journal-changing settings, identify its
 application/schema version, page size and exact catalog through a bounded,
@@ -321,6 +323,26 @@ reports. Archives are built by writing verified objects into a new file
 state, writer identity, anchors, sessions, device bundles and quick slots
 are never present to be removed.
 
+5.4. Explicit Android vault import stages only ciphertext in private owner-only
+storage, bounded by `MAX_DB_BYTES` (2 GiB physical SQLite bytes) using actual
+streamed length, not provider metadata. Apply all ordinary identification,
+SQLite hardening, password/header authentication and complete content validation
+before publication. Staging has a source-only anchor context; never consult or
+change another local replica's anchor because of the imported identity.
+
+The selected document is never changed. Require explicit acknowledgement that
+its freshness is unestablished and that QuickVault will edit an independent
+private copy. Use the verified archive/fresh-local creation protocol: preserve
+replicated data, history and attachments; generate a new local writer, replica,
+head and anchor; do not clone source local credentials or quick-unlock state.
+Never silently select conflicting password/control heads. Archive intermediate
+bounds remain §6 bounds, distinct from the raw physical-file bound. Preflight
+model/index validity before no-replace durable publication. Preserve a published
+file on any later failure and report `PublicationIncomplete`; return no late
+unlocked session. Remove abandoned leased staging on drop/cancel/restart without
+traversing provider/user files. No plaintext staging, provider write-back or
+automatic import is authorized.
+
 ### 6. Archive format
 
 Private unpublished temporary files use cooperative file leases. Serialize
@@ -469,6 +491,9 @@ is unsupported ([SQLite warning](https://www.sqlite.org/howtocorrupt.html)).
    format. Changes require documented policy/version updates.
 
 ## Changelog
+
+- 2026-11-10: §5.4 defines explicit bounded Android raw-document staging,
+  complete verification and independent no-replace publication (plan 0049).
 
 - 2026-11-09: Specify cooperative temporary-file lifetime/cleanup leases;
   implementation is pending in plan0050.

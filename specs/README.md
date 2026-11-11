@@ -5,6 +5,15 @@ what they say, and behaviour changes start with a spec change.
 
 ## Index
 
+Plan 0049's Android system-picker implementation uses explicit private-copy
+import under 0009 §1.8 and 0004 §5.4: bounded raw ciphertext staging, full
+authentication/verification, fresh local identity and no provider write-back.
+Linux import continues to reference the selected file. The named Draft client
+section is implemented under the owner's execution instruction; whole-spec
+statuses and independent device/release validation requirements are unchanged.
+0007 §3.2 distinguishes this independent new-path creation from a destructive
+import into an existing vault; the latter still requires its recovery copy.
+
 Plan0050 tracks all fifteen remaining assessment repairs under the owner's
 2026-11-09 instruction and delegated correctness decisions. The first amendment
 requires a bounded immutable read-only schema probe before mutable SQLite

@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application><uses-library android:name="android.test.runner" android:required="false" /></application>
+    <queries><package android:name="org.quickvault.validation49" /></queries>
+    <application>
+        <uses-library android:name="android.test.runner" android:required="false" />
+        <!-- Test APK only. The provider enforces the disposable validation49 UID. -->
+        <provider android:name="org.quickvault.app.VaultImportProvider"
+            android:authorities="${applicationId}.vault-import" android:exported="true" />
+    </application>
     <instrumentation android:name="android.test.InstrumentationTestRunner" android:targetPackage="org.quickvault.app" />
 </manifest>

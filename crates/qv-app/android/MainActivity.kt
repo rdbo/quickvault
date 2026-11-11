@@ -267,24 +267,39 @@ class MainActivity : WryActivity() {
     private var writer: java.io.FileOutputStream? = null
     private var writerFd: android.os.ParcelFileDescriptor? = null
     fun qvPick(create: Boolean, archive: Boolean): Long {
-        if (pickState == 0 || pickId >= 65534) return -1L
-        pickId += 1; pickCode = pickId.toInt(); pickState = 0; pickedUri = null; pickedName = null
+        val request = synchronized(this) {
+            if (pickState == 0 || pickId >= 65534) return -1L
+            pickId += 1; pickCode = pickId.toInt(); pickState = 0; pickedUri = null; pickedName = null
+            Pair(pickId, pickCode)
+        }
         val intent = Intent(if (create) Intent.ACTION_CREATE_DOCUMENT else Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
         if (create) intent.setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE, if (archive) "quickvault-archive.qvsnap" else "attachment")
-        runOnUiThread { try { startActivityForResult(intent, pickCode) } catch (e: Exception) { pickState = 2 } }
-        return pickId
+        runOnUiThread {
+            val active = synchronized(this) { pickId == request.first && pickState == 0 }
+            if (active) try { startActivityForResult(intent, request.second) } catch (e: Exception) {
+                synchronized(this) { if (pickId == request.first) pickState = 2 }
+            }
+        }
+        return request.first
     }
     @Deprecated("Platform result callback for the document picker")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         @Suppress("DEPRECATION") super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != pickCode || pickState != 0) return
-        val uri = data?.data
-        if (resultCode != RESULT_OK || uri == null) { pickState = 2; return }
-        pickedName = try {
+        val uri = synchronized(this) {
+            if (requestCode != pickCode || pickState != 0) return
+            val selected = data?.data
+            if (resultCode != RESULT_OK || selected == null) { pickState = 2; return }
+            selected
+        }
+        // Provider IPC must not hold the metadata monitor needed by lock.
+        val name = try {
             contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
-        } catch (e: Exception) { null } ?: uri.lastPathSegment
-        pickedUri = uri; pickState = 1
+        } catch (e: Exception) { null }?.take(255) ?: uri.lastPathSegment?.take(255)
+        synchronized(this) {
+            if (requestCode != pickCode || pickState != 0) return
+            pickedName = name; pickedUri = uri; pickState = 1
+        }
     }
     fun qvPickState(id: Long): Int = if (id == pickId) pickState else 2
     fun qvPickedName(): String? = pickedName?.take(255)
@@ -319,7 +334,18 @@ class MainActivity : WryActivity() {
         reader = null; writer = null; writerFd = null
         return ok
     }
-    fun qvForgetPick() { qvCloseDoc(false); pickState = 2; pickedUri = null; pickedName = null }
+    fun qvForgetPick() {
+        synchronized(this) { pickState = 2; pickedUri = null; pickedName = null }
+        qvCloseDoc(false)
+    }
+    // An old reader/result cannot clear a newer selection. Synchronize the
+    // ID check with picker creation and result publication, not blocking I/O.
+    fun qvForgetPickFor(id: Long) {
+        val active = synchronized(this) {
+            if (id != pickId) false else { pickState = 2; pickedUri = null; pickedName = null; true }
+        }
+        if (active) qvCloseDoc(false)
+    }
 
     fun qvGeneration(): Long = lifecycleGeneration
     fun qvScreenGeneration(): Long = screenGeneration

@@ -95,6 +95,13 @@ recovery snapshots may bypass the hourly interval. Only one serialized recovery
 operation may pin a snapshot; after confirmed completion its copy becomes an
 ordinary snapshot subject to count/byte pruning.
 
+An import into an existing vault requires that recovery snapshot. Explicit
+creation of an independent new path under 0004 §5.4 changes neither the selected
+document nor an existing local vault: fully verified leased staging and the
+no-replace restore protocol protect publication. It requires explicit new-baseline
+acknowledgement (§3.4), without taking a destructive-operation snapshot of an
+unmodified local vault.
+
 Core enforces this recovery policy for final deletion, history purge, baseline
 adoption and final-tombstone conflict resolution as well as existing import/
 restore/migration paths. A completed recovery-copy authorization is private,
@@ -191,6 +198,9 @@ reference set. Purge acknowledgements must not imply independent copies vanished
    explicit, warned user choice (0004 §6.4).*
 
 ## Changelog
+
+- 2026-11-11: §3.2 distinguishes Android independent new-path import from an
+  import that mutates an existing vault; source/local files remain intact (0049).
 
 - 2026-11-09: Specify core-enforced recovery-copy authorization and cross-process
   lifetime leases; source repairs and qualification are tracked in plan0050.

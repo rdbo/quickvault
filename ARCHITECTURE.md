@@ -91,7 +91,7 @@ rather than creating unused workspace scaffolding.
 | qv-store | Hardened SQLite with non-mutating identification, immutable objects, manifests, durable-outcome reporting, cooperative inode/directory leases for temporary files and snapshots, authenticated archives (header, writer, role-verifying reader), new-path restore and the full `verify` pass; no LAN peer state (the retired `lan_link` rows stay head-bound and clear at the next commit; 0013 §9.1), LAN serving reads, peer staging (new device, or merge with local copies of held objects) and receipt-free LAN acceptance through the archive acceptance transaction (0013 §7, §9–10) |
 | qv-protocol | Key-free hostile-input wire layer: bounded LAN frames, wire labels with exact arity, exact-shape message reader/writer, `lan / 2` profile, feature and error-code registry (roadmap 2.8); typed pairing/exchange/error messages, the one-use code's QR/manual form and endpoint text (roadmap 2.9–2.10, plan 0042); server wire types later; depends only on qv-encoding |
 | qv-sync | Shared causal merge candidates; LAN over TCP: the one-use sync window and the joiner in sync or new-device mode, and the two-way exchange (roadmap 2.9–2.10, plan 0042); remote candidate state and publication orchestration (planned) |
-| qv-core | Session policy, handles, lock cancellation, mutation authorization including verified pre-state recovery copies, snapshot policy/budgets, the `verify` report, and LAN sync windows, sync from a code and new-device join for frontends; strict scanned QR kind/profile/address inspection without network I/O |
+| qv-core | Session policy, handles, lock cancellation, mutation authorization including verified pre-state recovery copies, snapshot policy/budgets, the `verify` report, and LAN sync windows, sync from a code and new-device join for frontends; strict scanned QR kind/profile/address inspection without network I/O; opaque staged/authenticated vault-import capabilities with complete pre-publication index validation and fresh-local creation |
 | qv-platform | Injected OS traits; local unicast addresses for LAN endpoints from route probes, attached networks first (`/proc/net/route` where readable; std only); Linux logind lifecycle, xdg-desktop-portal file picker (zbus, local `file:` results only), X11 clipboard ownership, single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; Android keystore quick unlock with boot-bound policy state that survives app restarts (on where the device supports it; plan 0045); Android storage evidence from the OS encryption status; exact-identity autofill matching; native input unavailable |
 | qv-cli / qv-app | Explicit user actions and views, including `qv lan open|sync|join` and the app's Sync screen and Join mode; qv-app's shared UI (own title bar, one DOM for desktop and phone, 0009 §1.8), its non-secret preferences file (theme, acknowledged protection status), QR rendering/decoding and bounded native Android Camera2 glue (camera on by default; `QV_APP_QR_CAMERA=0` builds without it); in-app attachment previews verified and streamed in protected chunks through a revocable `/preview/` capability on the existing bounded loopback listener (0003 §6.4); on Linux, portal file picks run in a re-executed helper process without vault data, since the portal refuses the non-dumpable app; no unrestricted crypto/file/SQL bridge |
 | qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
@@ -468,12 +468,20 @@ flowchart TB
     rust <-->|"one admitted LAN connection; credential auth then final-key exchange"| peer["another QuickVault device"]
     rust <-->|"optional account sync over hybrid TLS"| server["untrusted remote server"]
     anchor[("private external anchor")] <--> core
+    document["untrusted selected Android document"] -->|"native capability; bounded ciphertext stream"| core
 ```
 
 No plaintext or device-bound credentials go into archives. Only an explicitly
 self-contained backup carries a password slot, so whoever holds that file can
 attempt offline guessing. The native/OS memory conditions of 0008 qualify
 locked-device protection.
+
+Android vault opening (0049) is an explicit private-copy import: core/store
+retain leased ciphertext staging, authenticate the source under an isolated
+anchor context, preflight its bounded index and publish through verified
+archive restoration with fresh local identity. Native document URIs never
+enter the renderer or become SQLite paths. The selected document is untouched;
+Linux opening retains its selected-file behavior.
 
 LAN connectivity and discovery do not establish peer trust. Peers must be
 explicitly authorized for the vault; network input remains hostile. LAN sync

@@ -450,17 +450,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
         let c = controller.clone();
         move |_: MouseEvent| {
             sheet.set(Sheet::None);
-            #[cfg(target_os = "linux")]
-            crate::documents::pick_path(
-                &c,
-                epoch,
-                crate::documents::PathFor::Import,
-                qv_core::platform::portal::Pick::Open,
-                "Open a QuickVault vault",
-                None,
-            );
-            #[cfg(not(target_os = "linux"))]
-            let _ = &c;
+            crate::documents::pick_vault(&c, epoch);
         }
     };
     let pick_folder = {
@@ -497,7 +487,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
             let _ = &c;
         }
     };
-    let can_pick = cfg!(target_os = "linux");
+    let can_pick = cfg!(any(target_os = "linux", target_os = "android"));
     // Validation fixtures keep their synthetic vaults at a typed private path;
     // nothing else types a vault path here (0009 §1.8): a failed picker
     // reports the missing portal and only hides the picker choices.
@@ -662,7 +652,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                         span { class: "sp", id: "create-place",
                             if let Some(file) = picked.as_ref() { "Saves as {file}" } else { "Saves in {folder_place}" }
                         }
-                        if can_pick && !fallback {
+                        if cfg!(target_os = "linux") && !fallback {
                             div { class: "pop-anchor",
                                 button { class: "link", id: "create-change", onclick: move |_| sheet.set(if sheet() == Sheet::SaveMenu { Sheet::None } else { Sheet::SaveMenu }), "Change" }
                                 if sheet() == Sheet::SaveMenu {
@@ -718,6 +708,41 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                             button { class: "btn primary", id: "create-submit", "data-qv-clear": "true", disabled: busy || preview || mismatch, onclick: move |_| g2(Action::Create), if busy { "Creating…" } else { "Create vault" } }
                         }
                     }
+                }
+            }
+        }
+    } else if mode == Mode::Import {
+        let name = controller.import_name(epoch);
+        let name_c = controller.clone();
+        let ack_c = controller.clone();
+        let mut g = gate.clone();
+        rsx! {
+            div { class: "wizard fade-in",
+                h2 { "Import a private copy" }
+                p { "Changes in QuickVault won't update the selected file. Choose a closed or exported vault file; a live database copy may be incomplete." }
+                p { "This file has no trusted rollback record on this device. Authentication can verify its contents, but cannot establish that it is the latest copy." }
+                if view.import_ready {
+                    div { class: "field",
+                        label { r#for: "import-name", "Local file name" }
+                        input { id: "import-name", r#type: "text", maxlength: 256, value: "{name}", disabled: busy,
+                            autocomplete: "off", spellcheck: "false",
+                            oninput: move |e: FormEvent| { let mut name = e.value(); name_c.input(epoch, InputField::Name, &mut name); }
+                        }
+                    }
+                    SecretInput { controller: controller.clone(), epoch, field: InputField::Password,
+                        label: "Master password", id: "import-password", secret: true, disabled: busy, autofocus: true }
+                    label { class: "check",
+                        input { id: "import-ack", r#type: "checkbox", checked: view.import_ack, disabled: busy,
+                            oninput: move |e: FormEvent| ack_c.acknowledge_vault_import(epoch, e.checked()) }
+                        "I accept this file as a new local baseline and understand that QuickVault will edit a private copy."
+                    }
+                }
+                {err_view}
+                div { class: "actions",
+                    button { class: "btn subtle", disabled: busy, onclick: to_mode(Mode::Unlock), "Cancel" }
+                    button { class: "btn primary", id: "import-submit", "data-qv-clear": "true",
+                        disabled: busy || preview || !view.import_ready || !view.import_ack,
+                        onclick: move |_| g(Action::ImportVault), "Verify and import" }
                 }
             }
         }

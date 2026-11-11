@@ -136,6 +136,8 @@ mod rotation;
 mod session;
 mod settings;
 mod setup;
+mod vault_import;
+pub use vault_import::{PendingVaultImport, VerifiedVaultImport};
 mod snapshot;
 mod strength;
 #[cfg(test)]
@@ -179,8 +181,8 @@ pub use qv_model::{
 };
 pub use qv_store::{
     AnchorDir, AnchorStatus, InterruptedRotation, Leftovers, LocationWarnings,
-    MAX_ARCHIVE_TOTAL_LENGTH, NeededPasswords, RotationChoice, RotationState, SnapshotDir,
-    SnapshotKind, StoreError, VAULT_EXTENSION,
+    MAX_ARCHIVE_TOTAL_LENGTH, MAX_DB_BYTES, NeededPasswords, RotationChoice, RotationState,
+    SnapshotDir, SnapshotKind, StoreError, VAULT_EXTENSION,
 };
 
 pub use attachment::{AttachmentHandle, AttachmentSummary};

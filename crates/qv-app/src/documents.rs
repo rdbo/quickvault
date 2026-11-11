@@ -38,6 +38,8 @@ pub enum PickKind {
     Any,
     /// Archive input or export destination.
     Archive,
+    /// A vault to authenticate and import as an independent private copy.
+    Vault,
 }
 /// Which screen's path input a system picker fills.
 #[cfg(feature = "desktop")]
@@ -71,6 +73,36 @@ pub fn picker_missing() -> bool {
     #[cfg(not(target_os = "linux"))]
     {
         false
+    }
+}
+
+/// Open a vault through the platform picker. Android returns a document
+/// capability for verified private import; Linux retains the original path.
+#[cfg(feature = "desktop")]
+pub(crate) fn pick_vault(c: &Controller, epoch: crate::controller::FormEpoch) {
+    #[cfg(target_os = "linux")]
+    pick_path(
+        c,
+        epoch,
+        PathFor::Import,
+        qv_core::platform::portal::Pick::Open,
+        "Open a QuickVault vault",
+        None,
+    );
+    #[cfg(target_os = "android")]
+    crate::android::request_pick(c, epoch, PickKind::Vault, false);
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let _ = (c, epoch);
+}
+
+/// Switching obeys the same unsaved-input/lock rules as the existing list.
+#[cfg(feature = "desktop")]
+pub(crate) fn switch_to_file(c: &Controller, epoch: crate::controller::FormEpoch) {
+    if c.switch_vault(
+        epoch,
+        crate::controller::SwitchTo::Mode(crate::controller::Mode::Unlock),
+    ) {
+        pick_vault(c, c.snapshot().epoch);
     }
 }
 /// Linux: show the desktop's file picker on a worker thread and put the choice

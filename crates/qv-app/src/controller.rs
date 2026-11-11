@@ -15,6 +15,9 @@ use std::sync::{
 use std::time::{Duration, Instant};
 use zeroize::Zeroize;
 
+#[path = "vault_import.rs"]
+mod vault_import;
+
 /// A workspace operation shows as busy only after running this long.
 pub const BUSY_SHOWN_AFTER: Duration = Duration::from_millis(300);
 
@@ -108,7 +111,7 @@ impl AppError {
                 "The password or recovery phrase is incorrect."
             }
             Self::Core(CoreError::Store(qv_core::StoreError::PublicationIncomplete)) => {
-                "The vault file was created, but completion failed. Open the created file locally; do not repeat enrollment at the same path."
+                "The vault file was created, but completion failed. Open the created file locally; do not repeat creation at the same path."
             }
             Self::Core(CoreError::Store(qv_core::StoreError::CommittedAnchorPending)) => {
                 "Your change is saved. Its rollback record could not be updated. Restore access to device storage and reopen the vault; do not repeat the change."
@@ -257,6 +260,8 @@ pub enum Phase {
 pub enum Mode {
     /// Password unlock.
     Unlock,
+    /// Authenticate and import a selected Android document into private storage.
+    Import,
     /// Create a new local vault.
     Create,
     /// Phrase or anchor recovery.
@@ -339,6 +344,10 @@ pub struct View {
     /// The locked screen opens the quick-unlock prompt by itself for this
     /// foreground entry (plan 0045).
     pub autoprompt: Option<u64>,
+    /// An immutable selected document is ready for password authentication.
+    pub import_ready: bool,
+    /// Explicit acknowledgement of independent-copy and recovery-baseline limits.
+    pub import_ack: bool,
 }
 impl View {
     /// Whether the Join form's code came from a scan (it is never rendered).
@@ -363,6 +372,8 @@ pub enum Action {
     ConfirmWeak,
     /// Unlock with a password.
     Unlock,
+    /// Authenticate and publish an explicitly acknowledged private copy.
+    ImportVault,
     /// Explicit hardware-authenticated quick unlock; never a fallback.
     QuickUnlock,
     /// Open with the recovery phrase.
@@ -448,6 +459,9 @@ pub(crate) struct State {
     /// offer runs as the next operation (0009 §1.8, plan 0045).
     quick_offer: Option<MasterPassword>,
     pub(crate) pages: crate::page_read::Reads,
+    pending_import: Option<Arc<qv_core::PendingVaultImport>>,
+    import_name: String,
+    import_ack: bool,
 }
 impl State {
     fn clear_inputs(&mut self) {
@@ -458,6 +472,9 @@ impl State {
         }
     }
     pub(crate) fn invalidate(&mut self) {
+        self.pending_import = None;
+        self.import_name.clear();
+        self.import_ack = false;
         self.pages.clear();
         crate::preview::close();
         if let Some(scan) = self.scan.take() {
@@ -465,7 +482,8 @@ impl State {
         }
         #[cfg(all(feature = "desktop", target_os = "android"))]
         crate::android::forget_scan();
-        let creating = self.phase == Phase::Opening && self.status == "Creating vault…";
+        let creating = self.phase == Phase::Opening
+            && matches!(self.status, "Creating vault…" | "Importing vault…");
         let unconfirmed = self.phase == Phase::Phrase;
         let rotation = self.phase == Phase::Rotation;
         let interrupted = self.op_running;
@@ -622,6 +640,9 @@ impl Controller {
                 scan: None,
                 quick_offer: None,
                 pages: crate::page_read::Reads::default(),
+                pending_import: None,
+                import_name: String::new(),
+                import_ack: false,
             }),
             working: AtomicBool::new(false),
             page_owner: AtomicU64::new(0),
@@ -655,7 +676,15 @@ impl Controller {
         let watch = Some(watch.map_err(|_| AppError::LockMonitoring)?);
         inner.monitoring.store(watch.is_some(), Ordering::SeqCst);
         *inner.watch.lock().unwrap_or_else(|p| p.into_inner()) = watch;
-        Ok(Self(inner))
+        let controller = Self(inner);
+        if controller
+            .core()
+            .and_then(|core| core.cleanup_vault_imports().map_err(Into::into))
+            .is_err()
+        {
+            controller.state().error = Some(AppError::PrivateStorage);
+        }
+        Ok(controller)
     }
     /// Whether this controller is a synthetic read-only preview.
     #[cfg(feature = "validation")]
@@ -1251,6 +1280,8 @@ impl Controller {
             theme: self.theme(),
             ack_needed: self.ack_needed_cached(),
             autoprompt,
+            import_ready: s.pending_import.is_some(),
+            import_ack: s.import_ack,
         }
     }
     /// Select a workflow, clearing the old form and invalidating late events.
@@ -1320,6 +1351,9 @@ impl Controller {
                     .expose_secret_mut()
                     .copy_from_slice(value.as_bytes());
                 s.inputs[field.index()] = protected;
+                if field == InputField::Name && s.mode == Mode::Import {
+                    s.import_name.clone_from(value);
+                }
                 s.active = Instant::now();
                 s.error = None;
                 if matches!(
@@ -1410,6 +1444,7 @@ impl Controller {
                 | Action::Recover
                 | Action::RecoverPassword
                 | Action::JoinDevice
+                | Action::ImportVault
         ) {
             // Re-arm the app-level subscription before each pending unlock/KDF.
             // The session's own watcher does not yet exist during that work.
@@ -1581,6 +1616,19 @@ impl Controller {
             s.error = Some(AppError::Consent);
             return Err(AppError::Consent);
         }
+        if matches!(action, Action::ImportVault) {
+            if s.mode != Mode::Import || s.pending_import.is_none() {
+                return Err(AppError::InvalidInput);
+            }
+            if !s.import_ack {
+                return Err(AppError::Consent);
+            }
+            crate::vaults::file_name(&s.import_name)?;
+            let mut name = SecretBytes::zeroed(s.import_name.len());
+            name.expose_secret_mut()
+                .copy_from_slice(s.import_name.as_bytes());
+            s.inputs[InputField::Name.index()] = name;
+        }
         if matches!(action, Action::Create | Action::ConfirmWeak) {
             let passwords =
                 MasterPassword::from_utf8(s.inputs[InputField::Password.index()].expose_secret())
@@ -1647,6 +1695,8 @@ impl Controller {
             "Creating vault…"
         } else if matches!(action, Action::JoinDevice) {
             "Joining from the other device…"
+        } else if matches!(action, Action::ImportVault) {
+            "Importing vault…"
         } else {
             "Opening vault…"
         };
@@ -1660,7 +1710,7 @@ impl Controller {
             .spawn(move || {
                 let _worker = worker;
                 let result = controller.open(action, &values, &token);
-                controller.complete(next, &token, result);
+                controller.complete(next, &token, result, matches!(action, Action::ImportVault));
             })
             .map_err(|_| AppError::Unavailable)?;
         Ok(())
@@ -1687,6 +1737,9 @@ impl Controller {
             std::str::from_utf8(values[field.index()].expose_secret())
                 .map_err(|_| AppError::InvalidInput)
         };
+        if matches!(action, Action::ImportVault) {
+            return self.publish_import(values, token);
+        }
         // A typed or picked file wins; else a new vault goes to the default
         // folder under its name, a joined one under a free "Joined vault"
         // name, and everything else opens the selected vault (plan 0041).
@@ -1823,9 +1876,21 @@ impl Controller {
             _ => Err(AppError::InvalidInput),
         }
     }
-    fn complete(&self, epoch: u64, token: &CancelToken, result: Result<Opened, AppError>) {
+    fn complete(
+        &self,
+        epoch: u64,
+        token: &CancelToken,
+        result: Result<Opened, AppError>,
+        importing: bool,
+    ) {
         let mut s = self.state();
         if s.epoch != epoch || token.is_cancelled() {
+            if importing && let Ok(Opened::Session(session, path, ..)) = &result {
+                session.lock();
+                let path = path.clone();
+                drop(s);
+                self.note_import_publication(&path);
+            }
             drop(result);
             return;
         }
@@ -1834,18 +1899,24 @@ impl Controller {
             Ok(Opened::Session(session, path, ..)) => Some((path.clone(), session)),
             _ => None,
         };
+        let mut remember_failed = false;
         if let Some((path, session)) = opened {
             // Remember and select it with its stored name; a failed list
             // write never blocks use.
             drop(s);
-            self.remember_vault(&path);
+            remember_failed = !self.remember_vault(&path);
             self.note_name_at(&path, session);
-            *self.0.selected.lock().unwrap_or_else(|p| p.into_inner()) = Some(path);
             s = self.state();
             if s.epoch != epoch || token.is_cancelled() {
+                if importing {
+                    session.lock();
+                    drop(s);
+                    self.note_import_publication(&path);
+                }
                 drop(result);
                 return;
             }
+            *self.0.selected.lock().unwrap_or_else(|p| p.into_inner()) = Some(path);
         }
         match result {
             Ok(Opened::Created(created, positions, path)) => {
@@ -1857,6 +1928,9 @@ impl Controller {
                 s.status = "Write down your recovery phrase";
             }
             Ok(Opened::Session(session, path, phrase, about, offer)) => {
+                s.pending_import = None;
+                s.import_name.clear();
+                s.import_ack = false;
                 self.0
                     .quick_opened
                     .store(self.0.services.foreground_entries(), Ordering::SeqCst);
@@ -1876,6 +1950,15 @@ impl Controller {
                 };
                 s.session = Some(Arc::new(session));
                 enter_workspace(&mut s);
+                if importing
+                    && remember_failed
+                    && let Some(ws) = &mut s.workspace
+                {
+                    ws.error = Some(AppError::Unavailable);
+                    ws.notice = Some(
+                        "The imported file is saved in the default folder, but its list entry could not be saved.",
+                    );
+                }
                 crate::autofill::bind(&mut s);
             }
             Ok(Opened::Resume(path, need)) => {
@@ -1885,11 +1968,23 @@ impl Controller {
                 s.error = Some(AppError::RotationPending);
             }
             Err(e) => {
+                if matches!(
+                    e,
+                    AppError::Core(CoreError::Store(qv_core::StoreError::PublicationIncomplete))
+                ) {
+                    s.pending_import = None;
+                    s.import_name.clear();
+                    s.import_ack = false;
+                    s.mode = Mode::Unlock;
+                }
                 s.phase = Phase::Locked;
                 s.status = "Locked";
                 // Only quick unlock reports a dismissal here (an unlock
                 // cancelled by a lock never completes).
                 s.error = (e != AppError::Core(CoreError::Cancelled)).then_some(e);
+                if s.pending_import.is_some() {
+                    s.mode = Mode::Import;
+                }
             }
         }
     }
@@ -2735,6 +2830,7 @@ mod tests {
             epoch,
             &token,
             Ok(Opened::Created(created, [0, 1, 2], PathBuf::new())),
+            false,
         );
         let view = env.controller.snapshot();
         assert_eq!(view.phase, Phase::Locked);
