@@ -241,6 +241,16 @@ release, but no longer gates the feature.
   - A Wi‑Fi item's page can show a `WIFI:` join QR code. It contains the
     password, so it is an explicit 30-second reveal under 0008 §4.
   - Tiles show the colour token of 0003 §5.5.
+- **Item types and list loading** (owner, 2026-11-11; plan 0051). The
+  sidebar always lists the new-item picker's five types (Logins, Cards,
+  Wi-Fi, Notes, Other; 0003 §5.1) with exact counts, zero included. Choosing
+  a type, group or filter, turning a page or a new vault revision never
+  blanks the list: the previous rows stay until the new page lands (in place
+  of it, so §7's page bound holds), then title, count and rows change
+  together. Only a load over 250 ms dims them, and they take no clicks
+  meanwhile. Popovers (command bar, group pickers) read in a lane of their
+  own (shared only with the sidebar's type counts, which the shell keeps
+  as numbers) and never take the list's or the sidebar's groups page.
 - **Item list actions** (owner, 2026-11-07; plan 0044). A right click on an
   item row opens its menu (open, copy the first field or the password,
   colour, move, select, move to the trash) without opening the item.
@@ -481,6 +491,9 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-11: §1.8: fixed sidebar types with Other and Wi-Fi; list swaps
+  without blanking while a page loads (owner request, plan 0051; details
+  owner-delegated). Still Draft.
 - 2026-11-10: §1.8 permits native Android document capabilities and specifies
   explicit private-copy/baseline consent for verified vault import (0049).
 

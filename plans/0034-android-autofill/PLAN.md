@@ -471,7 +471,7 @@ the glue. Rust compares digests only.
   - an expired token → RESULT_CANCELED.
 
   Record results in `plans/0034-android-autofill/VALIDATION.md`, with passed
-  and pending rows kept separate as in 0033. Run on the POCO X7 Pro when it is
+  and pending rows kept separate as in 0033. Run on the Android test phone when it is
   connected. If no device is available, leave the rows explicitly pending; do
   not invent evidence.
 - **Files:** `crates/qv-app/android/tests/{AutofillTest.java,AndroidManifest.xml}`, `crates/qv-app/scripts/build-android.sh`, `plans/0034-android-autofill/VALIDATION.md`.
@@ -601,14 +601,14 @@ the glue. Rust compares digests only.
   `dist/android-project-*` directory (owner will handle the build-output
   pile-up separately).
 
-- 2026-11-02 (phone connected, POCO X7 Pro, Android 15):
+- 2026-11-02 (phone connected, Android test phone, Android 15):
   - `AutofillTest` passes on the validation build with all seven stages (label
     spoof refused, link confirmation, explicit fill, lock cancellation,
     wrong/replayed token refused).
   - `PlatformTest` passes on the normal build with `singleTask` (64.697 s).
     The normal build is reinstalled.
-  - Harness-only fixes: a JSON-string assertion; MIUI blocks app self-starts
-    from the background (MIUIOP 10021), so the test now waits for the activity
+  - Harness-only fixes: a JSON-string assertion; The vendor ROM blocks app self-starts
+    from the background (a vendor background-start app-op), so the test now waits for the activity
     and the runner starts it from adb shell. The op was temporarily allowed and
     restored to `ignore`.
 
@@ -641,5 +641,5 @@ the glue. Rust compares digests only.
   - a pre-existing Android-only Clippy cast in qv-store.
 
   New device test `AutofillTest#testColdStartRequestWaitsForControllerAndUnlock`
-  passes on the POCO X7 Pro and fails with the old poll order (VALIDATION.md).
+  passes on the Android test phone and fails with the old poll order (VALIDATION.md).
   Autofill stays gated.

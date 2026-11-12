@@ -50,9 +50,9 @@ has `true`.
 
 ## Device evidence (2026-11-02)
 
-The test device was the POCO X7 Pro 2412DPC0AG, Android 15 (API 35), build
+The test device was the Android test phone, Android 15 (API 35), build
 fingerprint
-`POCO/rodin_global/rodin:15/AP3A.240905.015.A2/OS2.0.7.0.VOJMIXM:user/release-keys`
+omitted
 (the 0033 device). APKs were installed with `-r`, so app data was kept.
 `AutofillTest` used only the fixture's `validation-current` root. The normal
 build was reinstalled afterwards. The rebuilt validation artifacts differ from
@@ -81,10 +81,10 @@ the hashes above only in the test assertion and launch changes described below.
 - Harness fixes during the run, with no product change:
   - `js()` returns JSON, so the candidate-count assertion now compares a
     boolean. The real count was 0 (correct).
-  - MIUI refuses an app's own activity start while another app is on top
-    (`Abort background activity starts`, MIUIOP 10021), so `startActivitySync`
+  - The vendor ROM refuses an app's own activity start while another app is on top
+    (a vendor app-op that aborts background activity starts), so `startActivitySync`
     hung. The test now waits for the activity and the runner starts QuickVault
-    from adb shell. MIUIOP 10021 was temporarily allowed and then restored to
+    from adb shell. That vendor app-op was temporarily allowed and then restored to
     `ignore`. The production handoff is unaffected: the handoff activity is
     foreground when it starts QuickVault.
 - Running the whole `AutofillTest` class also runs the inherited `PlatformTest`
@@ -96,14 +96,14 @@ the hashes above only in the test assertion and launch changes described below.
 
 | Requirement | Evidence needed | Status |
 |-------------|-----------------|--------|
-| In-process handoff: registry → Rust poll → shared UI → explicit choice → result; wrong/replayed token refused; lock cancels bound request | `AutofillTest` (validation build) | **pass** (POCO X7 Pro) |
+| In-process handoff: registry → Rust poll → shared UI → explicit choice → result; wrong/replayed token refused; lock cancels bound request | `AutofillTest` (validation build) | **pass** (Android test phone) |
 | Requester signer read under API 30+ package visibility without `QUERY_ALL_PACKAGES` | signer read for `com.android.shell` | **pass** for that system package; a third-party requester is covered by the round-trip row |
 | `singleTask` keeps existing instrumentation green | `PlatformTest` on the normal build | **pass**, 64.697 s |
 | Framework round trip from a foreign app: generic auth entry, handoff, dataset filled only into the requested fields | attended run with QuickVault selected as the autofill service (`adb shell settings put secure autofill_service org.quickvault.app/dev.dioxus.main.QvAutofillService`) and any login app | pending (attended) |
 | Label spoof: an app labelled like the service with no link gets no candidate | attended run with a sideloaded test app | UI/matcher pass in `AutofillTest`; framework path pending |
 | WebView origin claims from an untrusted app never match web entries | attended WebView page with `loadDataWithBaseURL("https://bank.example/", …)` | pending (host covered) |
 | Trusted-browser exact origin | requires recording a browser's signer digests from the device and adding an allowlist entry | not started; allowlist empty by design |
-| Cold-start handoff: request claimed before MainActivity/Rust start waits for the controller and unlock (review finding 1) | `AutofillTest#testColdStartRequestWaitsForControllerAndUnlock` (validation build) | **pass** (POCO X7 Pro, 2026-11-02, 6.1 s); the same test **fails** on a build with the pre-review poll order ("Request survives controller startup") |
+| Cold-start handoff: request claimed before MainActivity/Rust start waits for the controller and unlock (review finding 1) | `AutofillTest#testColdStartRequestWaitsForControllerAndUnlock` (validation build) | **pass** (Android test phone, 2026-11-02, 6.1 s); the same test **fails** on a build with the pre-review poll order ("Request survives controller startup") |
 | Reopening QuickVault in a still-cached process (e.g. a second handoff after backing out) | plan 0035 fix; attended Back/reopen and dark-mode toggle | **pass** after plan 0035 (fresh process on reopen, no abort) |
 
 Run after connecting the phone:
@@ -111,7 +111,7 @@ Run after connecting the phone:
 ```sh
 adb install -r crates/qv-app/dist/quickvault-validation-debug.apk
 adb install -r crates/qv-app/dist/quickvault-validation-tests.apk
-# One method per invocation. On MIUI, keep QuickVault in front from the shell
+# One method per invocation. On the test phone's vendor ROM, keep QuickVault in front from the shell
 # while the test runs, e.g. a loop of
 #   adb shell am start -n org.quickvault.app/dev.dioxus.main.MainActivity
 # whenever another activity is resumed.
@@ -126,10 +126,10 @@ recorded here.
 
 ## Device evidence after the 0034 review (2026-11-02)
 
-Same POCO X7 Pro (build fingerprint above), with plan 0036 included (libcrux
+Same Android test phone (build fingerprint above), with plan 0036 included (libcrux
 linked). The process was force-stopped before each method, and each method
 ran in its own `am instrument` invocation, with the shell starting
-MainActivity because of MIUI.
+MainActivity because of the vendor ROM.
 
 | Run | Build (APK SHA-256) | Result |
 |-----|---------------------|--------|

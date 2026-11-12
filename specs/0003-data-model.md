@@ -77,7 +77,7 @@ UI limits collapse presentation rather than dropping groups.
 | Field | Type | Notes |
 |-------|------|-------|
 | group | ID | |
-| type_hint | text | UI hint only: `login`, `note`, `card`, `ssh-key`, `identity`, `custom`, … |
+| type_hint | text | UI hint only: `login`, `note`, `card`, `wifi`, `ssh-key`, `identity`, `custom`, … |
 | title | text | |
 | fields | list<Field> | ordered |
 | notes | text? | multi-line |
@@ -102,8 +102,11 @@ readable; timestamps never identify a recursive deletion (0007 §2.1).
 | value | text or bytes | |
 | protected | bool | controls the secret boundary (0008 §4); see 5.3 |
 
-5.1. `type_hint` MUST NOT change how data is encrypted or stored. An unknown
-`type_hint` is shown as `custom`.
+5.1. `type_hint` MUST NOT change how data is encrypted or stored. Clients
+show `login`, `note`, `card` and `wifi` (compared lowercased) as their own
+types and every other hint, including an empty one, as one *Other* type;
+`custom` is the hint a client stores for a new Other item. The hint itself is
+kept unchanged.
 
 5.2. Templates (which fields a `login` has by default, etc.) are UI concerns,
 defined in client code, not in the data.
@@ -213,6 +216,8 @@ searchable. Paging MUST NOT silently omit records, fields or conflicts.
 
 ## Changelog
 
+- 2026-11-11: §5.1: standard hints include `wifi`; every other hint shows
+  as one Other type instead of `custom` (owner request, plan 0051).
 - 2026-11-09: Specify bounded verified preview streams and explicit expensive
   image-decode consent; retain attachment eligibility limits (plan0050).
 - 2026-11-09: Define optional encrypted deletion-operation UUIDs at group key6

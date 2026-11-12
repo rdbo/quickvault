@@ -30,7 +30,7 @@ The explicit isolated validation artifacts for the app-flow retry are:
 APK signature verification passes. minSdk 29/target 35; backups disabled;
 permissions are INTERNET (renderer loopback), USE_BIOMETRIC and generated
 signature-level receiver permission. Optional quick unlock requires API 30+.
-The POCO test phone is now connected. The current artifacts include the
+The Android test phone is now connected. The current artifacts include the
 device-discovered protocol metadata fix and an awake interactive test window;
 installation preserves app data. No production lock or key policy was weakened.
 
@@ -60,8 +60,8 @@ an explicitly injected fake wrapping backend; they do not validate hardware.
 
 ## Physical device session (2026-11-02)
 
-POCO X7 Pro, model 2412DPC0AG, Android 15, build fingerprint
-`POCO/rodin_global/rodin:15/AP3A.240905.015.A2/OS2.0.7.0.VOJMIXM:user/release-keys`,
+Android test phone, Android 15, build fingerprint
+omitted,
 security patch 2024-12-01, WebView 156.0.8078.47.
 
 - Original phase artifacts (`dcd86b1f…75d8e`, test APK `e24cfe59…6dff6`):

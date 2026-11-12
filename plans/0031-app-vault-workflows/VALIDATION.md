@@ -70,8 +70,7 @@ Inspected:
 
 ### Physical device (2026-11-01/02)
 
-POCO X7 Pro (model 2412DPC0AG, `rodin_global`), Android 15 (SDK 35, build
-AP3A.240905.015.A2, HyperOS OS2.0.7.0.VOJMIXM), WebView provider
+The owner's Android test phone, Android 15 (SDK 35, build omitted), WebView provider
 `com.google.android.webview` 156.0.8078.47. Installed over USB with
 `sh crates/qv-app/scripts/test-android.sh`; synthetic vaults only.
 

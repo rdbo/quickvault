@@ -265,7 +265,7 @@ No alternative renderer/framework or secret-input adapter unless owner directs i
   while the roadmap calls for 0.7; installed Rust targets currently list only
   x86_64-unknown-linux-musl. GTK 3.24.52 and WebKitGTK 2.48.1 pkg-config entries
   exist. Phone is authorized through owner-started adb at localhost:5037 and
-  meets D7: model 2412DPC0AG, API 35, arm64-v8a, MemTotal 11,584,740 KiB.
+  meets D7: API 35, arm64-v8a, MemTotal 11,584,740 KiB.
   Only model/API/ABI/RAM were read. No APK, fixture, clipboard marker, keystore
   object or service was installed/created/enabled on the phone.
 - 2026-10-26: Reviewed upstream Dioxus 0.7 mobile guide and downloaded source

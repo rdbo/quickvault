@@ -158,7 +158,7 @@ independent/device gates and any resulting fixes are complete.
   representative datasets; dependent qualification remains pending. `adb devices
   -l` lists no attached device. Existing synthetic benchmark profiles may supply
   host development evidence, without selecting owner qualification targets.
-- 2026-11-09: Owner connected the POCO X7 Pro during execution. Treat this as
+- 2026-11-09: Owner connected the Android test phone during execution. Treat this as
   identification of the available Android target and continue synthetic device
   validation. Owner has not chosen an independent reviewer or performance
   acceptance target. Initial Android build attempts found the default Dioxus
@@ -169,7 +169,7 @@ independent/device gates and any resulting fixes are complete.
   upstream-audit scope references. Fresh deny/vet pass with existing debt;
   no certification or exception was added. D12 remains pending, not a local
   approval. No reviewer was contacted and no material sent externally.
-- 2026-11-09: Final host P0–P3 measurements and physical POCO P0–P3 samples
+- 2026-11-09: Final host P0–P3 measurements and physical phone P0–P3 samples
   pass. P3 contains 1,071,077,760 actual referenced ciphertext bytes (99.752%
   of the unchanged 1 GiB budget); each sample unlocks, fully verifies, edits
   and locks. Physical 67.5/135 MiB searchable-text fixtures also pass; the

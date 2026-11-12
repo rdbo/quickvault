@@ -240,8 +240,8 @@ QuickBinding/AAD (36-byte encoding), rather than the initial 32-byte sketch.
   once the phone is connected, followed by ordinary fresh-context review.
   Original staged index preserved; no commit/push/branch.
 
-- 2026-11-02 (phone connected): POCO X7 Pro 2412DPC0AG, Android 15,
-  fingerprint `POCO/rodin_global/rodin:15/AP3A.240905.015.A2/OS2.0.7.0.VOJMIXM:user/release-keys`,
+- 2026-11-02 (phone connected): Android test phone, Android 15,
+  fingerprint omitted,
   WebView 156.0.8078.47. Installed APKs without clearing app data. Extended
   PlatformTest passes, OK (1 test), 62.241 s. Initial quick-test startup crashed
   in vendor CSP's edits_path while the render RefCell was mutably borrowed;

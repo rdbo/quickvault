@@ -73,7 +73,8 @@ impl<T> core::fmt::Debug for ViewPage<T> {
 pub struct ItemFilter<'a> {
     /// Include entries in this group and all displayed descendants.
     pub group: Option<GroupHandle>,
-    /// Match the lowercased type hint exactly.
+    /// Match one of [`TYPE_BUCKETS`]: the lowercased type hint exactly, or
+    /// `other` for every hint outside the standard four.
     pub kind: Option<&'a str>,
     /// Match title or first visible field, as the app's list filter does.
     pub text: Option<&'a str>,
@@ -149,9 +150,9 @@ enum Scope {
     AllConflicts,
 }
 
-/// One type present in live entries, with an exact count.
+/// One type bucket present in live entries, with an exact count.
 pub struct KindSummary {
-    /// Lowercased type hint, zeroizing and bounded by the model's normalization expansion.
+    /// One of [`TYPE_BUCKETS`].
     pub kind: Zeroizing<String>,
     /// Live entries of this type.
     pub count: usize,
@@ -233,6 +234,17 @@ fn text(ctx: &Ctx<'_>, value: Zeroizing<String>) -> Result<BudgetText, CoreError
         value,
         _lease: lease,
     })
+}
+/// The type buckets `kinds_page` returns, in order; every lowercased type
+/// hint outside the first four, including an empty one, is `other` (0003 §5.1).
+pub const TYPE_BUCKETS: [&str; 5] = ["login", "note", "card", "wifi", "other"];
+/// The [`TYPE_BUCKETS`] entry of a lowercased type hint.
+pub fn type_bucket(kind: &str) -> &'static str {
+    TYPE_BUCKETS[..4]
+        .iter()
+        .find(|b| **b == kind)
+        .copied()
+        .unwrap_or("other")
 }
 fn lower(ctx: &Ctx<'_>, value: &str) -> Result<BudgetText, CoreError> {
     text(ctx, Zeroizing::new(value.to_lowercase()))
@@ -364,21 +376,16 @@ fn key(ctx: &Ctx<'_>, request: &Request, id: RecordId) -> Result<Option<SortKey>
         let ViewData::Entry(entry) = &**view else {
             return Err(CoreError::Internal);
         };
-        let kind = lower(ctx, entry.type_hint.expose())?;
-        if kind.as_str().is_empty() {
-            return Ok(None);
-        }
-        let category = match kind.as_str() {
-            "login" => 0,
-            "note" => 1,
-            "card" => 2,
-            "wifi" => 3,
-            _ => 4,
-        };
+        let kind = type_bucket(lower(ctx, entry.type_hint.expose())?.as_str());
+        let category = TYPE_BUCKETS
+            .iter()
+            .position(|b| *b == kind)
+            .and_then(|i| u8::try_from(i).ok())
+            .ok_or(CoreError::Internal)?;
         return Ok(Some(SortKey {
             category,
             date: Reverse(None),
-            text: kind,
+            text: text(ctx, Zeroizing::new(kind.to_owned()))?,
             id: [0; 16],
             version: [0; 16],
         }));
@@ -417,7 +424,8 @@ fn key(ctx: &Ctx<'_>, request: &Request, id: RecordId) -> Result<Option<SortKey>
         },
         ViewData::Entry(entry) => {
             if matches!(request.scope, Scope::Items { kind: true, .. })
-                && lower(ctx, entry.type_hint.expose())?.as_str() != request.kind.as_str()
+                && type_bucket(lower(ctx, entry.type_hint.expose())?.as_str())
+                    != request.kind.as_str()
             {
                 return Ok(None);
             }
@@ -911,7 +919,7 @@ impl Session {
         self.read(|ctx| Ok(ctx.open.vault.local_seq()))
     }
 
-    /// Distinct live type hints and exact counts, common types first, then text order.
+    /// Live entries per [`TYPE_BUCKETS`] entry, in that order; empty buckets are omitted.
     pub fn kinds_page(
         &self,
         cursor: Option<ViewCursor>,

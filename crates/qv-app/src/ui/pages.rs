@@ -1358,7 +1358,7 @@ fn AutofillScreen(controller: Controller, epoch: FormEpoch, revision: u64) -> El
     let (link_owner, link_read) = super::use_page(
         &controller,
         epoch,
-        crate::page_read::Lane::Kinds,
+        crate::page_read::Lane::Overlay,
         2,
         crate::page_read::Spec::Search(if view.app.is_some() {
             query.clone()

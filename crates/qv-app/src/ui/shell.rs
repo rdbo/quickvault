@@ -319,10 +319,10 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
             query: Zeroizing::new(String::new()),
         },
     );
-    let (kind_owner, kind_read) = super::use_page(
+    let (_, kind_read) = super::use_page(
         &controller,
         epoch,
-        crate::page_read::Lane::Kinds,
+        crate::page_read::Lane::Overlay,
         0,
         crate::page_read::Spec::Kinds,
     );
@@ -332,10 +332,22 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
         Some(crate::page_read::Rows::Groups(groups)) => groups.as_slice(),
         _ => &[],
     };
-    let kinds = match kind_page.as_deref().map(|p| &p.rows) {
-        Some(crate::page_read::Rows::Kinds(kinds)) => kinds.as_slice(),
-        _ => &[],
-    };
+    // The type counts outlive their page: popovers share its lane (plan
+    // 0051), and only these five numbers are kept.
+    let held_counts = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(None::<[usize; 5]>)));
+    if let Some(crate::page_read::Rows::Kinds(kinds)) = kind_page.as_deref().map(|p| &p.rows) {
+        let mut counts = [0; 5];
+        for row in kinds {
+            if let Some(i) = qv_core::TYPE_BUCKETS
+                .iter()
+                .position(|b| *b == row.kind.as_str())
+            {
+                counts[i] = row.count;
+            }
+        }
+        held_counts.set(Some(counts));
+    }
+    let counts = held_counts.get();
     let recovered = overview.as_ref().map_or(0, |o| o.recovered);
     let total_items = overview.as_ref().map_or(0, |o| o.entries);
     let context = controller
@@ -431,18 +443,20 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
                 button { class: nav_class(all_on), id: "nav-all", title: "All items", disabled: busy, onclick: go(&controller, epoch, Screen::Browse(None)),
                     Svg { icon: Icon::All } span { class: "t", "All items" } span { class: "n", "{total_items}" }
                 }
-                if !kinds.is_empty() { div { class: "h", "TYPES" } }
-                for kind in kinds.iter().cloned() {
-                    { let k = kind.kind; let n = kind.count; rsx! {
-                    button { class: nav_class(vault_screen && context == Screen::Kind(k.clone())), title: "{kind_label(&k)}", disabled: busy,
-                        onclick: go(&controller, epoch, Screen::Kind(k.clone())),
-                        Svg { icon: kind_icon(&k) } span { class: "t", "{kind_label(&k)}" } span { class: "n", "{n}" }
+                // Always the picker's five types, so the section keeps its
+                // shape; counts show once known (plan 0051).
+                div { class: "h", "TYPES" }
+                for t in crate::editor::ItemType::ALL {
+                    { let k = qv_core::type_bucket(t.hint()); let target = Screen::Kind(Zeroizing::new(k.to_owned()));
+                      let n = counts.zip(qv_core::TYPE_BUCKETS.iter().position(|b| *b == k)).map(|(c, i)| c[i]);
+                      rsx! {
+                    button { class: nav_class(vault_screen && context == target), id: "nav-type-{k}", title: "{kind_label(k)}", disabled: busy,
+                        onclick: go(&controller, epoch, target.clone()),
+                        Svg { icon: kind_icon(k) } span { class: "t", "{kind_label(k)}" } span { class: "n", if let Some(n) = n { "{n}" } }
                     }
                     } }
                 }
-                if let (Some(owner), Some(read)) = (kind_owner, kind_read.clone()) {
-                    super::PageNav { controller: controller.clone(), epoch, owner, read }
-                }
+                if let Some(error) = kind_read.as_ref().and_then(|r| r.error) { p { class: "banner warn", "{error.message()}" } }
                 div { class: "h", "GROUPS"
                     if let Some(r) = root {
                         button { title: "New group", "aria-label": "New group", disabled: busy, onclick: act(&controller, epoch, WsAction::NewGroup(r)), Svg { icon: Icon::Plus } }
@@ -538,20 +552,17 @@ pub(crate) fn Shell(controller: Controller, view: ShellView, palette: Signal<boo
     }
 }
 
-/// A sidebar label for a type hint.
+/// A sidebar label for a type hint; every non-standard hint is "Other"
+/// (0003 §5.1).
 pub(crate) fn kind_label(kind: &str) -> String {
-    match kind {
-        "login" => "Logins".into(),
-        "note" => "Notes".into(),
-        "card" => "Cards".into(),
-        "wifi" => "Wi-Fi".into(),
-        other => {
-            let mut c = other.chars();
-            c.next()
-                .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
-                .unwrap_or_default()
-        }
+    match qv_core::type_bucket(&kind.to_lowercase()) {
+        "login" => "Logins",
+        "note" => "Notes",
+        "card" => "Cards",
+        "wifi" => "Wi-Fi",
+        _ => "Other",
     }
+    .to_owned()
 }
 
 #[derive(Clone, PartialEq)]
@@ -585,7 +596,7 @@ fn Palette(
     let (owner, read) = super::use_page(
         &controller,
         epoch,
-        crate::page_read::Lane::Main,
+        crate::page_read::Lane::Overlay,
         2,
         crate::page_read::Spec::Search(query.clone()),
     );

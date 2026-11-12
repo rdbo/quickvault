@@ -9,6 +9,11 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-11: The app's item list no longer blanks and reloads when a type,
+  group or filter is chosen: the previous rows stay until the new page is
+  ready. The sidebar always lists Logins, Cards, Wi-Fi, Notes and Other;
+  non-standard types count as Other, and "Something else" is now "Other"
+  (plan 0051).
 - 2026-11-11: Implement Android vault-file selection through the system picker
   with explicit private-copy/baseline consent, bounded ciphertext staging,
   complete authentication and verified fresh-local publication. Password retries
@@ -53,7 +58,7 @@ Dates are ISO 8601. Newest first within each section.
 
 - 2026-11-09: Execute the local validation work in plan 0048: prepare a pinned
   LAN/2 independent-review package and dependency-debt inventory; benchmark the
-  final dependency tree on Linux and the connected POCO X7 Pro, including an
+  final dependency tree on Linux and the connected Android test phone, including an
   actually populated near-1-GiB vault. Record paged-search and atomic-mutation
   memory costs with reproducible disposable harnesses. Retain the failed app UI
   run and owner-observed fingerprint flicker; prepare a separate-UID validation
@@ -363,7 +368,7 @@ Dates are ISO 8601. Newest first within each section.
   brief and mockups for an application look on desktop and phone, waiting for
   the owner's approval.
 
-- 2026-11-03: Android QR device validation uses a bounded MIUI-compatible
+- 2026-11-03: Android QR device validation uses a bounded vendor-ROM-compatible
   activity launcher. Explicit validation-only modes exercise live camera
   frames/lifecycle/timeout and optical Join form filling. The native camera
   and optical Join checks pass on the connected Android 15 phone; remaining
@@ -606,7 +611,7 @@ Dates are ISO 8601. Newest first within each section.
   visible protection status and responsive screens. A maintained Dioxus 0.7.10
   integration restricts assets, CSP, native IPC/navigation and loopback transport.
   Android arm64/API29+ app and instrumentation APKs build; Linux real-WebKit
-  boundary and full rendered-flow checks pass. Synthetic Android instrumentation also passes on a POCO X7 Pro
+  boundary and full rendered-flow checks pass. Synthetic Android instrumentation also passes on the owner's Android test phone
   (Android 15); manual device and real-desktop lifecycle validation remain
   pending, so the phase stays In progress. Full
   vault browsing/editing follows in 2.5. Framework cleanup is best effort.

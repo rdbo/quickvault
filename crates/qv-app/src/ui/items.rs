@@ -254,6 +254,17 @@ pub(crate) fn ListPane(
     let (page_owner, page_read) =
         super::use_page(&controller, epoch, crate::page_read::Lane::Main, 1, spec);
     let page = page_read.as_ref().and_then(|r| r.page.clone());
+    // While a held page shows, so does the list it belongs to: the title,
+    // count, header and rows change together when the new page lands (plan
+    // 0051). The sidebar marks the new choice at once.
+    let stale = page_read.as_ref().is_some_and(|r| r.stale);
+    let shown_list = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(list.clone())));
+    let list = if stale {
+        shown_list.borrow().clone()
+    } else {
+        shown_list.borrow_mut().clone_from(&list);
+        list
+    };
     let (rows, groups) = match page.as_deref().map(|p| &p.rows) {
         Some(crate::page_read::Rows::Items { items, groups }) => (
             items
@@ -264,12 +275,15 @@ pub(crate) fn ListPane(
         ),
         _ => (Vec::new(), Vec::new()),
     };
-    let mut group_view = match &list {
-        Screen::Browse(Some(group)) => controller
-            .read(epoch, |s| views::browse_header(s, Some(*group)))
-            .and_then(Result::ok),
+    // `read` is empty while an operation runs; keep the header meanwhile.
+    let mut group_view = super::use_last(match &list {
+        Screen::Browse(Some(group)) => {
+            controller.read(epoch, |s| views::browse_header(s, Some(*group)))
+        }
         _ => None,
-    };
+    })
+    .and_then(Result::ok)
+    .filter(|_| matches!(list, Screen::Browse(Some(_))));
     if let Some(view) = &mut group_view {
         view.groups = groups;
     }
@@ -562,9 +576,9 @@ pub(crate) fn ListPane(
                     b { "Resolve" }
                 }
             }
-            div { class: "rows", id: "rows",
+            div { class: if stale { "rows stale" } else { "rows" }, id: "rows",
                 if count == 0 {
-                    div { class: "empty", div {
+                    div { class: if page.is_none() { "empty late" } else { "empty" }, div {
                         div { class: "big", Svg { icon: if query.is_empty() { Icon::Key } else { Icon::Search } } }
                         if page.is_none() { "Loading items…" } else if query.is_empty() && list != Screen::Search { "Nothing here yet. Create an item with the + button." } else { "No items match." }
                     } }
@@ -1033,7 +1047,7 @@ fn MoveScreen(
     let (owner, read) = super::use_page(
         &controller,
         epoch,
-        crate::page_read::Lane::Groups,
+        crate::page_read::Lane::Overlay,
         2,
         crate::page_read::Spec::Groups {
             parent: Some(view.here),

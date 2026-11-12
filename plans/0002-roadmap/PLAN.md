@@ -1314,7 +1314,7 @@ release; it is not weakened.
     - `cargo deny check`, fuzz-crate deny and `cargo vet --locked` pass;
     - Android arm64 Clippy passes for both feature sets;
     - fuzz smoke: 28.4M runs, no crash.
-  - Phone reconnected (same session), POCO X7 Pro:
+  - Phone reconnected (same session), Android test phone:
     - the new cold-start autofill method passes, and fails with the old poll
       order;
     - the handoff method passes;
@@ -1800,7 +1800,7 @@ release; it is not weakened.
   unfinished phase 1.9, not 1.10b. Unapproved plan 0012 is Abandoned; its
   proposed split never took effect. Phone is now reachable via the owner's
   adb server at localhost:5037. Read-only model/API/ABI/RAM queries confirm
-  the D7 baseline (model 2412DPC0AG, API 35, arm64, about 11 GiB RAM).
+  the D7 baseline (API 35, arm64, about 11 GiB RAM).
   Owner requires device work to be limited to the locally built spike and
   relevant diagnostics; no rooting, personal-data access, security-setting
   changes or deletion of existing apps/data. No APK installed yet.
@@ -1966,8 +1966,8 @@ release; it is not weakened.
   remediation and exact development audit debt. Physical-device evidence is
   still pending; keep 2.4 unticked and In progress. No commit/push/branch.
 
-- 2026-11-01: Phase 2.4 synthetic instrumentation passed on the owner's POCO
-  X7 Pro, Android 15/API35, WebView 156.0.8078.47, after correcting a checkbox
+- 2026-11-01: Phase 2.4 synthetic instrumentation passed on the owner's
+  Android test phone, Android 15/API35, WebView 156.0.8078.47, after correcting a checkbox
   assertion in the test fixture. Production app unchanged. Working invocation
   and initial failed/ANR runs are recorded in plan 0030 VALIDATION.md. Manual
   device/desktop scenarios and fresh review remain pending; keep 2.4 unticked.
@@ -2044,8 +2044,8 @@ release; it is not weakened.
   disabled (empty device and browser allowlists). Next: owner commits, attended
   device run, then fresh-context review of 0034. No commit, push or branch.
 
-- 2026-11-02 (phone connected): plan 0034 `AutofillTest` passes on the POCO
-  X7 Pro (validation build), and `PlatformTest` passes on the normal build
+- 2026-11-02 (phone connected): plan 0034 `AutofillTest` passes on the Android
+  test phone (validation build), and `PlatformTest` passes on the normal build
   with `singleTask`. Attended rows still pending: framework round trip from a
   foreign app and WebView origin claims.
 
@@ -2159,7 +2159,7 @@ release; it is not weakened.
   sensor frames, permission grant, stale request/completion, finish, pause and
   30 s native timeout pass; optical Join Scan -> Rust/core form acceptance and
   navigation cleanup pass (5.471 s). The ordinary camera gate remains closed.
-  Fixed only the test launcher/permission-return driver for MIUI and lock reset.
+  Fixed only the test launcher/permission-return driver for the vendor ROM and lock reset.
   Real-peer Linux/phone pairing, address sync and Internet-blocked/interruption
   rows are still pending, as is fresh-context production review. Details and
   updated instrumentation APK identity are in 0039/DEVICE-VALIDATION.md.

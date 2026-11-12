@@ -1218,9 +1218,11 @@ pub(crate) fn PageNav(
     let loading = read.loading;
     let serial = read.serial;
     let back = controller.clone();
+    // Only a page with neighbours shows the bar, so a load never inserts
+    // and removes it (plan 0051).
     rsx! {
         if let Some(error) = read.error { p { class: "banner warn", "{error.message()}" } }
-        if previous || next || loading {
+        if previous || next {
             div { class: "actions start",
                 button { r#type: "button", class: "btn subtle", disabled: loading || !previous,
                     onclick: move |_| back.page_turn(epoch, owner, serial, false), "Previous" }

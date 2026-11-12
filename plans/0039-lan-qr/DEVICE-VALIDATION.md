@@ -126,11 +126,11 @@ permission UI, lifecycle behaviour or offline two-device operation.
 
 ## Connected-device attempt — 2026-11-03
 
-Owner connected one authorized device and resumed step 6. Observed model
-2412DPC0AG (`rodin_global`), Android 15/API 35, arm64-v8a, WebView
+Owner connected one authorized device and resumed step 6. Observed:
+Android 15/API 35, arm64-v8a, WebView
 com.google.android.webview 156.0.8078.47. Host: Linux 7.3.1-0-sigma;
 base revision `138bdde` plus the staged 0038/0039 implementation. Phone
-192.168.15.2 and host 192.168.15.7 share the LAN. Internet isolation has not
+192.168.1.2 and host 192.168.1.7 share the LAN. Internet isolation has not
 been established; airplane mode was off, mobile data and Wi-Fi were enabled.
 
 The marked validation app and test APKs installed with `adb install -r`, without
@@ -277,7 +277,7 @@ results above remain the device evidence. No long suite or unchanged camera
 campaign was repeated.
 
 Wi-Fi was initially off; enabled it for LAN setup, and it rejoined
-192.168.15.2 with Linux at 192.168.15.7. Mobile data stayed enabled. Linux has
+192.168.1.2 with Linux at 192.168.1.7. Mobile data stayed enabled. Linux has
 no network-admin capability; a trial isolated user/network namespace failed
 with ENOSPC. No system limits, firewall, VPN or Internet routes were changed.
 Internet isolation was never established and no live-peer round was started.
@@ -300,7 +300,7 @@ is inferred from the incomplete attempts.
 
 ## Redesign regression and optical re-check — 2026-11-06
 
-Phone: Xiaomi 2412DPC0AG (rodin), Android 15 (API 35), WebView
+Phone: the owner's Android test phone, Android 15 (API 35), WebView
 156.0.8078.47. Linux tree: 58f9f62 plus the fix below (uncommitted). The
 owner's camera permission is "Ask every time"; the owner granted it at the
 prompt. Fixture: the same public `TEST_PAIR` constant, this time encoded with

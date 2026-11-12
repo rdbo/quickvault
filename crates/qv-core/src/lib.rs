@@ -148,7 +148,8 @@ mod views;
 pub use edit::{EntryDraft, GroupDraft, MAX_BATCH, PurgeReport};
 pub use error::CoreError;
 pub use paging::{
-    ItemFilter, KindSummary, MAX_PAGE_ROWS, MAX_PAGE_TEXT_BYTES, PageLimit, ViewCursor, ViewPage,
+    ItemFilter, KindSummary, MAX_PAGE_ROWS, MAX_PAGE_TEXT_BYTES, PageLimit, TYPE_BUCKETS,
+    ViewCursor, ViewPage, type_bucket,
 };
 pub use path::ViewPath;
 pub use rotation::{ROTATION_CONFIRMATIONS, Rotation, RotationError, RotationOutcome};

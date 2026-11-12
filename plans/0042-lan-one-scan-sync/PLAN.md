@@ -395,7 +395,7 @@ None.
 - 2026-11-06: Plan written with Draft 0014 after the owner's direction.
   Context: the owner's first typed-code sync attempt on the phone failed
   (details not yet reported). Phone-to-Linux TCP on a test port worked;
-  Linux also has a ProtonVPN address (`10.2.0.2`) that a typed endpoint
+  Linux also has a VPN address (`10.0.0.2`) that a typed endpoint
   must avoid.
 - 2026-11-06: Owner: "Accepted, go ahead". D1 resolved; plan Approved and
   In progress.
@@ -534,7 +534,7 @@ None.
     to fixed text (0014 §8), e.g. no device answered (address, network,
     firewall or VPN), different vault or generation, timeout, expired code.
   - Phone-to-computer TCP was checked again and works; the computer also has
-    a ProtonVPN address (`10.2.0.2`) that the QR lists, which costs a
+    a VPN address (`10.0.0.2`) that the QR lists, which costs a
     connect timeout when tried first. Found, not fixed: windows advertise
     point-to-point tunnel addresses.
   - Checks: fmt, SPDX, diff check, app clippy (validation and Android
@@ -543,12 +543,12 @@ None.
     `edfa6efc…7fdda`).
 - 2026-11-06: Owner: the window showed only the VPN address. Cause: the
   route probes target fixed private destinations, and the owner's
-  ProtonVPN policy routing sends all of them through its tunnel table, so
-  every probe returned `10.2.0.2`; the LAN `192.168.15.7` is only on the
-  main table's attached `192.168.15.0/24`. Fix (qv-platform `net`): probe
+  VPN policy routing sends all of them through its tunnel table, so
+  every probe returned `10.0.0.2`; the LAN `192.168.1.7` is only on the
+  main table's attached `192.168.1.0/24`. Fix (qv-platform `net`): probe
   one address inside each attached IPv4 network of `/proc/net/route` first
   (bounded 64 KiB read; up, no gateway, prefix 1–30, not `lo`), then the
-  fixed probes. On this host: `[192.168.15.7, 10.2.0.2, 2a07:b944::2:2]`.
+  fixed probes. On this host: `[192.168.1.7, 10.0.0.2, 2001:db8::2]`.
   Where `/proc/net/route` is unreadable (Android), only the fixed probes
   run. Deviation from plan 0038 decision 3 ("no interface list is read"):
   the route table is read, still no interface enumeration or dependency.

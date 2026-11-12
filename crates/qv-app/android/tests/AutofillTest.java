@@ -33,14 +33,14 @@ public final class AutofillTest extends PlatformTest {
     }
     private void launch() throws Exception {
         os=getInstrumentation();
-        // MIUI refuses an app's own activity start while another app is on
+        // The vendor ROM refuses an app's own activity start while another app is on
         // top, so the runner starts QuickVault from adb shell (VALIDATION.md).
         Instrumentation.ActivityMonitor monitor=os.addMonitor(MainActivity.class.getName(),null,false);
         try {
             try { os.getTargetContext().startActivity(new Intent().setClassName("org.quickvault.app","dev.dioxus.main.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception ignored) {}
             activity=(MainActivity)os.waitForMonitorWithTimeout(monitor,120000);
         } finally { os.removeMonitor(monitor); }
-        assertNotNull("QuickVault started (runner must start it on MIUI)",activity);
+        assertNotNull("QuickVault started (runner must start it on the vendor ROM)",activity);
         os.runOnMainSync(()->activity.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
         foreground();
         WebView[] found=new WebView[1];os.runOnMainSync(()->found[0]=find(activity.getWindow().getDecorView()));view=found[0];assertNotNull(view);

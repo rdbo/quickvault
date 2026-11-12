@@ -270,6 +270,7 @@ fn paging_type_counts_are_complete_and_group_counts_use_structural_descendants()
         .into_iter()
         .map(str::to_owned)
         .chain((0..11).map(|i| format!("custom{i:02}")))
+        .chain([String::new()])
         .collect();
     for kind in &types {
         for group in [root, child] {
@@ -286,20 +287,44 @@ fn paging_type_counts_are_complete_and_group_counts_use_structural_descendants()
             .unwrap();
         assert!(page.items.len() <= 3);
         for kind in page.items {
-            assert_eq!(kind.count, 2);
-            kinds.push(kind.kind.to_string());
+            kinds.push((kind.kind.to_string(), kind.count));
         }
         cursor = page.next;
         if cursor.is_none() {
             break;
         }
     }
-    let expected: Vec<_> = ["login", "note", "card", "wifi"]
-        .into_iter()
-        .map(str::to_owned)
-        .chain((0..11).map(|i| format!("custom{i:02}")))
-        .collect();
+    // Unknown and empty hints share the Other bucket (0003 §5.1).
+    let expected: Vec<_> = [
+        ("login", 2),
+        ("note", 2),
+        ("card", 2),
+        ("wifi", 2),
+        ("other", 24),
+    ]
+    .into_iter()
+    .map(|(k, n)| (k.to_owned(), n))
+    .collect();
     assert_eq!(kinds, expected);
+    for (kind, count) in &expected {
+        let page = session
+            .items_page(
+                ItemFilter {
+                    kind: Some(kind),
+                    ..ItemFilter::default()
+                },
+                None,
+                PageLimit::default(),
+                &CancelToken::new(),
+            )
+            .unwrap();
+        assert_eq!(page.items.len(), *count, "{kind}");
+        assert!(
+            page.items
+                .iter()
+                .all(|e| type_bucket(&e.type_hint.expose().to_lowercase()) == kind)
+        );
+    }
     let groups = session
         .groups_page(Some(root), "", None, limit(3), &CancelToken::new())
         .unwrap();

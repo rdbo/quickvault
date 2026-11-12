@@ -488,7 +488,7 @@ release requirement is proven from their presence.
   beyond listing attached devices (empty). Continue this same approved phase
   when hardware is available; do not create a suffix or repeat approvals.
 
-- 2026-11-01: Owner connected a POCO X7 Pro (2412DPC0AG, Android 15/API35,
+- 2026-11-01: Owner connected an Android test phone (Android 15/API35,
   arm64, Google WebView 156.0.8078.47) and authorized continuing device checks.
   Host ADB sees it after the competing workspace server was terminated at the
   owner's request. Installed the inspected app/test APKs, with no data clear.
@@ -531,7 +531,7 @@ release requirement is proven from their presence.
   checklist assigned to the owner. Keep step 7 unticked and phase In progress.
 
 - 2026-11-01: Owner requested continuation with the phone unlocked. Expanded
-  native/shared-screen suite now passes: OK (1 test), 15.287s, POCO X7 Pro /
+  native/shared-screen suite now passes: OK (1 test), 15.287s, Android test phone /
   Android 15 / WebView 156.0.8078.47. Confirms creation, requested recovery
   words, wrong-password refusal, password/phrase unlock, pause while opening,
   cleared controls/no late reopen and recorded skip. The prior second-create

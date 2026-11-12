@@ -204,6 +204,10 @@ kbd{font:11px system-ui,sans-serif;border:1px solid var(--line);border-bottom-wi
 .empty{flex:1;display:grid;place-items:center;text-align:center;color:var(--text3);padding:30px}
 .empty .big{width:56px;height:56px;border-radius:18px;background:var(--raised);display:grid;place-items:center;margin:0 auto 12px;color:var(--text3)}
 .empty .big .ico{width:26px;height:26px}
+/* Plan 0051: a first load's placeholder and slow-swap dimming wait 250 ms, so quick loads show nothing. */
+.empty.late{animation:fadeIn .15s ease-out .25s both}
+.rows.stale{pointer-events:none;animation:staleDim .15s ease-out .25s forwards}
+@keyframes staleDim{to{opacity:.55}}
 /* Plan 0044: list selection and the row menu. */
 .selbar{display:flex;align-items:center;gap:2px;padding:6px 6px 6px 4px;margin:8px 8px 8px;border-radius:12px;background:var(--soft);animation:pop .14s ease-out;min-width:0}
 .selbar .sel-n{flex:1;min-width:0;margin-left:4px;font-weight:650;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

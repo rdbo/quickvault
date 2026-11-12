@@ -367,7 +367,7 @@ they do not block handoff of the implemented phase under the owner's direction.
 - 2026-11-03: Owner confirmed continuation after unlocking. The focused QR
   runner still waits during startup with the phone unlocked and QuickVault
   foreground. Stop this attempt rather than consume another 210 s timeout.
-  The existing AutofillTest already handles this MIUI singleTask startup using
+  The existing AutofillTest already handles this vendor-ROM singleTask startup using
   an explicit ActivityMonitor and shell foreground launch. Apply that same
   bounded monitor pattern to QrTest, add a fixed startup stage and test-window
   keep-awake with cleanup; no product behaviour or assertions removed. Rebuild
@@ -461,8 +461,8 @@ they do not block handoff of the implemented phase under the owner's direction.
 
 
 - 2026-11-04: Owner reconnected the same unlocked Android phone. Wi-Fi was off;
-  enabled it for LAN verification and it rejoined 192.168.15.2/24, with host
-  192.168.15.7. Mobile data remains enabled. Host has no network-admin capability;
+  enabled it for LAN verification and it rejoined 192.168.1.2/24, with host
+  192.168.1.7. Mobile data remains enabled. Host has no network-admin capability;
   an isolated user/network namespace cannot be created (ENOSPC). No system
   limits, global firewall, VPN or Internet routes changed. Architect revised
   only step 6 fixture detail above; switch to developer. No approval question

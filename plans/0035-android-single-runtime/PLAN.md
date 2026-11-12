@@ -147,14 +147,14 @@ None.
   build then a normal build added exactly one directory (47 → 48 total; the
   old timestamped copies are left for the owner).
 
-  Device (POCO X7 Pro, normal build):
+  Device (Android test phone, normal build):
   - Dark mode off/on with QuickVault in front: same pid 8138, activity stays
     resumed, no abort.
   - Attended Back then reopen: destroy at 17:11:53.793, pid 8138 died
     17:11:54.069, fresh pid 10267 created and resumed, no `am_crash` or
     `ndk-context` abort. Before the fix this path aborted.
   - The process ended 276 ms after the destroy record, under the 300 ms Rust
-    grace, so the ending may have come from MIUI's cached-process reclaim
+    grace, so the ending may have come from the vendor ROM's cached-process reclaim
     rather than our handler. Unconfirmed; either way, process death releases
     all state and fails closed.
 

@@ -13,7 +13,7 @@ clipboard threads, then acknowledges. Kotlin then wipes the autofill registry
 and ends the process; it ends it anyway after 2 s. Each Android build reuses
 one generated project directory and refuses a symlink there. Device evidence
 for in-place dark mode and fresh-process reopen is in the plan log. The plan
-itself notes that the observed process end may have come from MIUI reclaim.
+itself notes that the observed process end may have come from the vendor ROM's reclaim.
 
 ## Plan conformance
 

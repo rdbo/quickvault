@@ -17,7 +17,7 @@ pub const HUES: u8 = 12;
 const HUE_PREFIX: &str = "hue:";
 
 /// What an item is. The stored type hints are the existing strings
-/// (0003 §5); "Something else" is `custom`, the name for unknown hints.
+/// (0003 §5); "Other" is `custom`, one of the hints shown as Other.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ItemType {
     /// A website or app sign-in.
@@ -95,7 +95,7 @@ impl ItemType {
             Self::Card => "Card",
             Self::Wifi => "Wi‑Fi",
             Self::Note => "Note",
-            Self::Other => "Something else",
+            Self::Other => "Other",
         }
     }
     /// The type of a stored hint, if it is one of these.

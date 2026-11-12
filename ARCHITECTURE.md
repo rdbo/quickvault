@@ -435,7 +435,7 @@ routes are unavailable in this configuration. One provenance-tracked upstream
 snapshot supports the integration; see third-party/README.md. Application Rust
 secrets use protected containers; framework/DOM/OS copies have best-effort cleanup,
 not deterministic erasure. Linux real-WebKit boundary and rendered-flow tests
-pass under private Xvfb. Android APKs compile and synthetic instrumentation passes on a POCO X7 Pro
+pass under private Xvfb. Android APKs compile and synthetic instrumentation passes on the owner's Android test phone
 (Android 15); manual device and real-desktop lifecycle evidence remain incomplete. Dependency
 exemptions are development audit debt. Full vault browsing/editing belongs to
 roadmap 2.5; phase 2.4 foundation is implemented, with fresh-context review pending.
@@ -663,7 +663,7 @@ publication reporting repair were reviewed under explicit owner continuation.
 Roadmap 2.3 (plan 0029) supplies Linux platform services. The owner approved GUI
 phase 2.4 under D13 and delegated dependency/integration choices. Plan 0030's
 shared UI foundation builds on Linux and Android; Linux engine tests pass,
-and Android synthetic instrumentation passes on a POCO X7 Pro. Manual
+and Android synthetic instrumentation passes on the owner's Android test phone. Manual
 supported-device release evidence remains incomplete. The foundation is
 Implemented and requires a fresh-context implementation review. This work does not
 authorize a release.

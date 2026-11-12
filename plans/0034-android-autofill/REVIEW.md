@@ -33,7 +33,7 @@ VALIDATION.md remain pending.
 | 4 | yes | Candidates per live head; values re-read and re-matched; `StaleHandle` after edits; `link_app` through `edit_entry`/`save_entry` only; conflicted entries cannot be linked. Empty-value handling fixed (finding 2). |
 | 5 | yes, as revised | Kotlin lives in `MainActivity.kt` (logged revision). Service gate, system-reported package, signers via PackageManager without `QUERY_ALL_PACKAGES`, bounded traversal, mixed-origin detection refused, generic presentation, no `SaveInfo`. The registry zeroes results on replace/cancel/consume/expiry access; the auth activity is non-exported. |
 | 6 | yes | Bridge validation and bounds; `bind` on unlock; `on_lock` from `invalidate`; worker Fill checks the cancel token before completing. Cold-start poll ordering fixed (finding 1). |
-| 7 | partial (as planned) | `AutofillTest` in-process handoff and the reviewer's cold-start method pass on the POCO X7 Pro. The framework round trip, WebView claims and trusted-browser rows are pending. |
+| 7 | partial (as planned) | `AutofillTest` in-process handoff and the reviewer's cold-start method pass on the Android test phone. The framework round trip, WebView claims and trusted-browser rows are pending. |
 | 8 | yes | ARCHITECTURE, CHANGELOG, app README, index. |
 
 Out-of-scope changes: plan 0035 (same commit), reviewed in its own REVIEW.md.
@@ -56,7 +56,7 @@ Out-of-scope changes: plan 0035 (same commit), reviewed in its own REVIEW.md.
    after the controller is set, and the reviewer added
    `AutofillTest#testColdStartRequestWaitsForControllerAndUnlock`, which
    registers and claims before launch. Android arm64 Clippy and both APK
-   builds pass. Device: passes on the POCO X7 Pro, and fails with the old
+   builds pass. Device: passes on the Android test phone, and fails with the old
    ordering (VALIDATION.md).
 2. **[medium, functional] An empty login field failed the whole fill** —
    `crates/qv-core/src/autofill.rs` `copy_value`.
@@ -123,7 +123,7 @@ Final tree after fixes:
 | Android arm64 Clippy (`mobile`, `mobile,validation`; app, platform, core, store) | pass |
 | Validation and normal APK + instrumentation builds, with manifest inspection | pass (rebuilt on the final tree, including plan 0036; normal gate closed, one reused `dist/android-project`) |
 | `cargo deny` / `cargo vet` | n/a (no dependency or lockfile change) |
-| Device: `AutofillTest` cold-start method | pass on the POCO X7 Pro (6.1 s); fails on a build with the old poll order, so the test catches finding 1. See VALIDATION.md |
+| Device: `AutofillTest` cold-start method | pass on the Android test phone (6.1 s); fails on a build with the old poll order, so the test catches finding 1. See VALIDATION.md |
 
 ## Documentation
 

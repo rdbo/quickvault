@@ -57,8 +57,8 @@ fn text(v: Option<qv_core::SecretBytes>) -> Zeroizing<String> {
 fn type_name(form: &EntryFormView) -> String {
     match form.kind {
         Some(t) => t.name().to_owned(),
-        None if form.type_hint.is_empty() => "Something else".to_owned(),
-        None => form.type_hint.to_string(),
+        // Every non-standard hint is shown as Other (0003 §5.1).
+        None => ItemType::Other.name().to_owned(),
     }
 }
 
@@ -154,7 +154,7 @@ pub(crate) fn GroupChoices(
     let (owner, read) = super::use_page(
         &controller,
         epoch,
-        crate::page_read::Lane::Groups,
+        crate::page_read::Lane::Overlay,
         2,
         crate::page_read::Spec::Groups {
             parent: root,

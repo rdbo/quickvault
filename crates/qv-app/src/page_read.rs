@@ -15,9 +15,14 @@ type Z = Zeroizing<String>;
 /// Rows sharing one cache slot. Popovers may temporarily preempt a lower-priority owner.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Lane {
+    /// The item list, or a full page (trash, conflicts, autofill).
     Main = 0,
+    /// The sidebar's groups.
     Groups = 1,
-    Kinds = 2,
+    /// The sidebar's type counts, and popovers and pickers (command bar,
+    /// group choices, autofill links). The shell keeps the five counts as
+    /// numbers, so preempting it changes nothing on screen (plan 0051).
+    Overlay = 2,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Owner {
@@ -87,6 +92,9 @@ pub(crate) struct Read {
     pub(crate) loading: bool,
     pub(crate) error: Option<AppError>,
     pub(crate) serial: u64,
+    /// `page` is the owner's previous page, kept on screen while its
+    /// replacement loads (plan 0051); see `ui::use_page`.
+    pub(crate) stale: bool,
 }
 
 struct Job {
@@ -104,6 +112,10 @@ struct Slot {
     revision: Option<u64>,
     serial: u64,
     ready: Option<Arc<Page>>,
+    /// The owner's previous page while its replacement loads (plan 0051), so
+    /// a new filter, query, revision or page swaps rows instead of blanking
+    /// them. It takes `ready`'s place, so a lane still holds one page.
+    held: Option<Arc<Page>>,
     error: Option<AppError>,
     running: bool,
     cancel: Option<CancelToken>,
@@ -118,13 +130,16 @@ impl Slot {
             job.cancel.cancel();
         }
         self.ready = None;
+        self.held = None;
         self.error = None;
         self.spec = None;
         self.revision = None;
         self.serial = self.serial.wrapping_add(1);
     }
     fn request(&mut self, spec: Spec, revision: u64, cursor: Option<ViewCursor>) {
+        let held = self.ready.take().or_else(|| self.held.take());
         self.clear();
+        self.held = held;
         self.spec = Some(spec.clone());
         self.revision = Some(revision);
         self.pending = Some(Job {
@@ -136,9 +151,15 @@ impl Slot {
         });
     }
     fn snapshot(&self) -> Read {
+        let loading = self.running || self.pending.is_some();
+        let held = self
+            .held
+            .clone()
+            .filter(|_| loading && self.ready.is_none());
         Read {
-            page: self.ready.clone(),
-            loading: self.running || self.pending.is_some(),
+            stale: held.is_some(),
+            page: self.ready.clone().or(held),
+            loading,
             error: self.error,
             serial: self.serial,
         }
@@ -383,6 +404,7 @@ impl Controller {
                     loading: false,
                     error: Some(error.into()),
                     serial: 0,
+                    stale: false,
                 });
             }
         };
@@ -481,6 +503,7 @@ impl Controller {
                     let slot = &mut state.pages.slots[lane as usize];
                     if slot.serial == job.serial && !job.cancel.is_cancelled() {
                         slot.cancel = None;
+                        slot.held = None;
                         match result {
                             Ok(page) if page.revision == job.revision => {
                                 slot.ready = Some(Arc::new(page));
@@ -500,6 +523,7 @@ impl Controller {
                 let slot = &mut state.pages.slots[lane as usize];
                 slot.running = false;
                 slot.pending = None;
+                slot.held = None;
                 slot.error = Some(AppError::Unavailable);
                 state.revision = state.revision.wrapping_add(1);
             }
@@ -572,6 +596,57 @@ mod tests {
             env.c.state().pages.slots[Lane::Main as usize]
                 .ready
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn a_new_request_keeps_the_previous_page_until_its_replacement_lands() {
+        let _k = KDF.lock().unwrap_or_else(|e| e.into_inner());
+        let env = Env::unlocked();
+        env.add_entry("Bank", "one");
+        env.add_entry("Mail", "two");
+        let owner = env.c.page_owner(Lane::Main, 1).unwrap();
+        let all = ready(&env, owner, items(""));
+        // The filter changes: the old rows stay, marked stale, while the
+        // request is queued (the worker starts after this snapshot).
+        let read = env.c.page(env.epoch(), owner, items("bank")).unwrap();
+        assert!(read.loading && read.stale);
+        assert!(read.page.as_ref().is_some_and(|p| Arc::ptr_eq(p, &all)));
+        let bank = ready(&env, owner, items("bank"));
+        assert!(matches!(&bank.rows, Rows::Items { items, .. } if items.len() == 1));
+        let read = env.c.page(env.epoch(), owner, items("bank")).unwrap();
+        assert!(!read.stale);
+        // The lane holds one page: the held one went when the new one landed.
+        assert!(
+            env.c.state().pages.slots[Lane::Main as usize]
+                .held
+                .is_none()
+        );
+        // A popover (command bar, group picker) reads in the overlay lane and
+        // leaves the list's page in place.
+        let popover = env.c.page_owner(Lane::Overlay, 2).unwrap();
+        ready(
+            &env,
+            popover,
+            Spec::Search(Zeroizing::new("mail".to_owned())),
+        );
+        let read = env.c.page(env.epoch(), owner, items("bank")).unwrap();
+        assert!(!read.loading && read.page.as_ref().is_some_and(|p| Arc::ptr_eq(p, &bank)));
+        env.c.release_page(popover);
+        drop((all, bank, read));
+        // Lock drops everything, held page included.
+        let epoch = env.epoch();
+        env.c.page_turn(epoch, owner, 0, true);
+        env.c.page(epoch, owner, items(""));
+        env.c.lock();
+        assert!(env.c.page(epoch, owner, items("")).is_none());
+        assert!(
+            env.c
+                .state()
+                .pages
+                .slots
+                .iter()
+                .all(|s| s.ready.is_none() && s.held.is_none())
         );
     }
 

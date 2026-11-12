@@ -62,6 +62,10 @@ screen's protection chip only while an acknowledgement is pending.
 attachment previews and the Android shell, and 0003 §6.4 allows memory-only
 in-app previews of sniffed types (owner, 2026-11-07, plan 0044).
 
+0009 §1.8 lists fixed item types with Other and Wi-Fi and swaps list pages
+without blanking; 0003 §5.1 shows non-standard hints as Other (owner,
+2026-11-11, plan 0051).
+
 0009 §1.8 puts quick unlock first, grades protection as levels and adds
 Android evidence, long-press selection and conflict links; 0002 §5.4 lets
 boot-bound quick-unlock state survive app restarts (owner, 2026-11-07, plan

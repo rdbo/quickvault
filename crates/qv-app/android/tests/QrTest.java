@@ -164,7 +164,7 @@ public class QrTest extends InstrumentationTestCase {
         assertNull(NativeQrCamera.packFrame(3,2,Integer.MAX_VALUE,2,plane));
         Arrays.fill(packed,(byte)0);
         Instrumentation ins=getInstrumentation();
-        // MIUI can hold startActivitySync indefinitely for the singleTask
+        // Some vendor ROMs can hold startActivitySync indefinitely for the singleTask
         // activity. Match AutofillTest's bounded monitor and shell foreground
         // launch, which the runner issues when it observes this stage.
         Instrumentation.ActivityMonitor monitor=ins.addMonitor(MainActivity.class.getName(),null,false);

@@ -24,7 +24,7 @@ review do not prove security or authorize release (0012).
 | 4 | yes | Uses existing core create/unlock/phrase/recovery APIs; baseline adoption takes a verified recovery snapshot first (same ordering as the CLI). Fixed, data-free error categories. |
 | 5 | yes | Linux private root, instance lock, reduced-lifecycle disclosure on every screen, acknowledgement gate. Startup category bug fixed (below). |
 | 6 | yes | FLAG_SECURE before the window is shown; the controller is created only after secure-window plus hardening are observed. Generation counter catches pause/resume between polls; immediate background lock; backup off; noBackupFilesDir. |
-| 7 | yes, within stated limits | Physical POCO X7 Pro instrumentation and owner observations are recorded separately from automated tests in VALIDATION.md. Positive real-desktop lock/sleep evidence is absent, which the amendment makes optional. |
+| 7 | yes, within stated limits | Physical test-phone instrumentation and owner observations are recorded separately from automated tests in VALIDATION.md. Positive real-desktop lock/sleep evidence is absent, which the amendment makes optional. |
 | 8 | yes | ARCHITECTURE, CHANGELOG, specs index/Changelogs, README updated; no spec status promotion. |
 
 Out-of-scope changes: None. The 0008 §1.4 / 0009 §5 amendment is owner-directed

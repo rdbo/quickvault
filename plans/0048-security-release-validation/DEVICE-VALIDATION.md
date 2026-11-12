@@ -2,7 +2,7 @@
 
 2026-11-09. **Qualification in progress.** Initially `adb devices -l` returned
 only the header. The owner then connected the phone and identified it for this
-run: POCO X7 Pro / 2412DPC0AG, arm64-v8a, Android 15 / API 35, OS2.0.7.0.VOJMIXM,
+run: the owner's Android test phone, arm64-v8a, Android 15 / API 35,
 WebView 156.0.8078.47. Device serial is omitted from shared artifacts.
 The Linux development host supplies headless test and benchmark evidence;
 the complete supported-device list and independent reviewer remain undecided.

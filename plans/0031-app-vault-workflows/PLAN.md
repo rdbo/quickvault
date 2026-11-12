@@ -729,8 +729,7 @@ dated revision under roadmap step 4.
   step 11's phone checklist are pending, so the plan stays In progress. Steps
   1–7, 9, 10 and 12 documentation are done.
 
-- 2026-11-01 (device session, POCO X7 Pro 2412DPC0AG, Android 15 / HyperOS
-  OS2.0.7.0.VOJMIXM, WebView 156.0.8078.47). The first device run found and
+- 2026-11-01 (device session, Android test phone, Android 15, WebView 156.0.8078.47). The first device run found and
   fixed, each verified by the next run:
   1. Vendored `poll_edits_flushed` re-polled a resolved oneshot (`Canceled`),
      so the 0031 "close on dropped batch" closed the app on the first wake-up

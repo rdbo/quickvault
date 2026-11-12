@@ -106,7 +106,7 @@ packaged. Network-security config denies remote cleartext, allowing exact
 
 ## Physical Android instrumentation — 2026-11-01
 
-Device: Xiaomi POCO X7 Pro, model 2412DPC0AG (rodin), Android 15/API 35,
+Device: the owner's Android test phone, Android 15/API 35,
 arm64-v8a, Google Android WebView 156.0.8078.47. Both packages installed
 successfully. The app APK hash is unchanged; the test APK hash above now identifies the expanded flow suite described
 below. The earlier passing baseline used test APK
@@ -153,7 +153,7 @@ adb shell am start -W -n org.quickvault.app/dev.dioxus.main.MainActivity
 
 ## Owner-observed phone checks — 2026-11-01
 
-On the same POCO X7 Pro and installed app build, the owner reports:
+On the same Android test phone and installed app build, the owner reports:
 
 | Scenario | Observed result |
 |----------|-----------------|

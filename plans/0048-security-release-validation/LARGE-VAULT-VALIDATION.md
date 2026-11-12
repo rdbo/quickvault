@@ -65,7 +65,7 @@ Raw rows are `evidence/P*-measure-final.log` and
 precede the benchmark's ordinary edits. Phone runs used the snapshots of all
 four host fixtures after the initial host series, before the final host series.
 
-Phone: POCO X7 Pro / 2412DPC0AG, Android 15/API 35, arm64-v8a. The same
+Phone: the owner's Android test phone, Android 15/API 35, arm64-v8a. The same
 `budget_bench` was cross-built with Rust 1.98.1, release/locked, target
 `aarch64-linux-android`, NDK 27.3.13750724 and the repository's Android API29
 linker/SQLite settings. ADB pushed it and the fixtures into a freshly created
