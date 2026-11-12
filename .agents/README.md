@@ -34,7 +34,7 @@ provided; the roadmap itself is not an implementation plan.
 | Admission, auth, key custody, OPAQUE, server identity, registration, login, adding a device (pairing), recovery, password change, revocation | `0006` server auth |
 | Entry history §1, trash §2, local snapshots §3, server retention §4 | `0007` history & backups |
 | Memory §1, timing §2, OS leaks §3, webview boundary §4, local files & testing §5 | `0008` memory & side channels |
-| Clients, platform priority, CLI scope, mobile autofill, desktop | `0009` clients & platforms |
+| Clients, platform priority, CLI scope, mobile autofill, desktop, Windows profile (§5.1) | `0009` clients & platforms |
 | Randomness, modes, strength, warnings, settings, secret handling | `0010` password generator |
 | CLI general, addressing, secret-handling rules, commands, output, exit codes | `0011` CLI |
 | Validation matrix §1, acceptance scenarios §2, release gates & supply chain §3 | `0012` security validation |

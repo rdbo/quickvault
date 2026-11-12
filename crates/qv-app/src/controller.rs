@@ -175,6 +175,9 @@ impl AppError {
                 "The autofill request expired or was cancelled. Start it again from the other app."
             }
             Self::NameRequired => "Give the item a title, and every field a name, before saving.",
+            Self::VaultName if cfg!(windows) => {
+                "Use a name of 1 to 64 characters, without / \\ < > : \" | ? * or a device name such as CON, that does not start or end with a dot."
+            }
             Self::VaultName => {
                 "Use a name of 1 to 64 characters, without / or \\, that does not start with a dot."
             }
@@ -184,6 +187,9 @@ impl AppError {
             }
             Self::LanInput => {
                 "Type the code the other device shows, and its address as ip:port (for example 192.168.1.20:41234)."
+            }
+            Self::NoFilePicker if cfg!(windows) => {
+                "The Windows file dialog could not be shown. Try again."
             }
             Self::NoFilePicker => {
                 "No file chooser is available on this desktop. It needs xdg-desktop-portal with a backend such as xdg-desktop-portal-gtk."
@@ -2370,7 +2376,10 @@ pub(crate) fn private_dir(path: &std::path::Path) -> Result<(), AppError> {
             .create(path)
             .map_err(|_| AppError::Unavailable)?;
     }
-    #[cfg(not(unix))]
+    // An owner-only DACL that the folder's files inherit (0009 §5.1).
+    #[cfg(windows)]
+    qv_core::create_private_dirs(path).map_err(|_| AppError::Unavailable)?;
+    #[cfg(not(any(unix, windows)))]
     {
         std::fs::create_dir_all(path).map_err(|_| AppError::Unavailable)?;
     }

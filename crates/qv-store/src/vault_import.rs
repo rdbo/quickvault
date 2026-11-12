@@ -175,16 +175,7 @@ fn stage_bounded(
         if count > available {
             return Err(StoreError::LimitExceeded);
         }
-        let mut remaining = &buffer[..count];
-        while !remaining.is_empty() {
-            check_cancel(cancelled)?;
-            match rustix::io::write(lock.fd(), remaining) {
-                Ok(0) => return Err(StoreError::Io),
-                Ok(n) => remaining = &remaining[n..],
-                Err(rustix::io::Errno::INTR) => continue,
-                Err(e) => return Err(crate::error::errno_err(e)),
-            }
-        }
+        lock.write_all(&buffer[..count])?;
         total += count as u64;
     }
     lock.sync()?;

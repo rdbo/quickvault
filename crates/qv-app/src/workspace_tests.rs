@@ -1063,6 +1063,13 @@ fn attachments_follow_path_rules_and_round_trip_where_ancestors_are_safe() {
     env.act(WsAction::Answer(true));
     assert!(env.read(|s| views::attachments(s, e)).is_empty());
 }
+/// Windows checks ancestors by ACL in `files` itself; the test temp folder
+/// is under the user's profile, which meets those rules.
+#[cfg(windows)]
+pub(crate) fn ancestors_safe(_: &std::path::Path) -> bool {
+    true
+}
+#[cfg(unix)]
 pub(crate) fn ancestors_safe(path: &std::path::Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     let euid = std::fs::metadata("/proc/self")
@@ -2005,6 +2012,11 @@ fn quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only() 
     };
     let c = Controller::new(dir.clone(), Arc::new(phone)).unwrap();
     let env = Env { c, os, dir };
+    // A host that cannot disable core dumps or debugger attachment (Windows)
+    // always needs the acknowledgement; the phone model itself does not.
+    if qv_core::harden().is_reduced() {
+        env.c.acknowledge_protection().unwrap();
+    }
     assert!(!env.c.protection_ack_needed());
     env.fill(InputField::Password, PASSWORD);
     env.fill(InputField::Repeat, PASSWORD);

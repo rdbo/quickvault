@@ -457,16 +457,16 @@ fn Locked(controller: Controller, revision: u64) -> Element {
         let c = controller.clone();
         move |_: MouseEvent| {
             sheet.set(Sheet::None);
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", windows))]
             crate::documents::pick_path(
                 &c,
                 epoch,
                 crate::documents::PathFor::Folder,
-                qv_core::platform::portal::Pick::Folder,
+                crate::documents::Pick::Folder,
                 "Choose where new vaults are saved",
                 None,
             );
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(not(any(target_os = "linux", windows)))]
             let _ = &c;
         }
     };
@@ -474,20 +474,20 @@ fn Locked(controller: Controller, revision: u64) -> Element {
         let c = controller.clone();
         move |_: MouseEvent| {
             sheet.set(Sheet::None);
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", windows))]
             crate::documents::pick_path(
                 &c,
                 epoch,
                 crate::documents::PathFor::Locked,
-                qv_core::platform::portal::Pick::Save("vault.qvault".into()),
+                crate::documents::Pick::Save("vault.qvault".into()),
                 "Save the new vault",
                 None,
             );
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(not(any(target_os = "linux", windows)))]
             let _ = &c;
         }
     };
-    let can_pick = cfg!(any(target_os = "linux", target_os = "android"));
+    let can_pick = cfg!(any(target_os = "linux", target_os = "android", windows));
     // Validation fixtures keep their synthetic vaults at a typed private path;
     // nothing else types a vault path here (0009 §1.8): a failed picker
     // reports the missing portal and only hides the picker choices.
@@ -652,7 +652,7 @@ fn Locked(controller: Controller, revision: u64) -> Element {
                         span { class: "sp", id: "create-place",
                             if let Some(file) = picked.as_ref() { "Saves as {file}" } else { "Saves in {folder_place}" }
                         }
-                        if cfg!(target_os = "linux") && !fallback {
+                        if cfg!(any(target_os = "linux", windows)) && !fallback {
                             div { class: "pop-anchor",
                                 button { class: "link", id: "create-change", onclick: move |_| sheet.set(if sheet() == Sheet::SaveMenu { Sheet::None } else { Sheet::SaveMenu }), "Change" }
                                 if sheet() == Sheet::SaveMenu {

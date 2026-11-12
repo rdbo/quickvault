@@ -215,6 +215,19 @@ impl LockedFile {
         fsync(&*self.handle.file).map_err(errno_err)
     }
 
+    /// Appends `bytes` at the file's current position (staged imports).
+    pub(crate) fn write_all(&self, mut bytes: &[u8]) -> Result<(), StoreError> {
+        while !bytes.is_empty() {
+            match rustix::io::write(self.fd(), bytes) {
+                Ok(0) => return Err(StoreError::Io),
+                Ok(n) => bytes = &bytes[n..],
+                Err(Errno::INTR) => continue,
+                Err(e) => return Err(errno_err(e)),
+            }
+        }
+        Ok(())
+    }
+
     fn lock(fd: OwnedFd, files: &mut HashMap<Identity, Registered>) -> Result<Self, StoreError> {
         flock(&fd, FlockOperation::NonBlockingLockExclusive).map_err(|e| match e {
             Errno::WOULDBLOCK => StoreError::Locked,
@@ -533,6 +546,54 @@ pub(crate) fn sync_dir(dir: &Path) -> Result<(), StoreError> {
     fsync(&fd).map_err(errno_err)
 }
 
+/// Flushes a file's data and metadata to stable storage.
+pub(crate) fn sync_file(file: &File) -> Result<(), StoreError> {
+    fsync(file).map_err(errno_err)
+}
+
+/// Creates `dir` and missing parents with mode 0700; existing ones are left
+/// as they are (callers then check them).
+pub(crate) fn create_private_dir_all(dir: &Path) -> Result<(), StoreError> {
+    use std::os::unix::fs::DirBuilderExt;
+    match std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+    {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+        Err(e) => Err(crate::error::io_err(e)),
+    }
+}
+
+/// What `path` itself is (`lstat`, never followed).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Entry {
+    /// Nothing at the path.
+    Missing,
+    /// A regular file.
+    Regular,
+    /// Anything else (directory, symlink, FIFO, device).
+    Other,
+}
+
+/// See [`Entry`].
+pub(crate) fn entry(path: &Path) -> Result<Entry, StoreError> {
+    match lstat(path) {
+        Ok(st) if FileType::from_raw_mode(st.st_mode) == FileType::RegularFile => {
+            Ok(Entry::Regular)
+        }
+        Ok(_) => Ok(Entry::Other),
+        Err(Errno::NOENT) => Ok(Entry::Missing),
+        Err(e) => Err(errno_err(e)),
+    }
+}
+
+/// Removes the file at `path` (`unlink`; a symlink itself, never its target).
+pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
+    std::fs::remove_file(path)
+}
+
 /// Removes `path` if it exists; errors are ignored (cleanup after a
 /// failure that is already being reported).
 pub(crate) fn remove_best_effort(path: &Path) {
@@ -660,6 +721,44 @@ pub(crate) mod test_dir {
     pub(crate) fn write_file(path: &Path, bytes: &[u8], mode: u32) {
         std::fs::write(path, bytes).unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    /// `chmod mode` (Windows maps it to an ACL).
+    pub(crate) fn set_mode(path: &Path, mode: u32) {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    /// Whether `path` has exactly the permission bits `mode` (Windows: the
+    /// matching owner-only or shared ACL).
+    pub(crate) fn has_mode(path: &Path, mode: u32) -> bool {
+        std::fs::symlink_metadata(path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777
+            == mode
+    }
+
+    /// Always false on Unix (see the Windows test helper).
+    pub(crate) fn wine_lacks_acl_inheritance() -> bool {
+        false
+    }
+
+    /// Always false on Unix (see the Windows test helper).
+    pub(crate) fn wine_keeps_deleted_names() -> bool {
+        false
+    }
+
+    /// Always false on Unix (see the Windows test helper).
+    pub(crate) fn wine_ignores_read_only_dacl() -> bool {
+        false
+    }
+
+    /// Creates a symlink; `false` only where the OS refuses the privilege
+    /// outside CI (Windows), so callers skip that check.
+    pub(crate) fn symlink(target: &Path, link: &Path) -> bool {
+        std::os::unix::fs::symlink(target, link).unwrap();
+        true
     }
 }
 

@@ -9,6 +9,8 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-12: Roadmap: Windows support (now milestone 3, phase 3.1) comes
+  before the optional remote server (now milestone 4, phases 4.1–4.9).
 - 2026-11-11: The app's item list no longer blanks and reloads when a type,
   group or filter is chosen: the previous rows stay until the new page is
   ready. The sidebar always lists Logins, Cards, Wi-Fi, Notes and Other;
@@ -389,6 +391,28 @@ Dates are ISO 8601. Newest first within each section.
   offline Linux/phone test remains pending before phase 2.10b.
 
 ### Added
+
+- 2026-11-12: Windows support (roadmap 3.1, plan 0052), not yet validated
+  for release:
+  - `qv` and the desktop app build and run on Windows 10 22H2 and Windows 11
+    (x86_64, WebView2).
+  - Vault files, anchors, snapshots and state use owner-only ACLs, refuse
+    symlinks and junctions, and are locked against a second process.
+  - The app locks on screen lock, sleep and session disconnect; on Windows
+    this monitoring is required.
+  - The clipboard keeps copied values out of clipboard history and the cloud
+    clipboard, and clears them only while it still owns them.
+  - The app uses the native open, save and folder dialogs.
+  - `qv` prompts without echo in the console.
+  - Quick unlock is not available on Windows.
+  - Data lives in `%LOCALAPPDATA%\QuickVault`; the CLI config is
+    `%APPDATA%\QuickVault\config.toml`.
+  - A new `qv-win` crate holds every Win32 call. It is the only crate that
+    uses `unsafe`.
+  - CI gains a Windows job that runs the gates and builds an unsigned
+    release zip with checksums.
+  - Spec 0009 §5.1 describes the Windows profile.
+  - The release checklist is in `plans/0052-windows-platform/WINDOWS-GATES.md`.
 
 - 2026-11-03: LAN QR display and Android camera scanning (roadmap 2.10b,
   plan 0039). The shared app shows binary pairing and address-only Receive

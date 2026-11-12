@@ -17,14 +17,22 @@ path = "src/main.rs"
 [dependencies]
 clap.workspace = true
 qv-core.workspace = true
-rustix = { workspace = true, features = ["termios", "stdio", "event", "net"] }
 signal-hook.workspace = true
 zeroize.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["termios", "stdio", "event", "net"] }
+
+[target.'cfg(windows)'.dependencies]
+qv-win.workspace = true
+
 [dev-dependencies]
 qv-core = { workspace = true, features = ["test-kdf-limit", "test-eager-views"] }
-x11rb.workspace = true
 proptest.workspace = true
+
+# The end-to-end harness drives a PTY and an X11 clipboard (Linux).
+[target.'cfg(unix)'.dev-dependencies]
+x11rb.workspace = true
 rustix = { workspace = true, features = ["termios", "stdio", "pty", "fs", "event", "pipe"] }
 
 [lints]

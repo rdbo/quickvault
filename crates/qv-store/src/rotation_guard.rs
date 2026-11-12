@@ -5,7 +5,7 @@
 //! or to reset an anchor. The resumed installation workflow comes in 1.15b.
 use std::path::Path;
 
-use crate::{StoreError, error::errno_err, fs};
+use crate::{StoreError, fs};
 
 /// The text every rotation sibling name contains: the marker
 /// `<vault>.qvrotate`, the replacement `<vault>.qvrotate-new-<32 hex>`, the
@@ -62,10 +62,9 @@ pub(crate) fn sibling(path: &Path, which: Sibling, suffix: &[u8; 16]) -> std::pa
 /// The marker test alone, for the rotation's own replacement file, whose name
 /// is reserved on purpose.
 pub(crate) fn check_marker(path: &Path) -> Result<(), StoreError> {
-    match rustix::fs::lstat(fs::with_suffix(path, RESERVED)) {
-        Ok(_) => Err(StoreError::Integrity),
-        Err(rustix::io::Errno::NOENT) => Ok(()),
-        Err(e) => Err(errno_err(e)),
+    match fs::entry(&fs::with_suffix(path, RESERVED))? {
+        fs::Entry::Missing => Ok(()),
+        _ => Err(StoreError::Integrity),
     }
 }
 
@@ -105,7 +104,11 @@ mod tests {
                 0 => write_file(&marker(&path), b"", 0o600),
                 1 => write_file(&marker(&path), b"hostile or incomplete journal", 0o600),
                 2 => std::fs::create_dir(marker(&path)).unwrap(),
-                _ => std::os::unix::fs::symlink(d.join("absent"), marker(&path)).unwrap(),
+                _ => {
+                    if !crate::fs::test_dir::symlink(&d.join("absent"), &marker(&path)) {
+                        continue;
+                    }
+                }
             }
             assert_eq!(err(VaultFile::open(&path)), StoreError::Integrity);
             assert_eq!(std::fs::read(&path).unwrap(), bytes);

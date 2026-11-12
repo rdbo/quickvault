@@ -671,7 +671,7 @@ impl ArchiveObject<'_> {
 pub struct OpenedArchive {
     header: ArchiveHeader,
     manifest: crate::manifest::Manifest,
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg(any(target_os = "linux", target_os = "android", windows))]
     pub(crate) frames: Vec<IndexedFrame>,
 }
 
@@ -831,7 +831,7 @@ pub fn read_archive<R: Read + Seek>(
     Ok(OpenedArchive {
         header,
         manifest,
-        #[cfg(any(target_os = "linux", target_os = "android"))]
+        #[cfg(any(target_os = "linux", target_os = "android", windows))]
         frames,
     })
 }
@@ -946,7 +946,7 @@ pub(crate) fn object_envelope<'a>(
     })
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod platform {
     //! The archive writer and the private snapshot directory (0004 §6.5,
     //! 0007 §3.1). They need the vault's SQLite read path and the private
@@ -1324,16 +1324,7 @@ mod platform {
         /// the effective UID that no one else can write
         /// ([`StoreError::UnsafeFile`] otherwise).
         pub fn open(dir: &Path) -> Result<Self, StoreError> {
-            match std::os::unix::fs::DirBuilderExt::mode(
-                std::fs::DirBuilder::new().recursive(true),
-                0o700,
-            )
-            .create(dir)
-            {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(e) => return Err(crate::error::io_err(e)),
-            }
+            fs::create_private_dir_all(dir)?;
             fs::check_private_dir(dir)?;
             Ok(Self {
                 path: dir.to_owned(),
@@ -1350,11 +1341,17 @@ mod platform {
         /// absolute path, else `$HOME/.local/state/quickvault/snapshots`.
         /// [`StoreError::NotFound`] without a usable home directory;
         /// [`StoreError::Unsupported`] on Android until the platform layer
-        /// provides its directory (phase 2.3).
+        /// provides its directory (phase 2.3). Windows:
+        /// `%LOCALAPPDATA%\QuickVault\snapshots`.
         pub fn default_dir() -> Result<PathBuf, StoreError> {
+            #[cfg(windows)]
+            return crate::location::windows_app_dir(std::env::var_os("LOCALAPPDATA"))
+                .map(|d| d.join("snapshots"));
+            #[cfg(not(windows))]
             Self::default_dir_from(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"))
         }
 
+        #[cfg_attr(windows, allow(dead_code))] // Linux rule; tested everywhere.
         pub(crate) fn default_dir_from(
             xdg_state: Option<OsString>,
             home: Option<OsString>,
@@ -1465,7 +1462,7 @@ mod platform {
             let _dir = fs::lock_dir(&self.path)?;
             let entry = self.lease_entry_unlocked(entry)?;
             let path = self.file(&entry)?;
-            std::fs::remove_file(&path).map_err(|e| match e.kind() {
+            fs::remove_file(&path).map_err(|e| match e.kind() {
                 std::io::ErrorKind::NotFound => StoreError::NotFound,
                 _ => StoreError::Io,
             })?;
@@ -1516,11 +1513,7 @@ mod platform {
                 lease: entry.lease.clone(),
             };
             let source = self.path.join(&entry.name);
-            let present = match rustix::fs::lstat(&source) {
-                Ok(_) => true,
-                Err(rustix::io::Errno::NOENT) => false,
-                Err(e) => return Err(crate::error::errno_err(e)),
-            };
+            let present = fs::entry(&source)? != fs::Entry::Missing;
             let leased = self.lease_entry_unlocked(if present { entry } else { &ordinary })?;
             // Authenticate all bytes for idempotence too; an existing name is
             // never enough to turn a real integrity/I/O failure into success.
@@ -1623,7 +1616,7 @@ mod platform {
                     }
                 }
                 point(CrashPoint::ArchiveVerified)?;
-                rustix::fs::fsync(&file).map_err(crate::error::errno_err)?;
+                fs::sync_file(&file)?;
                 Ok((stats, size, file))
             })();
             let (stats, size, file) = match built {
@@ -1660,7 +1653,7 @@ mod platform {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use platform::{PublishedSnapshot, SnapshotDir, SnapshotEntry, SnapshotKind};
 
 #[cfg(test)]
@@ -2272,6 +2265,11 @@ mod tests {
         let path = vault_path(&d);
         let other = d.join("other.qvault");
         crate::fs::test_dir::write_file(&other, b"not a vault", 0o600);
+        // Windows refuses to replace a file SQLite holds open at all.
+        if cfg!(windows) {
+            assert!(std::fs::rename(&other, &path).is_err());
+            return;
+        }
         std::fs::rename(&other, &path).unwrap();
         assert_eq!(
             err(u.write_archive(&mut Vec::new(), CREATED, &|| false)),
@@ -2411,8 +2409,12 @@ mod tests {
         assert_eq!(dir.entries().unwrap().len(), 2);
         // Removal syncs the directory and forgets the file.
         dir.remove(published.entry()).unwrap();
-        assert_eq!(dir.entries().unwrap().len(), 1);
-        assert_eq!(err(dir.remove(published.entry())), StoreError::NotFound);
+        if !crate::fs::test_dir::wine_keeps_deleted_names() {
+            assert_eq!(dir.entries().unwrap().len(), 1);
+        }
+        if !crate::fs::test_dir::wine_keeps_deleted_names() {
+            assert_eq!(err(dir.remove(published.entry())), StoreError::NotFound);
+        }
     }
 
     fn has_recovery_name(entries: &[SnapshotEntry]) -> bool {
@@ -2467,7 +2469,9 @@ mod tests {
             .reclassify_as_ordinary(&entry, scope_of(&u), u.vault_key())
             .unwrap();
         dir.remove(&ordinary).unwrap();
-        assert!(dir.entries().unwrap().is_empty());
+        if !crate::fs::test_dir::wine_keeps_deleted_names() {
+            assert!(dir.entries().unwrap().is_empty());
+        }
     }
 
     #[test]
@@ -2820,7 +2824,11 @@ mod tests {
             SnapshotDir::open(&shared).err(),
             Some(StoreError::UnsafeFile)
         );
-        // The default directory follows the XDG state directory.
+        // The default directory follows the XDG state directory (Unix
+        // paths; Windows uses %LOCALAPPDATA%).
+        if cfg!(windows) {
+            return;
+        }
         let os = |s: &str| Some(std::ffi::OsString::from(s));
         assert_eq!(
             SnapshotDir::default_dir_from(os("/state"), os("/home/u")).unwrap(),

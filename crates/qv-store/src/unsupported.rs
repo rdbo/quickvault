@@ -4,7 +4,7 @@
 //!
 //! Owner-only permissions, symlink rejection, the process lock, no-replace
 //! renames and the anchor files are implemented for Linux and Android only;
-//! Windows comes in phase 4.1. Elsewhere every entry point fails with
+//! Windows comes in phase 3.1. Elsewhere every entry point fails with
 //! [`StoreError::Unsupported`] instead of opening a vault unprotected. The
 //! types are uninhabited, so no vault value can exist. On Linux this module
 //! is compiled only for its tests.

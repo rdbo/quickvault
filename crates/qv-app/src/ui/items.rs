@@ -183,11 +183,11 @@ pub(crate) fn Input(
 
 /// Run the system file picker into the screen's path input, then an action
 /// (Linux portal; elsewhere the caller uses the platform's own picker).
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 pub(crate) fn picker(
     c: &Controller,
     e: FormEpoch,
-    kind: qv_core::platform::portal::Pick,
+    kind: crate::documents::Pick,
     title: &'static str,
     then: Option<WsAction>,
 ) -> impl FnMut(MouseEvent) + 'static {
@@ -1287,9 +1287,9 @@ pub(crate) fn Viewer(
     };
     let lines = p.text.as_ref().map_or(0, |t| t.lines().count());
     let save = {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", windows))]
         let direct = !crate::documents::picker_missing();
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", windows)))]
         let direct = false;
         let c = controller.clone();
         let handle = p.handle;
@@ -1298,12 +1298,12 @@ pub(crate) fn Viewer(
         move |e: MouseEvent| {
             e.stop_propagation();
             if direct {
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", windows))]
                 crate::documents::pick_path(
                     &c,
                     epoch,
                     crate::documents::PathFor::Workspace,
-                    qv_core::platform::portal::Pick::Save(name.clone()),
+                    crate::documents::Pick::Save(name.clone()),
                     "Save a copy of the attachment",
                     Some(WsAction::SaveAttachment(handle)),
                 );
@@ -1407,10 +1407,10 @@ fn SaveAttachment(
     disabled: bool,
 ) -> Element {
     let _ = &name;
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     if !crate::documents::picker_missing() {
         return rsx! {
-            button { class: "btn", disabled, onclick: picker(&controller, epoch, qv_core::platform::portal::Pick::Save(name.clone()), "Save the attachment", Some(WsAction::SaveAttachment(handle))), "Save…" }
+            button { class: "btn", disabled, onclick: picker(&controller, epoch, crate::documents::Pick::Save(name.clone()), "Save the attachment", Some(WsAction::SaveAttachment(handle))), "Save…" }
         };
     }
     rsx! {

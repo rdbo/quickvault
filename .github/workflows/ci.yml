@@ -62,6 +62,40 @@ jobs:
       - name: Maintained webview integration regressions
         run: cargo test --manifest-path third-party/Cargo.toml --locked -p dioxus-desktop --no-default-features --features tokio_runtime --lib hardened
 
+  # Windows (plan 0052): the gates on the MSVC target, the desktop app, and
+  # the unsigned release zip as a workflow artifact. Real-Windows evidence for
+  # ACLs, locks and renames; lock/sleep events, dialogs, the clipboard and the
+  # webview boundary stay on the attended checklist (WINDOWS-GATES.md).
+  windows:
+    runs-on: windows-latest
+    env:
+      CARGO_BUILD_JOBS: "2"
+      QV_TEST_KDF_JOBS: "2"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain (from rust-toolchain.toml)
+        run: rustup toolchain install
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Clippy (desktop app)
+        run: cargo clippy --locked -p qv-app --features desktop --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked
+      - name: Package (unsigned)
+        shell: pwsh
+        run: ./crates/qv-app/scripts/package-windows.ps1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: quickvault-windows-x86_64
+          path: |
+            target/dist/*.zip
+            target/dist/*.zip.sha256
+          if-no-files-found: error
+
   android-app-build:
     runs-on: ubuntu-latest
     env:

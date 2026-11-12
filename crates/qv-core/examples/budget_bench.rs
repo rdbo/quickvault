@@ -25,7 +25,6 @@
 //! `profile,unlock_ms,verify_ms,write_ms,peak_rss_kib,file_bytes`.
 
 use std::io::Write as _;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::Instant;
@@ -69,11 +68,7 @@ impl Layout {
 }
 
 fn private_dir(p: &Path) -> R<()> {
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(p)
-        .map_err(err("create directory"))
+    qv_core::create_private_dirs(p).map_err(err("create directory"))
 }
 
 /// What one profile contains.
@@ -200,12 +195,12 @@ fn generate(dir: &Path, name: &str) -> R<()> {
     let l = Layout::of(dir);
     private_dir(l.vault.parent().ok_or("vault path")?)?;
     private_dir(&l.anchors)?;
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&l.password)
-        .map_err(err("password file"))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    // Windows: the file inherits the private directory's owner-only ACL.
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut f = options.open(&l.password).map_err(err("password file"))?;
     f.write_all(PASSWORD).map_err(err("password file"))?;
     let anchors = AnchorDir::open(&l.anchors).map_err(err("anchors"))?;
     let started = Instant::now();

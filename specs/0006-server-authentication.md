@@ -338,7 +338,7 @@ for client verification of vault contents or out-of-band key distribution.
    VK (a hybrid key pair like the recovery keys) plus the OPAQUE account for
    administration, removing per-device signing bundles, their storage rules
    and device-session challenges. The cost is losing honest-server per-device
-   revocation and audit. Recommendation: evaluate before the phase-3 protocol
+   revocation and audit. Recommendation: evaluate before the phase-4 protocol
    freeze; keep the current design until decided.
 
 ## Changelog
@@ -357,3 +357,5 @@ for client verification of vault contents or out-of-band key distribution.
   per ticket and recipient-side account confirmation; require a device or
   recovery signature for account password change; wrap the device bundle per
   synced vault and drop the separate device password; disable 0-RTT entirely.
+- 2026-11-12: OQ2 refers to the remote protocol as phase 4 after the roadmap
+  moved Windows to phase 3 (editorial).

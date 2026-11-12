@@ -4,8 +4,6 @@
 //! (plan 0023 steps 5–6; 0012 §1 rows "Rotation/purge ambiguity",
 //! "Migration coupling" (data part) and old-generation archives).
 
-use std::os::unix::fs::PermissionsExt;
-
 use qv_store::{RotationChoice, RotationState, SnapshotDir, SnapshotKind};
 
 use super::*;
@@ -261,14 +259,19 @@ fn rotate_without_confirmation_or_dropped_publishes_nothing() {
 
 /// Installs with an unwritable anchor directory: the anchor step fails after
 /// the journal is published (unlock and snapshots never write anchors).
-fn interrupted(env: &Env, core: &Core) {
+/// False (skip) under Wine, which cannot make the directory unwritable.
+fn interrupted(env: &Env, core: &Core) -> bool {
+    if crate::testutil::wine_ignores_read_only_dacl() {
+        return false;
+    }
     let s = unlock(core, env, PASSWORD).unwrap();
     let mut r = begin(&s, false).unwrap();
     confirm(&mut r);
-    std::fs::set_permissions(&env.anchors, std::fs::Permissions::from_mode(0o500)).unwrap();
+    crate::testutil::set_mode(&env.anchors, 0o500);
     let failed = r.install(None).unwrap_err();
-    std::fs::set_permissions(&env.anchors, std::fs::Permissions::from_mode(0o700)).unwrap();
+    crate::testutil::set_mode(&env.anchors, 0o700);
     assert!(failed.journal_published, "{failed:?} (running as root?)");
+    true
 }
 
 #[test]
@@ -276,7 +279,9 @@ fn rotate_resume_through_core_both_ways() {
     for choice in [RotationChoice::Complete, RotationChoice::RollBack] {
         let env = Env::new();
         let core = env.core_with(Some(wide(&env)));
-        interrupted(&env, &core);
+        if !interrupted(&env, &core) {
+            return;
+        }
         assert!(core.rotation_pending(&env.path).unwrap());
         assert_eq!(
             err(unlock(&core, &env, PASSWORD)),
@@ -317,7 +322,9 @@ fn rotate_resume_through_core_both_ways() {
 fn rotate_resume_without_a_snapshot_policy_is_not_allowed() {
     let env = Env::new();
     let core = env.core_with(Some(wide(&env)));
-    interrupted(&env, &core);
+    if !interrupted(&env, &core) {
+        return;
+    }
     let bare = env.core();
     assert_eq!(
         err(bare

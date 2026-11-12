@@ -14,7 +14,9 @@
 //! - the filesystem type (`fstatfs`): NFS, SMB/CIFS, FUSE (sshfs, rclone and
 //!   many sync clients), AFS, Ceph and 9P count as network filesystems;
 //!   VFAT and exFAT as removable;
-//! - paths under `/media/` or `/run/media/` as removable.
+//! - paths under `/media/` or `/run/media/` as removable;
+//! - on Windows, the drive type: remote drives are network filesystems,
+//!   removable and optical drives removable.
 
 use std::path::{Component, Path};
 
@@ -124,6 +126,7 @@ pub(crate) fn has_sync_marker(dir: &Path) -> bool {
 }
 
 /// Warnings from a filesystem type (`f_type`, as 32-bit magic).
+#[cfg_attr(windows, allow(dead_code))] // Unix `fstatfs` only; tested everywhere.
 pub(crate) fn fs_type_warnings(f_type: u64) -> LocationWarnings {
     let magic = f_type & 0xFFFF_FFFF;
     LocationWarnings {
@@ -144,15 +147,16 @@ fn union(a: LocationWarnings, b: LocationWarnings) -> LocationWarnings {
 }
 
 /// All warnings for the vault at `path`, open as `file`.
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub(crate) fn warnings_for(path: &Path, file: &crate::fs::LockedFile) -> LocationWarnings {
     let dir = std::fs::canonicalize(crate::fs::parent_of(path)).ok();
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let home = home_dir();
     let by_path = dir.as_deref().map_or_else(LocationWarnings::default, |d| {
         let mut w = path_warnings(d, home.as_deref());
         w.sync_folder |= has_sync_marker(d);
         w
     });
+    #[cfg(not(windows))]
     // `f_type` is a signed C long; the magic is its low 32 bits. Its Rust
     // type differs by target (already `u64` on Android), hence the allow.
     #[allow(clippy::unnecessary_cast)]
@@ -160,7 +164,64 @@ pub(crate) fn warnings_for(path: &Path, file: &crate::fs::LockedFile) -> Locatio
         |_| LocationWarnings::default(),
         |s| fs_type_warnings(s.f_type as u64),
     );
+    #[cfg(windows)]
+    let by_fs = {
+        let _ = file;
+        dir.as_deref().and_then(volume_warnings).unwrap_or_default()
+    };
     union(by_path, by_fs)
+}
+
+/// The home directory used by the sync-folder heuristics (`HOME`;
+/// `USERPROFILE` on Windows).
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
+pub(crate) fn home_dir() -> Option<std::path::PathBuf> {
+    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var_os(var).map(std::path::PathBuf::from)
+}
+
+/// Filesystem warnings for the volume holding `path`, `None` if unknown.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub(crate) fn volume_warnings(path: &Path) -> Option<LocationWarnings> {
+    let file = std::fs::File::open(path).ok()?;
+    // statfs magic has different signedness across Linux/Android ABIs.
+    #[allow(clippy::unnecessary_cast)]
+    rustix::fs::fstatfs(&file)
+        .ok()
+        .map(|s| fs_type_warnings(s.f_type as u64))
+}
+
+/// Filesystem warnings for the volume holding `path` (drive type), `None`
+/// if unknown.
+#[cfg(windows)]
+pub(crate) fn volume_warnings(path: &Path) -> Option<LocationWarnings> {
+    use qv_win::fs::Drive;
+    match qv_win::fs::drive_type(path) {
+        Drive::Local => Some(LocationWarnings::default()),
+        Drive::Remote => Some(LocationWarnings {
+            network_fs: true,
+            ..LocationWarnings::default()
+        }),
+        Drive::Removable => Some(LocationWarnings {
+            removable: true,
+            ..LocationWarnings::default()
+        }),
+        Drive::Unknown => None,
+    }
+}
+
+/// `<local>\QuickVault`, the Windows device-local application directory
+/// (0009 §5.1) from `%LOCALAPPDATA%`. [`crate::StoreError::NotFound`]
+/// unless it is absolute.
+#[cfg(windows)]
+pub(crate) fn windows_app_dir(
+    local: Option<std::ffi::OsString>,
+) -> Result<std::path::PathBuf, crate::StoreError> {
+    local
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .map(|p| p.join("QuickVault"))
+        .ok_or(crate::StoreError::NotFound)
 }
 
 #[cfg(test)]

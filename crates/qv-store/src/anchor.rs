@@ -29,22 +29,23 @@
 //! the old anchor, and the directory is synced.
 //!
 //! Location: [`AnchorDir::default_dir`] is `$XDG_STATE_HOME/quickvault/anchors`
-//! (or `~/.local/state/quickvault/anchors`) on Linux. Callers may choose
+//! (or `~/.local/state/quickvault/anchors`) on Linux and
+//! `%LOCALAPPDATA%\QuickVault\anchors` on Windows, where "owner-only" means
+//! the ACL rules of 0009 §5.1 and the directory is not a reparse point.
+//! Callers may choose
 //! another private directory. It must not be the vault's own directory or a
 //! sync folder: an anchor that rolls back with the vault detects nothing.
 
 use std::ffi::OsString;
 use std::io::{Read, Write};
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 
 use qv_crypto::{KeyGeneration, VaultId};
 use qv_encoding::{Decoder, Encoder};
 use qv_model::RandomId;
-use rustix::fs::fsync;
 
 use crate::crash::{CrashPoint, point};
-use crate::error::{StoreError, errno_err};
+use crate::error::StoreError;
 use crate::fs;
 use crate::head::Anchor;
 
@@ -158,15 +159,7 @@ impl AnchorDir {
     /// the effective UID that no one else can write
     /// ([`StoreError::UnsafeFile`] otherwise).
     pub fn open(dir: &Path) -> Result<AnchorDir, StoreError> {
-        match std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(dir)
-        {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(crate::error::io_err(e)),
-        }
+        fs::create_private_dir_all(dir)?;
         fs::check_private_dir(dir)?;
         Ok(AnchorDir {
             path: dir.to_owned(),
@@ -189,19 +182,12 @@ impl AnchorDir {
         {
             return true;
         }
-        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let home = crate::location::home_dir();
         let path_warning = crate::location::path_warnings(&anchors, home.as_deref());
         if path_warning.any() || crate::location::has_sync_marker(&anchors) {
             return true;
         }
-        let Ok(file) = std::fs::File::open(&anchors) else {
-            return true;
-        };
-        // statfs magic has different signedness across Linux/Android ABIs.
-        #[allow(clippy::unnecessary_cast)]
-        rustix::fs::fstatfs(&file).map_or(true, |s| {
-            crate::location::fs_type_warnings(s.f_type as u64).any()
-        })
+        crate::location::volume_warnings(&anchors).is_none_or(|w| w.any())
     }
 
     /// The default anchor directory on Linux: `$XDG_STATE_HOME/quickvault/
@@ -210,9 +196,14 @@ impl AnchorDir {
     /// without a usable home directory; [`StoreError::Unsupported`] on
     /// Android until the platform layer provides its directory (phase 2.3).
     pub fn default_dir() -> Result<PathBuf, StoreError> {
+        #[cfg(windows)]
+        return crate::location::windows_app_dir(std::env::var_os("LOCALAPPDATA"))
+            .map(|d| d.join("anchors"));
+        #[cfg(not(windows))]
         Self::default_dir_from(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"))
     }
 
+    #[cfg_attr(windows, allow(dead_code))] // Linux rule; tested everywhere.
     fn default_dir_from(
         xdg_state: Option<OsString>,
         home: Option<OsString>,
@@ -267,7 +258,7 @@ impl AnchorDir {
         let mut f = locked.into_archive_file();
         let written = (|| {
             f.write_all(&bytes).map_err(crate::error::io_err)?;
-            fsync(&f).map_err(errno_err)?;
+            fs::sync_file(&f)?;
             point(CrashPoint::AnchorTempWritten)?;
             fs::replace_anchor(&temp, &target)
         })();
@@ -288,10 +279,8 @@ impl AnchorDir {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::os::unix::fs::PermissionsExt;
-
     use super::*;
-    use crate::fs::test_dir::{TestDir, write_file};
+    use crate::fs::test_dir::{TestDir, has_mode, symlink, write_file};
     use crate::header::tests::v4;
 
     pub(crate) fn sample() -> Anchor {
@@ -307,8 +296,7 @@ pub(crate) mod tests {
     fn anchor_store_and_load() {
         let d = TestDir::new();
         let dir = AnchorDir::open(&d.join("a/b/anchors")).unwrap();
-        let mode = std::fs::metadata(dir.path()).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o700);
+        assert!(has_mode(dir.path(), 0o700));
         let r = [7u8; 16];
         assert_eq!(dir.load(&r).unwrap(), None);
         dir.store(&r, &sample()).unwrap();
@@ -324,10 +312,7 @@ pub(crate) mod tests {
             .collect();
         assert_eq!(names, vec![OsString::from(format!("{}.anchor", hex(&r)))]);
         let f = dir.file(&r);
-        assert_eq!(
-            std::fs::metadata(&f).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
+        assert!(has_mode(&f, 0o600));
         // Replicas are separate.
         assert_eq!(dir.load(&[8; 16]).unwrap(), None);
         dir.remove_best_effort(&r);
@@ -364,9 +349,10 @@ pub(crate) mod tests {
         // A symlink to a good file.
         let target = d.join("target");
         write_file(&target, &good, 0o600);
-        std::os::unix::fs::symlink(&target, &f).unwrap();
-        assert_eq!(dir.load(&r), Err(StoreError::UnsafeFile));
-        std::fs::remove_file(&f).unwrap();
+        if symlink(&target, &f) {
+            assert_eq!(dir.load(&r), Err(StoreError::UnsafeFile));
+            std::fs::remove_file(&f).unwrap();
+        }
         // Too long.
         write_file(&f, &[0u8; MAX_ANCHOR_BYTES + 1], 0o600);
         assert_eq!(dir.load(&r), Err(StoreError::DamagedAnchor));
@@ -415,16 +401,20 @@ pub(crate) mod tests {
         assert_eq!(AnchorDir::open(&world).err(), Some(StoreError::UnsafeFile));
         let real = d.subdir("real", 0o700);
         let link = d.join("link");
-        std::os::unix::fs::symlink(&real, &link).unwrap();
-        assert_eq!(AnchorDir::open(&link).err(), Some(StoreError::UnsafeFile));
+        if symlink(&real, &link) {
+            assert_eq!(AnchorDir::open(&link).err(), Some(StoreError::UnsafeFile));
+        }
         let file = d.join("file");
         write_file(&file, b"", 0o600);
         assert!(AnchorDir::open(&file).is_err());
         // Readable by others is fine; writable is not.
         let readable = d.subdir("readable", 0o755);
-        assert!(AnchorDir::open(&readable).is_ok());
+        if !crate::fs::test_dir::wine_lacks_acl_inheritance() {
+            assert!(AnchorDir::open(&readable).is_ok());
+        }
     }
 
+    #[cfg(unix)]
     #[test]
     fn anchor_default_dir() {
         let os = |s: &str| Some(OsString::from(s));

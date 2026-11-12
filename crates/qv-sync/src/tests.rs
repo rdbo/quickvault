@@ -639,12 +639,11 @@ fn covered_dominated_permanent_tombstone_is_never_silently_forgotten() {
     assert!(retained.floor().suppresses(retained.history()[0].clock()));
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 #[test]
 fn authenticated_archive_and_real_store_build_a_nonmutating_candidate() {
     use qv_crypto::MasterPassword;
     use qv_store::{AnchorDir, ArchiveScope, VaultFile, VerifiedIncoming};
-    use std::os::unix::fs::DirBuilderExt;
     struct Dir(std::path::PathBuf);
     impl Drop for Dir {
         fn drop(&mut self) {
@@ -655,15 +654,9 @@ fn authenticated_archive_and_real_store_build_a_nonmutating_candidate() {
         "qv-sync-{}",
         u64::from_be_bytes(qv_crypto::random_array().unwrap())
     )));
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&dir.0)
-        .unwrap();
+    qv_store::create_private_dirs(&dir.0).unwrap();
     let private = dir.0.join("private");
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&private)
-        .unwrap();
+    qv_store::create_private_dirs(&private).unwrap();
     let anchors = AnchorDir::open(&dir.0.join("anchors")).unwrap();
     let password = MasterPassword::from_utf8(b"test fixture password").unwrap();
     let mut u = VaultFile::create(&dir.0.join("v.qvault"), &password, "fixture", &anchors).unwrap();
@@ -725,7 +718,11 @@ fn authenticated_archive_and_real_store_build_a_nonmutating_candidate() {
         assert_eq!(candidate.source(r.object_id()), Some(Source::Local));
     }
     assert_eq!(u.local_seq(), seq);
-    assert_eq!(std::fs::read_dir(private).unwrap().count(), 0);
+    // Wine keeps an unlinked name listed while its handle is open; NTFS and
+    // Unix remove it at once. The test runner sets QV_WINE=1 under Wine.
+    if !(cfg!(windows) && std::env::var_os("QV_WINE").is_some()) {
+        assert_eq!(std::fs::read_dir(private).unwrap().count(), 0);
+    }
 }
 
 #[test]
@@ -776,12 +773,11 @@ fn attachments_keep_complete_chunk_references_and_reject_role_substitution() {
 }
 
 // 0012 §1: Order-dependent merges
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 #[test]
 fn accepted_archive_permutations_preserve_conflicts_tombstones_chunks_and_receipts() {
     use qv_crypto::MasterPassword;
     use qv_store::{AnchorDir, ArchiveScope, VaultFile, VerifiedIncoming};
-    use std::os::unix::fs::DirBuilderExt;
     struct Dir(std::path::PathBuf);
     impl Drop for Dir {
         fn drop(&mut self) {
@@ -792,12 +788,9 @@ fn accepted_archive_permutations_preserve_conflicts_tombstones_chunks_and_receip
         "qv-accept-{}",
         u64::from_be_bytes(qv_crypto::random_array().unwrap())
     )));
-    std::fs::DirBuilder::new().mode(0o700).create(&d.0).unwrap();
+    qv_store::create_private_dirs(&d.0).unwrap();
     let private = d.0.join("private");
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&private)
-        .unwrap();
+    qv_store::create_private_dirs(&private).unwrap();
     let anchors = AnchorDir::open(&d.0.join("anchors")).unwrap();
     let password = MasterPassword::from_utf8(b"test fixture password").unwrap();
     let mut base = VaultFile::create(

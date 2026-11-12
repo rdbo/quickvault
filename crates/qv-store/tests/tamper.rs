@@ -10,12 +10,14 @@
 //! leaves the file byte-for-byte unchanged: a rejected open writes nothing,
 //! and no stored trigger ever runs.
 
-#![cfg(any(target_os = "linux", target_os = "android"))]
+#![cfg(any(target_os = "linux", target_os = "android", windows))]
 // The helpers below are test code, but clippy's `allow-*-in-tests` settings
 // only cover `#[test]` functions.
 #![allow(clippy::unwrap_used, clippy::panic)]
 
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+mod common;
+
+use common::{set_mode, symlink, write_mode};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -32,7 +34,7 @@ impl Dir {
             name.push_str(&format!("{b:02x}"));
         }
         let p = std::env::temp_dir().join(name);
-        std::fs::DirBuilder::new().mode(0o700).create(&p).unwrap();
+        common::private_dir(&p);
         Self(p)
     }
 }
@@ -58,8 +60,7 @@ fn vault_bytes() -> &'static [u8] {
 
 fn copy(d: &Dir) -> PathBuf {
     let p = d.0.join("v.qvault");
-    std::fs::write(&p, vault_bytes()).unwrap();
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+    write_mode(&p, vault_bytes(), 0o600);
     p
 }
 
@@ -163,10 +164,7 @@ fn tamper_pages_and_files_are_refused() {
     let good = vault_bytes();
     let d = Dir::new();
     let p = d.0.join("v.qvault");
-    let write = |bytes: &[u8]| {
-        std::fs::write(&p, bytes).unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
-    };
+    let write = |bytes: &[u8]| write_mode(&p, bytes, 0o600);
     // Truncated to its first page and to half a page.
     write(&good[..4096]);
     refused(&p, StoreError::Integrity, "one page");
@@ -192,14 +190,15 @@ fn tamper_pages_and_files_are_refused() {
 fn tamper_file_safety_is_enforced() {
     let d = Dir::new();
     let p = copy(&d);
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+    set_mode(&p, 0o644);
     refused(&p, StoreError::UnsafeFile, "mode 0644");
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+    set_mode(&p, 0o600);
     let link = d.0.join("link.qvault");
-    std::os::unix::fs::symlink(&p, &link).unwrap();
-    match VaultFile::open(&link) {
-        Err(e) => assert_eq!(e, StoreError::UnsafeFile),
-        Ok(_) => panic!("opened through a symlink"),
+    if symlink(&p, &link) {
+        match VaultFile::open(&link) {
+            Err(e) => assert_eq!(e, StoreError::UnsafeFile),
+            Ok(_) => panic!("opened through a symlink"),
+        }
     }
 }
 
@@ -214,11 +213,6 @@ fn truncating_journal() -> Vec<u8> {
     }
     j.resize(512, 0);
     j
-}
-
-fn write_mode(path: &Path, bytes: &[u8], mode: u32) {
-    std::fs::write(path, bytes).unwrap();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
 }
 
 // 0012 §1: Hostile SQLite/CBOR
@@ -236,9 +230,10 @@ fn tamper_planted_sidecars_are_refused() {
     // A symlinked journal.
     let target = d.0.join("elsewhere");
     write_mode(&target, &truncating_journal(), 0o600);
-    std::os::unix::fs::symlink(&target, &journal).unwrap();
-    refused(&p, StoreError::UnsafeFile, "symlinked journal");
-    std::fs::remove_file(&journal).unwrap();
+    if symlink(&target, &journal) {
+        refused(&p, StoreError::UnsafeFile, "symlinked journal");
+        std::fs::remove_file(&journal).unwrap();
+    }
 
     // A real WAL for this vault's contents with the header MAC zeroed:
     // SQLite would replay it and checkpoint it into the vault.
@@ -253,7 +248,7 @@ fn tamper_planted_sidecars_are_refused() {
         .unwrap();
     let wal = d.0.join("v.qvault-wal");
     std::fs::copy(d.0.join("c.qvault-wal"), &wal).unwrap();
-    std::fs::set_permissions(&wal, std::fs::Permissions::from_mode(0o600)).unwrap();
+    set_mode(&wal, 0o600);
     drop(conn);
     refused(&p, StoreError::UnsafeFile, "planted wal");
     std::fs::remove_file(&wal).unwrap();
@@ -311,7 +306,7 @@ fn tamper_shared_parent_is_refused() {
     let d = Dir::new();
     let shared = d.0.join("shared");
     std::fs::create_dir(&shared).unwrap();
-    std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o1777)).unwrap();
+    set_mode(&shared, 0o1777);
     let p = shared.join("v.qvault");
     write_mode(&p, vault_bytes(), 0o600);
     refused(&p, StoreError::UnsafeFile, "sticky shared parent");

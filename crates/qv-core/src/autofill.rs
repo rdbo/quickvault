@@ -420,7 +420,7 @@ mod tests {
         s.save_entry(d).unwrap();
     }
 
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg(any(target_os = "linux", target_os = "android", windows))]
     #[test]
     fn autofill_conflicted_entry_offers_each_head_and_releases_only_the_choice() {
         use crate::testutil::{PASSWORD, TestDir, pw};

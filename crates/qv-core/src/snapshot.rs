@@ -1312,6 +1312,10 @@ mod tests {
             if damage {
                 std::fs::write(&path, b"damaged").unwrap();
             } else {
+                if crate::testutil::wine_keeps_deleted_names() {
+                    s.finish_destructive(copy).unwrap();
+                    continue;
+                }
                 std::fs::remove_file(&path).unwrap();
             }
             assert!(s.empty_trash().is_err());
@@ -1381,13 +1385,11 @@ mod tests {
 
     #[test]
     fn snapshot_failure_never_fails_an_unlock() {
-        use std::os::unix::fs::PermissionsExt;
-
         let env = Env::new();
         let configured = policy(&env, 48, DEFAULT_MAX_BYTES, DEFAULT_MAX_AGE_SECONDS);
         let dir = configured.dir.path().to_owned();
         // The directory is private but not writable: publication fails.
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        crate::testutil::set_mode(&dir, 0o500);
         let denied = std::fs::write(dir.join("probe"), b"").is_err();
         let _ = std::fs::remove_file(dir.join("probe"));
         if denied {
@@ -1410,7 +1412,7 @@ mod tests {
                 "note: permission-override privileges; the unwritable-directory arm is skipped"
             );
         }
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        crate::testutil::set_mode(&dir, 0o700);
         // A later unlock writes the copy normally.
         let s = env.unlock_with(Some(policy(
             &env,
@@ -1606,8 +1608,6 @@ mod tests {
     // 0012 §1: Snapshot disk growth
     #[test]
     fn snapshot_disk_growth_a_full_disk_aborts_the_mandatory_copy() {
-        use std::os::unix::fs::PermissionsExt;
-
         let env = Env::new();
         let s = env.unlock_with(Some(policy(
             &env,
@@ -1619,7 +1619,7 @@ mod tests {
         let seq_before = seq(&s);
         // An unsafe private directory refuses the copy outright; this check
         // does not depend on the process's privileges.
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        crate::testutil::set_mode(&dir, 0o777);
         assert_eq!(
             err(s.begin_destructive(false, None)),
             CoreError::Store(StoreError::UnsafeFile)
@@ -1627,7 +1627,7 @@ mod tests {
         // A read-only directory is the same abort through the I/O path, where
         // the process cannot override permissions (ordinary unprivileged
         // runs). The store's writer covers the disk-full error path itself.
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        crate::testutil::set_mode(&dir, 0o500);
         let denied = std::fs::write(dir.join("probe"), b"").is_err();
         let _ = std::fs::remove_file(dir.join("probe"));
         if denied {
@@ -1636,13 +1636,12 @@ mod tests {
                 CoreError::Store(StoreError::Io)
             );
         }
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        crate::testutil::set_mode(&dir, 0o700);
         assert_eq!(seq(&s), seq_before);
         assert!(s.begin_destructive(true, None).is_ok());
     }
     #[test]
     fn snapshot_publication_failure_preserves_expired_recovery_material() {
-        use std::os::unix::fs::PermissionsExt;
         let env = Env::new();
         let s = env.unlock_with(Some(env.snapshot_policy()));
         let old = s.snapshots().unwrap().snapshots[0].archive_id.clone();
@@ -1652,12 +1651,12 @@ mod tests {
         let dir = configured.dir.path().to_owned();
         let core = env.core_with(Some(configured));
         let _k = kdf();
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        crate::testutil::set_mode(&dir, 0o777);
         let s = core
             .unlock(&env.path, &pw(crate::testutil::PASSWORD), None)
             .unwrap();
         assert!(s.snapshot_status().unwrap().failed);
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        crate::testutil::set_mode(&dir, 0o700);
         assert_eq!(ids(&s.snapshots().unwrap()), vec![old]);
     }
     #[test]

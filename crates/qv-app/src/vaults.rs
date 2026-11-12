@@ -53,7 +53,7 @@ fn shown_name(name: &str) -> Option<String> {
 fn valid_path(p: &str) -> Option<PathBuf> {
     let ok = !p.is_empty()
         && p.len() <= MAX_PATH
-        && p.starts_with('/')
+        && Path::new(p).is_absolute()
         && !p.contains(['\0', '\n', '\r', '\t']);
     ok.then(|| PathBuf::from(p))
 }
@@ -175,6 +175,13 @@ pub fn default_folder(base: &Path, chosen: Option<&Path>) -> PathBuf {
     if let Some(c) = chosen {
         return c.to_path_buf();
     }
+    // Windows: device-local application data (0009 §5.1).
+    if cfg!(windows) {
+        return std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .map_or(private, |d| d.join("QuickVault").join("vaults"));
+    }
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
@@ -187,7 +194,9 @@ pub fn default_folder(base: &Path, chosen: Option<&Path>) -> PathBuf {
     data.map_or(private, |d| d.join("quickvault").join("vaults"))
 }
 /// The file name for a vault name (V4): trimmed, 1–64 characters, without
-/// `/`, `\` or control characters, not starting with a dot.
+/// `/`, `\` or control characters, not starting with a dot. Windows also
+/// refuses `<>:"|?*`, a trailing dot and the reserved device names (CON,
+/// PRN, AUX, NUL, COM1–9, LPT1–9) before the first dot (plan 0052).
 pub fn file_name(name: &str) -> Result<String, AppError> {
     let name = name.trim();
     let count = name.chars().count();
@@ -195,16 +204,30 @@ pub fn file_name(name: &str) -> Result<String, AppError> {
         && !name.starts_with('.')
         && !name
             .chars()
-            .any(|c| c == '/' || c == '\\' || c.is_control());
+            .any(|c| c == '/' || c == '\\' || c.is_control())
+        && (!cfg!(windows) || windows_name_ok(name));
     if ok {
         Ok(format!("{name}.{EXTENSION}"))
     } else {
         Err(AppError::VaultName)
     }
 }
+/// Windows file-name rules beyond the portable ones.
+fn windows_name_ok(name: &str) -> bool {
+    const RESERVED: [&str; 4] = ["CON", "PRN", "AUX", "NUL"];
+    let stem = name.split('.').next().unwrap_or_default().trim_end();
+    let upper = stem.to_ascii_uppercase();
+    let device = RESERVED.contains(&upper.as_str())
+        || ((upper.starts_with("COM") || upper.starts_with("LPT"))
+            && upper.len() == 4
+            && upper.as_bytes()[3].is_ascii_digit()
+            && upper.as_bytes()[3] != b'0');
+    !device && !name.ends_with('.') && !name.chars().any(|c| "<>:\"|?*".contains(c))
+}
 /// A folder for display, with the home directory shortened to `~`.
 pub fn shown_place(dir: &Path) -> String {
-    if let Some(home) = std::env::var_os("HOME")
+    let home_var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    if let Some(home) = std::env::var_os(home_var)
         .map(PathBuf::from)
         .filter(|h| h.is_absolute())
         && let Ok(rest) = dir.strip_prefix(&home)
@@ -212,7 +235,7 @@ pub fn shown_place(dir: &Path) -> String {
         return if rest.as_os_str().is_empty() {
             "~".into()
         } else {
-            format!("~/{}", rest.display())
+            format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display())
         };
     }
     dir.display().to_string()
@@ -315,6 +338,35 @@ mod tests {
         d
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_vault_list_uses_drive_paths() {
+        let l = VaultList::parse(
+            b"folder C:\\Users\\a\\V\nvault C:\\Users\\a\\V\\Work.qvault\nvault \\\\srv\\share\\S.qvault\nvault /unix/U.qvault\nvault rel.qvault\nname C:\\Users\\a\\V\\Work.qvault\tWork\n",
+        );
+        assert_eq!(l.folder.as_deref(), Some(Path::new(r"C:\Users\a\V")));
+        assert_eq!(
+            l.recent,
+            [
+                PathBuf::from(r"C:\Users\a\V\Work.qvault"),
+                PathBuf::from(r"\\srv\share\S.qvault")
+            ]
+        );
+        assert_eq!(VaultList::parse(l.encode().as_bytes()), l);
+        let mut m = VaultList::default();
+        m.remember(Path::new(r"C:\v\A.qvault"));
+        m.remember(Path::new(r"\v\NoDrive.qvault"));
+        m.remember(Path::new("rel.qvault"));
+        assert_eq!(m.recent, [PathBuf::from(r"C:\v\A.qvault")]);
+        assert!(m.set_name(Path::new(r"C:\v\A.qvault"), "Alpha"));
+        let d = dir("win-file");
+        m.save(&d).unwrap();
+        assert_eq!(VaultList::load(&d), m);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // Unix path literals; `windows_vault_list_uses_drive_paths` covers Windows.
+    #[cfg(unix)]
     #[test]
     fn vault_list_parse_is_strict_bounded_and_round_trips() {
         let l = VaultList::parse(
@@ -352,6 +404,8 @@ mod tests {
         assert_eq!(VaultList::parse(many.as_bytes()).recent.len(), MAX_VAULTS);
     }
 
+    // Unix path literals; `windows_vault_list_uses_drive_paths` covers Windows.
+    #[cfg(unix)]
     #[test]
     fn remembering_moves_to_the_front_and_is_capped() {
         let mut l = VaultList::default();
@@ -381,6 +435,8 @@ mod tests {
         assert!(l.recent.iter().all(|p| p.is_absolute() && is_vault(p)));
     }
 
+    // Unix path literals; `windows_vault_list_uses_drive_paths` covers Windows.
+    #[cfg(unix)]
     #[test]
     fn vault_list_files_are_private_atomic_and_never_followed() {
         let d = dir("file");
@@ -404,6 +460,35 @@ mod tests {
             assert_eq!(VaultList::load(&d), VaultList::default());
         }
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn windows_name_rules() {
+        for ok in [
+            "Personal",
+            "Família 2",
+            "con artist",
+            "COM0",
+            "Notes.v2",
+            "LPT",
+        ] {
+            assert!(windows_name_ok(ok), "{ok}");
+        }
+        for bad in [
+            "CON",
+            "con",
+            "Nul.backup",
+            "AUX ",
+            "com1",
+            "LPT9",
+            "a:b",
+            "a?",
+            "why*",
+            "q\"",
+            "end.",
+        ] {
+            assert!(!windows_name_ok(bad), "{bad}");
+        }
     }
 
     #[test]

@@ -5,12 +5,12 @@
 use std::path::Path;
 
 use qv_store::StoreError;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 use qv_store::{ArchiveScope, SnapshotDir, SnapshotKind, VerifiedIncoming};
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 use crate::index::{Index, MAX_VIEW_BYTES};
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 use crate::snapshot::{begin_recovery, finish_recovery};
 use crate::{CancelToken, CoreError, Session};
 
@@ -45,7 +45,7 @@ macro_rules! redacted {
 }
 redacted!(ArchiveMergeReport, ArchiveExportReport);
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 impl Session {
     /// Authenticate a stable archive, take a mandatory recovery copy, and merge
     /// complete versions without resolving conflicts or adopting password slots.
@@ -204,11 +204,11 @@ impl Session {
     }
 }
 
-#[cfg(all(test, any(target_os = "linux", target_os = "android")))]
+#[cfg(all(test, any(target_os = "linux", target_os = "android", windows)))]
 #[path = "exchange_tests.rs"]
 mod tests;
 
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
+#[cfg(not(any(target_os = "linux", target_os = "android", windows)))]
 impl Session {
     /// Archive exchange is unavailable until this platform has safe adapters.
     pub fn merge_archive(

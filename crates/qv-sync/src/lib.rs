@@ -11,7 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Direct LAN sync with one-use codes (0013; plans 0037, 0038, 0042).
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub mod lan;
 
 use qv_crypto::RecordId;
@@ -289,7 +289,7 @@ mod tests;
 
 /// Atomically accept one verified archive, recording its capability-bound name.
 /// Returns false for identical redelivery; pending anchor work finishes first.
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub fn accept_archive(
     vault: &mut qv_store::UnlockedVault,
     incoming: &mut qv_store::VerifiedIncoming,

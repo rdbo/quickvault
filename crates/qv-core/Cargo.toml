@@ -27,5 +27,8 @@ test-kdf-limit = ["qv-crypto/test-kdf-limit"]
 # Eager reference projections for small test fixtures; never production frontends.
 test-eager-views = []
 
+[target.'cfg(windows)'.dev-dependencies]
+qv-win.workspace = true
+
 [lints]
 workspace = true

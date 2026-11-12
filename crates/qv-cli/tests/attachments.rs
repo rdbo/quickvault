@@ -2,6 +2,7 @@
 
 //! Production attachment commands, file refusal and explicit export behavior.
 // Shared integration fixture helpers intentionally unwrap trusted test setup.
+#![cfg(any(target_os = "linux", target_os = "android"))]
 #![allow(clippy::unwrap_used, clippy::panic)]
 mod common;
 use common::{Home, PASSWORD, arg, piped};

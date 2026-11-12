@@ -706,10 +706,10 @@ pub(crate) fn FilePicker(
     #[cfg(not(target_os = "android"))]
     {
         if !crate::documents::picker_missing() {
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", windows))]
             return rsx! {
                 div { class: "actions start",
-                    button { class: "btn primary", id: "add-attachment", onclick: super::items::picker(&controller, epoch, qv_core::platform::portal::Pick::Open, "Add an attachment", Some(WsAction::AddAttachment(entry))), Svg { icon: Icon::Plus } "Add a file…" }
+                    button { class: "btn primary", id: "add-attachment", onclick: super::items::picker(&controller, epoch, crate::documents::Pick::Open, "Add an attachment", Some(WsAction::AddAttachment(entry))), Svg { icon: Icon::Plus } "Add a file…" }
                 }
             };
         }
@@ -942,12 +942,12 @@ fn Snapshots(controller: Controller, epoch: FormEpoch, revision: u64) -> Element
     };
     let typed = cfg!(target_os = "android") || crate::documents::picker_missing();
     let restore = |id: String| -> Box<dyn FnMut(MouseEvent)> {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", windows))]
         if !crate::documents::picker_missing() {
             return Box::new(super::items::picker(
                 &controller,
                 epoch,
-                qv_core::platform::portal::Pick::Save("restored.qvault".into()),
+                crate::documents::Pick::Save("restored.qvault".into()),
                 "Save the restored vault",
                 Some(WsAction::RestoreSnapshot(id)),
             ));
@@ -976,9 +976,9 @@ fn Snapshots(controller: Controller, epoch: FormEpoch, revision: u64) -> Element
 #[component]
 fn Archives(controller: Controller, epoch: FormEpoch, revision: u64) -> Element {
     let _ = revision;
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     if !crate::documents::picker_missing() {
-        use qv_core::platform::portal::Pick;
+        use crate::documents::Pick;
         return rsx! {
             Head { controller: controller.clone(), epoch, title: "Archives", lead: "Move changes between copies of this vault with an encrypted file. Merging keeps concurrent edits as conflicts.", nested: true }
             div { class: "card",
@@ -1059,16 +1059,16 @@ fn Settings(controller: Controller, epoch: FormEpoch, revision: u64, pane: Pane)
             let pick_folder = {
                 let c = controller.clone();
                 move |_: MouseEvent| {
-                    #[cfg(target_os = "linux")]
+                    #[cfg(any(target_os = "linux", windows))]
                     crate::documents::pick_path(
                         &c,
                         epoch,
                         crate::documents::PathFor::Folder,
-                        qv_core::platform::portal::Pick::Folder,
+                        crate::documents::Pick::Folder,
                         "Choose where new vaults are saved",
                         None,
                     );
-                    #[cfg(not(target_os = "linux"))]
+                    #[cfg(not(any(target_os = "linux", windows)))]
                     let _ = &c;
                 }
             };
@@ -1124,7 +1124,7 @@ fn Settings(controller: Controller, epoch: FormEpoch, revision: u64, pane: Pane)
                         span { class: "si", Svg { icon: Icon::Lock } } span { class: "l", b { "Switch vault" } span { "Locks this vault; open, create or join another from the lock screen" } } Svg { icon: Icon::Right }
                     }
                     div { class: "set-row", id: "settings-folder", span { class: "si", Svg { icon: Icon::Folder } } span { class: "l", b { "Folder for new vaults" } span { "{folder_place}" } }
-                        if cfg!(target_os = "linux") && !crate::documents::picker_missing() {
+                        if cfg!(any(target_os = "linux", windows)) && !crate::documents::picker_missing() {
                             button { class: "btn", id: "settings-folder-change", onclick: pick_folder, "Change…" }
                         }
                     }

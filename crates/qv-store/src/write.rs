@@ -40,7 +40,7 @@
 //! Counters are reserved in the same SQLite transaction that uses them
 //! (`replica.next_counter`, plan 0009 D-B), so no committed version can
 //! carry a counter whose reservation is not committed too. Offline vaults
-//! have no outbox (server sync, milestone 3).
+//! have no outbox (server sync, milestone 4).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -964,8 +964,6 @@ fn retention_floor(
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
-
     use qv_model::{Extensions, Group, Text, Timestamp, VersionId};
     use rusqlite::Connection;
 
@@ -1524,6 +1522,10 @@ mod tests {
 
     #[test]
     fn write_failed_anchor_blocks_until_retried() {
+        if crate::fs::test_dir::wine_ignores_read_only_dacl() {
+            return;
+        }
+        #[cfg(unix)]
         if rustix::process::geteuid().is_root() {
             // Root ignores the directory permission this test relies on.
             return;
@@ -1531,9 +1533,7 @@ mod tests {
         let (d, a) = (TestDir::new(), TestDir::new());
         let (p, dir) = copy_fixture(&d, &a, "v.qvault");
         let anchor_dir = a.join("anchors");
-        let mode = |m: u32| {
-            std::fs::set_permissions(&anchor_dir, std::fs::Permissions::from_mode(m)).unwrap()
-        };
+        let mode = |m: u32| crate::fs::test_dir::set_mode(&anchor_dir, m);
         let r = new_record();
         let mut u = unlock(&p, &dir, PASSWORD).unwrap();
         let root = u.manifest().root_group_id();
@@ -1575,6 +1575,10 @@ mod tests {
 
     #[test]
     fn write_adopt_baseline_retries_pending_anchor() {
+        if crate::fs::test_dir::wine_ignores_read_only_dacl() {
+            return;
+        }
+        #[cfg(unix)]
         if rustix::process::geteuid().is_root() {
             return;
         }
@@ -1583,9 +1587,7 @@ mod tests {
         let (d, a) = (TestDir::new(), TestDir::new());
         let (p, dir) = copy_fixture(&d, &a, "v.qvault");
         let anchor_dir = a.join("anchors");
-        let mode = |m: u32| {
-            std::fs::set_permissions(&anchor_dir, std::fs::Permissions::from_mode(m)).unwrap()
-        };
+        let mode = |m: u32| crate::fs::test_dir::set_mode(&anchor_dir, m);
         let mut u = unlock(&p, &dir, PASSWORD).unwrap();
         mode(0o500);
         edit_expect_err(&mut u, new_record());

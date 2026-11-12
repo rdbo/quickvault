@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Native OS services injected into core. OS protection is reported explicitly.
-//! No backend here stores keys or implements Linux quick unlock. Framework input
+//! No backend here stores keys or implements Linux or Windows quick unlock. Framework input
 //! and its best-effort cleanup remain the application's responsibility (0008).
 
 /// Android lifecycle/protection adapter, also testable without a device.
@@ -18,14 +18,18 @@ use std::time::Duration;
 
 #[cfg(target_os = "linux")]
 pub mod clipboard;
-/// No-follow explicit user file input/output (Linux).
-#[cfg(target_os = "linux")]
+/// No-follow explicit user file input/output (Linux and Windows).
+#[cfg(any(target_os = "linux", windows))]
+#[cfg_attr(windows, path = "files_windows.rs")]
 pub mod files;
 #[cfg(target_os = "linux")]
 pub mod linux;
 /// Local addresses for a LAN window's endpoints (0013 §8.5), std only.
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub mod net;
+/// Windows adapters (plan 0052).
+#[cfg(windows)]
+pub mod windows;
 
 /// Cancellation is sampled between bounded units of OS work; contains no secrets.
 pub type Cancellation = Arc<dyn Fn() -> bool + Send + Sync>;

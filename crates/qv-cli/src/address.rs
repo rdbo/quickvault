@@ -307,7 +307,6 @@ pub(crate) fn group(s: &Session, addr: &str) -> Result<GroupHandle, CliError> {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::DirBuilderExt;
 
     use qv_core::{AnchorDir, Core, CoreConfig, MasterPassword};
 
@@ -355,7 +354,7 @@ mod tests {
         static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let dir = std::env::temp_dir().join(format!("qv-cli-address-{}-{n}", std::process::id()));
-        std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        qv_core::create_private_dirs(&dir).unwrap();
         let core = Core::new(CoreConfig::new(
             AnchorDir::open(&dir.join("anchors")).unwrap(),
         ));

@@ -86,14 +86,15 @@ rather than creating unused workspace scaffolding.
 | Component | Responsibility |
 |-----------|----------------|
 | qv-encoding | Bounded deterministic CBOR (0004 §3.1): validates hostile input before typed reads, encodes only canonical items, builds AAD/info/transcript arrays; depends on no other qv crate |
-| qv-crypto | Profiles, key hierarchy, encryption, protected memory, X-Wing draft-11 (libcrux-kem), typed LAN record epochs and one-use code keys, ephemeral password authentication, independent VK proofs, final-key confirmation and comparison codes (0013 §15); hybrid signature verification from roadmap 3.3 |
+| qv-crypto | Profiles, key hierarchy, encryption, protected memory, X-Wing draft-11 (libcrux-kem), typed LAN record epochs and one-use code keys, ephemeral password authentication, independent VK proofs, final-key confirmation and comparison codes (0013 §15); hybrid signature verification from roadmap 4.3 |
 | qv-model | Canonical payloads, atomic records, compact authenticated-head summaries and deterministic tree projection |
-| qv-store | Hardened SQLite with non-mutating identification, immutable objects, manifests, durable-outcome reporting, cooperative inode/directory leases for temporary files and snapshots, authenticated archives (header, writer, role-verifying reader), new-path restore and the full `verify` pass; no LAN peer state (the retired `lan_link` rows stay head-bound and clear at the next commit; 0013 §9.1), LAN serving reads, peer staging (new device, or merge with local copies of held objects) and receipt-free LAN acceptance through the archive acceptance transaction (0013 §7, §9–10) |
+| qv-store | Hardened SQLite with non-mutating identification, immutable objects, manifests, durable-outcome reporting, cooperative inode/directory leases for temporary files and snapshots (on Windows: ACL owner-only rules, reparse-point refusal, file-ID identity, byte-range process locks, named-mutex directory locks and write-through renames, plan 0052), authenticated archives (header, writer, role-verifying reader), new-path restore and the full `verify` pass; no LAN peer state (the retired `lan_link` rows stay head-bound and clear at the next commit; 0013 §9.1), LAN serving reads, peer staging (new device, or merge with local copies of held objects) and receipt-free LAN acceptance through the archive acceptance transaction (0013 §7, §9–10) |
 | qv-protocol | Key-free hostile-input wire layer: bounded LAN frames, wire labels with exact arity, exact-shape message reader/writer, `lan / 2` profile, feature and error-code registry (roadmap 2.8); typed pairing/exchange/error messages, the one-use code's QR/manual form and endpoint text (roadmap 2.9–2.10, plan 0042); server wire types later; depends only on qv-encoding |
 | qv-sync | Shared causal merge candidates; LAN over TCP: the one-use sync window and the joiner in sync or new-device mode, and the two-way exchange (roadmap 2.9–2.10, plan 0042); remote candidate state and publication orchestration (planned) |
 | qv-core | Session policy, handles, lock cancellation, mutation authorization including verified pre-state recovery copies, snapshot policy/budgets, the `verify` report, and LAN sync windows, sync from a code and new-device join for frontends; strict scanned QR kind/profile/address inspection without network I/O; opaque staged/authenticated vault-import capabilities with complete pre-publication index validation and fresh-local creation |
-| qv-platform | Injected OS traits; local unicast addresses for LAN endpoints from route probes, attached networks first (`/proc/net/route` where readable; std only); Linux logind lifecycle, xdg-desktop-portal file picker (zbus, local `file:` results only), X11 clipboard ownership, single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; Android keystore quick unlock with boot-bound policy state that survives app restarts (on where the device supports it; plan 0045); Android storage evidence from the OS encryption status; exact-identity autofill matching; native input unavailable |
+| qv-platform | Injected OS traits; local unicast addresses for LAN endpoints from route probes, attached networks first (`/proc/net/route` where readable; std only); Windows WTS lock/sleep lifecycle (required), Win32 clipboard with history/cloud exclusion, native open/save/folder dialogs, the instance lock and ACL-checked explicit file input/output, with unknown persistence evidence and no quick unlock (plan 0052); Linux logind lifecycle, xdg-desktop-portal file picker (zbus, local `file:` results only), X11 clipboard ownership, single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; Android keystore quick unlock with boot-bound policy state that survives app restarts (on where the device supports it; plan 0045); Android storage evidence from the OS encryption status; exact-identity autofill matching; native input unavailable |
 | qv-cli / qv-app | Explicit user actions and views, including `qv lan open|sync|join` and the app's Sync screen and Join mode; qv-app's shared UI (own title bar, one DOM for desktop and phone, 0009 §1.8), its non-secret preferences file (theme, acknowledged protection status), QR rendering/decoding and bounded native Android Camera2 glue (camera on by default; `QV_APP_QR_CAMERA=0` builds without it); in-app attachment previews verified and streamed in protected chunks through a revocable `/preview/` capability on the existing bounded loopback listener (0003 §6.4); on Linux, portal file picks run in a re-executed helper process without vault data, since the portal refuses the non-dumpable app; no unrestricted crypto/file/SQL bridge |
+| qv-win | Windows-only Win32 bindings on `windows-sys`: the only crate allowed `unsafe`, confined to its FFI modules with a `// SAFETY:` note per block (enforced by Clippy). Safe wrappers for security descriptors (pure Rust SID/ACL parsing and the 0009 §5.1 rules, tested everywhere), no-follow opens, file identity, byte-range locks, write-through renames, POSIX deletion, private creation, named mutexes, the session watcher, the clipboard, console input/output and file dialogs (plan 0052); depends on no other qv crate |
 | qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
 
 Implemented so far: `qv-encoding` (canonical CBOR codec, fuzzed in CI) and
@@ -445,8 +446,17 @@ store, crypto and sync. Crypto/model have no dependency on frontends. Server
 uses protocol types and public-key verification libraries; its inability to
 decrypt rests on key custody, not a missing Cargo dependency.
 
+Roadmap 3.1 (plan 0052) brings the CLI and the app to Windows. `qv-win` is
+the one crate with `unsafe` (Win32 FFI, a SAFETY note per block); every other
+crate keeps `unsafe_code = forbid`. qv-store selects `fs_windows` with the
+same crate-private API as the Unix `fs`. Owner-only means the 0009 §5.1 ACL
+rules, and SQLite connections close before a vault file is renamed or
+removed. qv-platform's `WindowsPlatform` requires the WTS lifecycle watcher.
+Wine runs are development evidence; real-Windows evidence is the CI job and
+the attended checklist (`plans/0052-windows-platform/WINDOWS-GATES.md`).
+
 `qv-app` shares screens, navigation, application state and vault workflows across
-Android and Linux, with responsive layouts for touch and desktop. `qv-platform`
+Android, Linux and Windows, with responsive layouts for touch and desktop. `qv-platform`
 isolates OS integration such as secure input, key storage, biometrics, clipboard,
 lifecycle and autofill entry points. Prefer validated framework APIs or reviewed
 libraries where they meet the security contract; keep necessary native glue
@@ -459,6 +469,8 @@ flowchart TB
     core --> rust["trusted Rust: model, crypto, store, sync"]
     core --> views["structural index; bounded text cache and pages"]
     core --> platform["qv-platform: lifecycle, clipboard, protection status; gated Android keystore and autofill"]
+    platform --> win["qv-win: the only unsafe crate (Win32 FFI, Windows only)"]
+    rust -->|"Windows file safety"| win
     platform -. "lock/cancel notifications" .-> core
     ui --> clip["CLI clipboard via core reexports; keys already dropped"]
     clip --> platform
@@ -601,10 +613,10 @@ A vault master password alone cannot bootstrap a new device from the server.
 |---------|--------|
 | Language | Stable Rust; toolchain pinned to 1.98.1 (`rust-toolchain.toml`), which is the MSRV |
 | Build / CI | Cargo virtual workspace (`crates/<name>/`); GitHub Actions with SHA-pinned actions running the gates, `cargo deny` and `cargo vet` |
-| UI | Dioxus 0.7.10, maintained hardened dioxus-desktop integration, standard webview input; shared Android/Linux screens, best-effort framework cleanup; iOS later |
+| UI | Dioxus 0.7.10, maintained hardened dioxus-desktop integration, standard webview input; shared Android/Linux/Windows screens (WebView2 on Windows), best-effort framework cleanup; iOS later |
 | Android foundation | arm64/API 29+, pinned SDK/NDK recipe, FLAG_SECURE, metadata-only lifecycle adapter, private no-backup storage; device validation pending |
 | Optional remote server | Axum/Tokio; SQLite first, Postgres deferred |
-| Local storage | rusqlite 0.41.0 with bundled SQLite 3.54.1 and trimmed compile options (`.cargo/config.toml`), encrypted immutable objects and manifests; external anchors as per-replica files in the private state directory (`$XDG_STATE_HOME/quickvault/anchors` on Linux; keystore-backed where available later) |
+| Local storage | rusqlite 0.41.0 with bundled SQLite 3.54.1 and trimmed compile options (`.cargo/config.toml`), encrypted immutable objects and manifests; external anchors as per-replica files in the private state directory (`$XDG_STATE_HOME/quickvault/anchors` on Linux, `%LOCALAPPDATA%\QuickVault\anchors` on Windows; keystore-backed where available later) |
 | Serialization | Bounded RFC 8949 deterministic CBOR |
 | Data encryption | XChaCha20-Poly1305; 64 KiB attachment content chunks with fixed padded framing and streaming SHA-256 verification |
 | Password KDF / derivation | Argon2id / HKDF-SHA-512 |
@@ -615,6 +627,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Direct LAN discovery / enrollment / transport | Specified in 0013 (Accepted): DNS-SD only during explicit windows (`_qvault._tcp`, random instance), one-use QR/manual codes with transcript-bound VK proofs (0014; no stored links), X-Wing draft-11 + HKDF-SHA-512 + MAC/1 handshake, XChaCha20-Poly1305 counter-nonce records over TCP. X-Wing is `libcrux-kem` 0.0.10 (Cryspen; its draft-06 API matches the draft-11 vectors byte for byte); framing and records in qv-protocol/qv-crypto (roadmap 2.8); pairing and sessions over `std::net` TCP and endpoint addresses from `std` route probes, with no new dependency (2.9–2.10); DNS-SD discovery deferred (owner decision 2026-11-03); QR rendering/scanning in 2.10b |
 | LAN password authentication (0047 implemented; release gates open) | Pinned opaque-ke 4.0.1, defaults off, ristretto255 + Argon2; isolated compatibility aliases argon2 0.5.3 and sha2 0.10.9 in qv-crypto. Checked OS-RNG adapters, protected one-shot states and the explicit-KDF suite pass component tests. Host/Android component builds are recorded. Advisory reachability is documented; exact-version vet development exemptions are unaudited debt, with genuine review still required before release. Runtime lan/2 uses ephemeral registration/authentication and explicit final-key epochs; no stored verifier or vault/archive migration. Exact evidence: [0047 dependency review](plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md). |
 | LAN QR graphics / decoding | qrcodegen-no-heap 1.8.1 (caller-owned protected scratch) and quircs 0.10.3 (bounded grayscale/binary adapter); shared SVG display; native Android Camera2/ImageReader, no image files or Play Services; exact dependency audit debt in plan 0039 |
+| Windows OS adapters | `qv-win` over windows-sys 0.61.2 (already locked and exempted; no new third-party crate): ACL checks and protected owner-only DACLs, `LockFileEx`, `MoveFileExW` write-through, WTS session notifications from a hidden window, the Win32 clipboard with exclusion formats, comdlg32/shell32 dialogs, console mode; Windows 10 22H2/11 x86_64 with WebView2; CI on the MSVC target, local cross-checks on mingw-w64 with Wine (development evidence only); quick unlock unavailable (plan 0052) |
 | Linux OS adapters | Optional logind lifecycle monitoring via zbus 6.2.0 over the fixed system-bus Unix socket; existing rustix file locks/configuration probes; shared maintained X11 clipboard; quick unlock unavailable |
 | CLI / license | clap (builder API), rustix termios/poll for bounded no-echo prompts, signal-hook atomic flags for cancellation, own escaping and JSON writer, shared qv-platform X11 adapter over published x11rb 0.13.2 with QuickVault's bounded transport and framing budgets; `zxcvbn` (in `qv-core`) for typed master passwords / AGPL-3.0-or-later |
 
@@ -635,8 +648,8 @@ release requirements remain. Framework selection is not validation evidence.
 |-------|-------------|
 | 1 | Shared offline Rust core and early Linux CLI: encrypted vault, manifests, anchors, bounded history/recovery; early Android/Linux shared-UI and platform-adapter feasibility work |
 | 2 | Usable offline Android and Linux apps from the shared UI; validated input cleanup/lifecycle, Android quick unlock/autofill as their gates pass, manually initiated direct LAN sync, conflicts and archive exchange, then an owner-approved app-like UI design (2.10a); LAN protocol decisions/review required first |
-| 3 | Optional closed self-hosted remote server, manually initiated remote sync, accounts, device grants/sessions, server pairing/recovery and remote generation transitions |
-| 4 | Windows |
+| 3 | Windows |
+| 4 | Optional closed self-hosted remote server, manually initiated remote sync, accounts, device grants/sessions, server pairing/recovery and remote generation transitions |
 | Later | Automatic sync (separate design), third-party import/export, hosted admission, iOS/macOS, extensions and BSD |
 
 The phased implementation roadmap for these milestones is
@@ -685,7 +698,7 @@ protocol review. A witness service is optional future work; v1's documented
 fork/freeze limits do not depend on pretending it exists.
 
 Offline release is independent of both network modes. LAN sync must be usable
-without deploying phase 3; each sync mode has its own release evidence in 0012.
+without deploying phase 4; each sync mode has its own release evidence in 0012.
 Android development and its offline release do not depend on the remote server
 or iOS support. Unsupported quick unlock/autofill remains disabled until its
 platform gates pass; do not weaken unlock policy to complete an app milestone.

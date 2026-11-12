@@ -74,6 +74,8 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     // Before anything else, and before any secret is read.
     let protection = qv_core::harden();
+    #[cfg(windows)]
+    qv_win::console::enable_vt();
     if protection.process.is_reduced() {
         out::eprint(
             "qv: warning: reduced protection: core dumps or debugger attachment could not \

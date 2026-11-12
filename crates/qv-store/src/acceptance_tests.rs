@@ -374,7 +374,6 @@ fn acceptance_tombstones_survive_later_edits_purge_final_delete_restore_and_rota
 // 0012 §1: Hostile files from sync folders
 #[test]
 fn acceptance_paths_normalize_without_symlink_traversal_or_filename_spoofing() {
-    use std::os::unix::fs::symlink;
     let (d, a, private) = (TestDir::new(), TestDir::new(), TestDir::new());
     let mut u = local(&d, &a);
     let source = d.join("in.qvsnap");
@@ -391,18 +390,20 @@ fn acceptance_paths_normalize_without_symlink_traversal_or_filename_spoofing() {
             .unwrap()
     );
     let link = d.join("link");
-    symlink(d.path(), &link).unwrap();
-    assert!(
-        VerifiedIncoming::open(
-            &link.join("in.qvsnap"),
-            private.path(),
-            ArchiveScope::new(u.header().vault_id, u.header().key_generation),
-            u.vault_key(),
-            &|| false
-        )
-        .is_err()
-    );
+    if crate::fs::test_dir::symlink(d.path(), &link) {
+        assert!(
+            VerifiedIncoming::open(
+                &link.join("in.qvsnap"),
+                private.path(),
+                ArchiveScope::new(u.header().vault_id, u.header().key_generation),
+                u.vault_key(),
+                &|| false
+            )
+            .is_err()
+        );
+    }
     // A search-only ancestor (Android's /data is `--x` for apps) is traversed.
+    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let sealed = d.join("sealed");
@@ -422,11 +423,19 @@ fn acceptance_paths_normalize_without_symlink_traversal_or_filename_spoofing() {
     let bytes =
         crate::incoming_path::normalize(std::path::Path::new("./a/../receipt-test")).unwrap();
     assert!(bytes.expose_secret().ends_with(b"/receipt-test"));
+    #[cfg(unix)]
     assert_eq!(
         crate::incoming_path::normalize(std::path::Path::new("/../../a"))
             .unwrap()
             .expose_secret(),
         b"/a"
+    );
+    #[cfg(windows)]
+    assert_eq!(
+        crate::incoming_path::normalize(std::path::Path::new(r"C:\x\..\..\a"))
+            .unwrap()
+            .expose_secret(),
+        b"/C:/a"
     );
 }
 

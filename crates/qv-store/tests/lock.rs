@@ -3,12 +3,13 @@
 //! A second process cannot open a vault this process holds (spec 0004
 //! §1.3). The test re-runs its own binary as an ignored helper test.
 
-#![cfg(any(target_os = "linux", target_os = "android"))]
+#![cfg(any(target_os = "linux", target_os = "android", windows))]
 // The helpers below are test code, but clippy's `allow-*-in-tests` settings
 // only cover `#[test]` functions.
 #![allow(clippy::unwrap_used, clippy::panic)]
 
-use std::os::unix::fs::DirBuilderExt;
+mod common;
+
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -54,7 +55,7 @@ fn second_process_gets_lock_error() {
         name.push_str(&format!("{b:02x}"));
     }
     let dir = std::env::temp_dir().join(name);
-    std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+    common::private_dir(&dir);
     let path = dir.join("v.qvault");
     let pw = MasterPassword::from_utf8(b"lock test password").unwrap();
     let anchors = AnchorDir::open(&dir.join("anchors")).unwrap();

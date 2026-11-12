@@ -96,18 +96,18 @@ on top of these.
 | Local storage, archives | 0004 | Accepted | Phases 1.6–1.7, 1.13 |
 | Offline model, versions, merge, local head/anchor | 0005 §0–2, §5.1, §5.4 | **Draft** | Needed in milestone 1 → D5 |
 | File exchange | 0005 §4 | **Draft** | Phase 2.2 → D5 |
-| Remote sync, checkpoints | 0005 §3, §5.2–5.6 | **Draft** | Milestone 3 |
+| Remote sync, checkpoints | 0005 §3, §5.2–5.6 | **Draft** | Milestone 4 |
 | LAN sync | 0005 §6 | **Draft**, not implementable (§6.7) | Phase 2.1 writes the protocol spec |
-| Server accounts, enrollment | 0006 | **Draft** | Milestone 3; phase 3.1 finalizes |
-| History, trash, snapshots, server retention | 0007 | Accepted (§3 has OQ1) | Phases 1.8, 1.12, 1.13, 3.5 |
+| Server accounts, enrollment | 0006 | **Draft** | Milestone 4; phase 4.1 finalizes |
+| History, trash, snapshots, server retention | 0007 | Accepted (§3 has OQ1) | Phases 1.8, 1.12, 1.13, 4.5 |
 | Memory hygiene, side channels, webview | 0008 | **Draft** | §1–3, §5 needed from 1.1 → D5; §4 from 2.4 |
 | Clients and platforms | 0009 | **Draft** | §3, §6 in milestone 1 → D5; §1, §4–5 in milestone 2 |
 | Password generator | 0010 | Accepted | Phase 1.4 |
 | CLI | 0011 | Accepted | Phases 1.10 on |
-| Validation matrix, release gates | 0012 | Accepted | Exit criteria of every phase; 1.16, 2.11, 3.9 |
+| Validation matrix, release gates | 0012 | Accepted | Exit criteria of every phase; 1.16, 2.11, 4.9 |
 
 **Spec changes required:** phase 2.1 (LAN protocol amendment to 0005 §6 or a
-new spec), phase 3.1 (0006 finalization). D4, D6 and D9 each need a small
+new spec), phase 4.1 (0006 finalization). D4, D6 and D9 each need a small
 amendment once decided. No change is made by this roadmap itself.
 
 ## Decisions needed
@@ -183,12 +183,12 @@ at the phase that needs them.
     - local generation-bound link removal, with rotation for compromise.
 
     0013 was accepted the same day, also by owner delegation.
-11. **D11 — 0006 OQ2: per-device signing identities.** Settled in phase 3.1.
-    Blocks: 3.2 on. Resolution: pending.
+11. **D11 — 0006 OQ2: per-device signing identities.** Settled in phase 4.1.
+    Blocks: 4.2 on. Resolution: pending.
 12. **D12 — Independent protocol review.** 0012 §3 requires an external review
     of the LAN and server key-transfer/session compositions before release.
     The owner must choose and engage a reviewer. Lead time is long, so start
-    when 2.1 / 3.1 produce a spec. Blocks: 2.11, 3.9 (release only, not
+    when 2.1 / 4.1 produce a spec. Blocks: 2.11, 4.9 (release only, not
     implementation). Resolution: pending.
 13. **D13 — Owner architecture review before the GUI.** The owner wants to
     re-verify the architecture (`ARCHITECTURE.md`, component boundaries, D8
@@ -219,7 +219,7 @@ crate is created only in the phase that first needs its interface.
 | qv-platform | 1.9 (spike), 2.3 (real) | Trusted OS adapters |
 | qv-sync | 2.2 | Trusted; consumes hostile peer/server input |
 | qv-protocol | 2.8 | Bounded wire types; shared with server |
-| qv-server | 3.3 | Untrusted from the client's view; never holds keys |
+| qv-server | 4.3 | Untrusted from the client's view; never holds keys |
 
 **Interfaces:** defined per phase plan. Cross-phase invariants that every
 phase plan must keep:
@@ -243,8 +243,8 @@ must not invent a second one.
 
 **Secrets and hostile input:** see the invariants above. Fuzz targets are added
 by the phase that introduces each parser (1.2 CBOR, 1.6 SQLite schema
-validation, 1.13 archives, 2.9–2.10 LAN messages, 3.x server messages) and run
-in CI. 1.16, 2.11 and 3.9 then run extended campaigns.
+validation, 1.13 archives, 2.9–2.10 LAN messages, 4.x server messages) and run
+in CI. 1.16, 2.11 and 4.9 then run extended campaigns.
 
 **Errors:** a redacted error taxonomy is set up in 1.3 and 1.6. It must cover
 the "wrong password" vs "integrity error" split (0002 §8) and map 1:1 onto CLI
@@ -265,8 +265,8 @@ architect to evaluate, not decisions:
 | CLI / TTY / clipboard | `clap`, `rpassword` or `rustix` termios, `arboard` (check the X11/Wayland sensitive hints) | 1.10 |
 | Property / fuzz testing | `proptest`, `cargo-fuzz` | 1.2, 1.5 |
 | UI | Dioxus 0.7 (per D8) | 1.9 |
-| Signatures / KEM | `ed25519-dalek` (strict), RustCrypto `ml-dsa`, X-Wing draft-11 from `libcrux`/`x-wing`; record audit status (likely none for ML-DSA/X-Wing) | 2.8 / 3.x |
-| Server / TLS / OPAQUE | `axum`, `tokio`, `rustls` + `aws-lc-rs` (X25519MLKEM768), `opaque-ke` | 3.3–3.4 |
+| Signatures / KEM | `ed25519-dalek` (strict), RustCrypto `ml-dsa`, X-Wing draft-11 from `libcrux`/`x-wing`; record audit status (likely none for ML-DSA/X-Wing) | 2.8 / 4.x |
+| Server / TLS / OPAQUE | `axum`, `tokio`, `rustls` + `aws-lc-rs` (X25519MLKEM768), `opaque-ke` | 4.3–4.4 |
 
 ## Steps
 
@@ -537,7 +537,7 @@ remain required before 1.16.
   with logical IDs and clocks preserved, confirm the new phrase and password,
   write the recovery journal, install with the generation step in the anchor,
   retain the old DB until confirmed, resume or roll back on restart, and
-  invalidate quick slots. Out of scope: the server step (3.8) and LAN peer
+  invalidate quick slots. Out of scope: the server step (4.8) and LAN peer
   re-approval (2.9).
 - **Specs:** 0002 §2.2, §3.5 (offline path); 0005 §5.4; 0011 §4 `recovery rotate`.
 - **Depends on:** 1.14.
@@ -742,7 +742,7 @@ release; it is not weakened.
 #### Phase 2.8 — Protocol foundation and hybrid primitives
 
 - **Plan:** [0036](../0036-protocol-foundation/PLAN.md) (Reviewed: approved
-  with one minor fix). The hybrid signature moves to phase 3.3; see
+  with one minor fix). The hybrid signature moves to phase 4.3; see
   Revisions 2026-11-02 (phase 2.8).
 
 - [x] **Do:** Create `qv-protocol`: a bounded canonical message framework with
@@ -882,34 +882,50 @@ release; it is not weakened.
 - **Done when:** every applicable 0012 row has evidence, and unvalidated features are disabled.
 - **Verify:** gate checklist in the phase plan's log.
 
-### Milestone 3 — Optional self-hosted remote server and remote sync
+### Milestone 3 — Windows
 
-#### Phase 3.1 — Remote protocol finalization (spec only)
+#### Phase 3.1 — Windows platform and release
+
+- [ ] **Do:** Windows adapters (WTS session notifications, clipboard, secure
+  input, an OS-protected quick-unlock backend if one validates), packaging, and
+  the per-platform gates. May split.
+- **Specs:** 0009 §2, §5; 0002 §5.2; 0012 §3.
+- **Depends on:** milestone 2. The server (milestone 4) is not required.
+- **Files:** `crates/qv-platform/`, `crates/qv-app/`, packaging.
+- **Done when:** the Windows gate evidence is recorded and unvalidated features are disabled.
+- **Verify:** Windows CI target plus a manual gate checklist.
+- **Plan:** [0052](../0052-windows-platform/PLAN.md) — implemented 2026-11-12;
+  CI and attended gate evidence ([WINDOWS-GATES.md](../0052-windows-platform/WINDOWS-GATES.md)) pending.
+
+### Milestone 4 — Optional self-hosted remote server and remote sync
+
+#### Phase 4.1 — Remote protocol finalization (spec only)
 
 - [ ] **Do:** Settle D11 (0006 OQ2, with `quickvault-thinker`). Bring 0005 §3,
   §5.2–5.6 and 0006 to `Accepted`, with byte-level messages and transcripts and
   the error transitions. Send to the D12 reviewer.
 - **Specs:** 0005 §3, §5; 0006; 0007 §4.
-- **Depends on:** milestone 2 (it can overlap with 2.11).
+- **Depends on:** milestone 2; scheduled after milestone 3 (owner order,
+  2026-11-12). The remote work needs no Windows code.
 - **Files:** `specs/0005-…`, `specs/0006-…`, `specs/README.md`, `ARCHITECTURE.md`.
 - **Done when:** the specs are `Accepted` and the review request has been sent.
 - **Verify:** spec review by `quickvault-reviewer`.
 
-#### Phase 3.2 — Remote client state: checkpoints and acceptance
+#### Phase 4.2 — Remote client state: checkpoints and acceptance
 
 - [ ] **Do:** Checkpoint encoding and MAC, the "remote never forgets"
   acceptance rule, encrypted `sync_state` (verified base, cursor, pending
   publication), the outbox, and the remembered checkpoint in the local head.
   No network code yet.
 - **Specs:** 0005 §5.2–5.4; 0004 §2 (`sync_state`).
-- **Depends on:** 3.1.
+- **Depends on:** 4.1.
 - **Files:** `crates/qv-sync/`, `crates/qv-store/`, `crates/qv-protocol/`.
 - **Done when:** replay, fork, floor regression and tombstone removal are
   rejected after long offline gaps.
 - **Verify:** `cargo test --locked -p qv-sync checkpoint`.
 - **0012 rows:** Remote rollback without chain, Offline commitment mismatch.
 
-#### Phase 3.3 — Server foundation
+#### Phase 4.3 — Server foundation
 
 - [ ] **Do:** First add the hybrid signature deferred from 2.8 (strict
   Ed25519 + ML-DSA-65, 0002 §6.2) to `qv-crypto`, with upstream KATs and
@@ -919,100 +935,88 @@ release; it is not weakened.
   X25519MLKEM768 and no 0-RTT, the pinned application server identity, closed
   admission, request bounds and the opaque object store schema.
 - **Specs:** 0006 (scope, admission, server identity); 0002 §6.3.
-- **Depends on:** 3.1.
+- **Depends on:** 4.1.
 - **Files:** `crates/qv-server/`.
 - **Done when:** a classical-only TLS handshake is refused, and the stored rows
   hold no record linkage.
 - **Verify:** `cargo test --locked -p qv-server`.
 
-#### Phase 3.4 — Accounts and sessions
+#### Phase 4.4 — Accounts and sessions
 
 - [ ] **Do:** OPAQUE registration and login with the pinned profile,
   TLS-exporter-bound sessions, rate limits, fake records for unknown accounts,
   and the client account flows.
 - **Specs:** 0006 (OPAQUE, registration, login); 0008 §2.
-- **Depends on:** 3.3.
+- **Depends on:** 4.3.
 - **Files:** `crates/qv-server/`, `crates/qv-sync/`.
 - **Done when:** RFC 9807 vectors pass. A token used on another TLS connection
   or a replayed challenge fails.
 - **Verify:** `cargo test --locked -p qv-server account`.
 - **0012 rows:** Authentication complexity.
 
-#### Phase 3.5 — Publication, references and retention
+#### Phase 4.5 — Publication, references and retention
 
 - [ ] **Do:** Vault upload, idempotent atomic compare-and-swap checkpoint
   publication, reference lists that pin data, unreferenced-object GC, quotas,
   and purge acknowledgements.
 - **Specs:** 0006 (uploading); 0005 §3; 0007 §4.
-- **Depends on:** 3.4, 3.2.
+- **Depends on:** 4.4, 4.2.
 - **Files:** `crates/qv-server/`.
 - **Done when:** concurrent CAS races give exactly one winner, retries are
   idempotent, and GC never removes pinned objects.
 - **Verify:** `cargo test --locked -p qv-server publish gc`.
 
-#### Phase 3.6 — Client remote sync round
+#### Phase 4.6 — Client remote sync round
 
 - [ ] **Do:** Stage the remote state, verify it against the base, merge into a
   candidate, publish via CAS and query ambiguous outcomes by operation ID, with
   bounded in-operation retries. Add `qv sync` and `checkpoint show/compare`.
 - **Specs:** 0005 §0.3, §0.5, §3, §5.5; 0011 §4.
-- **Depends on:** 3.5.
+- **Depends on:** 4.5.
 - **Files:** `crates/qv-sync/`, `crates/qv-cli/`.
 - **Done when:** any enrolled device can sync without another device online.
   LAN receipt never advances the server base or discharges the outbox.
 - **Verify:** `cargo test --locked -p qv-sync remote`; client–server integration tests.
 - **0012 rows:** Mixed-mode state confusion, Unrequested synchronization (remote).
 
-#### Phase 3.7 — Device enrollment, grants and revocation
+#### Phase 4.7 — Device enrollment, grants and revocation
 
 - [ ] **Do:** Pairing per 0006 (QR ticket, comparison code, one request per
   ticket, ephemeral X-Wing transfer of the full payload and the trusted
   checkpoint), grants per generation, atomic revocation, and checks on every
   operation. Add `qv account …` and `qv device …`.
 - **Specs:** 0006 (adding a device, revocation); 0002 §6.
-- **Depends on:** 3.6, 2.8.
+- **Depends on:** 4.6, 2.8.
 - **Files:** `crates/qv-server/`, `crates/qv-sync/`, `crates/qv-cli/`.
 - **Done when:** a racing second requester cancels, a mismatched code aborts,
   and a revoked device with an open stream or uncommitted write is cut off.
 - **Verify:** `cargo test --locked -p qv-sync pairing revoke`; interop vectors.
 - **0012 rows:** Incomplete key transport, Pairing QR observation, Active revoked sessions, Server revocation overclaim.
 
-#### Phase 3.8 — Server recovery, password change and remote rotation
+#### Phase 4.8 — Server recovery, password change and remote rotation
 
 - [ ] **Do:** Server-only recovery (account login plus phrase, unverified
   baseline), the account password change that needs a device or recovery
   signature, and the server step of VK rotation (0002 §3.5.3) on top of 1.15.
 - **Specs:** 0006 (recovery, password changes); 0002 §3.5.
-- **Depends on:** 3.7.
+- **Depends on:** 4.7.
 - **Files:** `crates/qv-server/`, `crates/qv-sync/`, `crates/qv-core/`.
 - **Done when:** an account session alone cannot change the account password,
   and an interrupted remote rotation resumes from the journal and the server status.
 - **Verify:** `cargo test --locked rotate_remote recovery_remote`.
 - **0012 rows:** Account lockout by phished password, Rotation/purge ambiguity (remote).
 
-#### Phase 3.9 — App remote-sync UI and milestone 3 release evidence
+#### Phase 4.9 — App remote-sync UI and milestone 4 release evidence
 
-- [ ] **Do:** App screens for account, pairing, sync and checkpoint comparison.
+- [ ] **Do:** App screens for account, pairing, sync and checkpoint comparison
+  on every delivered app platform, Windows included.
   Run the remote and combined-mode gates (0012 §3), including both delivery
   orders. Fold in the D12 review findings. Server deployment docs.
 - **Specs:** 0012 §3 (remote, combined); 0009 §1.3.
-- **Depends on:** 3.8, D12 review result.
+- **Depends on:** 4.8, D12 review result.
 - **Files:** `crates/qv-app/`, release docs.
 - **Done when:** every applicable 0012 row has evidence.
 - **Verify:** gate checklist in the phase plan's log.
-
-### Milestone 4 — Windows
-
-#### Phase 4.1 — Windows platform and release
-
-- [ ] **Do:** Windows adapters (WTS session notifications, clipboard, secure
-  input, an OS-protected quick-unlock backend if one validates), packaging, and
-  the per-platform gates. May split.
-- **Specs:** 0009 §2, §5; 0002 §5.2; 0012 §3.
-- **Depends on:** milestone 2 (milestone 3 is not required).
-- **Files:** `crates/qv-platform/`, `crates/qv-app/`, packaging.
-- **Done when:** the Windows gate evidence is recorded and unvalidated features are disabled.
-- **Verify:** Windows CI target plus a manual gate checklist.
 
 ## Test plan
 
@@ -1020,11 +1024,11 @@ release; it is not weakened.
   codec round-trip (1.2) and generator statistics (1.4) are property tests.
 - Rejection, malformed-input and crash-path tests: every parser phase adds a
   fuzz target. 1.7 builds the crash-injection harness and later write paths
-  (1.12–1.15, 2.2, 2.10, 3.6) reuse it.
+  (1.12–1.15, 2.2, 2.10, 4.6) reuse it.
 - Vectors: development vectors from 1.3, frozen golden vectors in 1.16, and
-  protocol interop vectors in 2.8–2.10 and 3.x.
-- 0012 §1 matrix rows: mapped per phase above. 1.16, 2.11 and 3.9 check that
-  every row applicable to their release has a named passing test.
+  protocol interop vectors in 2.8–2.10 and 4.x.
+- 0012 §1 matrix rows: mapped per phase above. 1.16, 2.11, 3.1 and 4.9 check
+  that every row applicable to their release has a named passing test.
 
 ## Risks and stop conditions
 
@@ -1275,6 +1279,24 @@ release; it is not weakened.
   - **Why not wait in 2.10b:** the next phase, 2.10a, depends on 2.10b only
     so that every Milestone 2 screen exists, and they all do. A device run
     after the redesign also tests the final UI once instead of twice.
+
+- 2026-11-12, owner request ("move the windows support before the server"):
+  Windows is now milestone 3 (phase 3.1) and the optional remote server is
+  milestone 4. Old 4.1 is now 3.1, and old 3.1–3.9 are now 4.1–4.9 with
+  the same content. Earlier revisions, log entries, plans and changelog
+  lines keep the numbers they were written with. Windows still needs only
+  milestone 2; the server phases keep their dependencies and run after
+  Windows. Phase 4.9 adds the remote-sync screens on Windows too.
+
+- 2026-11-12, owner request ("I want you to execute the Windows phases";
+  "Don't ask questions ... Do the best judgement"): phase 3.1 runs now, as
+  [plan 0052](../0052-windows-platform/PLAN.md), although 2.10a acceptance
+  and 2.11 are still open. This deviates from *Depends on: milestone 2*.
+  Nothing in 3.1 consumes milestone-2 release evidence, and milestone 2's
+  open gates stay open. The phase is not split: one plan covers the adapters,
+  CI and packaging, and the attended Windows checklist is the remaining gate.
+  Design choices are owner-delegated (standing 2026-11-02), including the
+  `unsafe` boundary in the new `qv-win` crate.
 
 ## Execution log
 
@@ -2243,3 +2265,23 @@ release; it is not weakened.
     to 2.11 (0039 step 6) are rewritten for the new flows in
     `plans/0039-lan-qr/DEVICE-VALIDATION.md`. D12 still reviews the
     composition before any LAN release.
+
+- 2026-11-12: Owner request ("execute the Windows phases"), owner-delegated
+  design (standing 2026-11-02). Phase 3.1 implemented as plan 0052.
+  - **Built:**
+    - the `qv-win` Win32 crate, the only crate with `unsafe`;
+    - store file safety by ACL;
+    - WTS lifecycle, clipboard, dialogs and the instance lock;
+    - the console CLI and the Windows app;
+    - the CI `windows` job;
+    - the unsigned zip packaging;
+    - spec 0009 §5.1.
+  - **Dependencies:** rustix moved 1.1.5 → 1.1.6 for RUSTSEC-2026-0486,
+    which now fails `cargo deny` on the unchanged baseline too; deny, vet
+    and the baseline script pass.
+  - **Evidence:** Linux and Windows-cross gates; Wine runs of every crate
+    (development evidence only). See the plan's execution log for the
+    results.
+  - **Not ticked:** the first CI run on real Windows and the attended
+    checklist are the remaining gate evidence. 2.10a and 2.11 stay open.
+  - No commit, push or branch.

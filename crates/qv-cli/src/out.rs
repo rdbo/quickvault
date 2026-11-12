@@ -6,8 +6,9 @@
 //! All vault text (titles, names, field values, notes, revealed secrets,
 //! generated values, codes) goes through an [`Out`]. It is built in a
 //! zeroizing buffer that never reallocates without wiping the old copy, and
-//! written with `write(2)` on fd 1 or 2, so std's `Stdout` buffer never
-//! holds vault text.
+//! written with `write(2)` on fd 1 or 2 (on Windows straight to the
+//! standard handle, `WriteConsoleW` for a console), so std's `Stdout`
+//! buffer never holds vault text.
 //!
 //! **Escaping** (0011 §5.3): in human-readable output, `\` becomes `\\`;
 //! tab, newline and carriage return become `\t`, `\n`, `\r`; every other C0
@@ -248,6 +249,16 @@ impl Out {
     }
 }
 
+#[cfg(windows)]
+fn write_all(fd: Fd, b: &[u8]) -> Result<(), CliError> {
+    let which = match fd {
+        Fd::Stdout => qv_win::console::Std::Out,
+        Fd::Stderr => qv_win::console::Std::Err,
+    };
+    qv_win::console::write_std(which, b).map_err(|_| CliError::new(OTHER, "cannot write output"))
+}
+
+#[cfg(unix)]
 fn write_all(fd: Fd, mut b: &[u8]) -> Result<(), CliError> {
     while !b.is_empty() {
         let r = match fd {

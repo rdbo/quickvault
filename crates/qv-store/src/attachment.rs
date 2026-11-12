@@ -2,7 +2,7 @@
 
 //! Bounded attachment chunk roles and streaming reads (0003 §6, 0004 §3.3).
 use crate::StoreError;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 use crate::{UnlockedVault, schema::ObjectReader, vault::scope};
 use qv_crypto::StoredDataProfile;
 use qv_crypto::{RecordId, SecretArray};
@@ -36,7 +36,7 @@ impl StagedAttachment {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod platform {
     use super::*;
     use qv_crypto::{ContentHasher, ObjectHashProfile, purpose};

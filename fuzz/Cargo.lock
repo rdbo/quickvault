@@ -1413,6 +1413,7 @@ dependencies = [
  "async-io",
  "futures-lite",
  "qv-crypto",
+ "qv-win",
  "rustix",
  "x11rb",
  "x11rb-protocol",
@@ -1434,6 +1435,7 @@ dependencies = [
  "qv-crypto",
  "qv-encoding",
  "qv-model",
+ "qv-win",
  "rusqlite",
  "rustix",
  "zeroize",
@@ -1449,6 +1451,13 @@ dependencies = [
  "qv-protocol",
  "qv-store",
  "zeroize",
+]
+
+[[package]]
+name = "qv-win"
+version = "0.0.0"
+dependencies = [
+ "windows-sys",
 ]
 
 [[package]]
@@ -1560,9 +1569,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.1.5"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+checksum = "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa"
 dependencies = [
  "bitflags",
  "errno",

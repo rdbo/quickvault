@@ -18,8 +18,14 @@ zeroize.workspace = true
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 rustix = { workspace = true, features = ["fs"] }
 
+[target.'cfg(windows)'.dependencies]
+qv-win.workspace = true
+
 [dev-dependencies]
 proptest.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+qv-win.workspace = true
 
 [lints]
 workspace = true

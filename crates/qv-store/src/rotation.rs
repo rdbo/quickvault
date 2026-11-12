@@ -155,7 +155,7 @@ impl UnlockedVault {
     /// slot, then unlocking it from the persisted replacement). Refuses
     /// before any KDF or file work: a blocked or mismatched anchor (its
     /// error), remote sync state ([`StoreError::Unsupported`]; remote
-    /// rotation is phase 3.8), a control record with more than one head
+    /// rotation is phase 4.8), a control record with more than one head
     /// ([`StoreError::InvalidEdit`]), and an exhausted generation, sequence
     /// or counter ([`StoreError::LimitExceeded`]). Cancellation is
     /// [`StoreError::Io`]. Never writes the source, an anchor, a journal or a

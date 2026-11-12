@@ -3,7 +3,6 @@
 //! Test fixtures: private temporary directories, a serialized KDF, a fixed
 //! clock, and one fixture vault per test binary that each test copies.
 
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
@@ -60,6 +59,37 @@ pub(crate) fn kdf() -> KdfSlot {
     KdfSlot
 }
 
+/// `chmod mode`, or its Windows ACL counterpart (`qv_win::fs::chmod_like`).
+pub(crate) fn set_mode(path: &Path, mode: u32) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+    #[cfg(windows)]
+    qv_win::fs::chmod_like(path, mode).unwrap();
+}
+
+/// Wine keeps a deleted name listed while a handle is open (NTFS removes
+/// it); checks of that skip there. The runner sets `QV_WINE=1`.
+pub(crate) fn wine_keeps_deleted_names() -> bool {
+    let wine = cfg!(windows) && std::env::var_os("QV_WINE").is_some();
+    if wine {
+        eprintln!("skipped under Wine: deleted names linger while open");
+    }
+    wine
+}
+
+/// Wine does not enforce a DACL that removes the owner's write right; the
+/// test runner sets `QV_WINE=1` (never set on Windows).
+pub(crate) fn wine_ignores_read_only_dacl() -> bool {
+    let wine = cfg!(windows) && std::env::var_os("QV_WINE").is_some();
+    if wine {
+        eprintln!("skipped under Wine: read-only DACL not enforced");
+    }
+    wine
+}
+
 pub(crate) fn pw(s: &str) -> MasterPassword {
     MasterPassword::from_utf8(s.as_bytes()).unwrap()
 }
@@ -89,10 +119,7 @@ impl TestDir {
             name.push_str(&format!("{b:02x}"));
         }
         let path = std::env::temp_dir().join(name);
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&path)
-            .unwrap();
+        qv_store::create_private_dirs(&path).unwrap();
         Self(path)
     }
 
@@ -164,15 +191,12 @@ impl Env {
         let env = Env::empty(TestDir::new());
         let f = fixture();
         std::fs::write(&env.path, &f.vault).unwrap();
-        std::fs::set_permissions(&env.path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&env.anchors)
-            .unwrap();
+        set_mode(&env.path, 0o600);
+        qv_store::create_private_dirs(&env.anchors).unwrap();
         for (name, bytes) in &f.anchors {
             let p = env.anchors.join(name);
             std::fs::write(&p, bytes).unwrap();
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+            set_mode(&p, 0o600);
         }
         env
     }

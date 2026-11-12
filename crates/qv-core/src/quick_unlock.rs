@@ -168,7 +168,10 @@ pub(crate) fn synthetic_services() -> Arc<dyn qv_platform::PlatformServices> {
     tests::services()
 }
 
+// The synthetic platform has no lifecycle monitor, which only Linux's
+// optional-monitoring policy (`with_linux_platform`) accepts.
 #[cfg(test)]
+#[cfg(target_os = "linux")]
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;

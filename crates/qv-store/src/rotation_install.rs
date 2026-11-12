@@ -99,10 +99,10 @@ pub struct Leftovers {
     pub retained_old: usize,
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use platform::{InterruptedRotation, needed_passwords, rotation_pending};
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod platform {
     use std::path::{Path, PathBuf};
 
@@ -112,7 +112,6 @@ mod platform {
     use super::*;
     use crate::archive::SnapshotDir;
     use crate::crash::{CrashPoint, point};
-    use crate::error::errno_err;
     use crate::fs::{self, LockedFile};
     use crate::head::compare;
     use crate::rotation_guard::{self, Sibling};
@@ -157,31 +156,20 @@ mod platform {
 
     /// Whether `path` exists (lstat; never followed).
     fn exists(path: &Path) -> Result<bool, StoreError> {
-        match rustix::fs::lstat(path) {
-            Ok(_) => Ok(true),
-            Err(rustix::io::Errno::NOENT) => Ok(false),
-            Err(e) => Err(errno_err(e)),
-        }
+        Ok(fs::entry(path)? != fs::Entry::Missing)
     }
 
     /// Removes a regular file (never a symlink or directory) and its SQLite
     /// `-journal` if any. Absent is Ok.
     fn remove_regular(path: &Path) -> Result<(), StoreError> {
-        match rustix::fs::lstat(path) {
-            Err(rustix::io::Errno::NOENT) => {}
-            Err(e) => return Err(errno_err(e)),
-            Ok(st) => {
-                if rustix::fs::FileType::from_raw_mode(st.st_mode)
-                    != rustix::fs::FileType::RegularFile
-                {
-                    return Err(StoreError::UnsafeFile);
-                }
-                std::fs::remove_file(path).map_err(crate::error::io_err)?;
-            }
+        match fs::entry(path)? {
+            fs::Entry::Missing => {}
+            fs::Entry::Other => return Err(StoreError::UnsafeFile),
+            fs::Entry::Regular => fs::remove_file(path).map_err(crate::error::io_err)?,
         }
         let journal = fs::with_suffix(path, "-journal");
         if exists(&journal)? {
-            std::fs::remove_file(&journal).map_err(crate::error::io_err)?;
+            fs::remove_file(&journal).map_err(crate::error::io_err)?;
         }
         Ok(())
     }
@@ -269,13 +257,10 @@ mod platform {
                 let name = entry.file_name();
                 match classify(vault, name.as_encoded_bytes()) {
                     Some(Leftover::Removable) => {
-                        let st = rustix::fs::lstat(entry.path()).map_err(errno_err)?;
-                        if rustix::fs::FileType::from_raw_mode(st.st_mode)
-                            != rustix::fs::FileType::RegularFile
-                        {
+                        if fs::entry(&entry.path())? != fs::Entry::Regular {
                             return Err(StoreError::UnsafeFile);
                         }
-                        std::fs::remove_file(entry.path()).map_err(crate::error::io_err)?;
+                        fs::remove_file(&entry.path()).map_err(crate::error::io_err)?;
                         found.removed += 1;
                     }
                     Some(Leftover::Old) => found.retained_old += 1,
@@ -322,9 +307,15 @@ mod platform {
         old_generation: KeyGeneration,
         marker: M,
     ) -> Result<(), StoreError> {
-        if let Some(old) = &old {
-            old.file.check_identity()?;
-        }
+        // Close the old copy's connection but keep its lock: Windows cannot
+        // remove a file SQLite holds open (plan 0052).
+        let old = match old {
+            Some(old) => {
+                old.file.check_identity()?;
+                Some(old.file.into_lock()?)
+            }
+            None => None,
+        };
         if exists(&paths.old)? {
             remove_regular(&paths.old)?;
             fs::sync_dir(paths.dir())?;
@@ -333,7 +324,7 @@ mod platform {
         point(CrashPoint::RotationOldRemoved)?;
         snapshots.remove_inventory(vault_id, old_generation)?;
         point(CrashPoint::RotationInventoryRetired)?;
-        std::fs::remove_file(&paths.marker).map_err(crate::error::io_err)?;
+        fs::remove_file(&paths.marker).map_err(crate::error::io_err)?;
         fs::sync_dir(paths.dir())?;
         drop(marker);
         point(CrashPoint::RotationJournalRemoved)
@@ -349,16 +340,17 @@ mod platform {
         new_generation: KeyGeneration,
         marker: M,
     ) -> Result<(), StoreError> {
-        if let Some(c) = &candidate {
+        if let Some(c) = candidate {
             c.file.check_identity()?;
+            // Keep the lock while removing (see `cleanup`).
+            let _lock = c.file.into_lock()?;
             remove_regular(&paths.new)?;
             fs::sync_dir(paths.dir())?;
         }
-        drop(candidate);
         point(CrashPoint::RollbackCandidateRemoved)?;
         snapshots.remove_inventory(vault_id, new_generation)?;
         point(CrashPoint::RollbackInventoryRemoved)?;
-        std::fs::remove_file(&paths.marker).map_err(crate::error::io_err)?;
+        fs::remove_file(&paths.marker).map_err(crate::error::io_err)?;
         fs::sync_dir(paths.dir())?;
         drop(marker);
         point(CrashPoint::RotationJournalRemoved)
@@ -375,7 +367,7 @@ mod platform {
         let written = (|| {
             let mut file = locked.into_archive_file();
             file.write_all(bytes).map_err(crate::error::io_err)?;
-            rustix::fs::fsync(&file).map_err(errno_err)?;
+            fs::sync_file(&file)?;
             let mut back = Vec::with_capacity(bytes.len());
             std::io::Read::read_to_end(
                 &mut std::io::Read::take(
@@ -421,9 +413,12 @@ mod platform {
                 error,
                 journal_published: true,
             };
+            // Binding order matters: locals drop in reverse, so on an early
+            // return the replacement's connection closes before `unpublished`
+            // removes its file (Windows cannot remove a file SQLite holds).
             let PreparedRotation {
-                mut replacement,
                 _cleanup: mut unpublished,
+                mut replacement,
                 mut source,
                 phrase,
                 suffix,
@@ -864,6 +859,6 @@ mod platform {
 }
 
 #[cfg(test)]
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 #[path = "rotation_install_tests.rs"]
 mod tests;

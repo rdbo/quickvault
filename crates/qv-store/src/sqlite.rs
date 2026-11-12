@@ -269,8 +269,13 @@ mod tests {
     #[test]
     fn rejected_foreign_wal_and_hardlink_are_byte_identical() {
         let dir = TestDir::new();
-        // URI metacharacters must remain literal path bytes in the probe.
-        let path = dir.join("foreign #?%.sqlite");
+        // URI metacharacters must remain literal path bytes in the probe
+        // (`?` cannot appear in a Windows file name).
+        let path = dir.join(if cfg!(windows) {
+            "foreign #%&.sqlite"
+        } else {
+            "foreign #?%.sqlite"
+        });
         write_file(&path, b"", 0o600);
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE foreign_data (x TEXT); INSERT INTO foreign_data VALUES ('synthetic');").unwrap();
@@ -325,8 +330,7 @@ mod tests {
         let path = std::path::PathBuf::from(path);
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; CREATE TABLE foreign_data (x BLOB); INSERT INTO foreign_data VALUES (zeroblob(32768));").unwrap();
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        crate::fs::test_dir::set_mode(&path, 0o600);
         conn.execute_batch("PRAGMA cache_size=1; PRAGMA cache_spill=ON; BEGIN IMMEDIATE; UPDATE foreign_data SET x=zeroblob(32769);").unwrap();
         std::fs::write(path.with_extension("ready"), b"ready").unwrap();
         loop {

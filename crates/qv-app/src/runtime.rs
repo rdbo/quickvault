@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Native startup and lifecycle. No vault operations bypass core.
-#[cfg(any(target_os = "linux", feature = "validation"))]
+#[cfg(any(target_os = "linux", windows, feature = "validation"))]
 use crate::controller::Controller;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 use crate::controller::{AppError, private_dir};
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 use std::sync::Arc;
 
-/// Launch the shared Android/Linux UI with required platform services.
+/// Launch the shared Android/Linux/Windows UI with required platform services.
 pub fn run() -> ! {
     // The file-picker helper (plan 0044): answer and exit before hardening,
     // the instance lock or any vault access.
@@ -17,8 +17,8 @@ pub fn run() -> ! {
         std::process::exit(code);
     }
     qv_core::harden();
-    #[cfg(target_os = "linux")]
-    let guard = match linux_setup(state_root().map_err(|_| AppError::PrivateStorage)) {
+    #[cfg(any(target_os = "linux", windows))]
+    let guard = match desktop_setup(state_root().map_err(|_| AppError::PrivateStorage)) {
         Ok((guard, controller)) => {
             let _ = crate::ui::ACTIVE.set(controller);
             Some(guard)
@@ -31,7 +31,7 @@ pub fn run() -> ! {
     };
     #[cfg(target_os = "android")]
     crate::android::initialize();
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     let _instance = guard;
     #[cfg(feature = "validation")]
     if crate::validation_media::enabled() {
@@ -149,8 +149,8 @@ fn launch(title: &'static str, script: &'static [u8]) -> ! {
     )
 }
 /// Private state, single-instance ownership and the controller, in that order.
-#[cfg(target_os = "linux")]
-fn linux_setup(
+#[cfg(any(target_os = "linux", windows))]
+fn desktop_setup(
     base: Result<std::path::PathBuf, AppError>,
 ) -> Result<
     (
@@ -168,8 +168,25 @@ fn linux_setup(
             AppError::PrivateStorage
         }
     })?;
-    let controller = Controller::new(base, Arc::new(qv_core::platform::LinuxPlatform::default()));
+    #[cfg(target_os = "linux")]
+    let services = Arc::new(qv_core::platform::LinuxPlatform::default());
+    // Windows requires the WTS lock/sleep watcher (0009 §5.1).
+    #[cfg(windows)]
+    let services = Arc::new(qv_core::platform::WindowsPlatform::default());
+    let controller = Controller::new(base, services);
     Ok((guard, controller))
+}
+/// `%LOCALAPPDATA%\QuickVault\state`: device-local, never roaming.
+#[cfg(windows)]
+fn state_root() -> Result<std::path::PathBuf, AppError> {
+    let path =
+        std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or(AppError::Unavailable)?)
+            .join("QuickVault")
+            .join("state");
+    if !path.is_absolute() || path.as_os_str().len() > 4096 {
+        return Err(AppError::Unavailable);
+    }
+    Ok(path)
 }
 #[cfg(target_os = "linux")]
 fn state_root() -> Result<std::path::PathBuf, AppError> {
@@ -192,21 +209,21 @@ mod tests {
     fn linux_startup_reports_the_specific_storage_or_instance_refusal() {
         let dir = std::env::temp_dir().join(format!("qv-app-startup-{}", std::process::id()));
         private_dir(&dir).unwrap();
-        let (guard, controller) = linux_setup(Ok(dir.clone())).unwrap();
+        let (guard, controller) = desktop_setup(Ok(dir.clone())).unwrap();
         assert!(controller.is_ok());
         assert!(matches!(
-            linux_setup(Ok(dir.clone())),
+            desktop_setup(Ok(dir.clone())),
             Err(AppError::AlreadyRunning)
         ));
         drop(guard);
         let file = dir.join("not-a-directory");
         std::fs::write(&file, b"").unwrap();
         assert!(matches!(
-            linux_setup(Ok(file)),
+            desktop_setup(Ok(file)),
             Err(AppError::PrivateStorage)
         ));
         assert!(matches!(
-            linux_setup(Err(AppError::PrivateStorage)),
+            desktop_setup(Err(AppError::PrivateStorage)),
             Err(AppError::PrivateStorage)
         ));
         drop(controller);

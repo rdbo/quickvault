@@ -175,6 +175,11 @@ pub(crate) mod test {
     fn copy_if_exists(from: &Path, to: &Path) {
         if from.exists() {
             std::fs::copy(from, to).unwrap();
+            // A copy into a private folder inherits its owner-only ACL on
+            // Windows; set it explicitly (Wine has no inheritance).
+            if cfg!(windows) {
+                crate::fs::test_dir::set_mode(to, 0o600);
+            }
         }
     }
 
@@ -182,7 +187,7 @@ pub(crate) mod test {
     /// modes so owner-only checks still pass on the copy.
     fn copy_dir(dir: &Path, to: &Path) {
         std::fs::create_dir_all(to).unwrap();
-        std::fs::set_permissions(to, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+        crate::fs::test_dir::set_mode(to, 0o700);
         if let Ok(entries) = std::fs::read_dir(dir) {
             for e in entries {
                 let e = e.unwrap();
@@ -216,8 +221,7 @@ pub(crate) mod test {
                 );
                 let dir = a.snapshot.join("anchors");
                 std::fs::create_dir_all(&dir).unwrap();
-                std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
-                    .unwrap();
+                crate::fs::test_dir::set_mode(&dir, 0o700);
                 if let Ok(entries) = std::fs::read_dir(anchors) {
                     for e in entries {
                         let e = e.unwrap();

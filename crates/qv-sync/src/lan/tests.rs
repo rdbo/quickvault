@@ -7,7 +7,6 @@
 #![allow(clippy::unwrap_used)]
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -41,6 +40,16 @@ const PASSWORD: &str = "correct horse battery staple";
 /// without serializing every unlock.
 static KDF_SLOTS: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new());
 
+/// `chmod mode`, or its Windows ACL counterpart.
+fn set_mode(path: &std::path::Path, mode: u32) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+    #[cfg(windows)]
+    qv_win::fs::chmod_like(path, mode).unwrap();
+}
 fn kdf_jobs() -> usize {
     static JOBS: OnceLock<usize> = OnceLock::new();
     *JOBS.get_or_init(|| {
@@ -90,10 +99,7 @@ impl Dir {
             name.push_str(&format!("{b:02x}"));
         }
         let path = std::env::temp_dir().join(name);
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&path)
-            .unwrap();
+        qv_store::create_private_dirs(&path).unwrap();
         Self(path)
     }
     fn join(&self, n: &str) -> PathBuf {
@@ -144,20 +150,14 @@ impl Device {
     fn from(t: &Template) -> Self {
         let dir = Dir::new();
         std::fs::write(dir.join("v.qvault"), &t.vault).unwrap();
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(dir.join("anchors"))
-            .unwrap();
+        qv_store::create_private_dirs(&dir.join("anchors")).unwrap();
         for (n, b) in &t.anchors {
             std::fs::write(dir.join("anchors").join(n), b).unwrap();
         }
-        use std::os::unix::fs::PermissionsExt;
         for p in std::fs::read_dir(dir.join("anchors")).unwrap() {
-            std::fs::set_permissions(p.unwrap().path(), std::fs::Permissions::from_mode(0o600))
-                .unwrap();
+            set_mode(&p.unwrap().path(), 0o600);
         }
-        std::fs::set_permissions(dir.join("v.qvault"), std::fs::Permissions::from_mode(0o600))
-            .unwrap();
+        set_mode(&dir.join("v.qvault"), 0o600);
         let anchors = AnchorDir::open(&dir.join("anchors")).unwrap();
         let u = {
             let _k = kdf();
@@ -420,10 +420,7 @@ fn joined(r: Approved) -> (bool, Option<LanError>) {
 
 fn private_dir(d: &Dir) -> PathBuf {
     let private = d.join("private");
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&private)
-        .unwrap();
+    qv_store::create_private_dirs(&private).unwrap();
     private
 }
 
@@ -524,10 +521,7 @@ fn lan_enroll_new_device_end_to_end() {
     let a = Device::personal();
     let b = Dir::new();
     let private = b.join("private");
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&private)
-        .unwrap();
+    qv_store::create_private_dirs(&private).unwrap();
     let (w, _addr, code) = window();
     let qr = w.qr(&[IpAddr::V4(Ipv4Addr::LOCALHOST)]).unwrap();
     let mut approve = Approve::yes();
@@ -1304,10 +1298,7 @@ fn hostile_approver(
     let keys = PairingKeys::new(secret).unwrap();
     let b = Dir::new();
     let private = b.join("private");
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&private)
-        .unwrap();
+    qv_store::create_private_dirs(&private).unwrap();
     std::thread::scope(|s| {
         s.spawn(|| {
             let (stream, _) = listener.accept().unwrap();

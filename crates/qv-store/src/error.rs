@@ -215,12 +215,35 @@ pub(crate) fn errno_err(e: rustix::io::Errno) -> StoreError {
     }
 }
 
+/// Maps a Windows OS error without keeping its message (plan 0052).
+#[cfg(windows)]
+pub(crate) fn os_err(e: std::io::Error) -> StoreError {
+    match e.raw_os_error().and_then(|c| u32::try_from(c).ok()) {
+        // ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
+        Some(2 | 3) => StoreError::NotFound,
+        // ERROR_FILE_EXISTS, ERROR_ALREADY_EXISTS
+        Some(80 | 183) => StoreError::Exists,
+        // ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION
+        Some(32 | 33) => StoreError::Locked,
+        // ERROR_HANDLE_DISK_FULL, ERROR_DISK_FULL, ERROR_FILE_TOO_LARGE,
+        // ERROR_NOT_ENOUGH_QUOTA, ERROR_DISK_QUOTA_EXCEEDED
+        Some(39 | 112 | 223 | 1816 | 1295) => StoreError::StorageCapacity,
+        // ERROR_CANT_ACCESS_FILE, ERROR_CANT_RESOLVE_FILENAME (reparse loops)
+        Some(1920 | 1921) => StoreError::UnsafeFile,
+        _ => StoreError::Io,
+    }
+}
+
 /// Redacts a standard I/O error, retaining capacity failure classification.
 pub(crate) fn io_err(e: std::io::Error) -> StoreError {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     if let Some(code) = e.raw_os_error()
         && errno_err(rustix::io::Errno::from_raw_os_error(code)) == StoreError::StorageCapacity
     {
+        return StoreError::StorageCapacity;
+    }
+    #[cfg(windows)]
+    if os_err(e) == StoreError::StorageCapacity {
         return StoreError::StorageCapacity;
     }
     StoreError::Io
@@ -314,7 +337,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg(any(target_os = "linux", target_os = "android", windows))]
     #[test]
     fn full_database_at_page_limit_is_limit_exceeded() {
         use crate::fs::test_dir::{TestDir, write_file};
@@ -339,6 +362,38 @@ mod tests {
             None,
         );
         assert_eq!(write_err(&conn, &busy, 0), StoreError::Locked);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_os_errors_map() {
+        let cases = [
+            (2, StoreError::NotFound),
+            (3, StoreError::NotFound),
+            (80, StoreError::Exists),
+            (183, StoreError::Exists),
+            (32, StoreError::Locked),
+            (33, StoreError::Locked),
+            (112, StoreError::StorageCapacity),
+            (39, StoreError::StorageCapacity),
+            (1920, StoreError::UnsafeFile),
+            (5, StoreError::Io),
+        ];
+        for (code, to) in cases {
+            assert_eq!(
+                os_err(std::io::Error::from_raw_os_error(code)),
+                to,
+                "{code}"
+            );
+            assert_eq!(
+                io_err(std::io::Error::from_raw_os_error(code)),
+                if to == StoreError::StorageCapacity {
+                    to
+                } else {
+                    StoreError::Io
+                }
+            );
+        }
     }
 
     #[cfg(any(target_os = "linux", target_os = "android"))]

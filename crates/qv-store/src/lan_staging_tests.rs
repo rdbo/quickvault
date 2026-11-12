@@ -336,7 +336,7 @@ fn lan_merge_staging_copies_common_objects_and_accepts_new_ones() {
             .unwrap()
     );
     assert_eq!(u.local_seq(), seq + 1);
-    assert!(no_staging_left(&a));
+    assert!(no_staging_left(&a) || crate::fs::test_dir::wine_keeps_deleted_names());
 }
 
 fn own_plan_is_local(u: &UnlockedVault) -> bool {

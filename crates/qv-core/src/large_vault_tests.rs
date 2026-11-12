@@ -19,7 +19,7 @@ fn resources(session: &Session, stage: &str) {
             ctx.open.index.cache.bytes(),ctx.open.index.cache.total_bytes());
         Ok(())
     }).unwrap();
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg(any(target_os = "linux", target_os = "android", windows))]
     if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
         let metric = |name: &str| {
             status
@@ -79,7 +79,7 @@ fn check(session: &Session) {
     );
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 fn enroll_large(source: &Session, phrase: Option<&qv_crypto::RecoveryPhrase>) {
     struct Offer;
     impl crate::ApproverUi for Offer {
@@ -260,7 +260,7 @@ fn large_vault_stock_budget_opens_edits_searches_restores_merges_and_rotates() {
         let _k = kdf();
         session.recovery_phrase(&pw(PASSWORD)).unwrap()
     };
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg(any(target_os = "linux", target_os = "android", windows))]
     {
         enroll_large(&session, None);
         enroll_large(&session, Some(&phrase));

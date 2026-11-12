@@ -379,17 +379,17 @@ fn rotation_install_primitives_leftovers_removed_old_kept() {
     assert!(!next.exists());
 
     // A symlink matching a pattern is refused, never followed.
-    std::os::unix::fs::symlink(
-        e.vault.join("notes.txt"),
-        e.vault.join(&format!("v.qvault.qvrotate-new-{hex}")),
-    )
-    .unwrap();
-    assert_eq!(
-        err(u.remove_rotation_leftovers(&e.snaps)),
-        StoreError::UnsafeFile
-    );
-    assert!(e.vault.join("notes.txt").exists());
-    std::fs::remove_file(e.vault.join(&format!("v.qvault.qvrotate-new-{hex}"))).unwrap();
+    if crate::fs::test_dir::symlink(
+        &e.vault.join("notes.txt"),
+        &e.vault.join(&format!("v.qvault.qvrotate-new-{hex}")),
+    ) {
+        assert_eq!(
+            err(u.remove_rotation_leftovers(&e.snaps)),
+            StoreError::UnsafeFile
+        );
+        assert!(e.vault.join("notes.txt").exists());
+        std::fs::remove_file(e.vault.join(&format!("v.qvault.qvrotate-new-{hex}"))).unwrap();
+    }
 
     // Never while a marker exists.
     write_file(&crate::rotation_guard::marker(&e.path()), b"", 0o600);
@@ -432,9 +432,10 @@ fn rotation_install_primitives_transition_role_and_marker_reads() {
     let marker = crate::rotation_guard::marker(&e.path());
     let open =
         || InterruptedRotation::open(&e.path(), &e.anchors, None, None, &|| false).map(|_| ());
-    std::os::unix::fs::symlink(e.path(), &marker).unwrap();
-    assert_eq!(err(open()), StoreError::UnsafeFile);
-    std::fs::remove_file(&marker).unwrap();
+    if crate::fs::test_dir::symlink(&e.path(), &marker) {
+        assert_eq!(err(open()), StoreError::UnsafeFile);
+        std::fs::remove_file(&marker).unwrap();
+    }
     std::fs::create_dir(&marker).unwrap();
     assert!(matches!(
         err(open()),

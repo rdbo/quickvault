@@ -90,3 +90,4 @@ plan, or a new plan that names the one it supersedes.
 | [0049](0049-android-vault-file-picker/PLAN.md) | Android vault-file picker and verified local import | In progress — source implemented; host large/near-budget checks and Android builds pass; real-phone qualification and fresh review pending |
 | [0050](0050-complete-audit-remediation/PLAN.md) | Complete remaining security assessment repairs | In progress — source repairs/local verification recorded; isolated Android media qualification awaits phone |
 | [0051](0051-list-swap-other-type/PLAN.md) | No list flicker on filter change; fixed item types with Other (owner request) | Implemented — fresh review pending |
+| [0052](0052-windows-platform/PLAN.md) | Windows platform and release (roadmap 3.1) | Implemented — Windows CI run, attended gate checklist and fresh review pending |

@@ -326,7 +326,7 @@ pub(crate) fn file_name(vault_id: VaultId, generation: KeyGeneration) -> String 
     name
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod platform {
     use std::collections::BTreeMap;
     use std::io::{Read, Write};
@@ -448,7 +448,7 @@ mod platform {
             let mut file = locked.into_archive_file();
             let written = (|| {
                 file.write_all(&bytes).map_err(crate::error::io_err)?;
-                rustix::fs::fsync(&file).map_err(crate::error::errno_err)?;
+                fs::sync_file(&file)?;
                 if read_bounded(&temp)? != bytes {
                     return Err(StoreError::Integrity);
                 }
@@ -472,10 +472,8 @@ mod platform {
         ) -> Result<Option<SnapshotInventory>, StoreError> {
             let h = vault.header();
             let path = self.path().join(file_name(h.vault_id, h.key_generation));
-            match rustix::fs::lstat(&path) {
-                Err(rustix::io::Errno::NOENT) => return Ok(None),
-                Err(e) => return Err(crate::error::errno_err(e)),
-                Ok(_) => {}
+            if fs::entry(&path)? == fs::Entry::Missing {
+                return Ok(None);
             }
             let bytes = read_bounded(&path)?;
             let inventory = SnapshotInventory::decode(&bytes)?.verify(
@@ -515,7 +513,7 @@ mod platform {
             vault_id: VaultId,
             generation: KeyGeneration,
         ) -> Result<(), StoreError> {
-            match std::fs::remove_file(self.path().join(file_name(vault_id, generation))) {
+            match fs::remove_file(&self.path().join(file_name(vault_id, generation))) {
                 Ok(()) => fs::sync_dir(self.path()),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(_) => Err(StoreError::Io),

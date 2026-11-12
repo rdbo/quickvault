@@ -246,7 +246,7 @@ fn snapshot_inventory_rejects_bad_shape_bounds_and_rows() {
     );
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod dir {
     use std::path::Path;
 
@@ -490,7 +490,7 @@ mod dir {
 
     #[test]
     fn snapshot_inventory_dir_refuses_hostile_inventory_files() {
-        use std::os::unix::fs::{PermissionsExt, symlink};
+        use crate::fs::test_dir::{set_mode, symlink};
         let (d, a, s) = (TestDir::new(), TestDir::new(), TestDir::new());
         let (path, anchors) = copy_fixture(&d, &a, "v.qvault");
         let dir = snapshot_dir(&s);
@@ -510,8 +510,7 @@ mod dir {
             (
                 &|| {
                     write_file(&name, b"x", 0o600);
-                    std::fs::set_permissions(&name, std::fs::Permissions::from_mode(0o644))
-                        .unwrap();
+                    set_mode(&name, 0o644);
                 },
                 StoreError::UnsafeFile,
             ),
@@ -519,7 +518,10 @@ mod dir {
                 &|| {
                     let target = dir.path().join("elsewhere");
                     write_file(&target, &vector().encode().unwrap(), 0o600);
-                    symlink(&target, &name).unwrap();
+                    if !symlink(&target, &name) {
+                        // No symlink privilege: the plain copy is refused too.
+                        write_file(&name, b"x", 0o644);
+                    }
                 },
                 StoreError::UnsafeFile,
             ),

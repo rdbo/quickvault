@@ -22,6 +22,8 @@ pub(crate) struct Environment {
     pub(crate) qvault_path: Option<OsString>,
     pub(crate) home: Option<OsString>,
     pub(crate) xdg_config_home: Option<OsString>,
+    /// `%APPDATA%` (Windows only).
+    pub(crate) appdata: Option<OsString>,
 }
 
 impl Environment {
@@ -30,13 +32,22 @@ impl Environment {
             qvault_path: std::env::var_os("QVAULT_PATH"),
             home: std::env::var_os("HOME"),
             xdg_config_home: std::env::var_os("XDG_CONFIG_HOME"),
+            appdata: if cfg!(windows) {
+                std::env::var_os("APPDATA")
+            } else {
+                None
+            },
         }
     }
 
-    /// The config file path, if a home or config directory is known.
+    /// The config file path, if a home or config directory is known
+    /// (Windows: `%APPDATA%\QuickVault\config.toml`, 0009 §5.1).
     pub(crate) fn config_path(&self) -> Option<PathBuf> {
         let absolute =
             |v: &Option<OsString>| v.as_ref().map(PathBuf::from).filter(|p| p.is_absolute());
+        if cfg!(windows) {
+            return absolute(&self.appdata).map(|d| d.join("QuickVault").join("config.toml"));
+        }
         absolute(&self.xdg_config_home)
             .or_else(|| absolute(&self.home).map(|h| h.join(".config")))
             .map(|d| d.join("quickvault").join("config.toml"))
@@ -100,6 +111,8 @@ mod tests {
             qvault_path: qvault.map(OsString::from),
             home: None,
             xdg_config_home: config_dir.map(|p| p.as_os_str().to_owned()),
+            // Windows file names ignore case: `QuickVault` is `quickvault`.
+            appdata: config_dir.map(|p| p.as_os_str().to_owned()),
         }
     }
 
@@ -108,7 +121,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("qv-cli-select-{}", std::process::id()));
         let cfg = dir.join("quickvault");
         std::fs::create_dir_all(&cfg).unwrap();
-        std::fs::write(cfg.join("config.toml"), "default_vault = \"/c/v.qvault\"\n").unwrap();
+        // An absolute path needs a drive on Windows.
+        let r = if cfg!(windows) { "C:" } else { "" };
+        let configured = PathBuf::from(format!("{r}/c/v.qvault"));
+        std::fs::write(
+            cfg.join("config.toml"),
+            format!("default_vault = \"{r}/c/v.qvault\"\n"),
+        )
+        .unwrap();
         let explicit = PathBuf::from("/x/v.qvault");
 
         let e = env(Some("/e/v.qvault"), Some(&dir));
@@ -121,15 +141,9 @@ mod tests {
             PathBuf::from("/e/v.qvault")
         );
         let e = env(Some(""), Some(&dir));
-        assert_eq!(
-            require_vault(None, &e).unwrap(),
-            PathBuf::from("/c/v.qvault")
-        );
+        assert_eq!(require_vault(None, &e).unwrap(), configured.clone());
         let e = env(None, Some(&dir));
-        assert_eq!(
-            require_vault(None, &e).unwrap(),
-            PathBuf::from("/c/v.qvault")
-        );
+        assert_eq!(require_vault(None, &e).unwrap(), configured);
 
         let none = env(None, None);
         assert_eq!(selected_vault(None, &none).unwrap(), None);
@@ -148,12 +162,35 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn select_config_path_windows() {
+        let e = Environment {
+            appdata: Some(r"C:\Users\a\AppData\Roaming".into()),
+            ..Environment::default()
+        };
+        assert_eq!(
+            e.config_path(),
+            Some(PathBuf::from(
+                r"C:\Users\a\AppData\Roaming\QuickVault\config.toml"
+            ))
+        );
+        let relative = Environment {
+            appdata: Some("relative".into()),
+            home: Some(r"C:\Users\a".into()),
+            ..Environment::default()
+        };
+        assert_eq!(relative.config_path(), None);
+    }
+
+    #[cfg(unix)]
     #[test]
     fn select_config_path() {
         let e = Environment {
             qvault_path: None,
             home: Some("/home/a".into()),
             xdg_config_home: Some("relative".into()),
+            appdata: None,
         };
         assert_eq!(
             e.config_path(),

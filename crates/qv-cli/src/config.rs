@@ -267,19 +267,24 @@ mod tests {
     fn config_accepts_the_subset() {
         assert_eq!(ok(""), Config::default());
         assert_eq!(ok("# only a comment\n\n   \n"), Config::default());
-        let c = ok(
-            "default_vault = \"/home/a/v.qvault\" # mine\r\nclipboard_timeout=20\ncolor = 'never'\n",
+        // An absolute path needs a drive on Windows.
+        let r = if cfg!(windows) { "C:" } else { "" };
+        let c = ok(&format!(
+            "default_vault = \"{r}/home/a/v.qvault\" # mine\r\nclipboard_timeout=20\ncolor = 'never'\n",
+        ));
+        assert_eq!(
+            c.default_vault,
+            Some(PathBuf::from(format!("{r}/home/a/v.qvault")))
         );
-        assert_eq!(c.default_vault, Some(PathBuf::from("/home/a/v.qvault")));
         assert_eq!(c.clipboard_timeout, Some(20));
         assert_eq!(c.color, Some(Color::Never));
         assert_eq!(
-            ok("default_vault = \"/a\\u00e9/b\\\\c\\\"d\"").default_vault,
-            Some(PathBuf::from("/a\u{e9}/b\\c\"d"))
+            ok(&format!("default_vault = \"{r}/a\\u00e9/b\\\\c\\\"d\"")).default_vault,
+            Some(PathBuf::from(format!("{r}/a\u{e9}/b\\c\"d")))
         );
         assert_eq!(
-            ok("default_vault = '/x\\y'").default_vault,
-            Some(PathBuf::from("/x\\y"))
+            ok(&format!("default_vault = '{r}/x\\y'")).default_vault,
+            Some(PathBuf::from(format!("{r}/x\\y")))
         );
         assert_eq!(ok("clipboard_timeout = +3_0").clipboard_timeout, Some(30));
         assert_eq!(ok("color = \"auto\"").color, Some(Color::Auto));

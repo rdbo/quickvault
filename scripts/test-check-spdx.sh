@@ -35,6 +35,10 @@ check() {
 
 printf 'fn main() {}\n' > product.rs
 check 1 product.rs
+printf 'Write-Output 1\n' > package.ps1
+check 1 package.ps1
+printf '# SPDX-License-Identifier: AGPL-3.0-or-later\nWrite-Output 1\n' > package.ps1
+check 0 package.ps1
 printf '// SPDX-License-Identifier: AGPL-3.0-or-later\n' > product.rs
 check 0 product.rs
 # A failed file listing must not look like an empty successful scan.
@@ -61,6 +65,10 @@ printf '// Upstream header\n' > third-party/other/lib.rs
 check 1 third-party/other/lib.rs
 printf 'fn main() {}\n' > product.rs
 check 1 product.rs
+printf 'Write-Output 1\n' > package.ps1
+check 1 package.ps1
+printf '# SPDX-License-Identifier: AGPL-3.0-or-later\nWrite-Output 1\n' > package.ps1
+check 0 package.ps1
 mkdir -p third-party/dioxus-desktop
 printf '// Upstream header\n' > third-party/dioxus-desktop/lib.rs
 printf '[package]\nname = "dioxus-desktop"\nversion = "0.7.10"\n' > third-party/dioxus-desktop/Cargo.toml

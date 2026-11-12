@@ -1,6 +1,6 @@
 [package]
 name = "qv-platform"
-description = "QuickVault OS services and Linux adapters"
+description = "QuickVault OS services and Linux/Windows adapters"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,6 +19,9 @@ x11rb-protocol.workspace = true
 async-io = "=2.6.0"
 futures-lite = "=2.6.1"
 zbus = { version = "=6.2.0", default-features = false, features = ["default-rt", "proxy"] }
+
+[target.'cfg(windows)'.dependencies]
+qv-win.workspace = true
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 zbus = { version = "=6.2.0", default-features = false, features = ["service"] }

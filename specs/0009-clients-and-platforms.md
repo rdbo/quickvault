@@ -46,7 +46,7 @@ Account/session failures must leave local access and approved LAN use available.
 1.4. Delivery follows ARCHITECTURE.md §7: develop the shared offline Rust core,
 an early Linux CLI and Android/Linux framework feasibility work in phase 1.
 Deliver usable offline Android and Linux apps plus manual LAN sync in phase 2;
-the optional remote service follows in phase 3. Android work MUST NOT wait for
+Windows follows in phase 3 and the optional remote service in phase 4. Android work MUST NOT wait for
 completion of the full CLI or implementation of the remote server. Each later
 platform inherits the independent sync modes subject to its own gates. LAN
 discovery/enrollment/session choices remain open in 0005; platform APIs and
@@ -424,6 +424,72 @@ on titles, labels, activity names or URL substrings.
 - Quick unlock: only a validated backend with the authentication and backup
   behavior specified in 0002 §5; unavailable backends remain disabled.
 
+5.1. **Windows profile** (owner-delegated, 2026-11-12, plan 0052). The
+baseline is Windows 10 22H2 or Windows 11 on x86_64 with the WebView2
+Evergreen runtime.
+
+- **Owner-only files (0004 §1.1).** Trusted SIDs are the current user,
+  LocalSystem, BUILTIN\Administrators and TrustedInstaller, the
+  counterparts of root.
+  - A vault file or another private file is a regular file and not a reparse
+    point. Its owner is a trusted SID. It has a DACL, and every allow ACE
+    names a trusted SID. An unknown ACE type fails closed.
+  - A vault's parent directory is owned by a trusted SID. No other SID has an
+    allow ACE with write-class rights: add file, add subdirectory, delete
+    child, delete, write DAC, write owner, generic write or generic all.
+  - A private application directory follows the same rule and is not a
+    reparse point.
+  - New files and directories get a protected DACL with one full-control ACE
+    for the current user, owned by the current user.
+  - An explicitly chosen user file (0011 §4 path rules) has no reparse point
+    on its path. No other account may delete, rename or re-permission any
+    folder above it. Its own folder gives other accounts no right to add or
+    remove entries.
+- **Identity, locks and replacement (0004 §1.3).**
+  - File identity is the volume serial number plus the 128-bit file ID.
+  - The process lock is a byte-range lock far beyond SQLite's lock bytes.
+  - Directory locks are session-local named mutexes.
+  - Renames never replace (write-through), except for anchor metadata.
+  - A file is never renamed while SQLite holds it open. The connection is
+    closed, the file renamed under the retained lock, and the connection
+    reopened with full hardening.
+- **Lifecycle (0008 §1.4).** On Windows, lock and sleep monitoring is
+  required, unlike the optional Linux integration above.
+  - Monitoring uses WTS session notifications for this session and power
+    suspend broadcasts.
+  - Screen lock, console disconnect and remote disconnect lock the session.
+    Logoff, end of session and loss of the watcher are protection loss.
+  - A session that is already locked when the watcher is installed locks.
+  - Failure to install the watcher blocks unlock.
+- **Clipboard (0008 §3).** The text is offered with the
+  `ExcludeClipboardContentFromMonitorProcessing`,
+  `CanIncludeInClipboardHistory = 0` and `CanUploadToCloudClipboard = 0`
+  formats.
+  - Ownership is the clipboard sequence number. A change is
+    `ClipboardReplaced`, because consumption cannot be confirmed.
+  - Expiry clears the clipboard, and zeroes the OS copy first, only while the
+    clipboard is still owned.
+- **Protection evidence (0008 §1.2–1.3).**
+  - Storage, swap and hibernation evidence is unknown, so the
+    reduced-protection acknowledgement applies.
+  - Disabling core dumps and debugger attach is reported as unsupported.
+  - Memory pages are locked with `VirtualLock`.
+- **Locations.**
+  - Application data is device-local, never roaming:
+    `%LOCALAPPDATA%\QuickVault\` with `vaults`, `anchors`, `snapshots` and
+    `state`.
+  - The CLI configuration is `%APPDATA%\QuickVault\config.toml`.
+  - Vault file names derived from vault names also refuse `<>:"|?*`, a
+    trailing dot and the reserved device names (CON, PRN, AUX, NUL, COM1–9,
+    LPT1–9).
+  - Network and removable drives produce the 0004 §1.1 warnings.
+- **Disabled features.**
+  - Quick unlock: no Windows backend is specified or validated (0002 §5.2).
+  - Autofill: no desktop autofill exists (OQ2).
+- **Console input (§3).** Console input reads the console with echo and
+  line input off and edits lines itself, so the console keeps no history of
+  secret lines.
+
 ### 6. Early cross-platform framework validation
 
 Dioxus with its standard webview renderer and input controls is the owner's
@@ -491,6 +557,12 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-12: §5.1 Windows profile: ACL owner-only rules, identity and
+  locks, required WTS/sleep lifecycle, clipboard exclusion formats, unknown
+  persistence evidence, device-local locations, quick unlock disabled
+  (owner-delegated, plan 0052). Still Draft.
+- 2026-11-12: §1.4: Windows is delivery phase 3 and the optional remote
+  service phase 4 (owner request; roadmap 0002 revision).
 - 2026-11-11: §1.8: fixed sidebar types with Other and Wi-Fi; list swaps
   without blanking while a page loads (owner request, plan 0051; details
   owner-delegated). Still Draft.

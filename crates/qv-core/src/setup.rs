@@ -403,7 +403,6 @@ impl Core {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::DirBuilderExt;
 
     use qv_crypto::PasswordKdfProfile;
 
@@ -459,10 +458,7 @@ mod tests {
         );
         assert!(!inside.exists());
         let below = env.anchors.join("sub");
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&below)
-            .unwrap();
+        qv_store::create_private_dirs(&below).unwrap();
         assert_eq!(
             err(core.create(&below.join("v.qvault"), &pw(PASSWORD), "x")),
             CoreError::AnchorLocation

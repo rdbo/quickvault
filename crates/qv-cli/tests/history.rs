@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Real binary history masking, causal restore, suppression and preflight.
+#![cfg(any(target_os = "linux", target_os = "android"))]
 #![allow(clippy::unwrap_used, clippy::panic)]
 mod common;
 use common::{Home, PASSWORD, arg, piped};

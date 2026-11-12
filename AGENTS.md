@@ -108,7 +108,14 @@ requests override the named intermediate commit/session boundary.
   the local vendor patch as maintained application code; run its focused tests.
 - Crates opt into workspace lints (`[lints] workspace = true`): `unsafe_code`
   forbidden; `unwrap`/`expect`/`panic!` denied outside tests. `unsafe` requires
-  plan permission and a `// SAFETY:` comment.
+  plan permission and a `// SAFETY:` comment. The one exception is `qv-win`
+  (Windows-only Win32 FFI, plan 0052). Its own lint table allows `unsafe` only
+  in modules marked `#![allow(unsafe_code)]`, with Clippy enforcing one
+  documented operation per block. Add Windows OS calls there, never elsewhere.
+- Windows: the CI `windows` job (MSVC) runs the gates. A Windows change needs
+  `cargo clippy --target x86_64-pc-windows-gnu` locally (mingw-w64). Tests
+  under Wine (runner with `umask 077` and `QV_WINE=1`) are development
+  evidence only; see plan 0052.
 - Application-controlled Rust secrets live in `qv_crypto::{SecretBytes,
   SecretArray}`, accessed via `expose_secret*`; zeroize, no secret-bearing
   `Debug`/`Display`, logs, errors, panics or argv (0008, 0011 §3). Dioxus input

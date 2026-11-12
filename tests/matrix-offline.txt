@@ -3,7 +3,7 @@
 # Rows of spec 0012 §1 that apply to the offline Linux CLI release (plan 0024).
 # One exact row name per line, in 0012 order. Each needs at least one test
 # tagged `// 0012 §1: <row>` (scripts/check-matrix.sh). A row's parts that need
-# file exchange (2.2), LAN (2.x), the server (3.x) or the GUI (2.4+) belong to
+# file exchange (2.2), LAN (2.x), the server (4.x) or the GUI (2.4+) belong to
 # those releases' gates.
 Implicit server prerequisite
 Old-date concurrent edits

@@ -42,7 +42,7 @@ use rusqlite::{Connection, TransactionBehavior};
 
 use crate::anchor::AnchorDir;
 use crate::crash::{CrashPoint, point};
-use crate::error::{StoreError, errno_err, write_err};
+use crate::error::{StoreError, write_err};
 use crate::fs::{self, LockedFile};
 use crate::head::{Anchor, AnchorStatus, LocalHead, compare, head_mac, local_digest, verify_head};
 use crate::header::{Header, INITIAL_GENERATION, SlotRow, mac_transcript};
@@ -445,10 +445,69 @@ impl VaultFile {
             return Err(StoreError::Internal);
         }
         self.lock.same_as_path(&self.path)?;
-        fs::rename_noreplace(&self.path, to)?;
-        self.path = to.to_owned();
+        // Windows refuses to rename a file SQLite holds open (its handles do
+        // not share delete): close the connection first, rename under the
+        // retained lock, then reopen and re-harden (plan 0052).
+        #[cfg(windows)]
+        {
+            let placeholder =
+                Connection::open_in_memory().map_err(|e| crate::error::sqlite_err(&e))?;
+            let old = std::mem::replace(&mut self.conn, placeholder);
+            old.close().map_err(|(_, e)| crate::error::sqlite_err(&e))?;
+            let renamed = fs::rename_noreplace(&self.path, to);
+            if renamed.is_ok() {
+                self.path = to.to_owned();
+            }
+            // Reopen at whichever name the file now has, even after a failed
+            // rename, so this value never keeps the placeholder.
+            self.reopen()?;
+            renamed?;
+        }
+        #[cfg(not(windows))]
+        {
+            fs::rename_noreplace(&self.path, to)?;
+            self.path = to.to_owned();
+        }
         fs::sync_dir(fs::parent_of(to))?;
         self.lock.same_as_path(&self.path)
+    }
+
+    /// Reopens the hardened connection at `self.path` under the retained
+    /// lock and requires the same header, MAC and slots as before.
+    #[cfg(windows)]
+    fn reopen(&mut self) -> Result<(), StoreError> {
+        fs::check_sidecars(&self.path)?;
+        self.lock.same_as_path(&self.path)?;
+        let mut conn = open_connection(&self.path)?;
+        self.lock.same_as_path(&self.path)?;
+        harden(&mut conn, &self.budget)?;
+        let rows = {
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| validation_err(&e))?;
+            schema::validate_schema(&tx)?;
+            let rows = schema::read_rows(&tx)?;
+            tx.commit().map_err(|e| validation_err(&e))?;
+            rows
+        };
+        if rows.header_body != self.header_body
+            || rows.header_mac != *self.header_mac.as_bytes()
+            || rows.slots.len() != self.slots.len()
+        {
+            return Err(StoreError::Replaced);
+        }
+        self.conn = conn;
+        Ok(())
+    }
+
+    /// Closes the SQLite connection and keeps only the lock, so the file can
+    /// be published by rename: Windows refuses to rename a file SQLite holds
+    /// open (plan 0052). Nothing may read the file through this value again.
+    pub(crate) fn into_lock(self) -> Result<LockedFile, StoreError> {
+        let Self { conn, lock, .. } = self;
+        conn.close()
+            .map_err(|(_, e)| crate::error::sqlite_err(&e))?;
+        Ok(lock)
     }
 
     /// Switches this file to the transition role once its journal is
@@ -652,10 +711,8 @@ impl VaultFile {
             return Err(StoreError::Unsupported);
         }
         let name = Text::new(name).map_err(|_| StoreError::InvalidEdit)?;
-        match rustix::fs::lstat(path) {
-            Ok(_) => return Err(StoreError::Exists),
-            Err(rustix::io::Errno::NOENT) => {}
-            Err(e) => return Err(errno_err(e)),
+        if fs::entry(path)? != fs::Entry::Missing {
+            return Err(StoreError::Exists);
         }
         fs::check_parent(path)?;
         fs::remove_stale_temps(path)?;
@@ -1068,7 +1125,6 @@ impl UnlockedVault {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::os::unix::fs::PermissionsExt;
     use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
 
     use qv_crypto::{DerivationProfile, MacProfile};
@@ -1262,8 +1318,7 @@ pub(crate) mod tests {
             let _k = kdf();
             VaultFile::create(&p, &pw(PASSWORD), NAME, &dir).unwrap()
         };
-        let meta = std::fs::symlink_metadata(&p).unwrap();
-        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+        assert!(crate::fs::test_dir::has_mode(&p, 0o600));
         let h = *created.header();
         assert_eq!(h.key_generation, KeyGeneration(1));
         assert_eq!(h.data_profile, StoredDataProfile::V1);
@@ -1675,8 +1730,9 @@ pub(crate) mod tests {
         assert_eq!(err(create(&existing)), StoreError::Exists);
         assert_eq!(std::fs::read(&existing).unwrap(), b"keep");
         let link = d.join("l.qvault");
-        std::os::unix::fs::symlink(d.join("missing"), &link).unwrap();
-        assert_eq!(err(create(&link)), StoreError::Exists);
+        if crate::fs::test_dir::symlink(&d.join("missing"), &link) {
+            assert_eq!(err(create(&link)), StoreError::Exists);
+        }
         assert_eq!(err(create(&d.join("v.db"))), StoreError::Unsupported);
         assert_eq!(err(create(&d.join("v"))), StoreError::Unsupported);
         let open_dir = d.subdir("open", 0o777);
@@ -1720,9 +1776,17 @@ pub(crate) mod tests {
         assert_eq!(shown, "VaultFile(..)");
         assert!(!shown.contains("v.qvault"));
         let (q, _) = copy_fixture(&d, &a, "w.qvault");
-        std::fs::rename(&q, &p).unwrap();
-        assert_eq!(f.check_identity(), Err(StoreError::Replaced));
-        drop(f);
+        if cfg!(windows) {
+            // Windows refuses to replace a file SQLite holds open.
+            assert!(std::fs::rename(&q, &p).is_err());
+            assert_eq!(f.check_identity(), Ok(()));
+            drop(f);
+            std::fs::rename(&q, &p).unwrap();
+        } else {
+            std::fs::rename(&q, &p).unwrap();
+            assert_eq!(f.check_identity(), Err(StoreError::Replaced));
+            drop(f);
+        }
         // The replacement is a valid vault and opens on its own.
         assert!(VaultFile::open(&p).is_ok());
     }

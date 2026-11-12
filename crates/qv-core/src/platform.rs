@@ -21,6 +21,13 @@ pub use qv_platform::{
     files,
     linux::{InstanceLock, LinuxPlatform, portal},
 };
+#[cfg(windows)]
+pub use qv_platform::{
+    files,
+    windows::{
+        InstanceLock, Pick as WindowsPick, WinClipboard, WindowsPlatform, WtsLifecycle, pick,
+    },
+};
 use std::sync::Arc;
 
 pub(crate) struct PlatformPolicy {
@@ -57,6 +64,9 @@ impl Core {
         });
         self
     }
+    /// Windows uses [`Self::with_platform`]: lock/sleep notifications are
+    /// required there (0009 §5.1), so a failed watcher blocks unlock.
+    ///
     /// Configure Linux OS services with optional lock/sleep notifications.
     /// Manual and application inactivity locking remain the frontend's duty.
     /// Missing monitoring requires explicit reduced-protection acknowledgement;

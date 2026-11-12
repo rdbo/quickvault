@@ -1549,9 +1549,9 @@ criteria = "safe-to-deploy"
 notes = "Plan 0047: owner-approved SQLite advisory repair (2026-11-09); carry forward the existing exact development baseline as unaudited debt, not certification or release approval."
 
 [[exemptions.rustix]]
-version = "1.1.5"
+version = "1.1.6"
 criteria = "safe-to-deploy"
-notes = "Plan0050: memory/filesystem/process OS boundaries. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
+notes = "Plan0050: memory/filesystem/process OS boundaries; 1.1.5 -> 1.1.6 in plan 0052 for RUSTSEC-2026-0486 (xattr, unused by QuickVault). Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
 [[exemptions.rustls]]
 version = "0.23.46"

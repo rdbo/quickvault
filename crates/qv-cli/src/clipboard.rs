@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Foreground X11 clipboard owner. No clipboard readback or manager handover.
+//! Foreground clipboard owner (X11 on Linux, Win32 on Windows). No clipboard
+//! readback or manager handover.
 use crate::{
     cli::Ctx,
     exit::{CliError, LIMIT, OTHER},
@@ -41,12 +42,20 @@ fn backend<T, E>(value: Result<T, E>) -> Result<T, CliError> {
     value.map_err(|_| {
         CliError::new(
             OTHER,
-            "clipboard backend failed or is unavailable (requires local X11)",
+            if cfg!(windows) {
+                "clipboard backend failed or is unavailable (requires a desktop session)"
+            } else {
+                "clipboard backend failed or is unavailable (requires local X11)"
+            },
         )
     })
 }
 pub(crate) fn hold(value: SecretBytes, options: ClipboardOptions) -> Result<(), CliError> {
-    use qv_core::platform::{Clipboard, PlatformError, X11Clipboard};
+    #[cfg(windows)]
+    use qv_core::platform::WinClipboard as Backend;
+    #[cfg(target_os = "linux")]
+    use qv_core::platform::X11Clipboard as Backend;
+    use qv_core::platform::{Clipboard, PlatformError};
     if value.len() > MAX_VALUE {
         return Err(CliError::new(LIMIT, "clipboard value exceeds model limit"));
     }
@@ -59,10 +68,10 @@ pub(crate) fn hold(value: SecretBytes, options: ClipboardOptions) -> Result<(), 
             "qv: warning: reduced protection: secret buffers could not all be locked in memory and may reach swap\n",
         );
     }
-    let tty = rustix::termios::isatty(rustix::stdio::stderr());
+    let tty = crate::term::stderr_is_tty();
     let token = crate::signals::token();
     let mut last = None;
-    let result = X11Clipboard.hold(
+    let result = Backend.hold(
         value,
         options.timeout,
         std::sync::Arc::new(move || token.is_cancelled()),

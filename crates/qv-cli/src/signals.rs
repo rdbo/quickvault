@@ -12,11 +12,17 @@ static CANCELLED: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 
 pub(crate) fn install() -> Result<(), CliError> {
     let flag = CANCELLED.get_or_init(|| Arc::new(AtomicBool::new(false)));
-    for signal in [
+    // Windows delivers Ctrl-C and Ctrl-Break as SIGINT and SIGBREAK
+    // (signal-hook's console handler); there is no SIGHUP.
+    #[cfg(unix)]
+    let signals = [
         signal_hook::consts::SIGINT,
         signal_hook::consts::SIGTERM,
         signal_hook::consts::SIGHUP,
-    ] {
+    ];
+    #[cfg(windows)]
+    let signals = [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM];
+    for signal in signals {
         signal_hook::flag::register(signal, flag.clone())
             .map_err(|_| CliError::new(crate::exit::OTHER, "could not install signal handlers"))?;
     }

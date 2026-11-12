@@ -131,7 +131,7 @@ impl VerifiedIncoming {
         // Unlink before any copy: success/failure/cancellation leaves no name.
         // A crash between creation and unlink can leave an empty file; no
         // content is written before unlink. Only encrypted bytes are staged.
-        if std::fs::remove_file(&name).is_err() {
+        if fs::remove_file(&name).is_err() {
             fs::remove_best_effort(&name);
             return Err(StoreError::Io);
         }
@@ -204,12 +204,11 @@ impl VerifiedIncoming {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs::test_dir::{TestDir, write_file};
+    use crate::fs::test_dir::{TestDir, symlink, write_file};
     use crate::vault::tests::{PASSWORD, copy_fixture, edit, unlock};
     use crate::{UnlockedVault, VaultFile};
     use qv_crypto::{KeyGeneration, ObjectHashProfile, VaultId, object_hash};
     use qv_model::{RandomId, Timestamp};
-    use std::os::unix::fs::symlink;
 
     fn vault(d: &TestDir, a: &TestDir) -> UnlockedVault {
         let (path, anchors) = copy_fixture(d, a, "local.qvault");
@@ -248,7 +247,9 @@ mod tests {
         );
         assert_eq!(incoming.manifest(), u.manifest());
         assert_eq!(format!("{incoming:?}"), "VerifiedIncoming(..)");
-        assert_eq!(std::fs::read_dir(private.path()).unwrap().count(), 0);
+        if !crate::fs::test_dir::wine_keeps_deleted_names() {
+            assert_eq!(std::fs::read_dir(private.path()).unwrap().count(), 0);
+        }
         std::fs::write(&source, b"replaced").unwrap();
         assert_eq!(
             incoming
@@ -352,23 +353,29 @@ mod tests {
         let source = d.join("input.qvsnap");
         write_file(&source, &bytes, 0o600);
         let link = d.join("link");
-        symlink(&source, &link).unwrap();
-        let fifo = d.join("fifo");
-        rustix::fs::mkfifoat(
-            rustix::fs::CWD,
-            &fifo,
-            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
-        )
-        .unwrap();
-        assert_eq!(
-            VerifiedIncoming::open(&fifo, private.path(), scope(&u), u.vault_key(), &|| false)
-                .unwrap_err(),
-            StoreError::UnsafeFile
-        );
-        assert!(
-            VerifiedIncoming::open(&link, private.path(), scope(&u), u.vault_key(), &|| false)
+        #[cfg(unix)]
+        {
+            let fifo = d.join("fifo");
+            rustix::fs::mkfifoat(
+                rustix::fs::CWD,
+                &fifo,
+                rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+            )
+            .unwrap();
+            assert_eq!(
+                VerifiedIncoming::open(&fifo, private.path(), scope(&u), u.vault_key(), &|| false)
+                    .unwrap_err(),
+                StoreError::UnsafeFile
+            );
+        }
+        if symlink(&source, &link) {
+            assert!(
+                VerifiedIncoming::open(&link, private.path(), scope(&u), u.vault_key(), &|| {
+                    false
+                })
                 .is_err()
-        );
+            );
+        }
         assert!(
             VerifiedIncoming::open(d.path(), private.path(), scope(&u), u.vault_key(), &|| {
                 false

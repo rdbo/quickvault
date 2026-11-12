@@ -19,7 +19,7 @@
 //!
 //! | Module | Contents | Spec |
 //! |--------|----------|------|
-//! | `fs` | owner-only checks, symlink rejection, parent-directory rule, sidecar checks, `flock` process lock, file identity, temp file + `RENAME_NOREPLACE` | 0004 §1.1, §1.3; 0008 §5 |
+//! | `fs` | owner-only checks, symlink rejection, parent-directory rule, sidecar checks, `flock` process lock, file identity, temp file + `RENAME_NOREPLACE`; on Windows (`fs_windows`) the ACL, reparse-point, `LockFileEx` and write-through rename equivalents | 0004 §1.1, §1.3; 0008 §5; 0009 §5.1 |
 //! | `location` | [`LocationWarnings`] for sync folders, network filesystems, removable media | 0004 §1.1 |
 //! | `sqlite` | open flags, `db_config`, pragmas, limits, step budget, all read back | 0004 §1.2, §4.1 |
 //! | `schema` | DDL, application ID, schema version, `quick_check`, exact schema, row checks, object rows | 0004 §1.2, §2, §4.1 |
@@ -115,7 +115,7 @@
 //! - If the anchor update after a durable commit fails, the commit returns
 //!   that error and the next write retries the anchor first.
 //! - The `local-state` key MACs the head; encrypting sync state with it
-//!   comes with sync (milestone 3).
+//!   comes with sync (milestone 4).
 //!
 //! Password replacement stages a fresh complete descriptor, encrypted causal
 //! keyslot record and header MAC inside the existing write transaction. Commit
@@ -191,104 +191,106 @@
 //! (2.2); standalone archive recovery using a phrase;
 //! sync state, outbox and
 //! checkpoints (milestones 2–3);
-//! quick-unlock slots (2.6); keystore-backed anchors (2.3, 2.6); Windows
-//! and macOS file safety (4.1 and later).
+//! quick-unlock slots (2.6); keystore-backed anchors (2.3, 2.6); macOS
+//! file safety (later). Windows file safety is in `fs_windows` (plan 0052).
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod anchor;
 mod archive;
 mod archive_verify;
 mod attachment;
 mod crash;
 #[cfg(test)]
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod crash_tests;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod creation;
-#[cfg(all(test, any(target_os = "linux", target_os = "android")))]
+#[cfg(all(test, any(target_os = "linux", target_os = "android", windows)))]
 mod credentials;
 mod error;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
+#[cfg_attr(windows, path = "fs_windows.rs")]
 mod fs;
 mod head;
 mod header;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod incoming;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
+#[cfg_attr(windows, path = "incoming_path_windows.rs")]
 mod incoming_path;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod lan_staging;
 #[cfg(test)]
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod lan_staging_tests;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod lan_store;
 #[cfg(test)]
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod lan_store_tests;
 mod limits;
 mod location;
 mod manifest;
 mod object;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod receipt_store;
 mod receipts;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod restore;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod rotation;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod rotation_guard;
 mod rotation_install;
 mod rotation_journal;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod schema;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod slot;
 mod snapshot_inventory;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod sqlite;
 mod validation;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod vault;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod vault_import;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod verify;
 #[cfg(test)]
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod verify_tests;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod write;
 // Other targets get an API that fails closed; on Linux it is compiled only
 // for its own tests, so its never-called methods are allowed to be unused.
-#[cfg(any(not(any(target_os = "linux", target_os = "android")), test))]
+#[cfg(any(not(any(target_os = "linux", target_os = "android", windows)), test))]
 #[cfg_attr(test, allow(dead_code))]
 mod unsupported;
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use anchor::{AnchorDir, MAX_ANCHOR_BYTES};
 pub use archive::{
     ARCHIVE_DERIVATION_PROFILE, ARCHIVE_EXTENSION, ARCHIVE_FORMAT, ARCHIVE_HEADER_LABEL,
     ARCHIVE_MAC_PROFILE, ARCHIVE_MAGIC, ArchiveHeader, ArchiveObject, ArchiveScope, ArchiveStats,
     MAX_ARCHIVE_HEADER_BYTES, OpenedArchive, read_archive, read_header,
 };
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use archive::{PublishedSnapshot, SnapshotDir, SnapshotEntry, SnapshotKind};
 pub use attachment::StagedAttachment;
 pub use error::StoreError;
 pub use head::AnchorStatus;
 pub use header::Header;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use incoming::VerifiedIncoming;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 #[cfg(test)]
 pub use lan_staging::PasswordProof;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use lan_staging::{
     LanEnrollmentProof, LanPasswordGrant, LanStaging, Planned, StagedKeyslot, VerifiedLanStaging,
 };
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use lan_store::LanServeState;
 pub use limits::{
     MAX_ARCHIVE_MANIFEST_FRAME, MAX_ARCHIVE_OBJECT_FRAME, MAX_ARCHIVE_TOTAL_LENGTH, MAX_CHUNKS,
@@ -300,17 +302,17 @@ pub use receipts::{
     ArchiveReceipts, MAX_ARCHIVE_RECEIPTS, MAX_RECEIPT_CIPHERTEXT, MAX_RECEIPT_ENVELOPE,
     MAX_RECEIPT_PATH_BYTES,
 };
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use vault_import::{PendingVaultImport, VerifiedVaultImport};
 
 pub use manifest::{MANIFEST_FORMAT, Manifest, ObjectRef, RecordEntry, VersionRef};
 pub use object::ObjectEnvelope;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use rotation::PreparedRotation;
 pub use rotation_install::{
     InstallError, Installed, Leftovers, NeededPasswords, RotationChoice, RotationState,
 };
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use rotation_install::{InterruptedRotation, needed_passwords, rotation_pending};
 pub use rotation_journal::{
     MAX_ROTATION_JOURNAL_BYTES, RotationJournal, RotationJournalBody, RotationSide,
@@ -318,18 +320,26 @@ pub use rotation_journal::{
 pub use snapshot_inventory::{
     InventoryRow, MAX_INVENTORY_BYTES, MAX_INVENTORY_ROWS, SnapshotInventory, UnverifiedInventory,
 };
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
+#[cfg(not(any(target_os = "linux", target_os = "android", windows)))]
 pub use unsupported::{
     AnchorDir, InterruptedRotation, MAX_ANCHOR_BYTES, PendingVaultImport, PreparedRotation,
     UnlockedVault, VAULT_EXTENSION, VaultFile, VerifiedVaultImport, VerifyCounts, Write,
     needed_passwords, rotation_pending,
 };
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use vault::{UnlockedVault, VAULT_EXTENSION, VaultFile};
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use verify::VerifyCounts;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use write::Write;
+
+/// Creates `dir` and any missing parents as owner-only directories (mode
+/// 0700; on Windows a protected owner-only DACL, 0009 §5.1). Existing
+/// directories are left as they are; callers check them where it matters.
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
+pub fn create_private_dirs(dir: &std::path::Path) -> Result<(), StoreError> {
+    fs::create_private_dir_all(dir)
+}
 
 #[cfg(test)]
 mod tests {

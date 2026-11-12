@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Checks that every Rust source starts with the SPDX header and every shell
-# script carries it on its first or second line (after a shebang). Covers
-# tracked and untracked, non-ignored files, so it also works before a commit.
+# or PowerShell script carries it on its first or second line (after a
+# shebang). Covers tracked and untracked, non-ignored files, so it also
+# works before a commit.
 # The exact owner-approved vendor package retains upstream headers (plan 0030).
 
 set -eu
@@ -30,7 +31,7 @@ approved_vendor() {
     ' "$vendor_dir/Cargo.toml"
 }
 
-files=$(git ls-files --cached --others --exclude-standard -- '*.rs' '*.sh') || {
+files=$(git ls-files --cached --others --exclude-standard -- '*.rs' '*.sh' '*.ps1') || {
     echo 'cannot list source files for SPDX check' >&2
     exit 1
 }
@@ -45,7 +46,7 @@ while IFS= read -r f; do
         echo "invalid vendor identity metadata: $f" | tee -a "$missing"
         continue ;;
     *.rs) [ "$(sed -n 1p "$f")" = "$rs_header" ] && continue ;;
-    *.sh) { [ "$(sed -n 1p "$f")" = "$sh_header" ] || [ "$(sed -n 2p "$f")" = "$sh_header" ]; } && continue ;;
+    *.sh|*.ps1) { [ "$(sed -n 1p "$f")" = "$sh_header" ] || [ "$(sed -n 2p "$f")" = "$sh_header" ]; } && continue ;;
     esac
     echo "missing SPDX header: $f" | tee -a "$missing"
 done

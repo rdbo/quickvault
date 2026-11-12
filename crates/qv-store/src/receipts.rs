@@ -178,6 +178,6 @@ impl ArchiveReceipts {
 }
 
 #[cfg(test)]
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 #[path = "receipt_tests.rs"]
 mod tests;

@@ -35,9 +35,10 @@ qv-store = { path = "crates/qv-store", version = "=0.0.0" }
 qv-platform = { path = "crates/qv-platform", version = "=0.0.0" }
 qv-protocol = { path = "crates/qv-protocol", version = "=0.0.0" }
 qv-sync = { path = "crates/qv-sync", version = "=0.0.0" }
+qv-win = { path = "crates/qv-win", version = "=0.0.0" }
 region = "=4.0.1"
 rusqlite = { version = "=0.41.0", default-features = false, features = ["bundled", "hooks", "limits"] }
-rustix = { version = "=1.1.5", default-features = false, features = ["std", "process"] }
+rustix = { version = "=1.1.6", default-features = false, features = ["std", "process"] }
 sha1 = { version = "=0.11.0", default-features = false, features = ["zeroize"] }
 signal-hook = { version = "=0.4.5", default-features = false }
 sha2 = { version = "=0.11.1", default-features = false, features = ["zeroize"] }

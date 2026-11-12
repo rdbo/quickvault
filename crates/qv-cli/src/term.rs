@@ -18,11 +18,19 @@
 //! so it never reallocates; input past the bound is drained to the end of
 //! the line and refused (exit 9). Signals are checked between bounded polls;
 //! cancellation unwinds through the terminal and alternate-screen guards.
+//!
+//! On Windows (plan 0052) the console's echo, line input and (except
+//! between prompts) Ctrl-C processing are turned off and pending input is
+//! discarded; the same line editing runs on UTF-16 key units converted to
+//! UTF-8, so the console keeps no line buffer or history of what was typed.
+//! `--password-stdin` reads the standard input handle one byte at a time.
 
+#[cfg(unix)]
 use std::os::fd::BorrowedFd;
 use std::time::Duration;
 
 use qv_core::SecretBytes;
+#[cfg(unix)]
 use rustix::termios::{LocalModes, OptionalActions, SpecialCodeIndex, Termios};
 use zeroize::Zeroizing;
 
@@ -53,22 +61,41 @@ impl core::fmt::Debug for Typed {
     }
 }
 
+/// The process's console (Windows): standard input and standard error.
+#[cfg(windows)]
+#[derive(Clone, Copy)]
+pub(crate) struct Console<'a>(std::marker::PhantomData<&'a ()>);
+
+#[cfg(unix)]
+type Handle<'a> = BorrowedFd<'a>;
+#[cfg(windows)]
+type Handle<'a> = Console<'a>;
+
 /// A terminal: where prompts read and write.
 #[derive(Clone, Copy)]
 pub(crate) struct Tty<'a> {
-    input: BorrowedFd<'a>,
-    output: BorrowedFd<'a>,
+    input: Handle<'a>,
+    output: Handle<'a>,
     deadline: Option<std::time::Instant>,
     cancelled: Option<&'a (dyn Fn() -> bool + Sync)>,
 }
 
 /// Restores the saved terminal state when dropped.
+#[cfg(unix)]
 pub(crate) struct RawGuard<'a> {
     fd: BorrowedFd<'a>,
     saved: Termios,
     flush: bool,
 }
 
+/// Restores the saved console mode when dropped.
+#[cfg(windows)]
+pub(crate) struct RawGuard<'a> {
+    _mode: qv_win::console::RawMode,
+    _console: Console<'a>,
+}
+
+#[cfg(unix)]
 impl Drop for RawGuard<'_> {
     fn drop(&mut self) {
         let action = if self.flush {
@@ -85,13 +112,35 @@ fn io_err<E>(_: E) -> CliError {
 }
 
 /// Whether standard input is a terminal.
+#[cfg(unix)]
 pub(crate) fn stdin_is_tty() -> bool {
     rustix::termios::isatty(rustix::stdio::stdin())
 }
 
 /// Whether standard output is a terminal.
+#[cfg(unix)]
 pub(crate) fn stdout_is_tty() -> bool {
     rustix::termios::isatty(rustix::stdio::stdout())
+}
+
+/// Whether standard input is a console.
+#[cfg(windows)]
+pub(crate) fn stdin_is_tty() -> bool {
+    qv_win::console::stdin_is_console()
+}
+
+/// Whether standard output is a console.
+#[cfg(windows)]
+pub(crate) fn stdout_is_tty() -> bool {
+    qv_win::console::is_console(qv_win::console::Std::Out)
+}
+
+/// Whether standard error is a console.
+pub(crate) fn stderr_is_tty() -> bool {
+    #[cfg(unix)]
+    return rustix::termios::isatty(rustix::stdio::stderr());
+    #[cfg(windows)]
+    return qv_win::console::is_console(qv_win::console::Std::Err);
 }
 
 /// Keep terminal type-ahead private until dispatch has finished (QV-018).
@@ -112,9 +161,16 @@ pub(crate) fn stdio_tty() -> Result<Tty<'static>, CliError> {
             "this command needs a terminal to prompt on (standard input is not a terminal)",
         ));
     }
+    #[cfg(unix)]
+    let (input, output) = (rustix::stdio::stdin(), rustix::stdio::stderr());
+    #[cfg(windows)]
+    let (input, output) = (
+        Console(std::marker::PhantomData),
+        Console(std::marker::PhantomData),
+    );
     Ok(Tty {
-        input: rustix::stdio::stdin(),
-        output: rustix::stdio::stderr(),
+        input,
+        output,
         deadline: None,
         cancelled: None,
     })
@@ -122,11 +178,12 @@ pub(crate) fn stdio_tty() -> Result<Tty<'static>, CliError> {
 
 enum Key {
     Byte(u8),
+    #[cfg_attr(windows, allow(dead_code))] // A console has no EOF; Ctrl-D is a byte.
     Eof,
 }
 
 impl<'a> Tty<'a> {
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn new(input: BorrowedFd<'a>, output: BorrowedFd<'a>) -> Self {
         Self {
             input,
@@ -163,6 +220,86 @@ impl<'a> Tty<'a> {
         self.mode(false, false)
     }
 
+    #[cfg(windows)]
+    fn mode(&self, keep_signals: bool, flush: bool) -> Result<RawGuard<'a>, CliError> {
+        Ok(RawGuard {
+            _mode: qv_win::console::raw_mode(keep_signals, flush).map_err(io_err)?,
+            _console: self.input,
+        })
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn say(&self, s: &str) -> Result<(), CliError> {
+        let _ = self.output;
+        qv_win::console::write_std(qv_win::console::Std::Err, s.as_bytes()).map_err(io_err)
+    }
+
+    /// One byte of typed input: a UTF-16 key unit becomes UTF-8, whose
+    /// remaining bytes wait in a zeroized per-thread buffer.
+    #[cfg(windows)]
+    fn key(&self) -> Result<Key, CliError> {
+        use std::cell::RefCell;
+        thread_local! {
+            static PENDING: RefCell<(Zeroizing<[u8; 4]>, usize, usize)> =
+                RefCell::new((Zeroizing::new([0; 4]), 0, 0));
+        }
+        if let Some(b) = PENDING.with(|p| {
+            let mut p = p.borrow_mut();
+            let (buf, at, len) = &mut *p;
+            (*at < *len).then(|| {
+                let b = buf[*at];
+                buf[*at] = 0;
+                *at += 1;
+                b
+            })
+        }) {
+            return Ok(Key::Byte(b));
+        }
+        let mut high = None;
+        loop {
+            crate::signals::check()?;
+            if self
+                .deadline
+                .is_some_and(|t| std::time::Instant::now() >= t)
+                || self.cancelled.is_some_and(|c| c())
+            {
+                return Err(CliError::cancelled());
+            }
+            let Some(unit) =
+                qv_win::console::read_unit(Duration::from_millis(100)).map_err(io_err)?
+            else {
+                continue;
+            };
+            let c = match unit {
+                0xD800..=0xDBFF => {
+                    high = Some(unit);
+                    continue;
+                }
+                0xDC00..=0xDFFF => match high.take() {
+                    Some(h) => char::decode_utf16([h, unit]).next().and_then(Result::ok),
+                    None => None,
+                },
+                u => {
+                    high = None;
+                    char::from_u32(u32::from(u))
+                }
+            };
+            let Some(c) = c else { continue };
+            let mut buf = Zeroizing::new([0u8; 4]);
+            let len = c.encode_utf8(&mut buf[..]).len();
+            let first = buf[0];
+            PENDING.with(|p| {
+                let mut p = p.borrow_mut();
+                p.0.copy_from_slice(&buf[..]);
+                p.0[0] = 0;
+                p.1 = 1;
+                p.2 = len;
+            });
+            return Ok(Key::Byte(first));
+        }
+    }
+
+    #[cfg(unix)]
     fn mode(&self, keep_signals: bool, flush: bool) -> Result<RawGuard<'a>, CliError> {
         let saved = rustix::termios::tcgetattr(self.input).map_err(io_err)?;
         let mut t = saved.clone();
@@ -183,6 +320,7 @@ impl<'a> Tty<'a> {
     }
 
     /// Writes program text (labels) to the terminal.
+    #[cfg(unix)]
     pub(crate) fn say(&self, s: &str) -> Result<(), CliError> {
         let mut b = s.as_bytes();
         while !b.is_empty() {
@@ -196,6 +334,7 @@ impl<'a> Tty<'a> {
         Ok(())
     }
 
+    #[cfg(unix)]
     fn key(&self) -> Result<Key, CliError> {
         let mut b = Zeroizing::new([0u8; 1]);
         loop {
@@ -345,10 +484,12 @@ impl<'a> Tty<'a> {
 }
 
 /// Wait for data while remaining responsive to cancellation even on a pipe.
+#[cfg(unix)]
 fn readable(fd: BorrowedFd<'_>) -> Result<(), CliError> {
     readable_until(fd, None, None)
 }
 
+#[cfg(unix)]
 fn readable_until(
     fd: BorrowedFd<'_>,
     deadline: Option<std::time::Instant>,
@@ -387,26 +528,80 @@ pub(crate) fn password_from_stdin(label: &str) -> Result<Typed, CliError> {
     if stdin_is_tty() {
         return stdio_tty()?.secret(label, MAX_PASSWORD_BYTES);
     }
-    read_first_line(rustix::stdio::stdin(), MAX_PASSWORD_BYTES)
+    #[cfg(unix)]
+    let input = rustix::stdio::stdin();
+    // An unbuffered duplicate of the standard input handle, so std's
+    // buffered `Stdin` never holds the password.
+    #[cfg(windows)]
+    let input = {
+        use std::os::windows::io::AsHandle;
+        std::fs::File::from(
+            std::io::stdin()
+                .as_handle()
+                .try_clone_to_owned()
+                .map_err(io_err)?,
+        )
+    };
+    read_first_line(input, MAX_PASSWORD_BYTES)
 }
 
-/// The first line of `fd`, at most `max` bytes after removing one trailing
-/// `\n` or `\r\n`.
-fn read_first_line(fd: BorrowedFd<'_>, max: usize) -> Result<Typed, CliError> {
+/// Reads one byte; `Ok(0)` at EOF. Waits in bounded polls so signals
+/// still cancel on a pipe.
+#[cfg(unix)]
+fn read_byte(fd: BorrowedFd<'_>, b: &mut [u8]) -> Result<usize, CliError> {
+    loop {
+        readable(fd)?;
+        match rustix::io::read(fd, &mut *b) {
+            Err(rustix::io::Errno::INTR) => {}
+            other => return other.map_err(io_err),
+        }
+    }
+}
+
+/// Reads one byte; `Ok(0)` at EOF (a closed pipe is EOF too). The read
+/// blocks; signals are checked between bytes.
+#[cfg(windows)]
+fn read_byte(mut input: &std::fs::File, b: &mut [u8]) -> Result<usize, CliError> {
+    use std::io::Read as _;
+    loop {
+        match input.read(&mut *b) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => return Ok(0),
+            other => return other.map_err(io_err),
+        }
+    }
+}
+
+/// The first line of `input`, at most `max` bytes after removing one
+/// trailing `\n` or `\r\n`.
+#[cfg(unix)]
+fn read_first_line(input: BorrowedFd<'_>, max: usize) -> Result<Typed, CliError> {
+    first_line(|b| read_byte(input, b), max)
+}
+
+#[cfg(windows)]
+fn read_first_line(input: std::fs::File, max: usize) -> Result<Typed, CliError> {
+    first_line(|b| read_byte(&input, b), max)
+}
+
+fn first_line(
+    mut read: impl FnMut(&mut [u8]) -> Result<usize, CliError>,
+    max: usize,
+) -> Result<Typed, CliError> {
     // Room for the content plus "\r\n".
     let mut buf = SecretBytes::zeroed(max + 2);
     let mut len = 0usize;
     let mut b = Zeroizing::new([0u8; 1]);
     let mut ended_at_lf = false;
     loop {
-        readable(fd)?;
-        match rustix::io::read(fd, &mut b[..]) {
-            Ok(0) => break,
-            Ok(_) if b[0] == b'\n' => {
+        crate::signals::check()?;
+        match read(&mut b[..])? {
+            0 => break,
+            _ if b[0] == b'\n' => {
                 ended_at_lf = true;
                 break;
             }
-            Ok(_) => {
+            _ => {
                 if len > max {
                     return Err(CliError::new(
                         LIMIT,
@@ -416,8 +611,6 @@ fn read_first_line(fd: BorrowedFd<'_>, max: usize) -> Result<Typed, CliError> {
                 buf.expose_secret_mut()[len] = b[0];
                 len += 1;
             }
-            Err(rustix::io::Errno::INTR) => {}
-            Err(e) => return Err(io_err(e)),
         }
     }
     if ended_at_lf
@@ -467,6 +660,7 @@ impl Drop for AltScreen {
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 pub(crate) mod tests {
     use std::os::fd::{AsFd, OwnedFd};
 

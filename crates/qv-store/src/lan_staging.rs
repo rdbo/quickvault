@@ -206,7 +206,7 @@ impl LanStaging {
         // Unlinked before any content: success, failure or cancellation
         // leaves no name; a crash in the gap leaves an empty file that the
         // next attempt removes.
-        if std::fs::remove_file(&temp).is_err() {
+        if fs::remove_file(&temp).is_err() {
             fs::remove_best_effort(&temp);
             return Err(StoreError::Io);
         }

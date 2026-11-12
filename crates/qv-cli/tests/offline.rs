@@ -164,19 +164,29 @@ fn offline_with_networking_blocked() {
 #[test]
 fn offline_cli_dependencies_are_fixed() {
     let manifest = include_str!("../Cargo.toml");
-    let deps: Vec<&str> = manifest
-        .split("\n[dependencies]\n")
-        .nth(1)
-        .unwrap()
-        .split("\n[")
-        .next()
-        .unwrap()
-        .lines()
-        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
-        .map(|l| l.split(['.', ' ', '=']).next().unwrap())
-        .collect();
+    let deps = |table: &str| -> Vec<&str> {
+        manifest
+            .split(&format!("\n{table}\n"))
+            .nth(1)
+            .unwrap()
+            .split("\n[")
+            .next()
+            .unwrap()
+            .lines()
+            .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            .map(|l| l.split(['.', ' ', '=']).next().unwrap())
+            .collect()
+    };
     assert_eq!(
-        deps,
-        ["clap", "qv-core", "rustix", "signal-hook", "zeroize"]
+        deps("[dependencies]"),
+        ["clap", "qv-core", "signal-hook", "zeroize"]
+    );
+    // Platform tables (plan 0052): terminal I/O on Unix, Win32 on Windows.
+    assert_eq!(deps("[target.'cfg(unix)'.dependencies]"), ["rustix"]);
+    assert_eq!(deps("[target.'cfg(windows)'.dependencies]"), ["qv-win"]);
+    assert_eq!(
+        manifest.matches("dependencies]").count(),
+        5,
+        "no other table"
     );
 }

@@ -165,10 +165,8 @@ impl VaultFile {
         if path.extension().and_then(|e| e.to_str()) != Some(vault::VAULT_EXTENSION) {
             return Err(StoreError::Unsupported);
         }
-        match rustix::fs::lstat(path) {
-            Ok(_) => return Err(StoreError::Exists),
-            Err(rustix::io::Errno::NOENT) => {}
-            Err(e) => return Err(crate::error::errno_err(e)),
+        if fs::entry(path)? != fs::Entry::Missing {
+            return Err(StoreError::Exists);
         }
         fs::check_parent(path)?;
         // An anchor stored/restored beside its vault cannot detect rollback.
@@ -262,6 +260,7 @@ impl VaultFile {
                     return Err(StoreError::Integrity);
                 }
             }
+            drop(reader);
             file.sync()?;
             point(CrashPoint::CreateBuilt)?;
             check_cancel(cancelled)?;
@@ -272,6 +271,7 @@ impl VaultFile {
             point(CrashPoint::CreateAnchored)?;
             check_cancel(cancelled)?;
             crate::rotation_guard::check(path)?;
+            let _lock = file.into_lock()?;
             fs::rename_noreplace(&temp, path)?;
             published = true;
             if lan.is_some() {
@@ -495,7 +495,7 @@ mod tests {
 
     #[test]
     fn restore_refuses_existing_unsafe_and_cancelled_targets() {
-        use std::os::unix::fs::{PermissionsExt, symlink};
+        use crate::fs::test_dir::{set_mode, symlink};
         let (d, _a, mut source, _) = crate::verify_tests::setup();
         let good = archive(&mut source);
         let path = d.join("restored.qvault");
@@ -503,8 +503,9 @@ mod tests {
         assert_eq!(err(restore(&source, &good, &path)), StoreError::Exists);
         assert_eq!(std::fs::read(&path).unwrap(), b"keep");
         let link = d.join("link.qvault");
-        symlink(&path, &link).unwrap();
-        assert_eq!(err(restore(&source, &good, &link)), StoreError::Exists);
+        if symlink(&path, &link) {
+            assert_eq!(err(restore(&source, &good, &link)), StoreError::Exists);
+        }
         let new = d.join("new.qvault");
         assert_eq!(
             err(VaultFile::create_from_archive(
@@ -540,14 +541,12 @@ mod tests {
         assert!(!new.exists());
 
         let unsafe_dir = TestDir::new();
-        std::fs::set_permissions(unsafe_dir.path(), std::fs::Permissions::from_mode(0o777))
-            .unwrap();
+        set_mode(unsafe_dir.path(), 0o777);
         assert_eq!(
             err(restore(&source, &good, &unsafe_dir.join("new.qvault"))),
             StoreError::UnsafeFile
         );
-        std::fs::set_permissions(unsafe_dir.path(), std::fs::Permissions::from_mode(0o700))
-            .unwrap();
+        set_mode(unsafe_dir.path(), 0o700);
         assert_eq!(
             err(restore(
                 &source,

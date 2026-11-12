@@ -70,7 +70,7 @@ pub enum CoreError {
     AnchorLocation,
     /// A LAN session failed (0013; exit codes come with the CLI commands in
     /// roadmap 2.10).
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg(any(target_os = "linux", target_os = "android", windows))]
     Lan(qv_sync::lan::LanError),
     /// A bug.
     Internal,
@@ -82,7 +82,7 @@ impl fmt::Display for CoreError {
             Self::Store(e) => e.fmt(f),
             Self::Generator(e) => e.fmt(f),
             Self::Totp(e) => e.fmt(f),
-            #[cfg(any(target_os = "linux", target_os = "android"))]
+            #[cfg(any(target_os = "linux", target_os = "android", windows))]
             Self::Lan(e) => e.fmt(f),
             Self::SnapshotOverBudget { needed } => write!(
                 f,

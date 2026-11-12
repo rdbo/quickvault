@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! User-selected files. Linux uses bounded absolute paths through the shared
-//! no-follow helpers (0011 §4 path rules). Android uses Storage Access
+//! User-selected files. Linux and Windows use bounded absolute paths through
+//! the shared no-follow helpers (0011 §4 path rules; Windows dialogs, plan
+//! 0052). Android uses Storage Access
 //! Framework documents (`android.rs`): attachments stream in bounded chunks
 //! without plaintext temporary files; ciphertext archives are staged in the
 //! private no-backup directory and removed afterwards.
@@ -14,10 +15,17 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
 
+#[cfg(all(feature = "desktop", windows))]
+pub(crate) use qv_core::platform::WindowsPick as Pick;
+/// The system picker's choice kind: the desktop portal on Linux, the
+/// native dialogs on Windows (plan 0052).
+#[cfg(all(feature = "desktop", target_os = "linux"))]
+pub(crate) use qv_core::platform::portal::Pick;
+
 /// Attachment bound shared with the CLI and model (10 MiB).
 pub const MAX_ATTACHMENT: u64 = 10 * 1024 * 1024;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 fn file_error(e: qv_core::platform::PlatformError) -> AppError {
     match e {
         qv_core::platform::PlatformError::StorageCapacity => {
@@ -43,7 +51,7 @@ pub enum PickKind {
 }
 /// Which screen's path input a system picker fills.
 #[cfg(feature = "desktop")]
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))] // Linux portal picker only.
+#[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))] // Linux portal picker only.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PathFor {
     /// The unlocked workspace's file field.
@@ -55,7 +63,7 @@ pub enum PathFor {
     /// The folder new vaults go to.
     Folder,
 }
-#[cfg(all(feature = "desktop", target_os = "linux"))]
+#[cfg(all(feature = "desktop", any(target_os = "linux", windows)))]
 static NO_PICKER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Validation fixtures never open a real desktop dialog: they use the typed
 /// fallback, which the synthetic flows exercise.
@@ -66,11 +74,11 @@ pub(crate) fn force_no_picker() {
 /// No system picker answered here; screens then offer a typed path instead.
 #[cfg(feature = "desktop")]
 pub fn picker_missing() -> bool {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     {
         NO_PICKER.load(std::sync::atomic::Ordering::SeqCst)
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
         false
     }
@@ -80,18 +88,18 @@ pub fn picker_missing() -> bool {
 /// capability for verified private import; Linux retains the original path.
 #[cfg(feature = "desktop")]
 pub(crate) fn pick_vault(c: &Controller, epoch: crate::controller::FormEpoch) {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     pick_path(
         c,
         epoch,
         PathFor::Import,
-        qv_core::platform::portal::Pick::Open,
+        crate::documents::Pick::Open,
         "Open a QuickVault vault",
         None,
     );
     #[cfg(target_os = "android")]
     crate::android::request_pick(c, epoch, PickKind::Vault, false);
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    #[cfg(not(any(target_os = "linux", target_os = "android", windows)))]
     let _ = (c, epoch);
 }
 
@@ -108,12 +116,12 @@ pub(crate) fn switch_to_file(c: &Controller, epoch: crate::controller::FormEpoch
 /// Linux: show the desktop's file picker on a worker thread and put the choice
 /// into the current screen's protected path input (0009 §1.8). Cancelling
 /// changes nothing; a stale screen ignores the result.
-#[cfg(all(feature = "desktop", target_os = "linux"))]
+#[cfg(all(feature = "desktop", any(target_os = "linux", windows)))]
 pub(crate) fn pick_path(
     c: &Controller,
     epoch: crate::controller::FormEpoch,
     to: PathFor,
-    kind: qv_core::platform::portal::Pick,
+    kind: crate::documents::Pick,
     title: &'static str,
     then: Option<crate::workspace::WsAction>,
 ) {
@@ -121,7 +129,11 @@ pub(crate) fn pick_path(
     let _ = std::thread::Builder::new()
         .name("qv-picker".into())
         .spawn(move || {
-            match crate::picker::pick(title, &kind) {
+            #[cfg(target_os = "linux")]
+            let chosen = crate::picker::pick(title, &kind);
+            #[cfg(windows)]
+            let chosen = qv_core::platform::pick(title, &kind);
+            match chosen {
                 Ok(Some(path)) => match path.into_os_string().into_string() {
                     Ok(mut text) => {
                         match to {
@@ -276,7 +288,7 @@ pub(crate) fn open_attachment(
     let _ = c;
     match source {
         Source::Path(path) => {
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", windows))]
             {
                 let name = path
                     .file_name()
@@ -294,7 +306,7 @@ pub(crate) fn open_attachment(
                     })?;
                 Ok((Box::new(input), name))
             }
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(not(any(target_os = "linux", windows)))]
             {
                 let _ = (path, token);
                 Err(AppError::Unavailable)
@@ -332,7 +344,7 @@ pub(crate) fn create_output(
     let _ = c;
     match target {
         Target::Path(path) => {
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", windows))]
             {
                 let out = qv_core::platform::files::Output::create(&path, cancellation(token))
                     .map_err(file_error)?;
@@ -348,7 +360,7 @@ pub(crate) fn create_output(
                     }),
                 })
             }
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(not(any(target_os = "linux", windows)))]
             {
                 let _ = (path, token);
                 Err(AppError::Unavailable)
@@ -379,9 +391,9 @@ fn write_document(id: u64, token: &CancelToken) -> Result<Output, AppError> {
 fn write_document(_: u64, _: &CancelToken) -> Result<Output, AppError> {
     Err(AppError::Unavailable)
 }
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 struct Shared(std::sync::Arc<std::sync::Mutex<qv_core::platform::files::Output>>);
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 impl Write for Shared {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.0
@@ -396,7 +408,7 @@ impl Write for Shared {
             .flush()
     }
 }
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 fn cancellation(token: &CancelToken) -> qv_core::platform::Cancellation {
     let token = token.clone();
     std::sync::Arc::new(move || token.is_cancelled())

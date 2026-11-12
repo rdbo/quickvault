@@ -180,6 +180,9 @@ pub use qv_model::{
     Entry, Extensions, Field, FieldId, FieldKind, FieldValue, GeneratorDefaults, Group, RandomId,
     SecretText, Settings, Text, Timestamp, TotpError, VaultMeta, VersionId, WriterId,
 };
+/// Creates owner-only directories (0700, or a private DACL on Windows).
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
+pub use qv_store::create_private_dirs;
 pub use qv_store::{
     AnchorDir, AnchorStatus, InterruptedRotation, Leftovers, LocationWarnings,
     MAX_ARCHIVE_TOTAL_LENGTH, MAX_DB_BYTES, NeededPasswords, RotationChoice, RotationState,
@@ -199,16 +202,16 @@ pub use conflict::{
 };
 pub use qv_model::{Deletion, RecordKind};
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod lan;
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use lan::{
     ApproverUi, EnrollmentCredential, JoinCode, JoinMode, JoinerUi, LanError, LanQrInfo,
     LanTimeouts, ListenScope, LocalAcceptance, PAIRING_WINDOW_MAX, Sas, Served, SyncOptions,
     SyncReport, SyncWindow, SyncWindowOptions, WindowCode, inspect_lan_qr, local_addresses,
     parse_endpoint,
 };
-#[cfg(all(test, any(target_os = "linux", target_os = "android")))]
+#[cfg(all(test, any(target_os = "linux", target_os = "android", windows)))]
 mod lan_tests;
 
 /// Android autofill candidates and explicit fill values.

@@ -66,6 +66,13 @@ in-app previews of sniffed types (owner, 2026-11-07, plan 0044).
 without blanking; 0003 §5.1 shows non-standard hints as Other (owner,
 2026-11-11, plan 0051).
 
+0009 §1.4 makes Windows delivery phase 3 and the optional remote service
+phase 4 (owner, 2026-11-12, roadmap 0002).
+
+0009 §5.1 adds the Windows profile: ACL owner-only rules, required WTS
+lifecycle, clipboard exclusion and disabled quick unlock (owner-delegated,
+2026-11-12, plan 0052).
+
 0009 §1.8 puts quick unlock first, grades protection as levels and adds
 Android evidence, long-press selection and conflict links; 0002 §5.4 lets
 boot-bound quick-unlock state survive app restarts (owner, 2026-11-07, plan
