@@ -3,9 +3,9 @@
 //! The listening side of a sync window (0013 §8; plans 0037 decision 6,
 //! 0038, 0042).
 //!
-//! The acceptor owns its listener. While a hello is checked, extra sockets
+//! The acceptor owns its listeners. While a hello is checked, extra sockets
 //! close unanswered. Admission returns only after the acceptor has exited and
-//! dropped that listener; no monitor survives into the authenticated session.
+//! dropped those listeners; no monitor survives into the authenticated session.
 
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -74,19 +74,16 @@ pub(crate) fn closing(
 /// Admission-only acceptor. Ownership guarantees listener closure when this
 /// function exits, including cancellation, expiry and accepted-hello handoff.
 pub(crate) fn acceptor(
-    listener: TcpListener,
+    listeners: Vec<TcpListener>,
     shared: &Shared,
     tx: &SyncSender<TcpStream>,
     expires: Instant,
     cancelled: &(dyn Fn() -> bool + Sync),
 ) {
     while !shared.finished.load(Ordering::SeqCst) && closing(shared, expires, cancelled).is_none() {
-        let stream = match listener.accept() {
-            Ok((s, _)) => s,
-            Err(_) => {
-                std::thread::sleep(POLL);
-                continue;
-            }
+        let Some((stream, _)) = listeners.iter().find_map(|l| l.accept().ok()) else {
+            std::thread::sleep(POLL);
+            continue;
         };
         match shared.phase() {
             Phase::Idle => {

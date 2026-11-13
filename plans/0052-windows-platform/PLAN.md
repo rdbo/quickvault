@@ -491,6 +491,15 @@ No path or OS message is included.
     form: `/C:/…` and `/UNC/server/share/…`.
   - **New public helper.** `qv_store::create_private_dirs` is re-exported by
     qv-core. Frontends and tests create owner-only folders through it.
+- 2026-11-13 (first CI `windows` run, owner-delegated): **LAN listeners.**
+  `PairingWindow::open` kept only the first socket that bound, `[::]`. That
+  socket is dual stack on Linux but IPv6-only on Windows, so a QR's IPv4
+  endpoints were refused and `lan_app_scanned_codes_start_the_join_and_the_sync`
+  timed out. `endpoint::listen` now binds `[::]`, then `0.0.0.0` on the same
+  port (that bind fails harmlessly where `[::]` is dual stack); the acceptor
+  polls every listener and drops them all on admission. This restores the
+  dual-stack intent of plan 0037 decision 7 and covers Linux `bindv6only`.
+  It is transport only: no wire, crypto or spec change.
 
 ## Execution log
 

@@ -404,6 +404,8 @@ Dates are ISO 8601. Newest first within each section.
     clipboard, and clears them only while it still owns them.
   - The app uses the native open, save and folder dialogs.
   - `qv` prompts without echo in the console.
+  - LAN sync windows listen on IPv4 as well as IPv6 on one port; Windows
+    `[::]` sockets are IPv6-only (2026-11-13, found by the first CI run).
   - Quick unlock is not available on Windows.
   - Data lives in `%LOCALAPPDATA%\QuickVault`; the CLI config is
     `%APPDATA%\QuickVault\config.toml`.

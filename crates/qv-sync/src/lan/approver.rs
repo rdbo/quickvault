@@ -22,7 +22,7 @@ use qv_protocol::oob::{WireEndpoint, encode_manual, encode_qr};
 use qv_protocol::registry::LanProfile;
 use zeroize::Zeroizing;
 
-use super::endpoint::{ListenScope, advertisable, bind_addrs};
+use super::endpoint::{ListenScope, advertisable, listen};
 use super::exchange::{ExchangeVault, Role, RoundReport};
 use super::steps_v2::{accept_for, auth_transcript, check_hello, crypto_mode, outer_transcript};
 use super::transport::{Conn, V2Channel};
@@ -131,7 +131,8 @@ pub enum Approved {
 
 /// An open sync window for one unlocked vault (0013 §8.1).
 pub struct PairingWindow {
-    listener: TcpListener,
+    /// One port; one listener per address family where the OS needs it.
+    listeners: Vec<TcpListener>,
     keys: PairingKeys,
     scope: ListenScope,
     expires: Instant,
@@ -153,13 +154,9 @@ impl PairingWindow {
         let keys = PairingSecret::generate()
             .and_then(PairingKeys::new)
             .map_err(|_| LanError::Io)?;
-        let listener = bind_addrs(scope, port.unwrap_or(0))
-            .into_iter()
-            .find_map(|a| TcpListener::bind(a).ok())
-            .ok_or(LanError::Io)?;
-        listener.set_nonblocking(true).map_err(|_| LanError::Io)?;
+        let listeners = listen(scope, port.unwrap_or(0))?;
         Ok(Self {
-            listener,
+            listeners,
             keys,
             scope,
             expires: Instant::now() + limit,
@@ -168,7 +165,8 @@ impl PairingWindow {
 
     /// The listening port.
     pub fn port(&self) -> Result<u16, LanError> {
-        Ok(self.listener.local_addr().map_err(|_| LanError::Io)?.port())
+        let first = self.listeners.first().ok_or(LanError::Io)?;
+        Ok(first.local_addr().map_err(|_| LanError::Io)?.port())
     }
 
     /// When the window closes.
@@ -214,10 +212,10 @@ impl PairingWindow {
         let (tx, rx) = sync_channel::<TcpStream>(1);
         let keys = &self.keys;
         let expires = self.expires;
-        let listener = self.listener;
+        let listeners = self.listeners;
         let (conn, hello) = std::thread::scope(|s| {
             let shared_ref = &shared;
-            s.spawn(move || acceptor(listener, shared_ref, &tx, expires, cancelled));
+            s.spawn(move || acceptor(listeners, shared_ref, &tx, expires, cancelled));
             let result = admit(keys, &shared, &rx, timeouts, expires, cancelled);
             shared.finished.store(true, Ordering::SeqCst);
             result
