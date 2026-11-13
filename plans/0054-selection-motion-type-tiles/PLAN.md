@@ -144,3 +144,8 @@ No behaviour, spec or dependency change.
   above helped only slightly. The tick is now an `i`, so the node is
   replaced and has no previous colour; leaving selection is fixed the same
   way.
+- 2026-11-13 (owner note, `dump.png`): **Command bar label.** In a narrow
+  window the title bar's "Search or run a command" wrapped onto three lines
+  and overflowed the bar. The label now stays on one line and truncates
+  with an ellipsis, the shortcut badge keeps its size, and below 760 px of
+  app width the badge is hidden to give the label room. CSS only.

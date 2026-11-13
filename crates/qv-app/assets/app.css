@@ -75,6 +75,11 @@ h1,h2,h3{margin:0;letter-spacing:-.01em}
 .cmd:hover:enabled{border-color:var(--text3)}
 /* The magnifier's handle sits low; drop the label 1px so they read as level. */
 .cmd span{flex:1;position:relative;top:1px}
+/* Plan 0054: one line in a narrow window; the label truncates, the shortcut keeps its size. */
+.cmd{min-width:0;overflow:hidden}
+.cmd span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cmd kbd{flex:none;white-space:nowrap}
+@container app (max-width: 760px){.cmd kbd{display:none}}
 kbd{font:11px system-ui,sans-serif;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 5px;color:var(--text3)}
 .tb-btn{width:32px;height:30px;display:grid;place-items:center;border:0;border-radius:7px;background:none;color:var(--text2);position:relative}
 .tb-btn:hover{background:var(--raised);color:var(--text)}
