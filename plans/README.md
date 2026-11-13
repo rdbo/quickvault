@@ -92,4 +92,4 @@ plan, or a new plan that names the one it supersedes.
 | [0051](0051-list-swap-other-type/PLAN.md) | No list flicker on filter change; fixed item types with Other (owner request) | Implemented — fresh review pending |
 | [0052](0052-windows-platform/PLAN.md) | Windows platform and release (roadmap 3.1) | Implemented — Windows CI run, attended gate checklist and fresh review pending |
 | [0053](0053-performance/PLAN.md) | Performance: unlock, paged views, search and bulk changes (owner request) | Implemented — fresh review and phone run pending |
-| [0054](0054-selection-motion-type-tiles/PLAN.md) | Selection motion, type tiles, quieter file cards, stable selection rows (owner request) | Implemented — fresh review and owner acceptance pending |
+| [0054](0054-selection-motion-type-tiles/PLAN.md) | Selection motion, type tiles, quieter file cards, stable selection rows, new logo (owner request) | Implemented — fresh review and owner acceptance pending |

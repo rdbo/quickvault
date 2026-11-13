@@ -62,6 +62,41 @@ change and no new dependency.
 - [x] `CHANGELOG.md`, plan index.
 - [x] Gates.
 
+## Revisions
+
+### 2026-11-13 — New logo
+
+The owner asked for a new logo ("be creative, make it nice and
+recognizable"). Explored with the owner over five rounds on a comparison
+page; design details owner-delegated.
+
+- **Chosen mark:** a vault door with two hinges. Its combination dial is
+  cut out of the door and turned 42°, so the ring and a short rounded tail
+  crossing it form a Q; the dial hub is the Q's centre. Same charcoal tile
+  (`#0E1113`) and mint (`#43D4A4`) as before.
+- **Owner refinements:** the dial was the owner's idea (turn it until the
+  cut reads as a Q); the tail is the owner's "rounded, reaching inside the
+  inner circle", the same thickness as the ring; the owner dropped the
+  dial's index mark as visual overload.
+- **Ruled out:** a first install, a vault handle wheel, read as a ship's
+  helm. Rounded stick tails read as a magnifying glass; a pointed door as a
+  chat bubble; a bolt as a power app; a plain padlock had no identity. A
+  padlock Q and refinements of the original logo stayed as options.
+- **Small cut** (`LOGO-small.svg`): at 32 px and below the ring, tail and
+  hub are heavier so the tail survives at 16 px. The title-bar logo (26 px)
+  uses it.
+- **Geometry:** the ring-and-tail cut is computed as an exact outline
+  (circle and stadium intersections), so the door is one even-odd path and
+  needs no SVG mask; Android vector drawables have none, and the launcher
+  foreground doubles as the monochrome layer. Rendered against the masked
+  design: the full mark differs by 3 anti-aliased pixels at 512 px.
+- **Files:** `LOGO.svg`, `LOGO-small.svg`, `LOGO.png` (2048 px),
+  `assets/icon-256.png`, the `Logo` component (`ui/icons.rs`) and the
+  Android adaptive foreground (scale 0.16; the farthest point is 31.3dp
+  from the centre, inside the 33dp safe circle).
+
+No behaviour, spec or dependency change.
+
 ## Execution log
 
 - 2026-11-13: Implemented as designed, except the row press scale: a
@@ -84,3 +119,9 @@ change and no new dependency.
   over each other. Redrawn: a radius-3 ring, a 45° shaft and two teeth.
   The other 43 icons were rendered and checked; none has the fault.
   `cargo fmt --check` and qv-app `desktop` Clippy pass.
+- 2026-11-13: New logo installed (see Revisions): first the vault wheel,
+  then, after the owner's critique, the vault door Q. `check-spdx.sh`,
+  `cargo fmt --check` and qv-app Clippy (`validation`, `desktop`) pass on
+  the final logo. Rendered at 256, 96, 48, 32, 24 and 16 px. Not run:
+  tests and an Android build; the launcher icon awaits the next phone
+  build.

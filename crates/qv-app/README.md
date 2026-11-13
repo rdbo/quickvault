@@ -210,10 +210,13 @@ These tests require Xvfb (`QV_TEST_XVFB` can select its executable). They start
 private X servers and use synthetic values. No graphical display is required by
 default workspace tests.
 
-The logo comes from the repository's `LOGO.svg`: `assets/icon-256.png`
-(desktop window icon, `rsvg-convert -w 256 -h 256 LOGO.svg`), the inline
-`Logo` component in `src/ui/icons.rs`, and the adaptive launcher icon in
-`android/res/`. Regenerate all three when the logo changes.
+The logo comes from the repository's `LOGO.svg`, with `LOGO-small.svg` as
+its cut for 32 px and below: `assets/icon-256.png` (desktop window icon,
+`rsvg-convert -w 256 -h 256 LOGO.svg`), the inline `Logo` component in
+`src/ui/icons.rs` (the title bar uses the small cut; the dial is an exact
+outline, so no SVG mask is needed), and the adaptive
+launcher icon in `android/res/`. Regenerate all of them when the logo
+changes.
 
 Android arm64/API 29+ packaging uses the repository's pinned SDK/NDK recipe,
 JDK 21 and Dioxus CLI 0.7.10:

@@ -139,17 +139,37 @@ impl Icon {
     }
 }
 
-/// The official mark (repository `LOGO.svg`): a vault shaped like a Q, with
-/// a keyhole, on a charcoal tile. Its colours are fixed in both themes.
-const LOGO_MARK: &str = "M208 96H288C349.856 96 400 146.144 400 208V288C400 312.65 392.04 335.44 378.55 353.93L420 395.38L379.38 436L337.93 394.55C319.44 408.04 296.65 416 272 416H208C146.144 416 96 365.856 96 304V208C96 146.144 146.144 96 208 96ZM248 164C215.967 164 190 189.967 190 222C190 248.461 207.723 270.785 231.947 277.751L218 316H250L238 348H290L304 310H273L284.907 266.746C297.79 256.109 306 240.013 306 222C306 189.967 280.033 164 248 164Z";
+/// The official mark (repository `LOGO.svg`, plan 0054): a vault door with
+/// two hinges whose combination dial is cut out and turned so the ring and a
+/// short rounded tail crossing it form a Q, on a charcoal tile. Its colours
+/// are fixed in both themes.
+struct LogoArt {
+    /// The two hinges.
+    hinges: &'static str,
+    /// The door with the dial cut out, filled even-odd: the door, the outer
+    /// and inner edges of the ring-and-tail cut, and the hub.
+    door: &'static str,
+}
+const LOGO: LogoArt = LogoArt {
+    hinges: "M100 156H112A14 14 0 0 1 126 170V202A14 14 0 0 1 112 216H100A14 14 0 0 1 86 202V170A14 14 0 0 1 100 156ZM100 296H112A14 14 0 0 1 126 310V342A14 14 0 0 1 112 356H100A14 14 0 0 1 86 342V310A14 14 0 0 1 100 296Z",
+    door: "M182 104H350A72 72 0 0 1 422 176V336A72 72 0 0 1 350 408H182A72 72 0 0 1 110 336V176A72 72 0 0 1 182 104ZM348.76 310.33L357.04 317.79A15 15 0 0 1 336.97 340.08L328.68 332.63A99 99 0 1 1 348.76 310.33ZM326.09 289.92L324.34 288.35A15 15 0 0 0 304.27 310.64L306.01 312.21A69 69 0 1 1 326.09 289.92ZM240 256a26 26 0 1 0 52 0a26 26 0 1 0 -52 0Z",
+};
+/// `LOGO-small.svg`: 32 px and below, with a heavier ring, tail and hub.
+const LOGO_SMALL: LogoArt = LogoArt {
+    hinges: "M100 156H112A14 14 0 0 1 126 170V202A14 14 0 0 1 112 216H100A14 14 0 0 1 86 202V170A14 14 0 0 1 100 156ZM100 296H112A14 14 0 0 1 126 310V342A14 14 0 0 1 112 356H100A14 14 0 0 1 86 342V310A14 14 0 0 1 100 296Z",
+    door: "M182 104H350A72 72 0 0 1 422 176V336A72 72 0 0 1 350 408H182A72 72 0 0 1 110 336V176A72 72 0 0 1 182 104ZM355.23 309.43L361.13 314.74A20 20 0 0 1 334.36 344.47L328.46 339.15A104 104 0 1 1 355.23 309.43ZM324.56 281.82L323.97 281.28A20 20 0 0 0 297.21 311.01L297.8 311.54A64 64 0 1 1 324.56 281.82ZM236 256a30 30 0 1 0 60 0a30 30 0 1 0 -60 0Z",
+};
 
 /// The QuickVault logo. Decorative: the name is always shown next to it.
+/// `small` selects the cut drawn for 32 px and below.
 #[component]
-pub(crate) fn Logo(class: &'static str) -> Element {
+pub(crate) fn Logo(class: &'static str, #[props(default)] small: bool) -> Element {
+    let art = if small { &LOGO_SMALL } else { &LOGO };
     rsx! {
         svg { class: "logo {class}", view_box: "0 0 512 512", "aria-hidden": "true", "focusable": "false",
             rect { width: "512", height: "512", rx: "112", fill: "#0E1113" }
-            path { fill: "#43D4A4", fill_rule: "evenodd", d: LOGO_MARK }
+            path { fill: "#43D4A4", d: art.hinges }
+            path { fill: "#43D4A4", fill_rule: "evenodd", d: art.door }
         }
     }
 }

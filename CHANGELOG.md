@@ -9,6 +9,11 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-13: New logo (plan 0054): a vault door with two hinges whose
+  cut-out combination dial forms a Q, on the same charcoal tile and mint.
+  `LOGO-small.svg` is its heavier cut for 32 px and below (used in the
+  title bar). The window icon, in-app logo and Android launcher icon use
+  it.
 - 2026-11-13: Tests run one Argon2id unlock at a time by default
   (`QV_TEST_KDF_JOBS` default 1, was half the CPUs up to 4), so a local
   test run no longer stalls the machine. Set the variable higher for speed.

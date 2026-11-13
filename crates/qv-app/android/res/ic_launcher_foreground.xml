@@ -1,20 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<!-- Adaptive launcher icon foreground: the LOGO.svg mark, scaled into the
-     66dp safe circle of the 108dp canvas (centre of the mark at 54,54). -->
+<!-- Adaptive launcher icon foreground: the LOGO.svg vault door, scaled
+     0.16 about the 512-unit canvas centre into the 66dp safe circle of the
+     108dp canvas (farthest point about 198 units, 31.7dp, from the centre).
+     The dial is a cut-out, so this is also the monochrome layer. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group
-        android:translateX="17.88"
-        android:translateY="16.76"
-        android:scaleX="0.14"
-        android:scaleY="0.14">
+        android:translateX="13.04"
+        android:translateY="13.04"
+        android:scaleX="0.16"
+        android:scaleY="0.16">
+        <path
+            android:fillColor="#43D4A4"
+            android:pathData="M100 156H112A14 14 0 0 1 126 170V202A14 14 0 0 1 112 216H100A14 14 0 0 1 86 202V170A14 14 0 0 1 100 156ZM100 296H112A14 14 0 0 1 126 310V342A14 14 0 0 1 112 356H100A14 14 0 0 1 86 342V310A14 14 0 0 1 100 296Z" />
         <path
             android:fillColor="#43D4A4"
             android:fillType="evenOdd"
-            android:pathData="M208 96H288C349.856 96 400 146.144 400 208V288C400 312.65 392.04 335.44 378.55 353.93L420 395.38L379.38 436L337.93 394.55C319.44 408.04 296.65 416 272 416H208C146.144 416 96 365.856 96 304V208C96 146.144 146.144 96 208 96ZM248 164C215.967 164 190 189.967 190 222C190 248.461 207.723 270.785 231.947 277.751L218 316H250L238 348H290L304 310H273L284.907 266.746C297.79 256.109 306 240.013 306 222C306 189.967 280.033 164 248 164Z" />
+            android:pathData="M182 104H350A72 72 0 0 1 422 176V336A72 72 0 0 1 350 408H182A72 72 0 0 1 110 336V176A72 72 0 0 1 182 104ZM348.76 310.33L357.04 317.79A15 15 0 0 1 336.97 340.08L328.68 332.63A99 99 0 1 1 348.76 310.33ZM326.09 289.92L324.34 288.35A15 15 0 0 0 304.27 310.64L306.01 312.21A69 69 0 1 1 326.09 289.92ZM240 256a26 26 0 1 0 52 0a26 26 0 1 0 -52 0Z" />
     </group>
 </vector>

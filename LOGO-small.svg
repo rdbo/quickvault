@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none" role="img" aria-labelledby="logo-title logo-desc">
+  <title id="logo-title">QuickVault</title>
+  <desc id="logo-desc">The QuickVault vault door drawn for 32 pixels and below: the same Q-shaped dial with a heavier ring, tail and hub.</desc>
+  <rect width="512" height="512" rx="112" fill="#0E1113"/>
+  <path fill="#43D4A4" d="M100 156H112A14 14 0 0 1 126 170V202A14 14 0 0 1 112 216H100A14 14 0 0 1 86 202V170A14 14 0 0 1 100 156ZM100 296H112A14 14 0 0 1 126 310V342A14 14 0 0 1 112 356H100A14 14 0 0 1 86 342V310A14 14 0 0 1 100 296Z"/>
+  <path fill="#43D4A4" fill-rule="evenodd" d="M182 104H350A72 72 0 0 1 422 176V336A72 72 0 0 1 350 408H182A72 72 0 0 1 110 336V176A72 72 0 0 1 182 104ZM355.23 309.43L361.13 314.74A20 20 0 0 1 334.36 344.47L328.46 339.15A104 104 0 1 1 355.23 309.43ZM324.56 281.82L323.97 281.28A20 20 0 0 0 297.21 311.01L297.8 311.54A64 64 0 1 1 324.56 281.82ZM236 256a30 30 0 1 0 60 0a30 30 0 1 0 -60 0Z"/>
+</svg>

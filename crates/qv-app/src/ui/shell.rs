@@ -78,14 +78,14 @@ pub(crate) fn TitleBar(
                         button { class: "brand", id: "vault-switch", title: "Switch vault", disabled: busy, "aria-haspopup": "menu",
                             "aria-expanded": if switcher() { "true" } else { "false" },
                             onclick: move |_| switcher.set(!switcher()),
-                            Logo { class: "logo-bar" }
+                            Logo { class: "logo-bar", small: true }
                             b { "{crate::views::z(&vault.clone().unwrap_or_default()).as_str()}" }
                             Svg { icon: Icon::ChevronDown }
                         }
                         if switcher() && !busy { VaultSwitcher { controller: c, epoch, open: switcher } }
                     }
                 } else {
-                    div { class: "brand", Logo { class: "logo-bar" } b { "QuickVault" } }
+                    div { class: "brand", Logo { class: "logo-bar", small: true } b { "QuickVault" } }
                 }
                 div { class: "drag" }
                 if let Some(mut p) = palette {
