@@ -532,6 +532,16 @@ No path or OS message is included.
     timed out. The probes now run in parallel; each assertion is unchanged.
   - Linux: both tests, qv-sync Clippy and `cargo fmt --check` pass. Awaits
     the next CI `windows` run.
+- 2026-11-13 (fifth CI `windows` run, owner-delegated): tests pass; the
+  **package step** failed to compile the vendored dioxus-desktop in release.
+  Its devtools menu handler calls wry methods that exist only in debug builds
+  or with wry's `devtools` feature, which QuickVault leaves off, so no
+  desktop release build had ever compiled, on any platform. The calls are
+  now debug-only, as the menu item already was (`third-party/README.md`).
+  The fuzz job also needed the plan 0055 `fuzz/Cargo.lock` edge.
+  Linux: `cargo check --release -p qv-app --features desktop`, qv-app
+  `desktop` Clippy, SPDX and `check-supply-chain.py` pass. Awaits the next
+  CI `windows` run.
 
 ## Execution log
 

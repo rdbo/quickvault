@@ -230,3 +230,8 @@ CLI has no window, so it needs a data-control protocol. Design delegated:
   flows pass, including `real_linux_services_run_the_shared_local_flows`
   (the real `LinuxPlatform` with `gtk`: GTK running on an X11 display takes
   the X11 path).
+- 2026-11-13 (CI `fuzz` job): the separate fuzz workspace also builds
+  `qv-app`, so `fuzz/Cargo.lock` needed the same `qv-app` → `qv-platform`
+  edge and `cargo fetch --locked` refused it. Regenerated offline: that one
+  line, no new package. `cargo tree --locked --offline` on the fuzz
+  manifest passes.

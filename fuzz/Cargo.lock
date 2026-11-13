@@ -1337,6 +1337,7 @@ dependencies = [
  "qrcodegen-no-heap",
  "quircs",
  "qv-core",
+ "qv-platform",
  "zeroize",
 ]
 

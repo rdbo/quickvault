@@ -12,8 +12,10 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
-    time::Duration,
 };
+// QuickVault: only the devtools-only toast below uses it.
+#[cfg(all(feature = "devtools", debug_assertions))]
+use std::time::Duration;
 use tao::{
     dpi::PhysicalSize,
     event::Event,
@@ -143,6 +145,11 @@ impl App {
             }
             "dioxus-toggle-dev-tools" => {
                 self.show_devtools = !self.show_devtools;
+                // QuickVault: wry has these methods only in debug builds or
+                // with its `devtools` feature, which QuickVault leaves off, so
+                // a release build failed here. The menu item exists only in
+                // debug builds (menubar.rs).
+                #[cfg(debug_assertions)]
                 for webview in self.webviews.values() {
                     let wv = &webview.desktop_context.webview;
                     if self.show_devtools {

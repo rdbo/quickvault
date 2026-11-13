@@ -92,6 +92,15 @@ Unmodified upstream unsafe is retained; product code adds none.
   Arc/Mutex server location still supplies refreshed ports/keys. Regression
   holds a live render borrow while reading/updating protocol metadata.
 
+- Plan 0052 (first CI release build), in app.rs: the "Toggle Developer
+  Tools" menu handler called wry's `open_devtools`/`close_devtools`, which
+  wry compiles only in debug builds or with its `devtools` feature. Upstream
+  0.7.10 enables that feature by default; QuickVault turns default features
+  off, so every desktop release build failed. The calls are now
+  `#[cfg(debug_assertions)]`, like `DesktopContext::devtool`; the menu item
+  exists only in debug builds (menubar.rs). The `Duration` import is gated
+  with its only user, the devtools toast.
+
 ## Verification and maintenance
 
 - `sh scripts/test-check-spdx.sh` and `sh scripts/check-spdx.sh`.
