@@ -730,7 +730,7 @@ fn Palette(
                     if !hits.is_empty() { div { class: "grp", "ITEMS" } }
                     for e in hits.iter().cloned() {
                         button { class: "it", onclick: { let mut run = run.clone(); let h = e.handle; move |_| run(Command::Open(Screen::Entry(h))) },
-                            span { class: "tile {item_hue(e.colour, &e.handle.id_hex())}", "{initial(&e.title)}" }
+                            span { class: "tile {item_hue(e.colour, &e.handle.id_hex())}", {super::icons::entry_glyph(e.kind, &e.title)} }
                             span { "{e.title.as_str()}" } small { "{e.subtitle.as_str()}" }
                         }
                     }

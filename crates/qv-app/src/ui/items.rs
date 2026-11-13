@@ -3,7 +3,7 @@
 //! Vault items: the list beside the detail, the entry card (click a field to
 //! copy, 30 s reveals), in-place editing, move, history and attachments.
 //! Protected values appear only through a reveal; forms never prefill them.
-use super::icons::{Icon, Svg, hue_class, initial, item_hue, kind_icon};
+use super::icons::{Icon, Svg, entry_glyph, hue_class, initial, item_hue, kind_icon};
 use super::shell::{ReportCard, Unreadable, act, go, kind_label};
 use crate::controller::{Controller, FormEpoch};
 use crate::views::{self, EntryView, FieldRow, kind_name};
@@ -14,8 +14,6 @@ use std::collections::BTreeSet;
 use zeroize::Zeroizing;
 
 const MASK: &str = "••••••••";
-/// A listed row and its lower-cased type hint.
-type Listed = (views::EntryRow, Zeroizing<String>);
 
 fn text(v: Option<qv_core::SecretBytes>) -> Zeroizing<String> {
     v.map_or_else(
@@ -267,10 +265,7 @@ pub(crate) fn ListPane(
     };
     let (rows, groups) = match page.as_deref().map(|p| &p.rows) {
         Some(crate::page_read::Rows::Items { items, groups }) => (
-            items
-                .iter()
-                .map(|i| (i.row.clone(), i.kind.clone()))
-                .collect::<Vec<_>>(),
+            items.iter().map(|i| i.row.clone()).collect::<Vec<_>>(),
             groups.clone(),
         ),
         _ => (Vec::new(), Vec::new()),
@@ -323,12 +318,12 @@ pub(crate) fn ListPane(
             }
         }
     };
-    let mut sections: Vec<(String, Vec<Listed>)> = Vec::new();
-    for (row, kind) in shown {
+    let mut sections: Vec<(String, Vec<views::EntryRow>)> = Vec::new();
+    for row in shown {
         let letter = initial(&row.title);
         match sections.last_mut() {
-            Some((l, v)) if *l == letter => v.push((row, kind)),
-            _ => sections.push((letter, vec![(row, kind)])),
+            Some((l, v)) if *l == letter => v.push(row),
+            _ => sections.push((letter, vec![row])),
         }
     }
     let count: usize = sections.iter().map(|s| s.1.len()).sum();
@@ -339,7 +334,7 @@ pub(crate) fn ListPane(
     // Shown rows in display order; the selection only counts what is shown.
     let order: Vec<(String, EntryHandle)> = sections
         .iter()
-        .flat_map(|(_, v)| v.iter().map(|(r, _)| (r.handle.id_hex(), r.handle)))
+        .flat_map(|(_, v)| v.iter().map(|r| (r.handle.id_hex(), r.handle)))
         .collect();
     // The multi-selection lives in the workspace, so Escape and Android Back
     // can end it from anywhere (plan 0044).
@@ -585,7 +580,7 @@ pub(crate) fn ListPane(
                 }
                 for (letter, items) in sections {
                     div { class: "sect", "{letter}" }
-                    for (row, kind) in items {
+                    for row in items {
                         {
                             let id = row.handle.id_hex();
                             let on = chosen.contains(&id);
@@ -602,12 +597,12 @@ pub(crate) fn ListPane(
                             oncontextmenu: { let id = id.clone(); move |e: MouseEvent| { e.prevent_default(); if !form && !in_selection { row_menu.set(Some(id.clone())); } } },
                             button { class: "open item-open", "aria-label": "{label}", "aria-pressed": if in_selection { if on { "true" } else { "false" } } else { "" }, disabled: form, onclick: click(id.clone(), h) }
                             if in_selection {
-                                span { class: if on { "tile check on" } else { "tile check" }, Svg { icon: Icon::Check, large: true } }
+                                span { class: if on { "tile tick on" } else { "tile tick" }, Svg { icon: Icon::Check, large: true } }
                             } else {
-                                span { class: "tile {item_hue(row.colour, &id)}", "{initial(&row.title)}" }
+                                span { class: "tile {item_hue(row.colour, &id)}", {entry_glyph(row.kind, &row.title)} }
                             }
                             span { class: "t", b { class: "row-title", "{row.title.as_str()}" }
-                                span { if row.subtitle.is_empty() { "{kind_label(&kind)}" } else { "{row.subtitle.as_str()}" } }
+                                span { if row.subtitle.is_empty() { "{kind_label(row.kind)}" } else { "{row.subtitle.as_str()}" } }
                             }
                             if row.conflict { span { class: "cbadge", "conflict" } }
                             if !in_selection {
@@ -852,7 +847,7 @@ fn EntryBody(
             .any(|f| crate::editor::same_slot(&f.name, crate::editor::NETWORK));
     rsx! {
         div { class: "hero",
-            span { class: "tile {tile}", "{initial(&view.title)}" }
+            span { class: "tile {tile}", {entry_glyph(&kind, &view.title)} }
             div { class: "min0",
                 h1 { "{view.title.as_str()}" }
                 div { class: "meta",

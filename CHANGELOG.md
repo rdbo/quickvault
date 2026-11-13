@@ -9,6 +9,17 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-13: Tests run one Argon2id unlock at a time by default
+  (`QV_TEST_KDF_JOBS` default 1, was half the CPUs up to 4), so a local
+  test run no longer stalls the machine. Set the variable higher for speed.
+- 2026-11-13: App polish (plan 0054). Choosing a sidebar item, tab, chip
+  or segment now animates: the old highlight fades out, the new one fades
+  in with an accent edge bar and a small icon pop; the selection tick pops
+  in. List rows, the entry header and the command bar show the item's type
+  glyph (login, note, card, Wi-Fi) instead of its initial; *Other* items
+  keep the initial. Attachment cards use a soft corner glow instead of the
+  large circle. Starting a selection no longer makes every row taller.
+  The key icon is redrawn; its old outline was malformed.
 - 2026-11-13: The app redraws as soon as a list page or an action finishes,
   instead of on its next 200 ms check. Choosing a group or an item type no
   longer waits up to 200 ms (about 100 ms on average) for rows that are

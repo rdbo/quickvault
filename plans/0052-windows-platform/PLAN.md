@@ -510,6 +510,16 @@ No path or OS message is included.
   that the object opens for writing; regression test
   `chmod_like_restores_write_after_read_only`. Fixture only; product code
   never changes permissions.
+- 2026-11-13 (third CI `windows` run, owner-delegated): **Lease check of a
+  removed snapshot.** The Windows `ArchiveFile::same_as_path` turned every
+  failure, a missing name included, into `Replaced`; the Unix one returns
+  `NotFound` for a missing name. Removing an already-removed snapshot
+  therefore said `Replaced` on Windows, and
+  `snapshot_publish_writes_verifies_and_lists` failed. Wine keeps deleted
+  names, so that assertion is skipped there. A missing name is now
+  `NotFound` on Windows too; every other failure still fails closed as
+  `Replaced`. Error category only; no format or protocol change. Awaits
+  the next CI `windows` run.
 
 ## Execution log
 

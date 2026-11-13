@@ -125,8 +125,12 @@ impl std::ops::Deref for ArchiveFile {
 }
 impl ArchiveFile {
     pub(crate) fn same_as_path(&self, path: &Path) -> Result<(), StoreError> {
-        // Compare with the identity recorded when the file was leased.
-        let now = inspect(path).map_err(|_| StoreError::Replaced)?;
+        // Compare with the identity recorded when the file was leased. A
+        // missing name is NotFound, as on Unix; other failures fail closed.
+        let now = inspect(path).map_err(|e| match e {
+            StoreError::NotFound => StoreError::NotFound,
+            _ => StoreError::Replaced,
+        })?;
         if !is_owner_only(&now)? || id_of(&now)? != self.handle._token.0 {
             return Err(StoreError::Replaced);
         }

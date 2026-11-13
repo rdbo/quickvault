@@ -1188,9 +1188,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::fs::test_dir::{TestDir, write_file};
 
-    /// Argon2id runs. At most `QV_TEST_KDF_JOBS` (default: half the CPUs, 1–4)
+    /// Argon2id runs. At most `QV_TEST_KDF_JOBS` (default 1)
     /// Argon2id runs of 256 MiB at once in this test binary, which bounds memory
-    /// without serializing every unlock.
+    /// and keeps the machine responsive; set it higher for speed.
     static KDF_SLOTS: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new());
 
     fn kdf_jobs() -> usize {
@@ -1200,11 +1200,7 @@ pub(crate) mod tests {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .filter(|n| *n > 0)
-                .unwrap_or_else(|| {
-                    std::thread::available_parallelism()
-                        .map_or(1, |n| n.get() / 2)
-                        .clamp(1, 4)
-                })
+                .unwrap_or(1)
         })
     }
 

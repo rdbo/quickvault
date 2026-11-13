@@ -99,6 +99,8 @@ pub struct EntryRow {
     pub colour: Option<u8>,
     /// It has conflicting versions.
     pub conflict: bool,
+    /// Its type bucket, one of [`qv_core::TYPE_BUCKETS`]; UI only.
+    pub kind: &'static str,
 }
 pub(crate) fn entry_row(e: &qv_core::EntrySummary) -> EntryRow {
     EntryRow {
@@ -110,6 +112,7 @@ pub(crate) fn entry_row(e: &qv_core::EntrySummary) -> EntryRow {
             .map_or_else(|| z(""), |f| z(f.value.expose())),
         colour: crate::editor::colour(e.icon.as_ref().map(Text::expose)),
         conflict: e.conflict,
+        kind: qv_core::type_bucket(&e.type_key),
     }
 }
 pub(crate) fn group_row(g: &qv_core::GroupSummary) -> GroupRow {
@@ -233,8 +236,6 @@ pub fn browse(s: &Session, group: Option<GroupHandle>) -> Result<BrowseView, Cor
 pub struct ItemRow {
     /// Title, subtitle and handle, as in group listings.
     pub row: EntryRow,
-    /// The entry's type hint (`login`, `note`, …), lower-cased; UI only.
-    pub kind: Z,
     /// Its groups from the top level down to its own; empty at the root.
     #[cfg(test)]
     pub path: Vec<GroupHandle>,
@@ -251,7 +252,6 @@ pub(crate) fn paged_item(e: qv_core::EntrySummary) -> ItemRow {
     let row = entry_row(&e);
     ItemRow {
         row,
-        kind: e.type_key,
         #[cfg(test)]
         path: Vec::new(),
         #[cfg(test)]
@@ -305,7 +305,6 @@ pub fn all_items(s: &Session) -> Result<Vec<ItemRow>, CoreError> {
 fn item(e: &qv_core::EntrySummary, path: Vec<GroupHandle>, top_name: Z) -> ItemRow {
     ItemRow {
         row: entry_row(e),
-        kind: Zeroizing::new(e.type_hint.expose().to_lowercase()),
         path,
         top_name,
         #[cfg(test)]

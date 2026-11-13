@@ -68,7 +68,7 @@ impl Icon {
             Self::Back => "M13 8H3M7 4L3 8l4 4",
             Self::All => "M2.5 4.5h11M2.5 8h11M2.5 11.5h11",
             Self::Key => {
-                "M10.5 2.5a3 3 0 1 1-2.6 4.5L3 11.9V13.5h1.6l.4-.4V12h1.1l.6-.6V10.3h1.1l1.1-1.1A3 3 0 0 1 10.5 2.5zM11 5h.01"
+                "M13.5 5.5a3 3 0 1 1-6 0a3 3 0 1 1 6 0zM8.4 7.6L2.5 13.5M4 12l1.6 1.6M5.6 10.4l1.2 1.2M11.2 4.8h.01"
             }
             Self::Note => "M4 2.5h6l2.5 2.5v8.5H4zM10 2.5V5h2.5M6 8h4M6 10.5h4",
             Self::Card => "M2 4.5h12v7H2zM2 7h12M4.5 9.5h2",
@@ -206,6 +206,17 @@ pub(crate) fn id_hue(id_hex: &str) -> &'static str {
         .and_then(|h| u16::from_str_radix(h, 16).ok())
         .unwrap_or(0);
     HUES[usize::from(byte) % 12]
+}
+
+/// An entry tile's content (plan 0054): the glyph of its type bucket (one of
+/// `qv_core::TYPE_BUCKETS`), or the title's monogram for *Other*, where one
+/// shared glyph would not tell items apart.
+pub(crate) fn entry_glyph(kind: &str, title: &str) -> Element {
+    if qv_core::type_bucket(kind) == "other" {
+        rsx! { "{initial(title)}" }
+    } else {
+        rsx! { Svg { icon: kind_icon(kind), large: true } }
+    }
 }
 
 /// A title's monogram letter, as text.
