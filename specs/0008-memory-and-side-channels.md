@@ -100,6 +100,11 @@ When clipboard ownership is replaced before completed delivery is established,
 report `ClipboardReplaced`, separately from ordinary expiry and cancellation.
 For X11, count only a successful text-property/notify delivery or the successful
 INCR terminator after all data acknowledgements; metadata requests do not count.
+With the GTK backend (the desktop app on Wayland), count a text-target request
+answered through GTK as delivery; GTK does not report whether the requester
+read the data. With Wayland data-control (the CLI, and the app without GTK),
+count a text-type request whose whole value was written to the requester's
+descriptor. The password-manager hint target does not count for either.
 Android cannot confirm consumption and reports observed replacement explicitly.
 Expiry means the value was offered for that interval, not proof of a paste.
 Cleanup must never clear a successor's selection.
@@ -198,6 +203,10 @@ out of scope. Remotely supplied parser/rendering inputs remain in scope.
 
 ## Changelog
 
+- 2026-11-13: §3 adds the delivery rules for the GTK clipboard (the desktop
+  app on Wayland) and Wayland data-control (the CLI) (plan 0055, owner
+  request; details owner-delegated under the standing 2026-11-02
+  delegation).
 - 2026-11-13: §2 bars secret-dependent timing in performance paths; §6 adds
   the label tier, folding scratch and match sets to the zeroized buffers
   (plan 0053, owner-delegated under the standing 2026-11-02 delegation).

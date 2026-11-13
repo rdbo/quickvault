@@ -1406,7 +1406,6 @@ impl Controller {
             }) {
                 old.cancel.cancel();
             }
-            ws.notice = Some("Copied. The clipboard clears when the countdown ends, if unchanged.");
             s.revision = s.revision.wrapping_add(1);
             generation
         };
@@ -1456,10 +1455,9 @@ impl Controller {
                         .is_some_and(|c| Arc::ptr_eq(&c.remaining, &remaining))
                 {
                     ws.clip = None;
+                    // The countdown toast is the only copy feedback (plan 0054).
                     if result.is_err() && !mine.is_cancelled() {
                         ws.error = Some(AppError::ClipboardUnavailable);
-                    } else if ws.notice.is_some_and(|n| n.starts_with("Copied")) {
-                        ws.notice = None;
                     }
                     s.revision = s.revision.wrapping_add(1);
                 }

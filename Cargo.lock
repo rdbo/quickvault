@@ -3687,6 +3687,7 @@ dependencies = [
  "qrcodegen-no-heap",
  "quircs",
  "qv-core",
+ "qv-platform",
  "zeroize",
 ]
 
@@ -3768,6 +3769,7 @@ version = "0.0.0"
 dependencies = [
  "async-io",
  "futures-lite",
+ "gtk",
  "qv-crypto",
  "qv-win",
  "rustix",

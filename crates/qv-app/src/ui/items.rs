@@ -1098,6 +1098,8 @@ fn History(
     rsx! {
         div { class: "phone-bar", button { class: "icon-btn back", "aria-label": "Back", onclick: back(&controller, epoch), Svg { icon: Icon::Back, large: true } } }
         div { class: "detail-inner fade-in",
+            // Desktop has no phone bar: the item's sub-pages get a back link (plan 0054).
+            button { class: "sub-back desk-only", onclick: back(&controller, epoch), Svg { icon: Icon::Back } "Back" }
             div { class: "hero", span { class: "tile h6", Svg { icon: Icon::History, large: true } } div { h1 { "History" } p { class: "muted", "Earlier versions kept for this item. Restoring creates a new version." } } }
             if rows.is_empty() { div { class: "empty", "No earlier versions are kept." } }
             div { class: "timeline",
@@ -1139,6 +1141,8 @@ fn HistoryVersion(
     rsx! {
         div { class: "phone-bar", button { class: "icon-btn back", "aria-label": "Back", onclick: back(&controller, epoch), Svg { icon: Icon::Back, large: true } } }
         div { class: "detail-inner fade-in",
+            // Desktop has no phone bar: the item's sub-pages get a back link (plan 0054).
+            button { class: "sub-back desk-only", onclick: back(&controller, epoch), Svg { icon: Icon::Back } "Back" }
             div { class: "banner", Svg { icon: Icon::History } span { "An earlier version. Restoring creates a new version; nothing is overwritten." } }
             EntryBody { controller: controller.clone(), epoch, revision, view, history: Some(version.clone()), live }
             div { class: "actions",
@@ -1165,6 +1169,8 @@ fn Attachments(
     rsx! {
         div { class: "phone-bar", button { class: "icon-btn back", "aria-label": "Back", onclick: back(&controller, epoch), Svg { icon: Icon::Back, large: true } } }
         div { class: "detail-inner fade-in",
+            // Desktop has no phone bar: the item's sub-pages get a back link (plan 0054).
+            button { class: "sub-back desk-only", onclick: back(&controller, epoch), Svg { icon: Icon::Back } "Back" }
             div { class: "hero", span { class: "tile h1", Svg { icon: Icon::Attach, large: true } } div { h1 { "Attachments" } p { class: "muted", "Up to 10 MiB each. Names and types are shown as text; files are never opened." } } }
             div { class: "card",
                 if rows.is_empty() { div { class: "set-row", span { class: "l", span { "No attachments yet." } } } }
@@ -1323,7 +1329,7 @@ pub(crate) fn Viewer(
     rsx! {
         // A click anywhere on the dark backdrop (title strip, stage, footer)
         // closes the preview; the content and the controls keep their clicks.
-        div { class: "viewer v-{tone}", role: "dialog", "aria-modal": "true", "aria-label": "Preview of {p.name.as_str()}", tabindex: "-1", autofocus: true, onkeydown: keys,
+        div { class: "viewer tone-{tone}", role: "dialog", "aria-modal": "true", "aria-label": "Preview of {p.name.as_str()}", tabindex: "-1", autofocus: true, onkeydown: keys,
             onclick: act(&controller, epoch, WsAction::ClosePreview),
             div { class: "v-top",
                 span { class: "v-badge", Svg { icon: file_icon(&p.name, p.mime) } }

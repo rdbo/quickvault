@@ -9,7 +9,7 @@ repository.workspace = true
 publish.workspace = true
 [features]
 default = []
-desktop = ["dep:dioxus", "dep:dioxus-desktop"]
+desktop = ["dep:dioxus", "dep:dioxus-desktop", "qv-platform/gtk"]
 mobile = ["desktop"]
 validation = ["desktop"]
 [[bin]]
@@ -24,6 +24,10 @@ qrcodegen-no-heap = "=1.8.1"
 quircs = "=0.10.3"
 dioxus = { version = "=0.7.10", optional = true, default-features = false, features = ["minimal"] }
 dioxus-desktop = { version = "=0.7.10", optional = true, default-features = false, features = ["tokio_runtime"] }
+# Only to enable its GTK clipboard with `desktop` (plan 0055); the app reaches
+# platform services through qv-core.
+[target.'cfg(target_os = "linux")'.dependencies]
+qv-platform.workspace = true
 [dev-dependencies]
 qv-core = { workspace = true, features = ["test-kdf-limit", "test-eager-views"] }
 

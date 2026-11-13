@@ -45,16 +45,16 @@ fn backend<T, E>(value: Result<T, E>) -> Result<T, CliError> {
             if cfg!(windows) {
                 "clipboard backend failed or is unavailable (requires a desktop session)"
             } else {
-                "clipboard backend failed or is unavailable (requires local X11)"
+                "clipboard backend failed or is unavailable (requires a Wayland or X11 desktop session)"
             },
         )
     })
 }
 pub(crate) fn hold(value: SecretBytes, options: ClipboardOptions) -> Result<(), CliError> {
+    #[cfg(target_os = "linux")]
+    use qv_core::platform::SessionClipboard as Backend;
     #[cfg(windows)]
     use qv_core::platform::WinClipboard as Backend;
-    #[cfg(target_os = "linux")]
-    use qv_core::platform::X11Clipboard as Backend;
     use qv_core::platform::{Clipboard, PlatformError};
     if value.len() > MAX_VALUE {
         return Err(CliError::new(LIMIT, "clipboard value exceeds model limit"));

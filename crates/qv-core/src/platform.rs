@@ -17,7 +17,7 @@ pub use qv_platform::{
 };
 #[cfg(target_os = "linux")]
 pub use qv_platform::{
-    clipboard::X11Clipboard,
+    clipboard::{SessionClipboard, X11Clipboard},
     files,
     linux::{InstanceLock, LinuxPlatform, portal},
 };

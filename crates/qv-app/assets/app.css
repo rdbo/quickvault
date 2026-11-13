@@ -43,6 +43,11 @@ html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none;backgrou
 .qv .pw input:focus-visible,.qv .filter input:focus-visible,.qv .palette input:focus-visible,.qv .ed input:focus-visible,
 .qv .ed textarea:focus-visible,.qv .title-in:focus-visible,.qv .field input:focus-visible,.qv .field textarea:focus-visible{outline:none}
 .qv button:disabled{opacity:.45}
+/* Plan 0054: every action is disabled the moment an operation starts, but
+   the dimming waits BUSY_SHOWN_AFTER (300 ms), so a quick one (opening a
+   preview, a color change) does not flash the whole window. Re-enabling is
+   instant, and a control that renders disabled is dim from the start. */
+.qv :disabled{transition:opacity .12s .3s}
 .mono{font-family:ui-monospace,"JetBrains Mono","DejaVu Sans Mono","Noto Sans Mono",monospace;letter-spacing:.02em}
 .ico{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .ico.lg{width:20px;height:20px}
@@ -209,7 +214,9 @@ kbd{font:11px system-ui,sans-serif;border:1px solid var(--line);border-bottom-wi
 .tile{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;font-weight:650;font-size:15px;flex:none;
   background:hsl(var(--h),var(--mono-s),var(--mono-l));color:hsl(var(--h),60%,var(--mono-t))}
 .row .tile{transition:transform .2s cubic-bezier(.3,1.5,.5,1)}
+/* Hover already grows the tile, so the click that opens the row does not move it again. */
 .row.on .tile{transform:scale(1.06)}
+@media (hover:hover){.row:hover .tile{transform:scale(1.06)}}
 .row .t{display:flex;flex-direction:column;min-width:0;flex:1}
 .row .t b{font-weight:560;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .t span{color:var(--text3);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -256,6 +263,8 @@ kbd{font:11px system-ui,sans-serif;border:1px solid var(--line);border-bottom-wi
 .detail-inner,.page-inner{max-width:680px;margin:0 auto;padding:24px 28px 90px}
 .page-inner{max-width:720px}
 .phone-bar{display:none}
+.sub-back{display:inline-flex;align-items:center;gap:6px;margin:-6px 0 14px -6px;padding:5px 9px 5px 6px;border:0;border-radius:8px;background:none;color:var(--text2);font-size:13px;font-weight:550;transition:background .15s,color .15s}
+.sub-back:hover{background:var(--raised);color:var(--text)}
 .hero{display:flex;align-items:center;gap:16px;margin-bottom:18px}
 .hero .tile{width:58px;height:58px;border-radius:17px;font-size:24px}
 .hero .tile .ico{width:26px;height:26px}
@@ -800,7 +809,8 @@ button.set-row:hover:enabled{background:var(--raised)}
 .shelf-tile:disabled{opacity:.55}
 /* No backdrop-filter: tearing down a full-window blur layer repaints the page under it on close. */
 .viewer{--t:var(--accent);position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;background:rgba(6,8,9,.94);color:#eef2f3;animation:viewerIn .22s ease-out;outline:none}
-.viewer.v-img{--t:hsl(330,70%,62%)}.viewer.v-aud{--t:hsl(265,70%,68%)}.viewer.v-vid{--t:hsl(18,85%,60%)}.viewer.v-txt{--t:hsl(200,75%,58%)}
+/* `tone-*`, never `v-img`: that is the image wrapper, whose zoom-in also hit the whole full-screen viewer (plan 0054). */
+.viewer.tone-img{--t:hsl(330,70%,62%)}.viewer.tone-aud{--t:hsl(265,70%,68%)}.viewer.tone-vid{--t:hsl(18,85%,60%)}.viewer.tone-txt{--t:hsl(200,75%,58%)}
 .v-top{display:flex;align-items:center;gap:10px;padding:14px 16px;flex:none}
 .v-badge{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;background:color-mix(in srgb,var(--t) 22%,transparent);color:var(--t);flex:none}
 .v-title{display:flex;flex-direction:column;min-width:0}

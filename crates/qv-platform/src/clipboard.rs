@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Foreground X11 ownership, moved from the CLI (plan 0015), without manager handover.
+//! Foreground X11 ownership, moved from the CLI (plan 0015), without manager
+//! handover, and the session clipboard that prefers Wayland data-control
+//! (plan 0055).
 mod transport;
+mod wayland;
 use crate::{Cancellation, Clipboard, PlatformError};
 use qv_crypto::SecretBytes;
 use std::time::{Duration, Instant};
@@ -12,7 +15,7 @@ use x11rb::{
     protocol::{Event, xproto::*},
     wrapper::ConnectionExt as _,
 };
-const MAX_VALUE: usize = 256 * 1024;
+pub(crate) const MAX_VALUE: usize = 256 * 1024;
 const MAX_TRANSFERS: usize = 16;
 fn backend<T, E>(value: Result<T, E>) -> Result<T, PlatformError> {
     value.map_err(|_| PlatformError::Unavailable)
@@ -362,6 +365,68 @@ impl Owner {
             std::thread::sleep(Duration::from_millis(20));
         }
         Ok(())
+    }
+}
+
+/// The request checks every Linux backend makes before any backend work.
+pub(crate) fn validate(
+    value: &SecretBytes,
+    timeout: Duration,
+    cancel: &Cancellation,
+) -> Result<(), PlatformError> {
+    if value.len() > MAX_VALUE {
+        return Err(PlatformError::LimitExceeded);
+    }
+    if std::str::from_utf8(value.expose_secret()).is_err()
+        || !(Duration::from_secs(1)..=Duration::from_secs(300)).contains(&timeout)
+    {
+        return Err(PlatformError::InvalidInput);
+    }
+    if cancel() {
+        return Err(PlatformError::Cancelled);
+    }
+    Ok(())
+}
+
+/// The Linux session clipboard (plan 0055): Wayland data-control where the
+/// compositor offers it (wlroots-based compositors, KDE), else X11, which
+/// includes XWayland. Whether an XWayland selection reaches Wayland clients
+/// is compositor policy, so a Wayland session tries data-control first.
+#[derive(Debug, Default)]
+pub struct SessionClipboard;
+impl SessionClipboard {
+    /// Probes without reading or owning a selection.
+    pub fn is_available(&self) -> bool {
+        wayland::available() || X11Clipboard.is_available()
+    }
+}
+impl Clipboard for SessionClipboard {
+    fn hold(
+        &self,
+        value: SecretBytes,
+        timeout: Duration,
+        cancel: Cancellation,
+        progress: &mut dyn FnMut(u64) -> Result<(), PlatformError>,
+    ) -> Result<(), PlatformError> {
+        validate(&value, timeout, &cancel)?;
+        if let Some(sock) = wayland::connect() {
+            match wayland::Owner::start(sock, value.expose_secret(), cancel.clone()) {
+                Ok(mut owner) => {
+                    let result = owner.serve(value.expose_secret(), timeout, progress);
+                    let cleanup = owner.finish();
+                    drop(value);
+                    if cancel() {
+                        return Err(PlatformError::Cancelled);
+                    }
+                    return result.and(cleanup);
+                }
+                Err(PlatformError::Cancelled) => return Err(PlatformError::Cancelled),
+                // No data-control here (GNOME) or no usable compositor:
+                // nothing is owned once the socket closed, so X11 is safe.
+                Err(_) => {}
+            }
+        }
+        X11Clipboard.hold(value, timeout, cancel, progress)
     }
 }
 

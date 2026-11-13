@@ -149,3 +149,30 @@ No behaviour, spec or dependency change.
   and overflowed the bar. The label now stays on one line and truncates
   with an ellipsis, the shortcut badge keeps its size, and below 760 px of
   app width the badge is hidden to give the label room. CSS only.
+- 2026-11-13 (owner note): **Tile grows on hover.** The open row's tile
+  grew only once opened, so a click visibly moved it. On hover-capable
+  devices the hovered row's tile now grows too, so opening keeps its size.
+  CSS only.
+- 2026-11-13 (owner notes): **Preview, back link, copy notice.**
+  - The viewer root had class `v-{tone}`, so an image preview's root was
+    also `.v-img`, the image wrapper's class: the full-screen backdrop got
+    the wrapper's `imgIn` zoom (owner: "the dark background zooms in") and
+    its sizing rules, and scaling a full-window layer is the likely cause
+    of the UI-wide flash on open. The root now uses `tone-*`; the backdrop
+    only fades in (`viewerIn`), and the image keeps its own small zoom.
+  - Desktop has no phone bar, so Attachments, History and a history version
+    had no way back. They now start with a desktop-only "Back" link.
+  - Copying set a notice ("The clipboard clears when the countdown ends")
+    next to the countdown toast; the notice and its cleanup are removed.
+- 2026-11-13: The app's real-engine validation flows (3) and 104 unit tests
+  pass on the final tree under a private Xvfb.
+- 2026-11-13 (owner note): **UI-wide text flash on opening a preview.** The
+  backdrop fix did not cover it. Cause: opening a preview runs an operation,
+  the shell disables every action at once (`ShellView::busy`, by design),
+  and `.qv button:disabled{opacity:.45}` dimmed them all immediately, so
+  the sidebar, title bar and list blinked for any quick operation. Disabled
+  controls now dim with a 300 ms transition delay (`BUSY_SHOWN_AFTER`):
+  quick operations re-enable them first, long ones dim as before, and
+  controls rendered disabled are dim from the start. CSS only; the
+  reduced-motion rule disables the delay (and so keeps the old behaviour)
+  for those users.

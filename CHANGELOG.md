@@ -9,6 +9,15 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-13: Copying works on Wayland (plan 0055). Linux used only the X11
+  clipboard through XWayland, which some compositors (for example
+  wlroots-based ones) do not pass on to Wayland apps, so nothing was pasted
+  while QuickVault reported a copy. The desktop app on a Wayland display now
+  owns the clipboard through GTK; the CLI uses the Wayland data-control
+  protocol (wlroots compositors, KDE) through a small bounded client with no
+  new crate, and still falls back to X11 elsewhere (GNOME). The 20-second
+  clear-if-unchanged rule and replacement reporting are unchanged. Specs
+  0008 §3 and 0011 §3.6 are amended.
 - 2026-11-13: New logo (plan 0054): a vault door with two hinges whose
   cut-out combination dial forms a Q, on the same charcoal tile and mint.
   `LOGO-small.svg` is its heavier cut for 32 px and below (used in the
@@ -26,6 +35,11 @@ Dates are ISO 8601. Newest first within each section.
   large circle. Starting a selection no longer makes every row taller, or
   shifts the list down on desktop.
   The title bar's search label no longer wraps in a narrow window.
+  List tiles grow on hover, so opening an item does not move its tile.
+  Opening an image preview no longer zooms the dark backdrop (it fades in)
+  or flashes the UI; item sub-pages (attachments, history) have a Back link
+  on desktop; copying shows only the countdown toast.
+  Quick actions no longer dim every button for a moment.
   The key icon is redrawn; its old outline was malformed.
 - 2026-11-13: The app redraws as soon as a list page or an action finishes,
   instead of on its next 200 ms check. Choosing a group or an item type no

@@ -93,3 +93,4 @@ plan, or a new plan that names the one it supersedes.
 | [0052](0052-windows-platform/PLAN.md) | Windows platform and release (roadmap 3.1) | Implemented — Windows CI run, attended gate checklist and fresh review pending |
 | [0053](0053-performance/PLAN.md) | Performance: unlock, paged views, search and bulk changes (owner request) | Implemented — fresh review and phone run pending |
 | [0054](0054-selection-motion-type-tiles/PLAN.md) | Selection motion, type tiles, quieter file cards, stable selection rows, new logo (owner request) | Implemented — fresh review and owner acceptance pending |
+| [0055](0055-wayland-clipboard/PLAN.md) | Clipboard on Wayland: GTK in the app, data-control in the CLI (owner bug report) | Implemented — owner Wayland check and fresh review pending |

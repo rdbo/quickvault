@@ -8,6 +8,10 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# The desktop app's GTK clipboard on Wayland (plan 0055); the CLI leaves it off.
+gtk = ["dep:gtk"]
+
 [dependencies]
 qv-crypto.workspace = true
 
@@ -19,6 +23,7 @@ x11rb-protocol.workspace = true
 async-io = "=2.6.0"
 futures-lite = "=2.6.1"
 zbus = { version = "=6.2.0", default-features = false, features = ["default-rt", "proxy"] }
+gtk = { version = "=0.18.2", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 qv-win.workspace = true
