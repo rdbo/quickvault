@@ -80,6 +80,10 @@ account/device failures must match existing-credential failures in shape and
 work class with rate limits and fake OPAQUE records. Do not claim the server
 cannot distinguish its own registered account database. Vault search is local;
 network content is not generated from protected-value searches.
+Performance paths (caches, match sets, case folding, staged writes) add no
+secret-dependent comparison or early exit on keys, MACs, fingerprints or
+protected values; their timing may depend only on non-protected text and the
+query, as matching already does.
 
 ### 3. OS leaks
 
@@ -170,8 +174,9 @@ erasure of library/framework/OS copies. RNG failure releases no message and
 uses no panic, zero seed or weaker fallback.
 
 Confidential metadata uses 0004 §7's evictable cache and bounded view pages.
-Zeroize query/sort/cursor/cache/page buffers when discarded; include allocated
-text capacity and normalization copies in accounting. Protected values/notes
+Zeroize query/sort/cursor/cache/page buffers, the label tier, case-folding
+scratch and 0004 §7.3 match sets when discarded; include allocated text
+capacity and normalization copies in accounting. Protected values/notes
 remain outside searching. No persistent plaintext search index or temporary
 plaintext file is permitted.
 
@@ -193,6 +198,9 @@ out of scope. Remotely supplied parser/rendering inputs remain in scope.
 
 ## Changelog
 
+- 2026-11-13: §2 bars secret-dependent timing in performance paths; §6 adds
+  the label tier, folding scratch and match sets to the zeroized buffers
+  (plan 0053, owner-delegated under the standing 2026-11-02 delegation).
 - 2026-11-10: Define bounded protected preview streaming and capability/session
   lifetimes, including explicit renderer/kernel/GPU cleanup limits (plan0050).
 - 2026-11-09: Report clipboard replacement before confirmed delivery separately

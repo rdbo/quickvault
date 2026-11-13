@@ -245,6 +245,7 @@ mod rotation_install;
 mod rotation_journal;
 #[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod schema;
+mod sink;
 #[cfg(any(target_os = "linux", target_os = "android", windows))]
 mod slot;
 mod snapshot_inventory;
@@ -302,6 +303,7 @@ pub use receipts::{
     ArchiveReceipts, MAX_ARCHIVE_RECEIPTS, MAX_RECEIPT_CIPHERTEXT, MAX_RECEIPT_ENVELOPE,
     MAX_RECEIPT_PATH_BYTES,
 };
+pub use sink::{HeadSink, NoSink};
 #[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use vault_import::{PendingVaultImport, VerifiedVaultImport};
 

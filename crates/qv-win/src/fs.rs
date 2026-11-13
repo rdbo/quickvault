@@ -515,10 +515,14 @@ pub fn set_dacl(path: &Path, user_mask: u32, grants: &[security::Grant<'_>]) -> 
 /// directory's children), read/search bits grant Everyone read (never
 /// inherited, like a listable folder whose new files stay private), and
 /// without the owner write bit the user keeps only read and execute. An
-/// object that is already owner-only is left alone for a private writable
-/// mode (Wine maps a rewritten owner-only DACL to a shared mode).
+/// object that is already owner-only and writable is left alone for a
+/// private writable mode (Wine maps a rewritten owner-only DACL to a shared
+/// mode); a read-only one (`0o500`) is rewritten, restoring write access.
 pub fn chmod_like(path: &Path, mode: u32) -> io::Result<()> {
-    if mode & 0o277 == 0o200 && meets(&open_nofollow(path, Access::Inspect)?, Rule::OwnerOnly)? {
+    if mode & 0o277 == 0o200
+        && meets(&open_nofollow(path, Access::Inspect)?, Rule::OwnerOnly)?
+        && open_nofollow(path, Access::ReadWrite).is_ok()
+    {
         return Ok(());
     }
     let everyone = Sid::everyone();
@@ -649,6 +653,18 @@ mod tests {
         let dir = open_nofollow(&d.0, Access::Inspect).unwrap();
         assert!(!meets(&dir, Rule::NoForeignWrite).unwrap());
         set_dacl(&d.0, security::FILE_ALL_ACCESS, &[]).unwrap();
+    }
+
+    #[test]
+    fn chmod_like_restores_write_after_read_only() {
+        let d = Dir::new();
+        chmod_like(&d.0, 0o500).unwrap();
+        // Wine does not enforce a read-only DACL; real Windows does.
+        let denied = std::fs::write(d.0.join("probe"), b"").is_err();
+        chmod_like(&d.0, 0o700).unwrap();
+        std::fs::write(d.0.join("probe"), b"").unwrap();
+        let dir = open_nofollow(&d.0, Access::Inspect).unwrap();
+        assert!(meets(&dir, Rule::OwnerOnly).unwrap(), "denied={denied}");
     }
 
     #[test]

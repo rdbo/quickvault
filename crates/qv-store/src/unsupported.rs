@@ -385,6 +385,26 @@ impl VaultFile {
     }
 
     /// Unreachable: no `VaultFile` exists on this target.
+    pub fn unlock_for_recovery_into<S: crate::HeadSink>(
+        self,
+        _password: &MasterPassword,
+        _anchors: &AnchorDir,
+        _sink: &mut S,
+    ) -> Result<(UnlockedVault, AnchorStatus), S::Error> {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `VaultFile` exists on this target.
+    pub fn unlock_with_phrase_into<S: crate::HeadSink>(
+        self,
+        _phrase: &[u8],
+        _anchors: &AnchorDir,
+        _sink: &mut S,
+    ) -> Result<(UnlockedVault, AnchorStatus), S::Error> {
+        match self.0 {}
+    }
+
+    /// Unreachable: no `VaultFile` exists on this target.
     pub fn warnings(&self) -> LocationWarnings {
         match self.0 {}
     }
@@ -638,6 +658,15 @@ impl UnlockedVault {
 }
 
 impl Write<'_> {
+    /// Unreachable: no Write exists on this target.
+    pub fn read_base_version(
+        &self,
+        _record: RecordId,
+        _version: VersionId,
+    ) -> Result<RecordVersion, StoreError> {
+        match self.0 {}
+    }
+
     /// Unreachable: no Write exists on this target.
     pub fn stage_selected_password(
         &mut self,

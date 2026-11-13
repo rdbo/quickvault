@@ -120,8 +120,8 @@ impl Core {
             .unlock_bound(expected, cancelled.clone())
             .map_err(crate::platform::error)?;
         let result = (|| {
-            let (vault, status) = self.open(path, cancel, |f| {
-                f.unlock_with_phrase(phrase.expose_secret(), &self.anchors)
+            let (vault, status, index) = self.open(path, cancel, |f, b| {
+                f.unlock_with_phrase_into(phrase.expose_secret(), &self.anchors, b)
             })?;
             match status {
                 AnchorStatus::Missing => return Err(StoreError::NoAnchor.into()),
@@ -129,13 +129,13 @@ impl Core {
                 AnchorStatus::Mismatch => return Err(StoreError::Rollback.into()),
                 _ => {}
             }
-            let session = Session::open(
+            let session = Session::open_built(
                 vault,
+                index,
                 self.time.clone(),
                 status,
                 self.snapshots.clone(),
                 false,
-                cancel,
             )?;
             if session.read(|ctx| binding(ctx))? != expected || cancelled() {
                 return Err(CoreError::NotAllowed);

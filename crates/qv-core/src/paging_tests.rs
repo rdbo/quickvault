@@ -497,3 +497,243 @@ fn paging_paths_stream_names_and_fail_if_the_snapshot_changes() {
     let foreign = Env::new().unlock();
     assert_eq!(err(foreign.path_next(&mut path)), CoreError::StaleHandle);
 }
+
+fn reference(value: &str, query: &str) -> bool {
+    value.to_lowercase().contains(query)
+}
+
+fn fold(value: &str, query: &str) -> bool {
+    if value.is_ascii() {
+        let mut buf = Vec::with_capacity(value.len());
+        ascii_contains(&mut buf, value, query)
+    } else {
+        reference(value, query)
+    }
+}
+
+#[test]
+fn ascii_folding_matches_unicode_lowercase() {
+    for (value, query) in [
+        ("Bulk Entry", "bulk"),
+        ("BULK", "ulk"),
+        ("abc", ""),
+        ("", "a"),
+        ("\u{212A}elvin", "k"),
+        ("\u{0130}stanbul", "i\u{307}"),
+        ("Stra\u{1E9E}e", "stra\u{df}e"),
+        ("e\u{301}t\u{c9}", "\u{e9}"),
+        ("MiXeD-123_[x]", "-123_[x]"),
+    ] {
+        assert_eq!(
+            fold(value, &query.to_lowercase()),
+            reference(value, &query.to_lowercase()),
+            "{value:?} / {query:?}"
+        );
+    }
+}
+
+proptest::proptest! {
+    #[test]
+    fn ascii_folding_matches_unicode_lowercase_for_any_text(
+        value in "(?s).{0,40}",
+        ascii in "[ -~]{0,40}",
+        query in "(?s).{0,6}",
+    ) {
+        for value in [value.as_str(), ascii.as_str()] {
+            let query = query.to_lowercase();
+            proptest::prop_assert_eq!(fold(value, &query), reference(value, &query));
+            // Queries taken from the value itself must also agree.
+            let sub: String = value.chars().skip(1).take(3).collect::<String>().to_lowercase();
+            proptest::prop_assert_eq!(fold(value, &sub), reference(value, &sub));
+        }
+    }
+}
+
+/// An entry whose only searchable text besides its title is `field`.
+fn add_with_field(s: &Session, group: crate::GroupHandle, title: &str, field: &str) {
+    let mut d = s.new_entry(group, "login", title).unwrap();
+    d.add_field(
+        "Username",
+        qv_model::FieldKind::Text,
+        qv_model::FieldValue::text(field).unwrap(),
+    )
+    .unwrap();
+    s.save_entry(d).unwrap();
+}
+
+/// A cache where every label fits but no full view does.
+fn label_only_cache(session: &Session) {
+    session
+        .read(|ctx| {
+            ctx.open.index = crate::index::Index::build(&ctx.open.vault, &|| false, 4096)?;
+            Ok(())
+        })
+        .unwrap();
+}
+
+fn reads() -> usize {
+    crate::index::READS.with(std::cell::Cell::get)
+}
+
+fn reset_reads() {
+    crate::index::READS.with(|n| n.set(0));
+}
+
+fn all_search(session: &Session, query: &str, rows: usize) -> Vec<String> {
+    let mut cursor = None;
+    let mut out = Vec::new();
+    loop {
+        let page = session
+            .search_page(query, cursor, limit(rows), &CancelToken::new())
+            .unwrap();
+        out.extend(page.items.iter().map(hit_id));
+        cursor = page.next;
+        if cursor.is_none() {
+            return out;
+        }
+    }
+}
+
+fn eager(session: &Session, query: &str) -> Vec<String> {
+    session.search(query).unwrap().iter().map(hit_id).collect()
+}
+
+fn match_sets(session: &Session) -> usize {
+    session
+        .read(|ctx| Ok(ctx.open.index.matches.len()))
+        .unwrap()
+}
+
+// 0012 §1: Budget inconsistency
+#[test]
+fn paging_traversal_and_search_read_each_record_once_when_fields_exceed_the_cache() {
+    let env = Env::new();
+    let session = env.unlock();
+    let root = session.root().unwrap();
+    let filler = "f".repeat(2048);
+    for i in 0..40 {
+        let field = if i % 3 == 0 {
+            format!("{filler} needle {i}")
+        } else {
+            filler.clone()
+        };
+        add_with_field(&session, root, &format!("item {i:02}"), &field);
+    }
+    label_only_cache(&session);
+    let entries = 40;
+    // A complete traversal sorts by resident labels; only rows are read.
+    reset_reads();
+    let mut cursor = None;
+    let mut seen = 0;
+    loop {
+        let page = session
+            .all_items_page(cursor, limit(7), &CancelToken::new())
+            .unwrap();
+        seen += page.items.len();
+        cursor = page.next;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(seen, entries);
+    assert!(reads() <= entries, "traversal read {} records", reads());
+    // A field-only search matches once, then pages through its match set.
+    reset_reads();
+    let paged = all_search(&session, "needle", 3);
+    let hits = paged.len();
+    assert_eq!(hits, 14);
+    assert!(
+        reads() <= entries + hits,
+        "search read {} records for {hits} hits",
+        reads()
+    );
+    assert_eq!(paged, eager(&session, "needle"));
+    // Refining the query scans only the previous matches.
+    reset_reads();
+    let first = session
+        .search_page("needle 1", None, limit(3), &CancelToken::new())
+        .unwrap();
+    assert!(!first.items.is_empty());
+    assert!(reads() <= hits + 3, "refinement read {} records", reads());
+    assert_eq!(
+        all_search(&session, "needle 1", 3),
+        eager(&session, "needle 1")
+    );
+}
+
+#[test]
+fn paging_match_sets_return_the_same_pages_as_the_eager_reference() {
+    let env = Env::new();
+    let session = env.unlock();
+    let root = session.root().unwrap();
+    let words = ["abc", "abd", "bca", "cab", "ABx", "zz", "\u{212A}ab"];
+    for (i, w) in words.iter().cycle().take(35).enumerate() {
+        add_with_field(
+            &session,
+            root,
+            &format!("t{} {w}", i % 5),
+            words[(i * 3) % 7],
+        );
+    }
+    for name in ["Abc group", "other"] {
+        add_group(&session, root, name);
+    }
+    label_only_cache(&session);
+    for query in ["a", "ab", "abc", "b", "ab", "kab", "z", "abc"] {
+        for rows in [1, 4, 32] {
+            assert_eq!(
+                all_search(&session, query, rows),
+                eager(&session, query),
+                "{query:?} in pages of {rows}"
+            );
+        }
+    }
+    assert!(match_sets(&session) <= MAX_MATCH_SETS);
+    // A cursor from before an edit is stale, and stale sets are discarded.
+    let page = session
+        .search_page("ab", None, limit(2), &CancelToken::new())
+        .unwrap();
+    add_with_field(&session, root, "t9 abz", "abz");
+    assert_eq!(
+        err(session.search_page("ab", page.next, limit(2), &CancelToken::new())),
+        CoreError::StaleHandle
+    );
+    assert_eq!(all_search(&session, "abz", 2), eager(&session, "abz"));
+    assert_eq!(all_search(&session, "ab", 3), eager(&session, "ab"));
+    assert_eq!(match_sets(&session), 2);
+    // Groups and filtered item lists share the mechanism.
+    let groups = |q: &str| {
+        session
+            .groups_page(None, q, None, limit(32), &CancelToken::new())
+            .unwrap()
+            .items
+            .len()
+    };
+    assert_eq!(groups("ab"), groups("abc"));
+}
+
+#[test]
+fn paging_without_budget_for_a_match_set_still_pages_correctly() {
+    let env = Env::new();
+    let session = env.unlock();
+    let root = session.root().unwrap();
+    for i in 0..30 {
+        add_with_field(&session, root, &format!("n{i:02}"), &format!("v{}", i % 4));
+    }
+    // Hold nearly the whole view budget: queries and sort keys still fit, a
+    // 30-record match set does not.
+    let held = session
+        .read(|ctx| {
+            ctx.open
+                .index
+                .cache
+                .reserve(crate::index::MAX_VIEW_BYTES - 400)
+                .ok_or(CoreError::LimitExceeded)
+        })
+        .unwrap();
+    assert_eq!(all_search(&session, "v1", 2), eager(&session, "v1"));
+    assert_eq!(match_sets(&session), 0);
+    drop(held);
+    assert_eq!(all_search(&session, "v1", 2), eager(&session, "v1"));
+    assert_eq!(match_sets(&session), 1);
+}

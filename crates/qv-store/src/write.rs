@@ -432,6 +432,23 @@ impl Write<'_> {
             .unwrap_or_default()
     }
 
+    /// Reads a version of the state this write started from (plan 0053), so
+    /// a bulk change can load one record at a time. A record this write has
+    /// already changed or staged is refused with [`StoreError::InvalidEdit`].
+    pub fn read_base_version(
+        &self,
+        record: RecordId,
+        version: qv_model::VersionId,
+    ) -> Result<RecordVersion, StoreError> {
+        if self.poisoned {
+            return Err(StoreError::Internal);
+        }
+        if self.touched.contains(&record) || self.staged.contains_key(&record) {
+            return Err(StoreError::InvalidEdit);
+        }
+        self.vault.read_version(record, version)
+    }
+
     /// Stages one local edit of `record` (0005 §1.2). The clock's component
     /// for this writer must be a counter reserved by this `Write`, the clock
     /// must strictly dominate every current head, the kind must not change,

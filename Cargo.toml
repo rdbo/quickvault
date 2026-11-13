@@ -56,6 +56,12 @@ opt-level = 3
 [profile.dev.package.blake2]
 opt-level = 3
 
+# Tests run optimized: unoptimized, the stock-budget large-vault test alone
+# took over 20 minutes and CI test jobs over an hour. Debug assertions and
+# overflow checks stay on (inherited from dev).
+[profile.test]
+opt-level = 2
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"

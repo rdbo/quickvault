@@ -43,6 +43,7 @@ impl Controller {
         std::thread::Builder::new()
             .name("qv-vault-import".into())
             .spawn(move || {
+                let _wake = crate::controller::WakeOnDrop;
                 let _worker = worker;
                 let result = (|| {
                     let (mut input, name) = source(&token)?;

@@ -527,8 +527,27 @@ limit retained rows/text in core and frontends; cache size is not vault capacity
 or total process memory. The 1 GiB referenced-ciphertext validity limit remains.
 Eager plaintext collection APIs are retired to a development-only test feature;
 normal frontends consume pages. Full validation still precedes acceptance
-(0004 §7). Bulk mutations still stage payload vectors and can use substantially
-more memory than the cache; streaming those mutations is separate work.
+(0004 §7).
+
+Plan 0053 (performance) keeps those bounds and changes how work is done:
+- `qv-store`'s unlock verification hands each authenticated head to a
+  `HeadSink`; `qv-core`'s `IndexBuilder` indexes it there, so a single-head
+  record is decoded once at unlock, and only conflicted representatives are
+  read again.
+- The cache has two tiers under the same 64 MiB budget: labels (lowercased
+  titles and names, type buckets, group order) and full views. Views are
+  evicted first. A scan never evicts to admit what it reads, so a scan larger
+  than the cache keeps a stable resident set instead of missing on every read.
+- Query-bearing scans keep up to four text-free match sets (record IDs only)
+  in the index. A cursor of the same query pages through its set without
+  rematching, and a longer query that contains an earlier one scans only the
+  earlier matches. Lock, revision change and index rebuild drop them.
+- ASCII text is case-folded into one reused, zeroizing, budget-charged buffer.
+- Bulk changes (batch edits, batch and recursive trash/restore) read, edit and
+  stage one record at a time inside the existing single transaction
+  (`Write::read_base_version`); purge stages tombstones only.
+
+Nothing new is persisted, and no format, budget or ordering changes.
 
 ## 4. Key hierarchy and lifecycle
 

@@ -16,9 +16,10 @@ use qv_model::{
     merge_summaries, project_groups,
 };
 use qv_store::UnlockedVault;
+use zeroize::Zeroizing;
 
 use crate::error::{CoreError, data};
-use crate::view_cache::{ViewCache, ViewRef};
+use crate::view_cache::{Access, Label, LabelRef, ViewCache, ViewRef};
 
 /// Ceiling for owned cache, query, sort-key and cursor text (0004 §7).
 pub(crate) const MAX_VIEW_BYTES: usize = 64 * 1024 * 1024;
@@ -173,6 +174,29 @@ impl ViewData {
     }
 }
 
+/// The normalized short text paged scans sort and filter by (0004 §7.3).
+pub(crate) fn label_of(view: &ViewData) -> Result<Label, CoreError> {
+    Ok(match view {
+        ViewData::Entry(e) => {
+            let kind =
+                crate::paging::type_bucket(&Zeroizing::new(e.type_hint.expose().to_lowercase()));
+            Label::Entry {
+                title: Zeroizing::new(e.title.expose().to_lowercase()),
+                bucket: crate::paging::TYPE_BUCKETS
+                    .iter()
+                    .position(|b| *b == kind)
+                    .and_then(|i| u8::try_from(i).ok())
+                    .ok_or(CoreError::Internal)?,
+            }
+        }
+        ViewData::Group(g) => Label::Group {
+            name: Zeroizing::new(g.name.expose().to_lowercase()),
+            order: Zeroizing::new(g.order.expose().to_owned()),
+        },
+        ViewData::Meta(_) | ViewData::Attachment { .. } | ViewData::None => Label::Other,
+    })
+}
+
 /// Whether a field's value may be retained and searched: non-protected,
 /// textual and of a kind that names or locates the entry.
 fn searchable(protected: bool, kind: FieldKind) -> bool {
@@ -309,6 +333,172 @@ impl RecordInfo {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Version reads by the index on this thread (plan 0053 decode counts).
+    pub(crate) static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+fn count_read() {
+    READS.with(|n| n.set(n.get() + 1));
+}
+
+/// One record's index entry from its heads' compact summaries (0004 §7.2).
+/// `read` supplies the representative's full version, which must match its
+/// summary.
+fn summarized(
+    summaries: Vec<HeadSummary>,
+    read: impl FnOnce(VersionId) -> Result<RecordVersion, CoreError>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<RecordInfo, CoreError> {
+    let kind = summaries.first().ok_or(CoreError::Internal)?.kind();
+    let latest = summaries
+        .iter()
+        .map(HeadSummary::latest)
+        .max()
+        .unwrap_or(Timestamp(0));
+    let merged = merge_summaries(summaries).map_err(data)?;
+    let status = merged.status();
+    let shown = merged
+        .representative(View::Live)
+        .or_else(|| merged.representative(View::Trash));
+    let node = (kind == RecordKind::Group).then(|| GroupNode {
+        parent: shown.and_then(HeadSummary::group_parent),
+        live: status.live,
+    });
+    let content = if let Some(summary) = shown {
+        if cancelled() {
+            return Err(CoreError::Cancelled);
+        }
+        let version = read(summary.version_id())?;
+        if !summary.matches_version(&version).map_err(data)? {
+            return Err(CoreError::Store(qv_store::StoreError::Integrity));
+        }
+        extract(version)?
+    } else {
+        ViewData::None
+    };
+    Ok(RecordInfo {
+        kind,
+        latest,
+        status,
+        node,
+        shown: shown.map(Versioned::version_id),
+        heads: merged.heads().iter().map(Versioned::version_id).collect(),
+        payload_heads: merged
+            .heads()
+            .iter()
+            .filter(|v| v.deletion() != qv_model::Deletion::Final)
+            .count(),
+        #[cfg(test)]
+        bytes: content.bytes(),
+        data: Data::of(&content),
+        pending: Some(content),
+    })
+}
+
+/// Builds the index from the heads unlock verification has authenticated, so
+/// a single-head record is decoded once (0004 §7.2). A conflicted record keeps
+/// only compact summaries; [`IndexBuilder::finish`] reads its representative.
+pub(crate) struct IndexBuilder<'a> {
+    budget: usize,
+    cancelled: &'a dyn Fn() -> bool,
+    index: Option<Index>,
+    expected: usize,
+    current: Option<(RecordId, Vec<HeadSummary>)>,
+    deferred: Vec<(RecordId, Vec<HeadSummary>)>,
+}
+
+impl<'a> IndexBuilder<'a> {
+    pub(crate) fn new(budget: usize, cancelled: &'a dyn Fn() -> bool) -> Self {
+        Self {
+            budget,
+            cancelled,
+            index: None,
+            expected: 0,
+            current: None,
+            deferred: Vec::new(),
+        }
+    }
+
+    /// Completes the index once unlock has succeeded: reads conflicted
+    /// representatives through the verified vault, then the tree.
+    pub(crate) fn finish(self, vault: &UnlockedVault) -> Result<Index, CoreError> {
+        let mut index = self.index.ok_or(CoreError::Internal)?;
+        if self.current.is_some()
+            || index.records.len() + self.deferred.len() != self.expected
+            || vault.manifest().records().len() != self.expected
+        {
+            return Err(CoreError::Internal);
+        }
+        for (id, summaries) in self.deferred {
+            if (self.cancelled)() {
+                return Err(CoreError::Cancelled);
+            }
+            let info = summarized(
+                summaries,
+                |v| {
+                    #[cfg(test)]
+                    count_read();
+                    vault.read_version(id, v).map_err(Into::into)
+                },
+                self.cancelled,
+            )?;
+            index.insert(id, info)?;
+        }
+        index.retree()?;
+        Ok(index)
+    }
+}
+
+impl qv_store::HeadSink for IndexBuilder<'_> {
+    type Error = CoreError;
+
+    fn begin(&mut self, manifest: &qv_store::Manifest) -> Result<(), CoreError> {
+        if self.index.is_some() {
+            return Err(CoreError::Internal);
+        }
+        self.expected = manifest.records().len();
+        self.index = Some(Index::new(
+            manifest.root_group_id(),
+            manifest.vault_meta_id(),
+            self.budget,
+        )?);
+        Ok(())
+    }
+
+    fn head(
+        &mut self,
+        record: RecordId,
+        version: RecordVersion,
+        last: bool,
+    ) -> Result<(), CoreError> {
+        if (self.cancelled)() {
+            return Err(CoreError::Cancelled);
+        }
+        let index = self.index.as_mut().ok_or(CoreError::Internal)?;
+        let mut summaries = match self.current.take() {
+            Some((id, summaries)) if id == record => summaries,
+            Some(_) => return Err(CoreError::Internal),
+            None => Vec::new(),
+        };
+        summaries.push(HeadSummary::from_version(&version).map_err(data)?);
+        if !last {
+            // Only the compact projection survives a non-final head.
+            self.current = Some((record, summaries));
+            return Ok(());
+        }
+        if summaries.len() == 1 {
+            let info = summarized(summaries, |_| Ok(version), self.cancelled)?;
+            index.insert(record, info)?;
+        } else {
+            drop(version);
+            self.deferred.push((record, summaries));
+        }
+        Ok(())
+    }
+}
+
 /// The whole index.
 pub(crate) struct Index {
     pub(crate) root: RecordId,
@@ -318,6 +508,8 @@ pub(crate) struct Index {
     pub(crate) group_counts: BTreeMap<RecordId, usize>,
     pub(crate) recovered_count: usize,
     pub(crate) cache: ViewCache,
+    /// Text-free per-query match sets (0004 §7.3); dropped with the index.
+    pub(crate) matches: crate::paging::MatchSets,
 }
 
 impl Index {
@@ -334,6 +526,7 @@ impl Index {
             group_counts: BTreeMap::new(),
             recovered_count: 0,
             cache: ViewCache::new(budget),
+            matches: crate::paging::MatchSets::default(),
         })
     }
 
@@ -346,7 +539,11 @@ impl Index {
     ) -> Result<Index, CoreError> {
         Self::from_manifest(
             vault.manifest(),
-            &mut |r, v| vault.read_version(r, v).map_err(Into::into),
+            &mut |r, v| {
+                #[cfg(test)]
+                count_read();
+                vault.read_version(r, v).map_err(Into::into)
+            },
             cancelled,
             budget,
         )
@@ -376,50 +573,7 @@ impl Index {
                 summaries.push(HeadSummary::from_version(&version).map_err(data)?);
                 // Only the compact projection survives this iteration.
             }
-            let kind = summaries.first().ok_or(CoreError::Internal)?.kind();
-            let latest = summaries
-                .iter()
-                .map(HeadSummary::latest)
-                .max()
-                .unwrap_or(Timestamp(0));
-            let merged = merge_summaries(summaries).map_err(data)?;
-            let status = merged.status();
-            let shown = merged
-                .representative(View::Live)
-                .or_else(|| merged.representative(View::Trash));
-            let node = (kind == RecordKind::Group).then(|| GroupNode {
-                parent: shown.and_then(HeadSummary::group_parent),
-                live: status.live,
-            });
-            let content = if let Some(summary) = shown {
-                if cancelled() {
-                    return Err(CoreError::Cancelled);
-                }
-                let version = read(rec.record_id(), summary.version_id())?;
-                if !summary.matches_version(&version).map_err(data)? {
-                    return Err(CoreError::Store(qv_store::StoreError::Integrity));
-                }
-                extract(version)?
-            } else {
-                ViewData::None
-            };
-            let info = RecordInfo {
-                kind,
-                latest,
-                status,
-                node,
-                shown: shown.map(Versioned::version_id),
-                heads: merged.heads().iter().map(Versioned::version_id).collect(),
-                payload_heads: merged
-                    .heads()
-                    .iter()
-                    .filter(|v| v.deletion() != qv_model::Deletion::Final)
-                    .count(),
-                #[cfg(test)]
-                bytes: content.bytes(),
-                data: Data::of(&content),
-                pending: Some(content),
-            };
+            let info = summarized(summaries, |v| read(rec.record_id(), v), cancelled)?;
             index.insert(rec.record_id(), info)?;
         }
         index.retree()?;
@@ -448,23 +602,70 @@ impl Index {
     pub(crate) fn replace(&mut self, id: RecordId, mut info: RecordInfo) {
         self.cache.invalidate(id);
         if let (Some(version), Some(view)) = (info.shown, info.pending.take()) {
-            self.cache.put(id, version, view);
+            // Labels first: they take priority over field text (0004 §7.3).
+            if let Ok(label) = label_of(&view) {
+                self.cache.put_label(id, version, label);
+            }
+            self.cache.put(id, version, view, Access::Scan);
         }
         self.records.insert(id, info);
     }
 
-    /// A verified representative view, either resident or bounded transient data.
+    /// A verified representative view for a point read (a row, a detail),
+    /// either resident or bounded transient data.
     pub(crate) fn view(&self, vault: &UnlockedVault, id: RecordId) -> Result<ViewRef, CoreError> {
+        self.view_with(vault, id, Access::Point)
+    }
+
+    /// [`Self::view`] for a scan: never evicts to cache what it reads.
+    pub(crate) fn scan_view(
+        &self,
+        vault: &UnlockedVault,
+        id: RecordId,
+    ) -> Result<ViewRef, CoreError> {
+        self.view_with(vault, id, Access::Scan)
+    }
+
+    fn view_with(
+        &self,
+        vault: &UnlockedVault,
+        id: RecordId,
+        access: Access,
+    ) -> Result<ViewRef, CoreError> {
         let info = self.get(id).ok_or(CoreError::NotFound)?;
         let version = info.shown.ok_or(CoreError::NotFound)?;
         if let Some(view) = self.cache.get(id, version) {
             return Ok(view);
         }
+        #[cfg(test)]
+        count_read();
         let record = vault.read_version(id, version)?;
         if record.version_id != version || record.kind() != info.kind {
             return Err(CoreError::Store(qv_store::StoreError::Integrity));
         }
-        Ok(self.cache.put(id, version, extract(record)?))
+        let view = extract(record)?;
+        if self.cache.label(id, version).is_none() {
+            self.cache.put_label(id, version, label_of(&view)?);
+        }
+        Ok(self.cache.put(id, version, view, access))
+    }
+
+    /// The representative's sort/filter label, read through a scan if it is
+    /// not resident.
+    pub(crate) fn label(&self, vault: &UnlockedVault, id: RecordId) -> Result<LabelRef, CoreError> {
+        let info = self.get(id).ok_or(CoreError::NotFound)?;
+        let version = info.shown.ok_or(CoreError::NotFound)?;
+        if let Some(label) = self.cache.label(id, version) {
+            return Ok(label);
+        }
+        let view = match self.cache.get(id, version) {
+            Some(view) => view,
+            None => self.scan_view(vault, id)?,
+        };
+        if let Some(label) = self.cache.label(id, version) {
+            return Ok(label);
+        }
+        Ok(self.cache.put_label(id, version, label_of(&view)?))
     }
 
     /// Recomputes the display tree from the groups' nodes (0003 §4.1).
@@ -809,20 +1010,26 @@ pub(crate) mod tests {
             )
         };
         let size = one().bytes;
-        let mut at = Index::new(root, meta, size).unwrap();
+        // The sort/filter label is cached and charged alongside the view
+        // (plan 0053).
+        let label = label_of(one().pending.as_ref().unwrap()).unwrap().bytes();
+        assert!(label > 0);
+        let mut at = Index::new(root, meta, size + label).unwrap();
         at.insert(e, one()).unwrap();
-        assert_eq!(at.bytes(), size);
+        assert_eq!(at.bytes(), size + label);
         // Replacement invalidates old residency; uncachable rows remain structural.
         at.insert(e, one()).unwrap();
-        let mut over = Index::new(root, meta, size - 1).unwrap();
+        assert_eq!(at.bytes(), size + label);
+        let mut over = Index::new(root, meta, size + label - 1).unwrap();
         over.insert(e, one()).unwrap();
         assert_eq!(over.records.len(), 1);
-        assert_eq!(over.bytes(), 0);
+        // The label keeps priority; the view no longer fits.
+        assert_eq!(over.bytes(), label);
         assert!(at.check([(rid(), &one())]).is_ok());
         let another = rid();
         at.insert(another, one()).unwrap();
         assert_eq!(at.records.len(), 2);
-        assert!(at.bytes() <= size);
+        assert!(at.bytes() <= size + label);
     }
 
     #[test]

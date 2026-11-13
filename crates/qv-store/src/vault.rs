@@ -52,6 +52,7 @@ use crate::manifest::{
 };
 use crate::object::{RecordRole, Scope, SealedObject, open_record, seal_record};
 use crate::schema::{self, ObjectReader, StoredHead, StoredReplica, validation_err};
+use crate::sink::{HeadSink, NoSink};
 use crate::slot::{LocalSlot, password_slot};
 use crate::sqlite::{StepBudget, harden, open_connection};
 use crate::validation::{check_control_kinds, check_head};
@@ -210,6 +211,17 @@ pub(crate) fn load_state(
     header: &Header,
     vk: &VaultKey,
 ) -> Result<State, StoreError> {
+    load_state_into(conn, header, vk, &mut NoSink)
+}
+
+/// [`load_state`], handing the authenticated manifest and every
+/// authenticated head to `sink` (0004 §7.2).
+pub(crate) fn load_state_into<S: HeadSink>(
+    conn: &Connection,
+    header: &Header,
+    vk: &VaultKey,
+    sink: &mut S,
+) -> Result<State, S::Error> {
     let keys = Keys::derive(vk, header)?;
     let stored = schema::read_state(conn)?;
 
@@ -223,7 +235,7 @@ pub(crate) fn load_state(
     )?;
     let head = LocalHead::decode(&stored.head.body)?;
     if head.vault_id != header.vault_id || head.key_generation != header.key_generation {
-        return Err(StoreError::Integrity);
+        return Err(StoreError::Integrity.into());
     }
     let digest = local_digest(&stored.head.body, &head_tag)?;
     crate::receipt_store::open(
@@ -236,22 +248,22 @@ pub(crate) fn load_state(
     // LAN links: shape checks before any value, then the head-bound digest.
     let links = crate::lan_store::read(conn, header)?;
     if crate::lan_store::digest(&links)? != head.lan_links_digest {
-        return Err(StoreError::Integrity);
+        return Err(StoreError::Integrity.into());
     }
 
     // The manifest the head names.
     let m = &stored.manifest;
     if m.hash != head.manifest_hash || m.key_generation != header.key_generation {
-        return Err(StoreError::Integrity);
+        return Err(StoreError::Integrity.into());
     }
     let profile = accepted_profile(header, m.data_profile)?;
     if envelope_hash(m.key_generation, profile, &m.nonce, &m.ciphertext)? != m.hash {
-        return Err(StoreError::Integrity);
+        return Err(StoreError::Integrity.into());
     }
     let s = scope(header);
     let manifest = open_manifest(&keys.manifest, s, profile, &m.nonce, &m.ciphertext)?;
     if *manifest.config_digest() != config_digest(header)? {
-        return Err(StoreError::Integrity);
+        return Err(StoreError::Integrity.into());
     }
 
     // Every referenced object row exists with its profile and length.
@@ -262,15 +274,17 @@ pub(crate) fn load_state(
             .meta(header.key_generation, &r.object_id().to_bytes())?
             .ok_or(StoreError::Integrity)?;
         if meta.data_profile != r.data_profile().id() || meta.length != r.length() {
-            return Err(StoreError::Integrity);
+            return Err(StoreError::Integrity.into());
         }
     }
 
     // Every head decrypts for its role; one kind per record; control rules.
+    sink.begin(&manifest)?;
     let mut kinds = BTreeMap::new();
     for rec in manifest.records() {
         let mut kind = None;
-        for h in rec.heads() {
+        let heads = rec.heads().len();
+        for (i, h) in rec.heads().iter().enumerate() {
             let version = read_role(
                 &mut reader,
                 &keys,
@@ -282,10 +296,11 @@ pub(crate) fn load_state(
             )?;
             let k = version.kind();
             if kind.is_some_and(|known| known != k) {
-                return Err(StoreError::Integrity);
+                return Err(StoreError::Integrity.into());
             }
             kind = Some(k);
             check_head(&manifest, rec.record_id(), h, &version)?;
+            sink.head(rec.record_id(), version, i + 1 == heads)?;
         }
         for role in rec.history().iter().filter(|v| v.is_tombstone()) {
             let version = read_role(
@@ -298,14 +313,14 @@ pub(crate) fn load_state(
                 true,
             )?;
             if kind != Some(version.kind()) {
-                return Err(StoreError::Integrity);
+                return Err(StoreError::Integrity.into());
             }
         }
         kinds.insert(rec.record_id(), kind.ok_or(StoreError::Integrity)?);
     }
     check_control_kinds(&manifest, &kinds)?;
 
-    let writer = WriterId::from_bytes(stored.replica.writer_id)?;
+    let writer = WriterId::from_bytes(stored.replica.writer_id).map_err(StoreError::from)?;
     Ok(State {
         manifest,
         kinds,
@@ -330,6 +345,8 @@ pub(crate) fn read_role(
     v: &VersionRef,
     check_hash: bool,
 ) -> Result<RecordVersion, StoreError> {
+    #[cfg(test)]
+    tests::ROLE_READS.with(|n| n.set(n.get() + 1));
     let r = manifest
         .reference(v.object_id())
         .ok_or(StoreError::Integrity)?;
@@ -545,14 +562,26 @@ impl VaultFile {
         password: &MasterPassword,
         anchors: &AnchorDir,
     ) -> Result<(UnlockedVault, AnchorStatus), StoreError> {
+        self.unlock_for_recovery_into(password, anchors, &mut NoSink)
+    }
+
+    /// [`Self::unlock_for_recovery`], handing the authenticated manifest and
+    /// each authenticated head to `sink` during verification (0004 §7.2).
+    pub fn unlock_for_recovery_into<S: HeadSink>(
+        self,
+        password: &MasterPassword,
+        anchors: &AnchorDir,
+        sink: &mut S,
+    ) -> Result<(UnlockedVault, AnchorStatus), S::Error> {
         self.budget.reset();
         let slot = password_slot(&self.slots)?;
-        let vk =
-            slot.keyslot
-                .slot
-                .unlock(password, self.header.vault_id, self.header.key_generation)?;
+        let vk = slot
+            .keyslot
+            .slot
+            .unlock(password, self.header.vault_id, self.header.key_generation)
+            .map_err(StoreError::from)?;
         self.verify_header(&vk)?;
-        self.finish_unlock(vk, anchors)
+        self.finish_unlock_into(vk, anchors, sink)
     }
 
     /// Opens an existing local vault using a bounded recovery phrase.
@@ -564,16 +593,27 @@ impl VaultFile {
         phrase: &[u8],
         anchors: &AnchorDir,
     ) -> Result<(UnlockedVault, AnchorStatus), StoreError> {
+        self.unlock_with_phrase_into(phrase, anchors, &mut NoSink)
+    }
+
+    /// [`Self::unlock_with_phrase`], handing the authenticated manifest and
+    /// each authenticated head to `sink` during verification (0004 §7.2).
+    pub fn unlock_with_phrase_into<S: HeadSink>(
+        self,
+        phrase: &[u8],
+        anchors: &AnchorDir,
+        sink: &mut S,
+    ) -> Result<(UnlockedVault, AnchorStatus), S::Error> {
         if phrase.len() > 1024 {
-            return Err(StoreError::LimitExceeded);
+            return Err(StoreError::LimitExceeded.into());
         }
-        let vk = VaultKey::from_recovery_phrase(phrase)?;
+        let vk = VaultKey::from_recovery_phrase(phrase).map_err(StoreError::from)?;
         match self.verify_header(&vk) {
-            Err(StoreError::Integrity) => return Err(StoreError::WrongPhrase),
-            Err(e) => return Err(e),
+            Err(StoreError::Integrity) => return Err(StoreError::WrongPhrase.into()),
+            Err(e) => return Err(e.into()),
             Ok(()) => {}
         }
-        self.finish_unlock(vk, anchors)
+        self.finish_unlock_into(vk, anchors, sink)
     }
 
     /// The path this file was opened at.
@@ -620,6 +660,16 @@ impl VaultFile {
         vk: VaultKey,
         anchors: &AnchorDir,
     ) -> Result<(UnlockedVault, AnchorStatus), StoreError> {
+        self.finish_unlock_into(vk, anchors, &mut NoSink)
+    }
+
+    /// [`Self::finish_unlock`], handing each authenticated head to `sink`.
+    pub(crate) fn finish_unlock_into<S: HeadSink>(
+        self,
+        vk: VaultKey,
+        anchors: &AnchorDir,
+        sink: &mut S,
+    ) -> Result<(UnlockedVault, AnchorStatus), S::Error> {
         self.check_identity()?;
         self.budget.reset();
         let state = {
@@ -627,14 +677,14 @@ impl VaultFile {
                 .conn
                 .unchecked_transaction()
                 .map_err(|e| validation_err(&e))?;
-            let state = load_state(&tx, &self.header, &vk)?;
+            let state = load_state_into(&tx, &self.header, &vk, sink)?;
             tx.commit().map_err(|e| validation_err(&e))?;
             state
         };
         let status = match anchors.load(&state.replica.replica_id) {
             Ok(anchor) => compare(&state.head, &state.digest, anchor.as_ref()),
             Err(StoreError::DamagedAnchor) => AnchorStatus::Damaged,
-            Err(e) => return Err(e),
+            Err(e) => return Err(e.into()),
         };
         let gate = match status {
             AnchorStatus::Verified => WriteGate::Open,
@@ -1126,6 +1176,11 @@ impl UnlockedVault {
 #[cfg(test)]
 pub(crate) mod tests {
     use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
+
+    thread_local! {
+        /// Version decryptions on this thread (plan 0053 decode counts).
+        pub(crate) static ROLE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
 
     use qv_crypto::{DerivationProfile, MacProfile};
     use qv_model::{Clock, Entry};
@@ -1799,5 +1854,113 @@ pub(crate) mod tests {
         let u = unlock(&p, &dir, PASSWORD).unwrap();
         assert_eq!(format!("{u:?}"), "UnlockedVault(<redacted>)");
         assert_eq!(u.check_identity(), Ok(()));
+    }
+
+    /// Records what unlock verification hands over (plan 0053).
+    struct Recorder {
+        began: usize,
+        heads: Vec<(RecordId, VersionId, bool)>,
+        fail_at: Option<usize>,
+    }
+
+    impl HeadSink for Recorder {
+        type Error = StoreError;
+        fn begin(&mut self, _: &Manifest) -> Result<(), StoreError> {
+            assert!(self.heads.is_empty());
+            self.began += 1;
+            Ok(())
+        }
+        fn head(&mut self, r: RecordId, v: RecordVersion, last: bool) -> Result<(), StoreError> {
+            if self.fail_at == Some(self.heads.len()) {
+                return Err(StoreError::Internal);
+            }
+            self.heads.push((r, v.version_id, last));
+            Ok(())
+        }
+    }
+
+    fn recorder(fail_at: Option<usize>) -> Recorder {
+        Recorder {
+            began: 0,
+            heads: Vec::new(),
+            fail_at,
+        }
+    }
+
+    #[test]
+    fn unlock_sink_sees_each_authenticated_head_once() {
+        let d = TestDir::new();
+        let a = TestDir::new();
+        let (p, dir) = copy_fixture(&d, &a, "v.qvault");
+        {
+            let mut u = unlock(&p, &dir, PASSWORD).unwrap();
+            let edited = RecordId::generate().unwrap();
+            for title in ["a", "b", "c"] {
+                edit(&mut u, RecordId::generate().unwrap(), title);
+            }
+            edit(&mut u, edited, "first");
+            edit(&mut u, edited, "second");
+        }
+        let mut rec = recorder(None);
+        ROLE_READS.with(|n| n.set(0));
+        let (u, status) = {
+            let _k = kdf();
+            VaultFile::open(&p)
+                .unwrap()
+                .unlock_for_recovery_into(&pw(PASSWORD), &dir, &mut rec)
+                .unwrap()
+        };
+        assert_eq!(status, AnchorStatus::Verified);
+        let expected: Vec<_> = u
+            .manifest()
+            .records()
+            .iter()
+            .flat_map(|r| {
+                let n = r.heads().len();
+                r.heads()
+                    .iter()
+                    .enumerate()
+                    .map(move |(i, h)| (r.record_id(), h.version_id(), i + 1 == n))
+            })
+            .collect();
+        assert_eq!(rec.began, 1);
+        assert_eq!(rec.heads, expected);
+        let tombstones: usize = u
+            .manifest()
+            .records()
+            .iter()
+            .map(|r| r.history().iter().filter(|v| v.is_tombstone()).count())
+            .sum();
+        // Verification decrypts each head and tombstone exactly once.
+        assert_eq!(
+            ROLE_READS.with(std::cell::Cell::get),
+            expected.len() + tombstones
+        );
+    }
+
+    #[test]
+    fn unlock_sink_errors_abort_the_unlock() {
+        let d = TestDir::new();
+        let a = TestDir::new();
+        let (p, dir) = copy_fixture(&d, &a, "v.qvault");
+        let mut rec = recorder(Some(1));
+        let r = {
+            let _k = kdf();
+            VaultFile::open(&p)
+                .unwrap()
+                .unlock_with_phrase_into(b"not a phrase", &dir, &mut rec)
+        };
+        assert!(r.is_err());
+        assert_eq!((rec.began, rec.heads.len()), (0, 0));
+        let r = {
+            let _k = kdf();
+            VaultFile::open(&p)
+                .unwrap()
+                .unlock_for_recovery_into(&pw(PASSWORD), &dir, &mut rec)
+        };
+        assert_eq!(r.err(), Some(StoreError::Internal));
+        assert_eq!((rec.began, rec.heads.len()), (1, 1));
+        // The file is unchanged and opens normally afterwards.
+        unlock(&p, &dir, PASSWORD).unwrap();
     }
 }

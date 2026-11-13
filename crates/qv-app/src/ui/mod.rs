@@ -38,7 +38,9 @@ pub(crate) fn app() -> Element {
         std::thread::spawn(move || {
             let mut previous = None;
             loop {
-                std::thread::sleep(std::time::Duration::from_millis(200));
+                // Background results wake this at once; the tick remains for
+                // countdowns, inactivity and lock checks (plan 0053 step 9).
+                crate::controller::wait_ui(std::time::Duration::from_millis(200));
                 if let Some(Ok(controller)) = ACTIVE.get() {
                     controller.pump();
                 }

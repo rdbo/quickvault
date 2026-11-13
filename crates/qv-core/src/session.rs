@@ -227,6 +227,18 @@ impl<'a> Ctx<'a> {
         self.open.index.view(&self.open.vault, id)
     }
 
+    /// A full view for a scan, which never evicts to cache it (0004 §7.3).
+    pub(crate) fn scan_view(&self, id: RecordId) -> Result<crate::view_cache::ViewRef, CoreError> {
+        self.check_cancel()?;
+        self.open.index.scan_view(&self.open.vault, id)
+    }
+
+    /// The sort/filter label of a record's representative.
+    pub(crate) fn label(&self, id: RecordId) -> Result<crate::view_cache::LabelRef, CoreError> {
+        self.check_cancel()?;
+        self.open.index.label(&self.open.vault, id)
+    }
+
     /// A lock-request check that outlives borrows of `open`.
     pub(crate) fn canceller(&self) -> Canceller<'a> {
         Canceller(&self.session.locking)
@@ -303,6 +315,21 @@ impl Session {
             &|| cancel.is_some_and(CancelToken::is_cancelled),
             MAX_VIEW_BYTES,
         )?;
+        Ok(Self::open_indexed(
+            vault, index, tag, time, anchor, snapshots, read_only,
+        ))
+    }
+
+    /// Wraps a vault whose index was built during its unlock verification.
+    pub(crate) fn open_built(
+        vault: UnlockedVault,
+        index: Index,
+        time: Arc<dyn TimeSource>,
+        anchor: AnchorStatus,
+        snapshots: Option<Arc<SnapshotPolicy>>,
+        read_only: bool,
+    ) -> Result<Session, CoreError> {
+        let tag = SessionTag::generate()?;
         Ok(Self::open_indexed(
             vault, index, tag, time, anchor, snapshots, read_only,
         ))

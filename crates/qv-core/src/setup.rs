@@ -14,6 +14,7 @@ use qv_model::Timestamp;
 use qv_store::{AnchorDir, AnchorStatus, LocationWarnings, StoreError, UnlockedVault, VaultFile};
 
 use crate::error::{CoreError, crypto};
+use crate::index::{Index, IndexBuilder, MAX_VIEW_BYTES};
 use crate::session::{CancelToken, Session};
 use crate::snapshot::SnapshotPolicy;
 
@@ -274,9 +275,9 @@ impl Core {
 
     /// Unlocks the vault at `path`. A missing anchor is
     /// `Store(NoAnchor)` and a mismatched one `Store(Rollback)`; see
-    /// [`Self::unlock_for_recovery`]. The password KDF and the store's
-    /// verification cannot be interrupted; `cancel` is checked before and
-    /// after them and while the views are built.
+    /// [`Self::unlock_for_recovery`]. The password KDF cannot be
+    /// interrupted; `cancel` is checked before and after it and between the
+    /// heads that verification authenticates and indexes.
     pub fn unlock(
         &self,
         path: &Path,
@@ -304,8 +305,8 @@ impl Core {
         cancel: Option<&CancelToken>,
         automatic: bool,
     ) -> Result<Session, CoreError> {
-        let (vault, status) = self.open(path, cancel, |f| {
-            f.unlock_for_recovery(password, &self.anchors)
+        let (vault, status, index) = self.open(path, cancel, |f, b| {
+            f.unlock_for_recovery_into(password, &self.anchors, b)
         })?;
         match status {
             AnchorStatus::Missing => return Err(StoreError::NoAnchor.into()),
@@ -313,13 +314,13 @@ impl Core {
             AnchorStatus::Mismatch => return Err(StoreError::Rollback.into()),
             _ => {}
         }
-        let session = Session::open(
+        let session = Session::open_built(
             vault,
+            index,
             self.time.clone(),
             status,
             self.snapshots.clone(),
             false,
-            cancel,
         )?;
         let session = self.bind_platform(session)?;
         if automatic {
@@ -337,20 +338,20 @@ impl Core {
         phrase: &[u8],
         cancel: Option<&CancelToken>,
     ) -> Result<(Session, AnchorStatus), CoreError> {
-        let (vault, status) = self.open(path, cancel, |f| {
-            f.unlock_with_phrase(phrase, &self.anchors)
+        let (vault, status, index) = self.open(path, cancel, |f, b| {
+            f.unlock_with_phrase_into(phrase, &self.anchors, b)
         })?;
         let read_only = matches!(
             status,
             AnchorStatus::Missing | AnchorStatus::Mismatch | AnchorStatus::Damaged
         );
-        let session = Session::open(
+        let session = Session::open_built(
             vault,
+            index,
             self.time.clone(),
             status,
             self.snapshots.clone(),
             read_only,
-            cancel,
         )?;
         let session = self.bind_platform(session)?;
         Ok((session, status))
@@ -365,39 +366,48 @@ impl Core {
         password: &MasterPassword,
         cancel: Option<&CancelToken>,
     ) -> Result<(Session, AnchorStatus), CoreError> {
-        let (vault, status) = self.open(path, cancel, |f| {
-            f.unlock_for_recovery(password, &self.anchors)
+        let (vault, status, index) = self.open(path, cancel, |f, b| {
+            f.unlock_for_recovery_into(password, &self.anchors, b)
         })?;
         let read_only = matches!(
             status,
             AnchorStatus::Missing | AnchorStatus::Mismatch | AnchorStatus::Damaged
         );
-        let session = Session::open(
+        let session = Session::open_built(
             vault,
+            index,
             self.time.clone(),
             status,
             self.snapshots.clone(),
             read_only,
-            cancel,
         )?;
         let session = self.bind_platform(session)?;
         session.run_automatic_snapshot(cancel);
         Ok((session, status))
     }
 
+    /// Opens and unlocks `path`, building the session index from the heads
+    /// unlock verification authenticates (0004 §7.2). Cancellation is
+    /// checked before and after the KDF and between heads.
     pub(crate) fn open(
         &self,
         path: &Path,
         cancel: Option<&CancelToken>,
-        unlock: impl FnOnce(VaultFile) -> Result<(UnlockedVault, AnchorStatus), qv_store::StoreError>,
-    ) -> Result<(UnlockedVault, AnchorStatus), CoreError> {
+        unlock: impl FnOnce(
+            VaultFile,
+            &mut IndexBuilder<'_>,
+        ) -> Result<(UnlockedVault, AnchorStatus), CoreError>,
+    ) -> Result<(UnlockedVault, AnchorStatus, Index), CoreError> {
         self.platform_gate()?;
         cancelled(cancel)?;
         self.check_anchor_location(path)?;
         let file = VaultFile::open(path)?;
-        let unlocked = unlock(file)?;
+        let is_cancelled = || cancel.is_some_and(CancelToken::is_cancelled);
+        let mut builder = IndexBuilder::new(MAX_VIEW_BYTES, &is_cancelled);
+        let (vault, status) = unlock(file, &mut builder)?;
         cancelled(cancel)?;
-        Ok(unlocked)
+        let index = builder.finish(&vault)?;
+        Ok((vault, status, index))
     }
 }
 

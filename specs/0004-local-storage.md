@@ -431,6 +431,10 @@ views do not permit skipping integrity/schema checks. Decode one head at a
 time with compact merge summaries; do not retain all 256 maximum-size heads.
 Remove aggregate-text preflight rejection from acceptance/publication paths;
 validate the compact candidate and all existing model/storage budgets instead.
+The unlock verification pass may hand each head, after its AEAD and role
+checks, to the caller's index builder so that a head is decoded once. The
+builder sees no version before manifest authentication. If unlock then fails,
+the partial index and its text are discarded; no session is returned.
 
 7.3. Page views return at most 32 rows and 2 MiB owned display text. Account
 allocated capacity and Unicode normalization/lowercase expansion, including
@@ -444,7 +448,18 @@ No field or
 row truncation; a maximum valid row must remain readable. Preserve current
 case-insensitive matching and order: group order/ID, entry lowercase title/ID,
 search groups by lowercase name/ID before entries by lowercase title/ID. Use bounded top-k selection/on-demand reads
-rather than all-results plaintext accumulation. Private redacted/zeroizing
+rather than all-results plaintext accumulation. A session may keep a few
+text-free match sets: the ascending record IDs of every match of one
+query/scope at one revision, bounded by the record limit, zeroized and
+charged to the 64 MiB ceiling. They live in session state only, never in a
+cursor or page, and are discarded on lock, revision change and eviction by
+newer sets. A matching cursor may page through its set without rematching;
+a new query at the same revision and scope may scan only a prior set when the
+new normalized query contains the prior one. Exhausting the ceiling falls
+back to a full scan, never a failure. The cache keeps labels (titles, type
+hints, icons, group names/order and their normalized copies) apart from
+searchable field text and evicts field text first; a sequential scan must not
+evict resident views to admit new ones. Private redacted/zeroizing
 cursors bind session, revision, query/scope and order; mismatches return
 StateChanged, never mixed-snapshot output. Scans process at most 16 records
 per session read, check cancellation between heads, release the mutex between
@@ -492,6 +507,11 @@ is unsupported ([SQLite warning](https://www.sqlite.org/howtocorrupt.html)).
 
 ## Changelog
 
+- 2026-11-13: §7.2 lets unlock verification feed the index builder so each
+  head is decoded once; §7.3 permits text-free per-query match sets, query
+  refinement over them, a separately evicted label tier and scan-resistant
+  admission (plan 0053, owner-delegated 2026-11-13 under the standing
+  2026-11-02 delegation). Results, ordering and budgets are unchanged.
 - 2026-11-10: §5.4 defines explicit bounded Android raw-document staging,
   complete verification and independent no-replace publication (plan 0049).
 

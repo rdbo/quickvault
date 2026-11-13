@@ -9,6 +9,30 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-13: The app redraws as soon as a list page or an action finishes,
+  instead of on its next 200 ms check. Choosing a group or an item type no
+  longer waits up to 200 ms (about 100 ms on average) for rows that are
+  already loaded (plan 0053 step 9).
+- 2026-11-13: Large vaults are much faster (plan 0053). Host measurements on
+  a 180-entry vault with 135 MiB of searchable text:
+  - a complete search drops from 16.1 s to 0.40 s, and listing every item
+    from 16.3 s to 0.35 s;
+  - type counts drop from 180 ms to 2 ms;
+  - unlock drops from 1.9 s to 1.3 s, and from 3.6 s to 1.7 s at 50,000
+    records;
+  - bulk changes (batch icon, move, trash and restore, deleting a group)
+    grow memory by about 4 MiB instead of 146 MiB.
+
+  How: unlock decodes each item once; paged views keep short labels
+  resident and never evict for a scan; searches remember which records
+  matched (record IDs only, in memory) so later pages and longer queries
+  rescan less; bulk changes stage one item at a time in the same single
+  transaction. Results, ordering, budgets and formats are unchanged; specs
+  0004 §7.2/§7.3 and 0008 §2/§6 are amended. Phone measurements are pending.
+- 2026-11-13: Tests build at `opt-level = 2` (`[profile.test]`), with
+  debug assertions and overflow checks still on. The large-vault test drops
+  from about 21 minutes to 33 seconds locally; CI test jobs had taken over
+  an hour.
 - 2026-11-12: Roadmap: Windows support (now milestone 3, phase 3.1) comes
   before the optional remote server (now milestone 4, phases 4.1–4.9).
 - 2026-11-11: The app's item list no longer blanks and reloads when a type,

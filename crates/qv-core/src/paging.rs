@@ -12,7 +12,7 @@ use zeroize::Zeroizing;
 
 use crate::index::{Data, ViewData};
 use crate::session::{Ctx, SessionTag};
-use crate::view_cache::TextLease;
+use crate::view_cache::{Label, TextLease};
 use crate::views::{entry_summary, group_summary, item_handle, item_name, trash_item};
 use crate::{
     CancelToken, ConflictSummary, CoreError, EntrySummary, GroupHandle, GroupSummary,
@@ -221,6 +221,9 @@ struct Request<'a> {
     text: BudgetText,
     kind: BudgetText,
     fingerprint: std::sync::Arc<SecretArray<32>>,
+    fold: std::cell::RefCell<Fold>,
+    /// The candidates come from this exact query's match set.
+    prematched: bool,
 }
 
 fn text(ctx: &Ctx<'_>, value: Zeroizing<String>) -> Result<BudgetText, CoreError> {
@@ -249,6 +252,96 @@ pub fn type_bucket(kind: &str) -> &'static str {
 fn lower(ctx: &Ctx<'_>, value: &str) -> Result<BudgetText, CoreError> {
     text(ctx, Zeroizing::new(value.to_lowercase()))
 }
+/// The most text-free match sets a session keeps (0004 §7.3). The app reads
+/// at most three lanes at once.
+const MAX_MATCH_SETS: usize = 4;
+
+/// The ascending record IDs of every match of one query and scope at one
+/// revision: no text, zeroized, charged to the view budget, kept only in
+/// session state and never in a cursor or page (0004 §7.3, 0008 §6).
+pub(crate) struct MatchSet {
+    revision: u64,
+    scope: Scope,
+    fingerprint: std::sync::Arc<SecretArray<32>>,
+    query: Zeroizing<String>,
+    kind: Zeroizing<String>,
+    ids: std::sync::Arc<Zeroizing<Vec<[u8; 16]>>>,
+    _lease: TextLease,
+}
+
+/// A session's match sets, oldest first.
+#[derive(Default)]
+pub(crate) struct MatchSets(Vec<MatchSet>);
+
+impl MatchSets {
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+/// Where a scan takes its candidate records from.
+enum Source {
+    /// Every indexed record.
+    All,
+    /// A match set's records: this exact query's (then `Request::prematched`)
+    /// or a contained query's.
+    Set(std::sync::Arc<Zeroizing<Vec<[u8; 16]>>>),
+}
+
+/// A match set under construction.
+struct Collect {
+    ids: Zeroizing<Vec<[u8; 16]>>,
+    lease: TextLease,
+}
+
+/// Case-insensitive containment for one scan, reusing one zeroizing,
+/// budget-charged buffer for ASCII values (0004 §7.3, 0008 §6).
+struct Fold {
+    buf: Zeroizing<Vec<u8>>,
+    _lease: Option<TextLease>,
+}
+
+impl Fold {
+    fn new() -> Self {
+        Self {
+            buf: Zeroizing::new(Vec::new()),
+            _lease: None,
+        }
+    }
+
+    /// Whether `value.to_lowercase()` contains the lowercased `query`.
+    fn contains(&mut self, ctx: &Ctx<'_>, value: &str, query: &str) -> Result<bool, CoreError> {
+        if !value.is_ascii() {
+            // Non-ASCII text can fold into ASCII (U+212A KELVIN SIGN is `k`).
+            return Ok(lower(ctx, value)?.as_str().contains(query));
+        }
+        if self.buf.capacity() < value.len() {
+            // Grow by replacement so no unzeroized copy is freed.
+            self._lease = None;
+            self.buf = Zeroizing::new(Vec::new());
+            self._lease = Some(
+                ctx.open
+                    .index
+                    .cache
+                    .reserve(value.len())
+                    .ok_or(CoreError::LimitExceeded)?,
+            );
+            self.buf = Zeroizing::new(Vec::with_capacity(value.len()));
+        }
+        Ok(ascii_contains(&mut self.buf, value, query))
+    }
+}
+
+/// [`Fold::contains`] for an ASCII `value`, folded into `buf`, whose capacity
+/// must already fit it.
+fn ascii_contains(buf: &mut Vec<u8>, value: &str, query: &str) -> bool {
+    buf.clear();
+    buf.extend_from_slice(value.as_bytes());
+    buf.make_ascii_lowercase();
+    std::str::from_utf8(buf).is_ok_and(|folded| folded.contains(query))
+}
+
 fn fingerprint(a: &str, b: &str) -> std::sync::Arc<SecretArray<32>> {
     let mut hash = ContentHasher::new();
     hash.update(b"qv/view-query/v1");
@@ -371,71 +464,75 @@ fn key(ctx: &Ctx<'_>, request: &Request, id: RecordId) -> Result<Option<SortKey>
             version: [0; 16],
         }));
     }
-    let view = ctx.view(id)?;
+    let label = ctx.label(id)?;
     if request.scope == Scope::Types {
-        let ViewData::Entry(entry) = &**view else {
+        let Label::Entry { bucket, .. } = &**label else {
             return Err(CoreError::Internal);
         };
-        let kind = type_bucket(lower(ctx, entry.type_hint.expose())?.as_str());
-        let category = TYPE_BUCKETS
-            .iter()
-            .position(|b| *b == kind)
-            .and_then(|i| u8::try_from(i).ok())
+        let kind = TYPE_BUCKETS
+            .get(usize::from(*bucket))
             .ok_or(CoreError::Internal)?;
         return Ok(Some(SortKey {
-            category,
+            category: *bucket,
             date: Reverse(None),
-            text: text(ctx, Zeroizing::new(kind.to_owned()))?,
+            text: text(ctx, Zeroizing::new((*kind).to_owned()))?,
             id: [0; 16],
             version: [0; 16],
         }));
     }
+    let deleted_at = match &info.data {
+        Data::Entry(e) => e.deleted_at,
+        Data::Group(g) => g.deleted_at,
+        _ => None,
+    };
     let mut category = 0;
     let mut date = Reverse(None);
-    let sort = match &**view {
-        ViewData::Group(group) => match request.scope {
+    let sort = match &**label {
+        Label::Group { name, order } => match request.scope {
             Scope::Search | Scope::Groups(None) => {
                 if matches!(request.scope, Scope::Groups(None)) {
                     category = u8::from(id != index.root);
                 }
-                let name = lower(ctx, group.name.expose())?;
-                if !name.as_str().contains(request.text.as_str()) {
+                if !request.prematched && !name.contains(request.text.as_str()) {
                     return Ok(None);
                 }
-                name
+                text(ctx, Zeroizing::new(name.as_str().to_owned()))?
             }
             Scope::Children(_) | Scope::GroupItems(_) | Scope::Groups(Some(_)) => {
                 if matches!(request.scope, Scope::Groups(_))
+                    && !request.prematched
                     && !request.text.as_str().is_empty()
-                    && !lower(ctx, group.name.expose())?
-                        .as_str()
-                        .contains(request.text.as_str())
+                    && !name.contains(request.text.as_str())
                 {
                     return Ok(None);
                 }
-                text(ctx, Zeroizing::new(group.order.expose().to_owned()))?
+                text(ctx, Zeroizing::new(order.as_str().to_owned()))?
             }
             Scope::Trash => {
-                date = Reverse(group.deleted_at);
+                date = Reverse(deleted_at);
                 text(ctx, Zeroizing::new(String::new()))?
             }
             Scope::Conflicts => text(ctx, Zeroizing::new(String::new()))?,
             _ => return Ok(None),
         },
-        ViewData::Entry(entry) => {
+        Label::Entry { title, bucket } => {
             if matches!(request.scope, Scope::Items { kind: true, .. })
-                && type_bucket(lower(ctx, entry.type_hint.expose())?.as_str())
-                    != request.kind.as_str()
+                && TYPE_BUCKETS.get(usize::from(*bucket)).copied() != Some(request.kind.as_str())
             {
                 return Ok(None);
             }
-            let title = lower(ctx, entry.title.expose())?;
             if matches!(
                 request.scope,
                 Scope::Search | Scope::Items { .. } | Scope::GroupItems(_)
-            ) && !request.text.as_str().is_empty()
-                && !title.as_str().contains(request.text.as_str())
+            ) && !request.prematched
+                && !request.text.as_str().is_empty()
+                && !title.contains(request.text.as_str())
             {
+                // Only now is field text needed; a scan never evicts for it.
+                let view = ctx.scan_view(id)?;
+                let ViewData::Entry(entry) = &**view else {
+                    return Err(CoreError::Internal);
+                };
                 let mut hit = false;
                 let fields = if matches!(
                     request.scope,
@@ -449,11 +546,9 @@ fn key(ctx: &Ctx<'_>, request: &Request, id: RecordId) -> Result<Option<SortKey>
                 } else {
                     1
                 };
+                let mut fold = request.fold.borrow_mut();
                 for field in entry.fields.iter().take(fields) {
-                    if lower(ctx, field.value.expose())?
-                        .as_str()
-                        .contains(request.text.as_str())
-                    {
+                    if fold.contains(ctx, field.value.expose(), request.text.as_str())? {
                         hit = true;
                         break;
                     }
@@ -465,17 +560,17 @@ fn key(ctx: &Ctx<'_>, request: &Request, id: RecordId) -> Result<Option<SortKey>
             match request.scope {
                 Scope::Search | Scope::Children(_) | Scope::GroupItems(_) => {
                     category = 1;
-                    title
+                    text(ctx, Zeroizing::new(title.as_str().to_owned()))?
                 }
                 Scope::Trash => {
-                    date = Reverse(entry.deleted_at);
+                    date = Reverse(deleted_at);
                     text(ctx, Zeroizing::new(String::new()))?
                 }
                 Scope::Conflicts => text(ctx, Zeroizing::new(String::new()))?,
-                _ => title,
+                _ => text(ctx, Zeroizing::new(title.as_str().to_owned()))?,
             }
         }
-        _ => return Ok(None),
+        Label::Other => return Ok(None),
     };
     Ok(Some(SortKey {
         category,
@@ -589,6 +684,74 @@ fn row(ctx: &Ctx<'_>, request: &Request, candidate: &Candidate) -> Result<Row, C
     }))
 }
 
+/// Picks a scan's candidates (0004 §7.3): this exact query's match set, else
+/// the smallest set of a query the new one contains, else every record. A
+/// query-bearing scan that is not prematched also collects a new set, if the
+/// budget allows; otherwise it runs without one.
+fn match_source(ctx: &mut Ctx<'_>, request: &mut Request<'_>) -> (Source, Option<Collect>) {
+    let eligible = request.requester.is_none()
+        && !request.text.as_str().is_empty()
+        && matches!(
+            request.scope,
+            Scope::Search | Scope::Items { .. } | Scope::GroupItems(_) | Scope::Groups(_)
+        );
+    let sets = &mut ctx.open.index.matches.0;
+    sets.retain(|m| m.revision == request.revision);
+    if !eligible {
+        return (Source::All, None);
+    }
+    if let Some(m) = sets.iter().find(|m| {
+        m.scope == request.scope && m.fingerprint.ct_eq(request.fingerprint.expose_secret())
+    }) {
+        request.prematched = true;
+        return (Source::Set(std::sync::Arc::clone(&m.ids)), None);
+    }
+    // Any text containing the new query contains every query it contains.
+    let prior = sets
+        .iter()
+        .filter(|m| {
+            m.scope == request.scope
+                && m.kind.as_str() == request.kind.as_str()
+                && request.text.as_str().contains(m.query.as_str())
+        })
+        .min_by_key(|m| m.ids.len());
+    let (source, capacity) = match prior {
+        Some(m) => (Source::Set(std::sync::Arc::clone(&m.ids)), m.ids.len()),
+        None => (Source::All, ctx.open.index.records.len()),
+    };
+    let bytes = capacity
+        .saturating_mul(16)
+        .saturating_add(request.text.as_str().len())
+        .saturating_add(request.kind.as_str().len());
+    let collect = ctx.open.index.cache.reserve(bytes).map(|lease| Collect {
+        ids: Zeroizing::new(Vec::with_capacity(capacity)),
+        lease,
+    });
+    (source, collect)
+}
+
+/// Keeps a completed scan's match set, replacing the oldest beyond the limit.
+fn keep_match_set(ctx: &mut Ctx<'_>, request: &Request<'_>, collect: Collect) {
+    let sets = &mut ctx.open.index.matches.0;
+    sets.retain(|m| {
+        m.revision == request.revision
+            && !(m.scope == request.scope
+                && m.fingerprint.ct_eq(request.fingerprint.expose_secret()))
+    });
+    while sets.len() >= MAX_MATCH_SETS {
+        sets.remove(0);
+    }
+    sets.push(MatchSet {
+        revision: request.revision,
+        scope: request.scope,
+        fingerprint: std::sync::Arc::clone(&request.fingerprint),
+        query: Zeroizing::new(request.text.as_str().to_owned()),
+        kind: Zeroizing::new(request.kind.as_str().to_owned()),
+        ids: std::sync::Arc::new(collect.ids),
+        _lease: collect.lease,
+    });
+}
+
 impl Session {
     fn page(
         &self,
@@ -616,7 +779,7 @@ impl Session {
         if query.len() > MAX_QUERY_BYTES || kind.len() > 3 * qv_model::MAX_TEXT_BYTES {
             return Err(CoreError::InvalidInput);
         }
-        let request = self.read(|ctx| {
+        let mut request = self.read(|ctx| {
             if cancel.is_cancelled() {
                 return Err(CoreError::Cancelled);
             }
@@ -649,6 +812,8 @@ impl Session {
                 text,
                 kind,
                 fingerprint,
+                fold: std::cell::RefCell::new(Fold::new()),
+                prematched: false,
             };
             if let Some(cursor) = &cursor
                 && (cursor.0.session != request.session
@@ -660,6 +825,7 @@ impl Session {
             }
             Ok(request)
         })?;
+        let (source, mut collect) = self.read(|ctx| Ok(match_source(ctx, &mut request)))?;
         let direction = cursor
             .as_ref()
             .map_or(Direction::Forward, |c| c.0.direction);
@@ -670,14 +836,27 @@ impl Session {
         loop {
             let done = self.read(|ctx| {
                 check(ctx, &request, cancel)?;
-                let ids: Vec<_> = ctx
-                    .open
-                    .index
-                    .records
-                    .range((scanned.map_or(Unbounded, Excluded), Unbounded))
-                    .take(16)
-                    .map(|(id, _)| *id)
-                    .collect();
+                let ids: Vec<_> = match &source {
+                    Source::All => ctx
+                        .open
+                        .index
+                        .records
+                        .range((scanned.map_or(Unbounded, Excluded), Unbounded))
+                        .take(16)
+                        .map(|(id, _)| *id)
+                        .collect(),
+                    Source::Set(ids) => {
+                        let from = match scanned {
+                            Some(RecordId(last)) => ids.partition_point(|id| *id <= last),
+                            None => 0,
+                        };
+                        ids.iter()
+                            .skip(from)
+                            .take(16)
+                            .map(|id| RecordId(*id))
+                            .collect()
+                    }
+                };
                 for &id in &ids {
                     check(ctx, &request, cancel)?;
                     let mut consider = |candidate: SortKey| -> Result<(), CoreError> {
@@ -736,7 +915,12 @@ impl Session {
                                 })?;
                             }
                         }
-                    } else if let Some(candidate) = key(ctx, &request, id)? {
+                    } else if ctx.open.index.get(id).is_some()
+                        && let Some(candidate) = key(ctx, &request, id)?
+                    {
+                        if let Some(c) = &mut collect {
+                            c.ids.push(id.0);
+                        }
                         consider(candidate)?;
                     }
                 }
@@ -788,7 +972,13 @@ impl Session {
                 }
             }
         }
-        self.read(|ctx| check(ctx, &request, cancel))?;
+        self.read(|ctx| {
+            check(ctx, &request, cancel)?;
+            if let Some(c) = collect.take() {
+                keep_match_set(ctx, &request, c);
+            }
+            Ok(())
+        })?;
         let more = excess || selected_len > items.len();
         let make_cursor = |after, direction| {
             ViewCursor(std::sync::Arc::new(CursorState {
@@ -901,6 +1091,8 @@ impl Session {
                 text: lower(ctx, "")?,
                 kind: lower(ctx, "")?,
                 fingerprint: fingerprint("", ""),
+                fold: std::cell::RefCell::new(Fold::new()),
+                prematched: false,
             };
             let after = key(ctx, &request, id)?.ok_or(CoreError::NotFound)?;
             Ok(ViewCursor(std::sync::Arc::new(CursorState {

@@ -35,9 +35,9 @@ use qv_model::{
 };
 
 use crate::error::{CoreError, data, input};
-use crate::index::{Data, RecordInfo, ViewData};
+use crate::index::{Data, Index, RecordInfo, ViewData};
 use crate::order::key_after;
-use crate::session::{Ctx, EntryHandle, GroupHandle, ItemHandle, Session, SessionTag};
+use crate::session::{Canceller, Ctx, EntryHandle, GroupHandle, ItemHandle, Session, SessionTag};
 use crate::views::{decrypt, record};
 
 /// One record's new version, before it has a clock.
@@ -74,26 +74,112 @@ pub(crate) fn commit_with(
     let changes = build(&mut w)?;
     let mut infos = Vec::with_capacity(changes.len());
     for ch in changes {
-        let counter = w.reserve_counter()?;
-        let heads = w.head_clocks(ch.record);
-        let clock = Clock::for_edit(&heads, w.writer_id(), counter).map_err(data)?;
-        let v = RecordVersion {
-            version_id: VersionId::generate().map_err(rng)?,
-            clock,
-            modified_at: now,
-            body: ch.body,
-            ext: ch.ext,
-        };
-        // The model's encode rules apply to what the caller supplied; the
-        // decoded copy is exactly what a later unlock will index.
-        let encoded = v.encode().map_err(input)?;
-        let copy = RecordVersion::decode(&encoded).map_err(data)?;
-        let mut info = RecordInfo::from_heads(ch.kind, vec![copy])?;
-        info.discard_view();
-        infos.push((ch.record, info));
-        w.put_local(ch.record, v)?;
+        infos.push(stage(&mut w, now, ch)?);
     }
-    open.index.check(infos.iter().map(|(id, i)| (*id, i)))?;
+    let committed = commit_staged(&open.index, w, &infos, cancel, cancelled)?;
+    after_commit(ctx, seq, infos, committed, cancelled)
+}
+
+/// Commits one change per record of `ids` in one transaction (plan 0053):
+/// each record is read, edited and staged before the next is read, so at
+/// most one decoded record is held. `make` returns `None` to leave a record
+/// unchanged; the write opens only at the first change, as [`commit`] opens
+/// none for no changes. An error or cancellation at any record rolls back.
+pub(crate) fn commit_each(
+    ctx: &mut Ctx<'_>,
+    ids: &[RecordId],
+    mut make: impl FnMut(
+        &Index,
+        &dyn Fn(RecordId, VersionId) -> Result<RecordVersion, CoreError>,
+        RecordId,
+    ) -> Result<Option<Change>, CoreError>,
+) -> Result<(), CoreError> {
+    let now = ctx.now();
+    let cancel = ctx.canceller();
+    let open = &mut *ctx.open;
+    let mut rest = ids.iter();
+    let first = loop {
+        let Some(&id) = rest.next() else {
+            return Ok(());
+        };
+        cancel.check()?;
+        #[cfg(test)]
+        staging_event('r', id);
+        let read = |r, v| open.vault.read_version(r, v).map_err(CoreError::from);
+        if let Some(change) = make(&open.index, &read, id)? {
+            break change;
+        }
+    };
+    let seq = open.vault.local_seq();
+    let mut w = open.vault.write()?;
+    let mut infos = Vec::with_capacity(ids.len());
+    infos.push(stage(&mut w, now, first)?);
+    for &id in rest {
+        cancel.check()?;
+        #[cfg(test)]
+        staging_event('r', id);
+        let change = {
+            let read = |r, v| w.read_base_version(r, v).map_err(CoreError::from);
+            make(&open.index, &read, id)?
+        };
+        if let Some(change) = change {
+            infos.push(stage(&mut w, now, change)?);
+        }
+    }
+    let committed = commit_staged(&open.index, w, &infos, cancel, &|| false)?;
+    after_commit(ctx, seq, infos, committed, &|| false)
+}
+
+/// Gives one change its clock and stages its sealed version; only its
+/// compact index entry is kept.
+fn stage(
+    w: &mut qv_store::Write<'_>,
+    now: Timestamp,
+    ch: Change,
+) -> Result<(RecordId, RecordInfo), CoreError> {
+    let counter = w.reserve_counter()?;
+    let heads = w.head_clocks(ch.record);
+    let clock = Clock::for_edit(&heads, w.writer_id(), counter).map_err(data)?;
+    let v = RecordVersion {
+        version_id: VersionId::generate().map_err(rng)?,
+        clock,
+        modified_at: now,
+        body: ch.body,
+        ext: ch.ext,
+    };
+    // The model's encode rules apply to what the caller supplied; the
+    // decoded copy is exactly what a later unlock will index.
+    let encoded = v.encode().map_err(input)?;
+    let copy = RecordVersion::decode(&encoded).map_err(data)?;
+    let mut info = RecordInfo::from_heads(ch.kind, vec![copy])?;
+    info.discard_view();
+    w.put_local(ch.record, v)?;
+    #[cfg(test)]
+    staging_event('s', ch.record);
+    Ok((ch.record, info))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Bulk-change reads ('r') and stages ('s') on this thread (plan 0053).
+    static STAGING: std::cell::RefCell<Vec<(char, RecordId)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+#[cfg(test)]
+fn staging_event(kind: char, id: RecordId) {
+    STAGING.with(|e| e.borrow_mut().push((kind, id)));
+}
+
+/// Index preflight, cancellation and the commit itself. Dropping `w` on an
+/// error rolls the transaction back.
+fn commit_staged(
+    index: &Index,
+    w: qv_store::Write<'_>,
+    infos: &[(RecordId, RecordInfo)],
+    cancel: Canceller<'_>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<Result<(), qv_store::StoreError>, CoreError> {
+    index.check(infos.iter().map(|(id, i)| (*id, i)))?;
     #[cfg(test)]
     crate::session::hooks::reached(crate::session::hooks::Point::BeforeCommit);
     cancel.check()?;
@@ -103,6 +189,20 @@ pub(crate) fn commit_with(
     let committed = w.commit_cancellable(&|| cancel.check().is_err() || cancelled());
     #[cfg(test)]
     crate::session::hooks::reached(crate::session::hooks::Point::AfterCommit);
+    Ok(committed)
+}
+
+/// Applies a commit's outcome: the index follows a durable commit even when
+/// a later step (the anchor) failed.
+fn after_commit(
+    ctx: &mut Ctx<'_>,
+    seq: u64,
+    infos: Vec<(RecordId, RecordInfo)>,
+    committed: Result<(), qv_store::StoreError>,
+    cancelled: &impl Fn() -> bool,
+) -> Result<(), CoreError> {
+    let cancel = ctx.canceller();
+    let open = &mut *ctx.open;
     if open.vault.local_seq() != seq {
         for (id, info) in infos {
             open.index.replace(id, info);
@@ -121,7 +221,11 @@ pub(crate) fn commit_with(
 /// A record that may be edited: exists with `kind`, not finally deleted,
 /// one head. Returns that head.
 fn single(ctx: &Ctx<'_>, id: RecordId, kind: RecordKind) -> Result<VersionId, CoreError> {
-    record(&ctx.open.index, id, kind)?.single_head()
+    single_in(&ctx.open.index, id, kind)
+}
+
+fn single_in(index: &Index, id: RecordId, kind: RecordKind) -> Result<VersionId, CoreError> {
+    record(index, id, kind)?.single_head()
 }
 
 /// Whether `g` is a group shown in the tree (live; the root included).
@@ -416,22 +520,31 @@ fn set_deleted(
     let operation = deleted_at
         .map(|_| qv_model::DeleteOperationId::generate().map_err(rng))
         .transpose()?;
-    let mut changes = Vec::with_capacity(groups.len() + entries.len());
+    // Compact preflight: every record is editable before anything is read.
     for &id in groups {
-        ctx.check_cancel()?;
-        let (_, mut g, ext) = load_group(ctx, id)?;
-        g.deleted_at = deleted_at;
-        g.delete_operation = operation;
-        changes.push(group_change(id, g, ext));
+        single(ctx, id, RecordKind::Group)?;
     }
     for &id in entries {
-        ctx.check_cancel()?;
-        let (_, mut e, ext) = load_entry(ctx, id)?;
-        e.deleted_at = deleted_at;
-        e.delete_operation = operation;
-        changes.push(entry_change(id, e, ext));
+        single(ctx, id, RecordKind::Entry)?;
     }
-    commit(ctx, changes)
+    let ids: Vec<RecordId> = groups.iter().chain(entries).copied().collect();
+    let first_entry = groups.len();
+    let mut n = 0;
+    commit_each(ctx, &ids, |index, read, id| {
+        let change = if n < first_entry {
+            let (mut g, ext) = group_of(read(id, single_in(index, id, RecordKind::Group)?)?)?;
+            g.deleted_at = deleted_at;
+            g.delete_operation = operation;
+            group_change(id, g, ext)
+        } else {
+            let (mut e, ext) = entry_of(read(id, single_in(index, id, RecordKind::Entry)?)?)?;
+            e.deleted_at = deleted_at;
+            e.delete_operation = operation;
+            entry_change(id, e, ext)
+        };
+        n += 1;
+        Ok(Some(change))
+    })
 }
 
 /// The most handles one batch call accepts (plan 0044).
@@ -463,20 +576,20 @@ fn edit_entries(
     edit: impl Fn(&mut Entry) -> bool,
 ) -> Result<(), CoreError> {
     let ids = live_entries(ctx, entries)?;
+    for &id in &ids {
+        single(ctx, id, RecordKind::Entry)?;
+    }
     let now = ctx.now();
-    let mut changes = Vec::with_capacity(ids.len());
-    for id in ids {
-        ctx.check_cancel()?;
-        let (_, mut e, ext) = load_entry(ctx, id)?;
+    commit_each(ctx, &ids, |index, read, id| {
+        let (mut e, ext) = entry_of(read(id, single_in(index, id, RecordKind::Entry)?)?)?;
         if e.deleted_at.is_some() {
             return Err(CoreError::NotAllowed);
         }
-        if edit(&mut e) {
+        Ok(edit(&mut e).then(|| {
             e.modified_at = now;
-            changes.push(entry_change(id, e, ext));
-        }
-    }
-    commit(ctx, changes)
+            entry_change(id, e, ext)
+        }))
+    })
 }
 
 fn trashed_info(ctx: &Ctx<'_>, item: ItemHandle) -> Result<(RecordId, RecordKind), CoreError> {
@@ -1441,6 +1554,92 @@ mod trash_tests {
         assert_eq!(trash_names(&s), ["e"]);
         s.restore(ItemHandle::Entry(e)).unwrap();
         assert!(trash_names(&s).is_empty());
+    }
+
+    fn staged() -> Vec<(char, RecordId)> {
+        STAGING.with(|e| std::mem::take(&mut *e.borrow_mut()))
+    }
+
+    /// Each record is read and staged before the next one is read, so at
+    /// most one decoded record is held (plan 0053).
+    fn assert_sequential(events: &[(char, RecordId)], records: usize) {
+        assert_eq!(events.len(), 2 * records, "{events:?}");
+        for pair in events.chunks(2) {
+            assert!(matches!(pair, [('r', a), ('s', b)] if a == b), "{events:?}");
+        }
+    }
+
+    #[test]
+    fn bulk_changes_read_and_stage_one_record_at_a_time() {
+        let env = Env::new();
+        let s = env.unlock();
+        let root = s.root().unwrap();
+        let g = add_group(&s, root, "G");
+        let inner = add_group(&s, g, "inner");
+        let entries: Vec<_> = (0..12)
+            .map(|i| add_entry(&s, if i % 2 == 0 { g } else { inner }, &format!("e{i}")))
+            .collect();
+        staged();
+        let before = seq(&s);
+        s.set_entry_icons(&entries, Some("blue")).unwrap();
+        assert_sequential(&staged(), 12);
+        // Unchanged records are read but not staged; the rest still commit.
+        s.set_entry_icons(&entries[..3], Some("blue")).unwrap();
+        assert_eq!(staged().iter().filter(|(k, _)| *k == 's').count(), 0);
+        s.move_entries(&entries, root).unwrap();
+        assert_sequential(&staged(), 12);
+        s.move_entries(&entries, inner).unwrap();
+        staged();
+        s.delete(ItemHandle::Group(g), true).unwrap();
+        assert_sequential(&staged(), 14);
+        s.restore(ItemHandle::Group(g)).unwrap();
+        assert_sequential(&staged(), 14);
+        assert_eq!(seq(&s), before + 5);
+        assert!(s.verify(None).unwrap().ok());
+    }
+
+    #[test]
+    fn bulk_change_failure_mid_staging_commits_nothing() {
+        let env = Env::new();
+        let s = env.unlock();
+        let root = s.root().unwrap();
+        let entries: Vec<_> = (0..8)
+            .map(|i| add_entry(&s, root, &format!("e{i}")))
+            .collect();
+        let ids: Vec<RecordId> = entries.iter().map(|e| e.record).collect();
+        let summary = |s: &Session| s.read(|ctx| ctx.open.index.summary(Some(&ctx.open.vault)));
+        let before = (seq(&s), summary(&s).unwrap());
+        for failure in [
+            CoreError::Cancelled,
+            CoreError::Store(qv_store::StoreError::Integrity),
+        ] {
+            let mut n = 0;
+            let r = s.mutate(|ctx| {
+                commit_each(ctx, &ids, |index, read, id| {
+                    n += 1;
+                    if n == 5 {
+                        return Err(failure);
+                    }
+                    let (mut e, ext) =
+                        entry_of(read(id, single_in(index, id, RecordKind::Entry)?)?)?;
+                    e.icon = Some(text("red")?);
+                    Ok(Some(entry_change(id, e, ext)))
+                })
+            });
+            assert_eq!(r, Err(failure));
+            assert_eq!((seq(&s), summary(&s).unwrap()), before);
+        }
+        // A record already staged in this write cannot be re-read as base.
+        let r = s.mutate(|ctx| {
+            commit_each(ctx, &[ids[0], ids[0]], |index, read, id| {
+                let (e, ext) = entry_of(read(id, single_in(index, id, RecordKind::Entry)?)?)?;
+                Ok(Some(entry_change(id, e, ext)))
+            })
+        });
+        assert_eq!(r, Err(CoreError::Store(qv_store::StoreError::InvalidEdit)));
+        assert_eq!((seq(&s), summary(&s).unwrap()), before);
+        staged();
+        assert!(s.verify(None).unwrap().ok());
     }
 
     fn trash_names(s: &Session) -> Vec<String> {

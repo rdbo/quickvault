@@ -5,6 +5,11 @@ what they say, and behaviour changes start with a spec change.
 
 ## Index
 
+Plan 0053 (2026-11-13, owner-delegated) amends 0004 §7.2/§7.3 and 0008
+§2/§6 for performance: unlock verification feeds the index, text-free match
+sets and a separately evicted label tier speed up paged views. No format,
+budget, ordering or status change.
+
 Plan 0049's Android system-picker implementation uses explicit private-copy
 import under 0009 §1.8 and 0004 §5.4: bounded raw ciphertext staging, full
 authentication/verification, fresh local identity and no provider write-back.

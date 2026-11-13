@@ -500,6 +500,16 @@ No path or OS message is included.
   polls every listener and drops them all on admission. This restores the
   dual-stack intent of plan 0037 decision 7 and covers Linux `bindv6only`.
   It is transport only: no wire, crypto or spec change.
+- 2026-11-13 (second CI `windows` run, owner-delegated): **Test fixture
+  `chmod_like`.** It left an already owner-only object alone for `0o700`,
+  so a directory set to `0o500` (owner-only, read-only) stayed read-only.
+  Wine does not enforce read-only DACLs, so only real Windows failed:
+  `rotate_resume_through_core_both_ways`,
+  `snapshot_disk_growth_a_full_disk_aborts_the_mandatory_copy` and
+  `snapshot_failure_never_fails_an_unlock`. The shortcut now also requires
+  that the object opens for writing; regression test
+  `chmod_like_restores_write_after_read_only`. Fixture only; product code
+  never changes permissions.
 
 ## Execution log
 

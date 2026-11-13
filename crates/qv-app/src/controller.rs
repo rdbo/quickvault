@@ -9,11 +9,48 @@ use qv_core::{
 };
 use std::path::PathBuf;
 use std::sync::{
-    Arc, Mutex, MutexGuard,
+    Arc, Condvar, Mutex, MutexGuard,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::{Duration, Instant};
 use zeroize::Zeroize;
+
+/// Set when background work changed what the screen shows (plan 0053 step 9).
+static UI_WAKE: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
+
+/// Asks the UI poll to redraw now instead of at its next tick. Call it after
+/// releasing the state lock. Carries no data; wakes before a wait coalesce.
+pub(crate) fn wake_ui() {
+    let (flag, ready) = &UI_WAKE;
+    *flag
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+    ready.notify_all();
+}
+
+/// Calls [`wake_ui`] when dropped. Declare it first in a background thread
+/// so it drops last, after that thread's state lock and worker permit.
+pub(crate) struct WakeOnDrop;
+
+impl Drop for WakeOnDrop {
+    fn drop(&mut self) {
+        wake_ui();
+    }
+}
+
+/// Waits until [`wake_ui`] or `timeout`, whichever comes first; true when woken.
+/// Only the UI poll (built with `desktop`) and tests wait.
+#[cfg(any(feature = "desktop", test))]
+pub(crate) fn wait_ui(timeout: Duration) -> bool {
+    let (flag, ready) = &UI_WAKE;
+    let guard = flag
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut woken, _) = ready
+        .wait_timeout_while(guard, timeout, |woken| !*woken)
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    std::mem::take(&mut *woken)
+}
 
 #[path = "vault_import.rs"]
 mod vault_import;
@@ -1574,6 +1611,7 @@ impl Controller {
             std::thread::Builder::new()
                 .name("qv-app-confirm".into())
                 .spawn(move || {
+                    let _wake = WakeOnDrop;
                     let _worker = worker;
                     let mut cleanup_pending = false;
                     let result = if matches!(action, Action::SkipPhrase) {
@@ -1714,6 +1752,7 @@ impl Controller {
         std::thread::Builder::new()
             .name("qv-app-vault".into())
             .spawn(move || {
+                let _wake = WakeOnDrop;
                 let _worker = worker;
                 let result = controller.open(action, &values, &token);
                 controller.complete(next, &token, result, matches!(action, Action::ImportVault));
@@ -2062,6 +2101,7 @@ impl Controller {
                 std::thread::Builder::new()
                     .name("qv-app-rotation".into())
                     .spawn(move || {
+                        let _wake = WakeOnDrop;
                         let _worker = worker;
                         let outcome = rotation.install(Some(&token));
                         let mut s = controller.state();
@@ -2119,6 +2159,7 @@ impl Controller {
         std::thread::Builder::new()
             .name("qv-app-resume".into())
             .spawn(move || {
+                let _wake = WakeOnDrop;
                 let _worker = worker;
                 let result = (|| -> Result<&'static str, AppError> {
                     let t =
@@ -2314,6 +2355,7 @@ impl Controller {
         let started = std::thread::Builder::new()
             .name("qv-qr-scan".into())
             .spawn(move || {
+                let _wake = WakeOnDrop;
                 let start = {
                     let _worker = worker;
                     let result = crate::qr::capture(&cancel).and_then(|p| {

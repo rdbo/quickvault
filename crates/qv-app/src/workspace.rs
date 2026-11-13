@@ -1330,6 +1330,7 @@ impl Controller {
         std::thread::Builder::new()
             .name("qv-app-op".into())
             .spawn(move || {
+                let _wake = crate::controller::WakeOnDrop;
                 let result = op(&session, &token, &controller);
                 let mut s = controller.state();
                 if s.lock_gen != generation || token.is_cancelled() {
@@ -1415,6 +1416,7 @@ impl Controller {
         std::thread::Builder::new()
             .name("qv-app-clipboard".into())
             .spawn(move || {
+                let _wake = crate::controller::WakeOnDrop;
                 let counter = remaining.clone();
                 let mut progress = move |left: u64| {
                     counter.store(left, Ordering::SeqCst);

@@ -129,6 +129,7 @@ pub(crate) fn pick_path(
     let _ = std::thread::Builder::new()
         .name("qv-picker".into())
         .spawn(move || {
+            let _wake = crate::controller::WakeOnDrop;
             #[cfg(target_os = "linux")]
             let chosen = crate::picker::pick(title, &kind);
             #[cfg(windows)]

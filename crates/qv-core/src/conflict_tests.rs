@@ -3,6 +3,7 @@
 // Test-only fixture helpers fail loudly; no user secrets are used.
 #![allow(clippy::unwrap_used, clippy::panic)]
 use super::*;
+use crate::index::MAX_VIEW_BYTES;
 use crate::testutil::{Env, PASSWORD, TestDir, err, kdf, pw};
 use crate::{FieldKind, FieldValue, ItemHandle, SnapshotKind};
 use qv_store::{AnchorDir, ArchiveScope, VaultFile};
@@ -550,4 +551,77 @@ fn conflict_additional_head_invalidates_inspected_choice_even_when_selected_stay
         CoreError::Cancelled
     );
     assert_eq!(s.resolve_version(&h, None, None).unwrap().conflicts, 0);
+}
+
+#[test]
+fn unlock_builds_the_index_from_verification_and_rereads_only_conflicts() {
+    let env = Env::new();
+    let s = env.unlock_with(Some(env.snapshot_policy()));
+    let entry = add(&s);
+    let plain = add(&s);
+    let remote = branch(&env, &s, "remote");
+    for (session, label) in [(&s, "local"), (&remote, "remote")] {
+        edit(session, entry.record, |v| {
+            if let RecordBody::Live(Payload::Entry(e)) = &mut v.body {
+                e.title = Text::new(label).unwrap();
+            }
+        });
+    }
+    let dir = TestDir::new();
+    let incoming = export(&remote, &dir);
+    assert_eq!(
+        s.merge_archive(&incoming, false, None).unwrap().conflicts,
+        1
+    );
+    s.lock();
+    crate::index::READS.with(|n| n.set(0));
+    let s = env.unlock();
+    // Single-head records come from verification; only the conflicted
+    // record's representative is read again.
+    assert_eq!(crate::index::READS.with(std::cell::Cell::get), 1);
+    let (built, rebuilt) = s
+        .read(|ctx| {
+            let vault = &ctx.open.vault;
+            let rebuilt = crate::index::Index::build(vault, &|| false, MAX_VIEW_BYTES)?;
+            Ok((
+                ctx.open.index.summary(Some(vault))?,
+                rebuilt.summary(Some(vault))?,
+            ))
+        })
+        .unwrap();
+    assert_eq!(built, rebuilt);
+    assert!(s.conflict_records().unwrap().len() == 1);
+    assert!(
+        s.read(|ctx| Ok(ctx.open.index.get(plain.record).is_some()))
+            .unwrap()
+    );
+}
+
+#[test]
+fn unlock_cancelled_while_indexing_returns_no_session() {
+    let env = Env::new();
+    let s = env.unlock();
+    add(&s);
+    add(&s);
+    s.lock();
+    // Cancellation is seen between the heads verification hands over.
+    let calls = std::cell::Cell::new(0);
+    let cancelled = || {
+        calls.set(calls.get() + 1);
+        calls.get() > 2
+    };
+    let mut builder = crate::index::IndexBuilder::new(MAX_VIEW_BYTES, &cancelled);
+    let r = {
+        let _k = kdf();
+        VaultFile::open(&env.path)
+            .unwrap()
+            .unlock_for_recovery_into(
+                &pw(PASSWORD),
+                &AnchorDir::open(&env.anchors).unwrap(),
+                &mut builder,
+            )
+    };
+    assert_eq!(r.err(), Some(CoreError::Cancelled));
+    // Nothing was changed: the vault opens normally.
+    env.unlock().lock();
 }

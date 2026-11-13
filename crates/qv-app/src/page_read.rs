@@ -487,6 +487,8 @@ impl Controller {
                         let Some(job) = slot.pending.take() else {
                             slot.running = false;
                             state.revision = state.revision.wrapping_add(1);
+                            drop(state);
+                            crate::controller::wake_ui();
                             return;
                         };
                         slot.cancel = Some(job.cancel.clone());
@@ -513,6 +515,8 @@ impl Controller {
                             Err(error) => slot.error = Some(error.into()),
                         }
                         state.revision = state.revision.wrapping_add(1);
+                        drop(state);
+                        crate::controller::wake_ui();
                     }
                     // Loop on the same worker for the single replaceable pending request.
                 }
@@ -558,6 +562,43 @@ mod tests {
             }
             assert!(Instant::now() < until, "page worker did not finish");
             std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// The wake flag is process-wide: tests that consume it take turns.
+    static WAKE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn a_wake_reaches_the_ui_poll_at_once() {
+        let _w = WAKE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        crate::controller::wake_ui();
+        let start = Instant::now();
+        assert!(crate::controller::wait_ui(Duration::from_secs(5)));
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_finished_page_wakes_the_ui_poll_before_its_tick() {
+        let _w = WAKE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let _k = KDF.lock().unwrap_or_else(|e| e.into_inner());
+        let env = Env::unlocked();
+        env.add_entry("Bank", "secret");
+        let owner = env.c.page_owner(Lane::Main, 1).unwrap();
+        env.c.page(env.epoch(), owner, items("Bank")).unwrap();
+        let until = Instant::now() + Duration::from_secs(10);
+        loop {
+            // Drop older wakes, then check: a worker that finishes after the
+            // check leaves its wake set, so the wait below cannot miss it.
+            while crate::controller::wait_ui(Duration::ZERO) {}
+            let read = env.c.page(env.epoch(), owner, items("Bank")).unwrap();
+            if !read.loading {
+                assert!(read.page.is_some());
+                return;
+            }
+            let start = Instant::now();
+            assert!(crate::controller::wait_ui(Duration::from_secs(5)));
+            assert!(start.elapsed() < Duration::from_secs(1));
+            assert!(Instant::now() < until, "page worker did not finish");
         }
     }
 

@@ -91,3 +91,4 @@ plan, or a new plan that names the one it supersedes.
 | [0050](0050-complete-audit-remediation/PLAN.md) | Complete remaining security assessment repairs | In progress — source repairs/local verification recorded; isolated Android media qualification awaits phone |
 | [0051](0051-list-swap-other-type/PLAN.md) | No list flicker on filter change; fixed item types with Other (owner request) | Implemented — fresh review pending |
 | [0052](0052-windows-platform/PLAN.md) | Windows platform and release (roadmap 3.1) | Implemented — Windows CI run, attended gate checklist and fresh review pending |
+| [0053](0053-performance/PLAN.md) | Performance: unlock, paged views, search and bulk changes (owner request) | Implemented — fresh review and phone run pending |
