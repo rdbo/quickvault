@@ -917,11 +917,19 @@ fn lan_enroll_admission_is_closed_before_approval_and_later_connections_cannot_i
     let mut approve = Approve::yes();
     approve.before = Some(Box::new(move || {
         // Even another valid code holder cannot reach a surviving listener.
-        assert!(TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_err());
-        assert!(!poke(addr, &racer));
-        for _ in 0..20 {
-            assert!(!poke(addr, b"junk"));
-        }
+        // In parallel: Windows retries a refused loopback connect, so each
+        // attempt runs its full 1 s timeout, and 22 in a row would outlast
+        // the confirmation window.
+        std::thread::scope(|s| {
+            let closed = s.spawn(|| TcpStream::connect_timeout(&addr, Duration::from_secs(1)));
+            let racer = s.spawn(|| poke(addr, &racer));
+            let junk: Vec<_> = (0..20).map(|_| s.spawn(|| poke(addr, b"junk"))).collect();
+            assert!(closed.join().unwrap().is_err());
+            assert!(!racer.join().unwrap());
+            for poke in junk {
+                assert!(!poke.join().unwrap());
+            }
+        });
     }));
     let mut join = Join::yes();
     let (approved, received) = std::thread::scope(|s| {

@@ -520,6 +520,18 @@ No path or OS message is included.
   `NotFound` on Windows too; every other failure still fails closed as
   `Replaced`. Error category only; no format or protocol change. Awaits
   the next CI `windows` run.
+- 2026-11-13 (fourth CI `windows` run, owner-delegated): two qv-sync test
+  failures, neither in product code.
+  - **LAN vectors.** The runner checks out text files with CRLF, so the
+    stored `qv-dev-lan-pairing.txt` no longer matched the rendered LF text.
+    `.gitattributes` now marks `crates/*/tests/vectors/*.txt` as `-text`
+    (all 17 are LF in the index), so every checkout keeps their bytes.
+  - **Closed admission.** On Windows a refused loopback connect is retried
+    until its timeout, so the test's 22 sequential 1 s probes of the closed
+    listener outlasted the 20 s confirmation window, and the approver
+    timed out. The probes now run in parallel; each assertion is unchanged.
+  - Linux: both tests, qv-sync Clippy and `cargo fmt --check` pass. Awaits
+    the next CI `windows` run.
 
 ## Execution log
 

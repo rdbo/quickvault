@@ -1,2 +1,5 @@
 # Embedded data whose SHA-256 is checked (plan 0006): never convert line endings.
 crates/qv-crypto/data/*.txt -text
+# Test vectors are compared byte for byte or parsed line by line: keep LF on
+# every checkout (a Windows checkout would otherwise get CRLF).
+crates/*/tests/vectors/*.txt -text

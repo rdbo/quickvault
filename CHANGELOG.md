@@ -9,6 +9,10 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-13: Test vector files (`crates/*/tests/vectors/*.txt`) keep LF
+  line endings on every checkout (`.gitattributes`), so the LAN vector test
+  passes on Windows; a LAN admission test probes the closed listener in
+  parallel to stay inside its window there (plan 0052).
 - 2026-11-13: Copying works on Wayland (plan 0055). Linux used only the X11
   clipboard through XWayland, which some compositors (for example
   wlroots-based ones) do not pass on to Wayland apps, so nothing was pasted
