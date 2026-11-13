@@ -23,7 +23,8 @@ Dates are ISO 8601. Newest first within each section.
   in. List rows, the entry header and the command bar show the item's type
   glyph (login, note, card, Wi-Fi) instead of its initial; *Other* items
   keep the initial. Attachment cards use a soft corner glow instead of the
-  large circle. Starting a selection no longer makes every row taller.
+  large circle. Starting a selection no longer makes every row taller, or
+  shifts the list down on desktop.
   The key icon is redrawn; its old outline was malformed.
 - 2026-11-13: The app redraws as soon as a list page or an action finishes,
   instead of on its next 200 ms check. Choosing a group or an item type no

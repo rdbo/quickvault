@@ -597,7 +597,10 @@ pub(crate) fn ListPane(
                             oncontextmenu: { let id = id.clone(); move |e: MouseEvent| { e.prevent_default(); if !form && !in_selection { row_menu.set(Some(id.clone())); } } },
                             button { class: "open item-open", "aria-label": "{label}", "aria-pressed": if in_selection { if on { "true" } else { "false" } } else { "" }, disabled: form, onclick: click(id.clone(), h) }
                             if in_selection {
-                                span { class: if on { "tile tick on" } else { "tile tick" }, Svg { icon: Icon::Check, large: true } }
+                                // A different element from the item tile's `span`, so Dioxus
+                                // replaces the node instead of reusing it; a reused node
+                                // animated its colour from the item's hue to the tick's grey.
+                                i { class: if on { "tile tick on" } else { "tile tick" }, Svg { icon: Icon::Check, large: true } }
                             } else {
                                 span { class: "tile {item_hue(row.colour, &id)}", {entry_glyph(row.kind, &row.title)} }
                             }

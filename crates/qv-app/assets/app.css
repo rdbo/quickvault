@@ -221,14 +221,17 @@ kbd{font:11px system-ui,sans-serif;border:1px solid var(--line);border-bottom-wi
 .rows.stale{pointer-events:none;animation:staleDim .15s ease-out .25s forwards}
 @keyframes staleDim{to{opacity:.55}}
 /* Plan 0044: list selection and the row menu. */
-.selbar{display:flex;align-items:center;gap:2px;padding:6px 6px 6px 4px;margin:8px 8px 8px;border-radius:12px;background:var(--soft);animation:pop .14s ease-out;min-width:0}
+/* 8 + 6 + 30 + 6 + 4 = 54px, the list head's height (14 + 30 + 10), with its buttons centred at the same 29px. */
+.selbar{display:flex;align-items:center;gap:2px;padding:6px 6px 6px 4px;margin:8px 8px 4px;border-radius:12px;background:var(--soft);animation:pop .14s ease-out;min-width:0}
 .selbar .sel-n{flex:1;min-width:0;margin-left:4px;font-weight:650;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .selbar .icon-btn.on{color:var(--accent)}
 .selbar .pop-anchor{flex:none}
 .icon-btn.danger{color:var(--danger)}
 .icon-btn.danger:hover:enabled{background:var(--danger-soft)}
 .icon-btn:disabled{opacity:.4}
-.tile.tick{display:flex;align-items:center;justify-content:center;background:var(--raised2);color:var(--ink);border:2px solid var(--line);transition:background .15s,border-color .15s;animation:pop .16s ease-out}
+/* An `i`, never the item tile's reused `span` (plan 0054); it grows in at full opacity. */
+.tile.tick{display:flex;align-items:center;justify-content:center;background:var(--raised2);color:var(--ink);border:2px solid var(--line);transition:background .15s,border-color .15s;animation:tickIn .16s ease-out}
+@keyframes tickIn{from{transform:scale(.88)}}
 .tile.tick .ico{margin:auto;opacity:0;transform:scale(.5);transition:opacity .15s,transform .22s cubic-bezier(.3,1.6,.5,1)}
 .tile.tick.on{background:var(--accent);border-color:var(--accent)}
 .tile.tick.on .ico{opacity:1;transform:none}

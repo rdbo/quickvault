@@ -125,3 +125,22 @@ No behaviour, spec or dependency change.
   the final logo. Rendered at 256, 96, 48, 32, 24 and 16 px. Not run:
   tests and an Android build; the launcher icon awaits the next phone
   build.
+- 2026-11-13 (owner note): **Selection bar height.** On desktop, starting a
+  selection pushed the rows down 4 px: the list head is 54 px (14 + 30 +
+  10) but the selection bar was 58 px (8 + 6 + 30 + 6 + 8 margins and
+  padding). Its bottom margin is now 4 px, so it is 54 px with its buttons
+  centred at the same 29 px as the head's. CSS only; the phone layout,
+  where the bar floats, is unchanged.
+- 2026-11-13 (owner note): **Tick flash.** Starting a selection briefly
+  flashed every row's tile: the tick tiles entered with `pop`, which fades
+  from opacity 0, so their border and fill blended with the row background
+  as they appeared. They now enter with `tickIn`, a scale-only grow
+  (0.88 to 1) at full opacity. CSS only.
+- 2026-11-13 (owner note, frame capture): **Tick flash, actual cause.** The
+  flash frame showed each tick still in its item's hue with a light border.
+  Dioxus reused the item tile's `span` for the tick (same tag, class
+  changed), so the tick's `background`/`border-color` transitions animated
+  from the hue and `currentColor` to the tick's grey. The scale-only entry
+  above helped only slightly. The tick is now an `i`, so the node is
+  replaced and has no previous colour; leaving selection is fixed the same
+  way.
