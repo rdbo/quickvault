@@ -139,7 +139,7 @@ impl Icon {
     }
 }
 
-/// The official mark (repository `LOGO.svg`, plan 0054): a vault door with
+/// The official mark (`docs/logo/logo.svg`, plan 0054): a vault door with
 /// two hinges whose combination dial is cut out and turned so the ring and a
 /// short rounded tail crossing it form a Q, on a charcoal tile. Its colours
 /// are fixed in both themes.
@@ -154,7 +154,7 @@ const LOGO: LogoArt = LogoArt {
     hinges: "M100 156H112A14 14 0 0 1 126 170V202A14 14 0 0 1 112 216H100A14 14 0 0 1 86 202V170A14 14 0 0 1 100 156ZM100 296H112A14 14 0 0 1 126 310V342A14 14 0 0 1 112 356H100A14 14 0 0 1 86 342V310A14 14 0 0 1 100 296Z",
     door: "M182 104H350A72 72 0 0 1 422 176V336A72 72 0 0 1 350 408H182A72 72 0 0 1 110 336V176A72 72 0 0 1 182 104ZM348.76 310.33L357.04 317.79A15 15 0 0 1 336.97 340.08L328.68 332.63A99 99 0 1 1 348.76 310.33ZM326.09 289.92L324.34 288.35A15 15 0 0 0 304.27 310.64L306.01 312.21A69 69 0 1 1 326.09 289.92ZM240 256a26 26 0 1 0 52 0a26 26 0 1 0 -52 0Z",
 };
-/// `LOGO-small.svg`: 32 px and below, with a heavier ring, tail and hub.
+/// `docs/logo/logo-small.svg`: 32 px and below, with a heavier ring, tail and hub.
 const LOGO_SMALL: LogoArt = LogoArt {
     hinges: "M100 156H112A14 14 0 0 1 126 170V202A14 14 0 0 1 112 216H100A14 14 0 0 1 86 202V170A14 14 0 0 1 100 156ZM100 296H112A14 14 0 0 1 126 310V342A14 14 0 0 1 112 356H100A14 14 0 0 1 86 342V310A14 14 0 0 1 100 296Z",
     door: "M182 104H350A72 72 0 0 1 422 176V336A72 72 0 0 1 350 408H182A72 72 0 0 1 110 336V176A72 72 0 0 1 182 104ZM355.23 309.43L361.13 314.74A20 20 0 0 1 334.36 344.47L328.46 339.15A104 104 0 1 1 355.23 309.43ZM324.56 281.82L323.97 281.28A20 20 0 0 0 297.21 311.01L297.8 311.54A64 64 0 1 1 324.56 281.82ZM236 256a30 30 0 1 0 60 0a30 30 0 1 0 -60 0Z",

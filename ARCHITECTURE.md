@@ -95,7 +95,7 @@ rather than creating unused workspace scaffolding.
 | qv-platform | Injected OS traits; local unicast addresses for LAN endpoints from route probes, attached networks first (`/proc/net/route` where readable; std only); Windows WTS lock/sleep lifecycle (required), Win32 clipboard with history/cloud exclusion, native open/save/folder dialogs, the instance lock and ACL-checked explicit file input/output, with unknown persistence evidence and no quick unlock (plan 0052); Linux logind lifecycle, xdg-desktop-portal file picker (zbus, local `file:` results only), session clipboard ownership (Wayland data-control with an own bounded wire client, else X11) and, for the desktop app on Wayland, GTK clipboard ownership behind the optional `gtk` feature (plan 0055), single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; Android keystore quick unlock with boot-bound policy state that survives app restarts (on where the device supports it; plan 0045); Android storage evidence from the OS encryption status; exact-identity autofill matching; native input unavailable |
 | qv-cli / qv-app | Explicit user actions and views, including `qv lan open|sync|join` and the app's Sync screen and Join mode; qv-app's shared UI (own title bar, one DOM for desktop and phone, 0009 §1.8), its non-secret preferences file (theme, acknowledged protection status), QR rendering/decoding and bounded native Android Camera2 glue (camera on by default; `QV_APP_QR_CAMERA=0` builds without it); in-app attachment previews verified and streamed in protected chunks through a revocable `/preview/` capability on the existing bounded loopback listener (0003 §6.4); on Linux, portal file picks run in a re-executed helper process without vault data, since the portal refuses the non-dumpable app; no unrestricted crypto/file/SQL bridge |
 | qv-win | Windows-only Win32 bindings on `windows-sys`: the only crate allowed `unsafe`, confined to its FFI modules with a `// SAFETY:` note per block (enforced by Clippy). Safe wrappers for security descriptors (pure Rust SID/ACL parsing and the 0009 §5.1 rules, tested everywhere), no-follow opens, file identity, byte-range locks, write-through renames, POSIX deletion, private creation, named mutexes, the session watcher, the clipboard, console input/output and file dialogs (plan 0052); depends on no other qv crate |
-| qv-server (optional) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
+| qv-server (optional; not planned, owner 2026-11-14) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
 
 Implemented so far: `qv-encoding` (canonical CBOR codec, fuzzed in CI) and
 `qv-crypto` (protected memory, process hardening, OS RNG, profile registry,
@@ -315,13 +315,9 @@ make the other fail rollback detection. Use archive/snapshot export for backups
 and the supported new-path restore, which creates a fresh replica, for an
 independent working copy (0004 §1.1, 0005 §4.1). A missing or damaged anchor must
 not be silently discarded to bypass this protection.
-The isolated `spikes/ui-feasibility/` crate is a non-production Dioxus
-prototype with standard webview input and a qv-core fixture controller. Its
-controller tests and real Linux/Android create/edit/reopen, Android background
-lock/screenshot blocking, and bounded unlock measurements pass (plan 0013).
-OS probes establish availability only; production adapter/webview validation
-remains. Four dependency advisory exceptions and initial vet exemptions are
-spike-only. It is outside default workspace members and is not a shipped frontend.
+The phase 1.9 Dioxus feasibility spike (plan 0013) was removed on
+2026-11-14 after qv-app superseded it; its source stays in git history and
+its findings in plan 0013.
 Other components are planned and are created by the roadmap phase that first
 needs them.
 
@@ -641,7 +637,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Build / CI | Cargo virtual workspace (`crates/<name>/`); GitHub Actions with SHA-pinned actions running the gates, `cargo deny` and `cargo vet` |
 | UI | Dioxus 0.7.10, maintained hardened dioxus-desktop integration, standard webview input; shared Android/Linux/Windows screens (WebView2 on Windows), best-effort framework cleanup; iOS later |
 | Android foundation | arm64/API 29+, pinned SDK/NDK recipe, FLAG_SECURE, metadata-only lifecycle adapter, private no-backup storage; device validation pending |
-| Optional remote server | Axum/Tokio; SQLite first, Postgres deferred |
+| Optional remote server (not planned) | Axum/Tokio; SQLite first, Postgres deferred |
 | Local storage | rusqlite 0.41.0 with bundled SQLite 3.54.1 and trimmed compile options (`.cargo/config.toml`), encrypted immutable objects and manifests; external anchors as per-replica files in the private state directory (`$XDG_STATE_HOME/quickvault/anchors` on Linux, `%LOCALAPPDATA%\QuickVault\anchors` on Windows; keystore-backed where available later) |
 | Serialization | Bounded RFC 8949 deterministic CBOR |
 | Data encryption | XChaCha20-Poly1305; 64 KiB attachment content chunks with fixed padded framing and streaming SHA-256 verification |
@@ -675,8 +671,12 @@ release requirements remain. Framework selection is not validation evidence.
 | 1 | Shared offline Rust core and early Linux CLI: encrypted vault, manifests, anchors, bounded history/recovery; early Android/Linux shared-UI and platform-adapter feasibility work |
 | 2 | Usable offline Android and Linux apps from the shared UI; validated input cleanup/lifecycle, Android quick unlock/autofill as their gates pass, manually initiated direct LAN sync, conflicts and archive exchange, then an owner-approved app-like UI design (2.10a); LAN protocol decisions/review required first |
 | 3 | Windows |
-| 4 | Optional closed self-hosted remote server, manually initiated remote sync, accounts, device grants/sessions, server pairing/recovery and remote generation transitions |
+| 4 (not planned) | Optional closed self-hosted remote server, manually initiated remote sync, accounts, device grants/sessions, server pairing/recovery and remote generation transitions |
 | Later | Automatic sync (separate design), third-party import/export, hosted admission, iOS/macOS, extensions and BSD |
+
+Phase 4 is not planned (owner, 2026-11-14). Its specs stay as Draft design
+records, and 1.0 is the offline core plus direct LAN sync on Linux, Android
+and Windows ([plan 0056](plans/0056-release-1-0/PLAN.md)).
 
 The phased implementation roadmap for these milestones is
 tracked in [plans/0002-roadmap](plans/0002-roadmap/PLAN.md). Offline rotation is split into

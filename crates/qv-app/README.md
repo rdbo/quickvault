@@ -9,13 +9,15 @@ with fresh local device state. Wrong passwords can retry the same staged file;
 an existing destination is never overwritten. Linux continues opening selected
 vault files in place.
 
-The Android import/provider qualification package uses the ordinary UI and a
-disposable `org.quickvault.validation49` UID. Build with the usual Android
-environment, then run `python3 plans/0049-android-vault-file-picker/package-android.py`.
-The script only builds and checks artifact identity; it never installs. The
-device command and remaining attended picker evidence are in
-`plans/0049-android-vault-file-picker/VALIDATION.md`. Never install test builds
-over a personal-vault application.
+Full Android instrumentation runs use a disposable application ID, never the
+ordinary `org.quickvault.app`: build the APK with the usual Android
+environment, then run `python3 crates/qv-app/scripts/package-isolated-android.py`
+(`--baseline validation` for a validation build, `--uid` to pick the ID;
+default `org.quickvault.isolated`). The script only builds and checks native
+byte equality and artifact identity; it never installs. It prints the install
+and instrument commands; remove the isolated pair afterwards. The remaining
+attended picker evidence is in `plans/0049-android-vault-file-picker/VALIDATION.md`.
+Never install test builds over a personal-vault application.
 
 The shared Android/Linux Dioxus UI provides the CLI's offline feature set:
 - create, phrase confirmation or recorded skip, password/phrase unlock,
@@ -210,9 +212,10 @@ These tests require Xvfb (`QV_TEST_XVFB` can select its executable). They start
 private X servers and use synthetic values. No graphical display is required by
 default workspace tests.
 
-The logo comes from the repository's `LOGO.svg`, with `LOGO-small.svg` as
-its cut for 32 px and below: `assets/icon-256.png` (desktop window icon,
-`rsvg-convert -w 256 -h 256 LOGO.svg`), the inline `Logo` component in
+The logo comes from the repository's `docs/logo/logo.svg`, with
+`docs/logo/logo-small.svg` as its cut for 32 px and below (`docs/logo/logo.png`
+is a 2048 px render): `assets/icon-256.png` (desktop window icon,
+`rsvg-convert -w 256 -h 256 docs/logo/logo.svg`), the inline `Logo` component in
 `src/ui/icons.rs` (the title bar uses the small cut; the dial is an exact
 outline, so no SVG mask is needed), and the adaptive
 launcher icon in `android/res/`. Regenerate all of them when the logo

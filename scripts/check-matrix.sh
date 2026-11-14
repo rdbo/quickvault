@@ -3,7 +3,7 @@
 #
 # Offline release matrix check (spec 0012 §1, §3; plan 0024).
 #
-# Every row listed in tests/matrix-offline.txt must have at least one test
+# Every row listed in scripts/matrix-offline.txt must have at least one test
 # tagged with a line `// 0012 §1: <exact row name>` directly above the
 # test's attributes (only comments and attributes may come between the tag
 # and the `fn`, and one of the attributes must be `#[test]`). A tag must
@@ -12,7 +12,7 @@
 set -eu
 
 cd "$(dirname "$0")/.."
-list=tests/matrix-offline.txt
+list=scripts/matrix-offline.txt
 spec=specs/0012-security-validation.md
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT

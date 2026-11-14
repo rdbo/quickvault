@@ -23,7 +23,24 @@ if [ "${QV_APP_DEVICE_VALIDATION:-0}" = 1 ]; then
     qv_features=mobile,validation
     qv_artifact=quickvault-validation
 fi
-export QV_APP_BUILT_APK="dist/$qv_artifact-debug.apk"
+# QV_APP_RELEASE=1 builds the non-debuggable release APK (plan 0056) and signs
+# it with the owner's keystore: QV_ANDROID_KEYSTORE (path) and
+# QV_ANDROID_KEY_ALIAS. apksigner prompts for the password unless
+# QV_ANDROID_KS_PASS names an apksigner password source (for example
+# `file:/path`). Never use a generated or repository key for a published APK.
+qv_release=${QV_APP_RELEASE:-0}
+if [ "$qv_release" = 1 ]; then
+    if [ "${QV_APP_DEVICE_VALIDATION:-0}" = 1 ] || [ "${QV_APP_MEDIA_VALIDATION:-0}" = 1 ]; then
+        echo 'A release APK never includes validation features.' >&2
+        exit 1
+    fi
+    : "${QV_ANDROID_KEYSTORE:?Set QV_ANDROID_KEYSTORE to the owner release keystore}"
+    : "${QV_ANDROID_KEY_ALIAS:?Set QV_ANDROID_KEY_ALIAS to the release key alias}"
+    [ -f "$QV_ANDROID_KEYSTORE" ] || { echo 'QV_ANDROID_KEYSTORE is not a file' >&2; exit 1; }
+    export QV_APP_BUILT_APK="dist/$qv_artifact-release.apk"
+else
+    export QV_APP_BUILT_APK="dist/$qv_artifact-debug.apk"
+fi
 "$qv_dx" build --platform android --target aarch64-linux-android --release \
     --features "$qv_features" --package qv-app --bin quickvault --cargo-args=--locked
 # Dioxus 0.7.10 uses android_min_sdk_version for native linking but hardcodes
@@ -48,6 +65,11 @@ if len(re.findall(r"minSdk = (?:24|29)\b",s))!=1:
 s=re.sub(r'minSdk = (?:24|29)\b','minSdk = 29',s,count=1)
 s=s.replace('android {','android {\n    useLibrary("android.test.runner")\n    useLibrary("android.test.base")\n    useLibrary("android.test.mock")',1)
 s=s.replace('defaultConfig {','defaultConfig {\n        testInstrumentationRunner = "android.test.InstrumentationTestRunner"',1)
+# Release (plan 0056): no R8. Minification could strip the Kotlin methods the
+# Rust side calls through JNI, which only a device run would reveal.
+if s.count('isMinifyEnabled = true')!=1:
+    raise SystemExit('Unexpected upstream release buildType; review it before packaging')
+s=s.replace('isMinifyEnabled = true','isMinifyEnabled = false\n            isDebuggable = false\n            isJniDebuggable = false',1)
 p.write_text(s)
 # Plan 0040: the shared CSS follows the OS light/dark setting. A Light parent
 # theme makes the WebView report light always; DayNight follows the system.
@@ -73,7 +95,7 @@ shutil.copyfile(root/'android/tests/AndroidManifest.xml',destination/'app/src/an
 # disallowing cleartext to remote hosts. The custom manifest references it.
 shutil.copyfile(root/'android/network_security_config.xml',
                 destination/'app/src/main/res/xml/network_security_config.xml')
-# The launcher icon from LOGO.svg (plan 0043), replacing the template's
+# The launcher icon from docs/logo/logo.svg (plan 0043), replacing the template's
 # adaptive icon files in place; refuse a changed template layout.
 res=destination/'app/src/main/res'
 icons={'mipmap-anydpi-v26/ic_launcher.xml':'ic_launcher.xml',
@@ -101,11 +123,30 @@ shutil.copyfile(root/'android/tests/AutofillTest.java',tests/'AutofillTest.java'
 print(destination)
 PY
 )
-sh "$qv_project/gradlew" -p "$qv_project" :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
-cp "$qv_project/app/build/outputs/apk/debug/app-debug.apk" "dist/$qv_artifact-debug.apk"
-cp "$qv_project/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk" "dist/$qv_artifact-tests.apk"
-"$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "dist/$qv_artifact-debug.apk" > dist/apk-badging.txt
-"$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "dist/$qv_artifact-debug.apk" > dist/apk-permissions.txt
+qv_tools="$ANDROID_HOME/build-tools/35.0.0"
+if [ "$qv_release" = 1 ]; then
+    sh "$qv_project/gradlew" -p "$qv_project" :app:assembleRelease --no-daemon
+    qv_unsigned="$qv_project/app/build/outputs/apk/release/app-release-unsigned.apk"
+    rm -f "$QV_APP_BUILT_APK"
+    "$qv_tools/zipalign" -p -f 4 "$qv_unsigned" "$QV_APP_BUILT_APK.aligned"
+    # shellcheck disable=SC2086 # the optional password source is one word
+    "$qv_tools/apksigner" sign --ks "$QV_ANDROID_KEYSTORE" --ks-key-alias "$QV_ANDROID_KEY_ALIAS" \
+        ${QV_ANDROID_KS_PASS:+--ks-pass "$QV_ANDROID_KS_PASS"} \
+        --out "$QV_APP_BUILT_APK" "$QV_APP_BUILT_APK.aligned"
+    rm -f "$QV_APP_BUILT_APK.aligned"
+    "$qv_tools/apksigner" verify --print-certs "$QV_APP_BUILT_APK" > dist/apk-certs.txt
+    if "$qv_tools/aapt" dump xmltree "$QV_APP_BUILT_APK" AndroidManifest.xml | grep -q 'android:debuggable([^)]*)=(type 0x12)0xffffffff'; then
+        echo 'The release APK is debuggable; refusing it.' >&2
+        rm -f "$QV_APP_BUILT_APK"
+        exit 1
+    fi
+else
+    sh "$qv_project/gradlew" -p "$qv_project" :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
+    cp "$qv_project/app/build/outputs/apk/debug/app-debug.apk" "dist/$qv_artifact-debug.apk"
+    cp "$qv_project/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk" "dist/$qv_artifact-tests.apk"
+fi
+"$qv_tools/aapt" dump badging "$QV_APP_BUILT_APK" > dist/apk-badging.txt
+"$qv_tools/aapt" dump permissions "$QV_APP_BUILT_APK" > dist/apk-permissions.txt
 python3 - <<'PY'
 from pathlib import Path
 import xml.etree.ElementTree as ET

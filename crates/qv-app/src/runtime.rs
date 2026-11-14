@@ -112,7 +112,7 @@ fn launch(title: &'static str, script: &'static [u8]) -> ! {
             dioxus_desktop::WindowBuilder::new()
                 .with_title(title)
                 // The logo for the taskbar and window switcher, rendered from
-                // `LOGO.svg`; a decoding failure leaves the framework default.
+                // `docs/logo/logo.svg`; a decoding failure leaves the framework default.
                 .with_window_icon(
                     dioxus_desktop::icon_from_memory(include_bytes!("../assets/icon-256.png")).ok(),
                 )

@@ -36,7 +36,9 @@ proptest.workspace = true
 # Derandomized X-Wing for interoperability vectors (plan 0037). Enabled only
 # by dev-dependencies; never in normal builds.
 test-vectors = []
-# Shared Argon2 test memory limit, including when used as another crate’s dependency.
+# Test builds only, enabled from dev-dependencies: one shared Argon2 slot
+# (memory limit) and a memo of full-profile results by password, salt and
+# profile, so copied fixture vaults run the real KDF once per test binary.
 test-kdf-limit = []
 
 [lints]

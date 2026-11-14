@@ -92,7 +92,9 @@ keystore ownership, not just a different fixture path. A marked validation
 build alone still uses the normal application ID; do not install it over the
 regular app for this run.
 
-[package-isolated-android.py](package-isolated-android.py) packages the already
+`package-isolated-android.py` (removed 2026-11-14, in git history; the
+maintained, generic packager is `crates/qv-app/scripts/package-isolated-android.py`)
+packaged the already
 built validation library as `org.quickvault.validation48`. Namespace, JNI
 class names and native library bytes are preserved; the script checks `.so`
 hash equality with the validation baseline. The resulting separate Android

@@ -8,12 +8,12 @@ development timings, not a release threshold. Phone measurements are pending
 
 ```sh
 # Current tree:
-python3 plans/0053-performance/measure-perf.py --label after
+python3 scripts/perf/measure-perf.py --label after
 # Baseline: a pristine export of the commit before this plan.
 mkdir -m 700 /var/tmp/qv-0053-baseline
 git archive 0c838e4 crates Cargo.toml Cargo.lock .cargo rust-toolchain.toml third-party \
   | tar -x -C /var/tmp/qv-0053-baseline
-python3 plans/0053-performance/measure-perf.py --source-root /var/tmp/qv-0053-baseline --label baseline
+python3 scripts/perf/measure-perf.py --source-root /var/tmp/qv-0053-baseline --label baseline
 # Unlock benchmark (plan 0024), P1 and P2, three samples each:
 cargo run --release --locked -p qv-core --example budget_bench -- generate <new dir> P2
 cargo run --release --locked -p qv-core --example budget_bench -- measure <dir> 3

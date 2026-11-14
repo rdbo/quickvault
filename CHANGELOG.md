@@ -9,6 +9,34 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Changed
 
+- 2026-11-14: The optional remote server (roadmap milestone 4) is not
+  planned (owner decision). Its phases, specs 0005 §3/§5.2–5.6 and 0006 and
+  the remote 0012 rows stay as Draft design records; 1.0 is the offline
+  vault plus direct LAN sync on Linux, Android and Windows. Roadmap 0002,
+  `ARCHITECTURE.md` §3/§6/§7, `README.md`, 0006 and 0009 §1.4 say so.
+- 2026-11-14: The test suite is much faster (plan 0056). Test builds
+  memoize full-profile Argon2id results by password, salt and profile
+  (qv-crypto `test-kdf-limit`, now also enabled by qv-store's tests), so
+  copies of a fixture vault run the real KDF once per test binary instead
+  of once per unlock. Every distinct input still runs the full 256 MiB
+  profile, assertions are unchanged, and `QV_TEST_KDF_JOBS` still defaults
+  to one KDF at a time. qv-store's unit tests went from 335 s to 52 s and
+  qv-core's from 168 s to 37 s; all test execution from about 16 to 5.5
+  minutes.
+- 2026-11-14: Repository cleanup and layout (plan 0056). Removed the phase
+  1.9 Dioxus spike (`spikes/ui-feasibility/`, superseded by qv-app; in git
+  history) and plan-local one-off harnesses; the three Android isolated-UID
+  packagers are now one, `crates/qv-app/scripts/package-isolated-android.py`
+  (`--baseline`, `--uid`); the plan 0053 performance harness moved to
+  `scripts/perf/`; the logo files moved from the root to `docs/logo/`
+  (`logo.svg`, `logo-small.svg`, `logo.png`); the 0012 offline matrix list
+  moved from `tests/` to `scripts/matrix-offline.txt`.
+- 2026-11-14: Focused fresh reviews for 1.0 (plan 0056): 0053 and 0055
+  Reviewed (no blocking findings); partial reviews of the 0052 qv-win
+  clipboard, the 0045 quick-unlock policy and the 0049 store import path
+  record low-severity findings only. Remaining reviews are listed in plan
+  0056 step 3.
+
 - 2026-11-13: Release builds of the desktop app now compile. The vendored
   dioxus-desktop called developer-tools methods that exist only in debug
   builds; the calls are now debug-only (`third-party/README.md`, plan 0052).
@@ -454,6 +482,19 @@ Dates are ISO 8601. Newest first within each section.
   offline Linux/phone test remains pending before phase 2.10b.
 
 ### Added
+
+- 2026-11-14: Plan 0056, the 1.0 readiness checklist: what is done, what an
+  agent can still do, and the owner-only items (D12 reviewer, freeze
+  go-ahead, signing keys, Windows CI and device runs).
+- 2026-11-14: `crates/qv-app/scripts/package-linux.sh` builds an unsigned
+  Linux release tarball (app, `qv`, desktop entry, icons, licence,
+  SHA256SUMS and the tarball checksum) under `target/dist/`.
+- 2026-11-14: Android release builds: `QV_APP_RELEASE=1` makes
+  `build-android.sh` produce a non-debuggable `quickvault-release.apk`
+  signed with the owner's keystore (`QV_ANDROID_KEYSTORE`,
+  `QV_ANDROID_KEY_ALIAS`; apksigner asks for the password). The development
+  APK stays debuggable and must never be published. `docs/RELEASE.md`
+  describes the release procedure.
 
 - 2026-11-14: A repository `README.md`: overview, features, build
   instructions, CLI and LAN sync examples, security design summary, crate

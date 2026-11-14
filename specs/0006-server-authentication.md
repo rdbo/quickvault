@@ -2,7 +2,11 @@
 
 | Status | Created | Depends on |
 |--------|---------|------------|
-| Draft | 2026-10-14 | 0001, 0002 |
+| Draft — not planned (owner, 2026-11-14) | 2026-10-14 | 0001, 0002 |
+
+**Not planned.** The owner set the optional remote server aside on
+2026-11-14 (roadmap 0002 milestone 4). This spec is kept as a design record;
+nothing here is scheduled, and no QuickVault release depends on it.
 
 ## Summary
 
@@ -343,6 +347,8 @@ for client verification of vault contents or out-of-band key distribution.
 
 ## Changelog
 
+- 2026-11-14: Marked not planned with roadmap milestone 4 (owner request);
+  the text is unchanged.
 - 2026-10-24: Scope accounts and server-bound pairing to optional remote sync;
   require initiation by any authorized enrolled device and separate account
   login from vault key access. Local use and LAN sync need no server identity,

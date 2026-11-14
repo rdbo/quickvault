@@ -184,7 +184,8 @@ at the phase that needs them.
 
     0013 was accepted the same day, also by owner delegation.
 11. **D11 — 0006 OQ2: per-device signing identities.** Settled in phase 4.1.
-    Blocks: 4.2 on. Resolution: pending.
+    Blocks: 4.2 on. Resolution: pending; moot while milestone 4 is not
+    planned (owner, 2026-11-14).
 12. **D12 — Independent protocol review.** 0012 §3 requires an external review
     of the LAN and server key-transfer/session compositions before release.
     The owner must choose and engage a reviewer. Lead time is long, so start
@@ -899,6 +900,10 @@ release; it is not weakened.
 
 ### Milestone 4 — Optional self-hosted remote server and remote sync
 
+**Not planned** (owner, 2026-11-14: "Mark the server stuff as not planned
+for now"). Phases 4.1–4.9 stay below as a record and are not scheduled.
+No 1.0 work depends on them; see Revisions 2026-11-14.
+
 #### Phase 4.1 — Remote protocol finalization (spec only)
 
 - [ ] **Do:** Settle D11 (0006 OQ2, with `quickvault-thinker`). Bring 0005 §3,
@@ -1297,6 +1302,14 @@ release; it is not weakened.
   CI and packaging, and the attended Windows checklist is the remaining gate.
   Design choices are owner-delegated (standing 2026-11-02), including the
   `unsafe` boundary in the new `qv-win` crate.
+
+- 2026-11-14, owner request ("Mark the server stuff as not planned for now.
+  No need to delete the plan, just say that it won't be done"): milestone 4
+  (phases 4.1–4.9) is not planned. The phase entries, 0005 §3/§5.2–5.6,
+  0006 and the remote 0012 rows stay as design records. D11 is moot while
+  this holds. D12 still applies to the LAN composition. Release 1.0 is the
+  offline core plus direct LAN sync on Linux, Android and Windows; its
+  preparation is [plan 0056](../0056-release-1-0/PLAN.md).
 
 ## Execution log
 

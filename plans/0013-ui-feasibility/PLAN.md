@@ -4,6 +4,10 @@
 |--------|---------|----------|-------|
 | Reviewed | 2026-10-26 | 2026-10-26 | 0008 §1–5; 0009 §6; 0002 §1.3/§4.2; 0004 §4–5; 0012 §1–3 |
 
+> **2026-11-14:** the spike under `spikes/ui-feasibility/` was deleted in the
+> repository cleanup (owner request); qv-app superseded it. Its source is in
+> git history before that commit; this plan and REPORT.md keep the findings.
+
 ## Intent
 
 Use the owner's selected Dioxus framework with ordinary webview input. Build a

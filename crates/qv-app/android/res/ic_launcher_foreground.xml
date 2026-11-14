@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<!-- Adaptive launcher icon foreground: the LOGO.svg vault door, scaled
+<!-- Adaptive launcher icon foreground: the docs/logo/logo.svg vault door, scaled
      0.16 about the 512-unit canvas centre into the 66dp safe circle of the
      108dp canvas (farthest point about 198 units, 31.7dp, from the centre).
      The dial is a cut-out, so this is also the monochrome layer. -->

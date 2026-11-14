@@ -23,6 +23,8 @@ qv-win.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+# Test-only KDF serialization and memo (qv-crypto `test-kdf-limit`).
+qv-crypto = { workspace = true, features = ["test-kdf-limit"] }
 
 [target.'cfg(windows)'.dev-dependencies]
 qv-win.workspace = true

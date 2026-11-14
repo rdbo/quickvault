@@ -123,6 +123,58 @@ pub(crate) fn kdf_test_guard() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+/// Test builds only: full-profile Argon2id results, memoized by password,
+/// salt and profile. Copies of one fixture vault share a salt, so a test
+/// binary runs the real KDF once per distinct input instead of once per
+/// unlock. Every distinct input still runs the full profile; outputs are
+/// identical. Production builds never enable `test-kdf-limit` (only
+/// dev-dependencies do), so this map never exists there. Binaries that a
+/// test build compiles (`target/debug/qv`) do enable it and keep master
+/// keys for their lifetime: never use them with a real vault.
+#[cfg(any(test, feature = "test-kdf-limit"))]
+mod memo {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, PoisonError};
+
+    use sha2::{Digest, Sha256};
+    use zeroize::Zeroizing;
+
+    use crate::memory::SecretArray;
+
+    type Map = HashMap<[u8; 32], Zeroizing<[u8; 32]>>;
+    static MEMO: Mutex<Option<Map>> = Mutex::new(None);
+    /// Cleared when full; a test binary needs far fewer distinct inputs.
+    const MAX: usize = 4096;
+
+    pub(super) fn key(password: &[u8], salt: &[u8; 32], profile: u16) -> [u8; 32] {
+        let mut h = Sha256::new();
+        h.update(b"qv/test-kdf-memo");
+        h.update(profile.to_be_bytes());
+        h.update(salt);
+        h.update(password);
+        h.finalize().into()
+    }
+
+    pub(super) fn get(key: &[u8; 32]) -> Option<SecretArray<32>> {
+        let memo = MEMO.lock().unwrap_or_else(PoisonError::into_inner);
+        let mk = memo.as_ref()?.get(key)?;
+        SecretArray::try_init(|out| {
+            *out = **mk;
+            Ok::<(), ()>(())
+        })
+        .ok()
+    }
+
+    pub(super) fn put(key: [u8; 32], mk: &SecretArray<32>) {
+        let mut memo = MEMO.lock().unwrap_or_else(PoisonError::into_inner);
+        let map = memo.get_or_insert_with(HashMap::new);
+        if map.len() >= MAX {
+            map.clear();
+        }
+        map.insert(key, Zeroizing::new(*mk.expose_secret()));
+    }
+}
+
 /// Runs the password KDF. `salt` is the slot's random 32-byte KDF salt.
 pub(crate) fn derive_master_key(
     password: &MasterPassword,
@@ -130,7 +182,18 @@ pub(crate) fn derive_master_key(
     profile: PasswordKdfProfile,
 ) -> Result<MasterKey, CryptoError> {
     #[cfg(any(test, feature = "test-kdf-limit"))]
+    let memo_key = memo::key(password.as_bytes(), salt, profile.id());
+    #[cfg(any(test, feature = "test-kdf-limit"))]
+    if let Some(mk) = memo::get(&memo_key) {
+        return Ok(MasterKey(mk));
+    }
+    #[cfg(any(test, feature = "test-kdf-limit"))]
     let _kdf = kdf_test_guard();
+    // Another thread may have derived the same input while this one waited.
+    #[cfg(any(test, feature = "test-kdf-limit"))]
+    if let Some(mk) = memo::get(&memo_key) {
+        return Ok(MasterKey(mk));
+    }
     let params = params(profile)?;
     let mut blocks = vec![Block::new(); params.block_count()];
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
@@ -141,7 +204,10 @@ pub(crate) fn derive_master_key(
     });
     // Wipe the working memory on every path, before it is freed.
     blocks.iter_mut().for_each(Zeroize::zeroize);
-    Ok(MasterKey(result?))
+    let mk = result?;
+    #[cfg(any(test, feature = "test-kdf-limit"))]
+    memo::put(memo_key, &mk);
+    Ok(MasterKey(mk))
 }
 
 /// KEK = HKDF-SHA-512(MK, salt = vault ID, `["qv/kek/v1", kdf_profile]`).

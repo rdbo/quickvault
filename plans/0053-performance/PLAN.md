@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented — fresh review and phone run pending | 2026-11-13 | 2026-11-13 (owner request; design owner-delegated, standing 2026-11-02) | 0004 §7.2–7.3 (amended, step 1); 0008 §2, §6 (amended, step 1); 0012 §1 |
+| Reviewed — approved 2026-11-14 (REVIEW.md); phone run pending | 2026-11-13 | 2026-11-13 (owner request; design owner-delegated, standing 2026-11-02) | 0004 §7.2–7.3 (amended, step 1); 0008 §2, §6 (amended, step 1); 0012 §1 |
 
 ## Intent
 

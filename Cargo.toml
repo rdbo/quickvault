@@ -2,7 +2,7 @@
 resolver = "3"
 members = ["crates/*"]
 # Fuzz targets have their own workspace and lockfile (fuzz/Cargo.toml).
-exclude = ["third-party", "fuzz", "spikes/ui-feasibility", "third-party/dioxus-desktop"]
+exclude = ["third-party", "fuzz", "third-party/dioxus-desktop"]
 
 [workspace.package]
 version = "0.0.0"

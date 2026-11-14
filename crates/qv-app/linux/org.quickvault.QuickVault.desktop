@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=QuickVault
+GenericName=Password Manager
+Comment=Offline-first, end-to-end encrypted password manager
+Exec=quickvault
+Icon=org.quickvault.QuickVault
+Terminal=false
+Categories=Utility;Security;
+Keywords=password;vault;secret;

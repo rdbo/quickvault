@@ -85,11 +85,13 @@ requests override the named intermediate commit/session boundary.
   old logs are not current evidence. Do not weaken tests to save tokens.
   Test binaries run at most `QV_TEST_KDF_JOBS` Argon2id unlocks (256 MiB
   each) at once, default 1 (owner, 2026-11-13: the machine must stay
-  responsive); raise it only when asked. Only the app's validation
-  (real-window) tests need `RUST_TEST_THREADS=1`.
+  responsive); raise it only when asked. Test builds memoize identical
+  (password, salt, profile) derivations (qv-crypto `test-kdf-limit`, plan
+  0056), so new tests should copy a crate's fixture vault rather than create
+  one. Only the app's validation (real-window) tests need `RUST_TEST_THREADS=1`.
 - Tests that cover a 0012 §1 offline row carry `// 0012 §1: <exact row>`
   above their attributes; `sh scripts/check-matrix.sh` (CI) checks the rows
-  in `tests/matrix-offline.txt`; it includes untracked Rust sources and skips
+  in `scripts/matrix-offline.txt`; it includes untracked Rust sources and skips
   deleted paths so unstaged work is checked. Pre-1.0, formats stay volatile: no freeze
   until the owner says so.
 - Dependency changes: justify in the plan, run `cargo deny check` and

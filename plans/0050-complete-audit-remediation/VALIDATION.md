@@ -126,8 +126,12 @@ export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
 export QV_DX=$PWD/crates/qv-app/dist/.build-cache/dx-0.7.10/bin/dx
 QV_APP_DEVICE_VALIDATION=1 QV_APP_MEDIA_VALIDATION=1 \
   sh crates/qv-app/scripts/build-android.sh
-python3 plans/0050-complete-audit-remediation/package-media-android.py
+python3 crates/qv-app/scripts/package-isolated-android.py --baseline validation \
+  --uid org.quickvault.validation50
 ```
+
+(The plan-local `package-media-android.py` was replaced by this generic
+packager on 2026-11-14; outputs are now `quickvault-validation50-{debug,tests}.apk`.)
 
 The packager builds only, checks identical native bytes, application/test IDs
 and instrumentation target, and emits a disposable `org.quickvault.validation50`

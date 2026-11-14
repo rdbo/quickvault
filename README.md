@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="LOGO.svg" alt="QuickVault logo" width="128" height="128">
+<img src="docs/logo/logo.svg" alt="QuickVault logo" width="128" height="128">
 
 # QuickVault
 
@@ -45,11 +45,11 @@ from the other end: a complete vault is a single encrypted file on your
 device, and everything works with the network unplugged. When you want your
 secrets on another device, you sync **directly over your local network** by
 scanning a one-use QR code. No account, no relay and nothing stored about
-the other device. An optional self-hosted server for remote sync is planned,
-and it is treated as untrusted storage that only ever sees ciphertext.
+the other device. A self-hosted remote-sync server was designed (as untrusted storage
+that only ever sees ciphertext) but is not planned for now.
 
 - **Offline is the default, not a fallback.** Reads and edits never wait
-  for the network. Account expiry or a server outage never locks you out.
+  for the network, and nothing depends on an account or a server.
 - **One UI everywhere.** The same app runs on Linux, Android and Windows
   and adapts from a three-pane desktop layout down to a phone.
 - **Edits are never silently lost.** Concurrent edits from different
@@ -234,7 +234,8 @@ brief:
   retained history and tombstone, and a per-device anchor detects a vault
   file that has been swapped for an older copy.
 - **Post-quantum ready.** LAN sync uses X-Wing (X25519 + ML-KEM-768).
-  Planned remote sync adds Ed25519 + ML-DSA-65 signatures and hybrid TLS.
+  The (not planned) remote-sync design adds Ed25519 + ML-DSA-65 signatures
+  and hybrid TLS.
 - **Memory hygiene.** Application secrets live in zeroizing containers,
   are never logged or put in error messages, and core dumps are disabled.
   Webview and OS copies are cleaned up on a best-effort basis, and the
@@ -307,11 +308,13 @@ lifecycle and the main flows in depth.
 | 1 | Offline core, encrypted vault, history and recovery, Linux CLI | ✅ Done |
 | 2 | Linux and Android apps, LAN sync, conflicts, archive exchange | 🚧 Implemented; device validation and owner review in progress |
 | 3 | Windows | 🚧 Implemented; Windows gate evidence pending |
-| 4 | Optional self-hosted server and remote sync | 📝 Specified, not started |
+| 4 | Optional self-hosted server and remote sync | ⏸️ Not planned (design kept in the specs) |
 | Later | Automatic sync, import/export from other managers, iOS/macOS, browser extension | 💭 Future |
 
 The detailed roadmap is in [`plans/0002-roadmap`](plans/0002-roadmap/PLAN.md)
-and changes are listed in [`CHANGELOG.md`](CHANGELOG.md).
+and changes are listed in [`CHANGELOG.md`](CHANGELOG.md). What remains before
+1.0 (offline vault plus LAN sync on Linux, Android and Windows) is tracked in
+[plan 0056](plans/0056-release-1-0/PLAN.md).
 
 ## Contributing
 

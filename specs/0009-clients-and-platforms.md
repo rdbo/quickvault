@@ -46,7 +46,9 @@ Account/session failures must leave local access and approved LAN use available.
 1.4. Delivery follows ARCHITECTURE.md §7: develop the shared offline Rust core,
 an early Linux CLI and Android/Linux framework feasibility work in phase 1.
 Deliver usable offline Android and Linux apps plus manual LAN sync in phase 2;
-Windows follows in phase 3 and the optional remote service in phase 4. Android work MUST NOT wait for
+Windows follows in phase 3. The optional remote service (phase 4) is not
+planned (owner, 2026-11-14): 0005 §3 and 0006 stay Draft and no release
+depends on them. Android work MUST NOT wait for
 completion of the full CLI or implementation of the remote server. Each later
 platform inherits the independent sync modes subject to its own gates. LAN
 discovery/enrollment/session choices remain open in 0005; platform APIs and
@@ -557,6 +559,8 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-14: §1.4: the optional remote service (phase 4) is not planned
+  (owner request). No other requirement changes. Still Draft.
 - 2026-11-12: §5.1 Windows profile: ACL owner-only rules, identity and
   locks, required WTS/sleep lifecycle, clipboard exclusion formats, unknown
   persistence evidence, device-local locations, quick unlock disabled

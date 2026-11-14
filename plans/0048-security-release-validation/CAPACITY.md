@@ -5,6 +5,11 @@ memory target or authorized mutation-architecture change.
 
 ## Reproduce
 
+The disposable `capacity-harness.rs` and `measure-capacity.py` were removed
+in the 2026-11-14 cleanup; they are in git history before that commit. Their
+maintained successor is `scripts/perf/` (plan 0053, derived from this
+harness). The original commands were:
+
 ```sh
 python3 plans/0048-security-release-validation/measure-capacity.py
 # Exact preparation checkpoint in a disposable core source copy:

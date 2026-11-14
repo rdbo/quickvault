@@ -5,6 +5,11 @@ what they say, and behaviour changes start with a spec change.
 
 ## Index
 
+The optional remote server (0005 §3, §5.2–5.6; 0006; 0007 §4; the remote
+rows of 0012) is not planned (owner, 2026-11-14). Those sections stay as
+design records with unchanged statuses; QuickVault 1.0 is offline plus
+direct LAN sync.
+
 Plan 0053 (2026-11-13, owner-delegated) amends 0004 §7.2/§7.3 and 0008
 §2/§6 for performance: unlock verification feeds the index, text-free match
 sets and a separately evicted label tier speed up paged views. No format,
@@ -101,7 +106,7 @@ phase 2.4 implementation; neither spec's overall status is promoted.
 | [0003](0003-data-model.md) | Data Model | Accepted |
 | [0004](0004-local-storage.md) | Local Storage (Vault File) | Accepted |
 | [0005](0005-synchronization.md) | Synchronization and Conflict Resolution (LAN and Remote) | Draft |
-| [0006](0006-server-authentication.md) | Server Accounts, Authentication and Device Enrollment | Draft |
+| [0006](0006-server-authentication.md) | Server Accounts, Authentication and Device Enrollment | Draft — not planned |
 | [0007](0007-history-and-backups.md) | History and Backups | Accepted |
 | [0008](0008-memory-and-side-channels.md) | Memory Hygiene and Side Channels | Draft |
 | [0009](0009-clients-and-platforms.md) | Clients and Platforms | Draft |

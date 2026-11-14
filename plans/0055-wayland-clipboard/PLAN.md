@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented — owner Wayland check and fresh review pending | 2026-11-13 | 2026-11-13 (owner bug report; design delegated by the owner, standing 2026-11-02) | 0008 §3 (amended), 0009 §1.6 |
+| Reviewed — approved 2026-11-14 (REVIEW.md); owner Wayland check pending | 2026-11-13 | 2026-11-13 (owner bug report; design delegated by the owner, standing 2026-11-02) | 0008 §3 (amended), 0009 §1.6 |
 
 ## Intent
 

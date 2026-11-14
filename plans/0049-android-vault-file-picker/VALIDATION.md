@@ -96,8 +96,12 @@ export QV_DX=$PWD/crates/qv-app/dist/.build-cache/dx-0.7.10/bin/dx
 cargo clippy --release --locked -p qv-app --features mobile \
   --target aarch64-linux-android --lib -- -D warnings
 QV_APP_DEVICE_VALIDATION=0 QV_APP_MEDIA_VALIDATION=0 sh crates/qv-app/scripts/build-android.sh
-python3 plans/0049-android-vault-file-picker/package-android.py
+python3 crates/qv-app/scripts/package-isolated-android.py --uid org.quickvault.validation49
 ```
+
+(The plan-local `package-android.py` was replaced by this generic packager on
+2026-11-14; outputs are now `quickvault-validation49-{debug,tests}.apk`, not
+`quickvault-import49-*`.)
 
 Logs: `/tmp/qv-0049-android-{clippy,build,package}.log`. The packager checks app/test
 IDs and target, API29 baseline, provider authority and absence from the main APK,
@@ -128,8 +132,8 @@ Class3/keystore matrix. KDF, protection acknowledgement and other requirements
 remain unchanged.
 
 ```sh
-adb install -r -t crates/qv-app/dist/quickvault-import49-debug.apk
-adb install -r -t crates/qv-app/dist/quickvault-import49-tests.apk
+adb install -r -t crates/qv-app/dist/quickvault-validation49-debug.apk
+adb install -r -t crates/qv-app/dist/quickvault-validation49-tests.apk
 adb shell am instrument -w -r \
   -e class org.quickvault.app.VaultImportTest \
   org.quickvault.validation49.test/android.test.InstrumentationTestRunner
