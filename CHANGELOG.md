@@ -455,6 +455,12 @@ Dates are ISO 8601. Newest first within each section.
 
 ### Added
 
+- 2026-11-14: A repository `README.md`: overview, features, build
+  instructions, CLI and LAN sync examples, security design summary, crate
+  map and project status, with Mermaid diagrams. Screenshots of the release
+  desktop app at desktop and phone widths, in dark and light themes, are in
+  `docs/images/`. They show a throwaway demo vault filled with made-up data.
+
 - 2026-11-12: Windows support (roadmap 3.1, plan 0052), not yet validated
   for release:
   - `qv` and the desktop app build and run on Windows 10 22H2 and Windows 11
