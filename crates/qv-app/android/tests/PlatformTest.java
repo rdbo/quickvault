@@ -107,10 +107,18 @@ public class PlatformTest extends InstrumentationTestCase {
         long end=System.currentTimeMillis()+30000;
         while(System.currentTimeMillis()<end && !clipEmpty(instrumentation)) Thread.sleep(250);
         assertTrue("Owned clip cleared at expiry",clipEmpty(instrumentation));
+        // A short background keeps the vault open (plan 0069): only the
+        // inactivity limit expires it.
+        instrumentation.runOnMainSync(()->instrumentation.callActivityOnPause(main));
+        Thread.sleep(1500);
+        instrumentation.runOnMainSync(()->instrumentation.callActivityOnResume(main));
+        Thread.sleep(500);
+        assertEquals("Short background keeps the vault open","true",js(instrumentation,view,"!!document.querySelector('.shell')"));
         // Background during a foreground hold defers only background expiry.
         js(instrumentation,view,"Array.from(document.querySelectorAll('.fld')).find(l=>l.textContent.toLowerCase().includes('password')).querySelector('.acts button:last-child').click()");
         awaitJs(instrumentation,view,"Array.from(document.querySelectorAll('.toast')).some(t=>t.textContent.startsWith('Copied'))","second clipboard hold");
         instrumentation.runOnMainSync(()->instrumentation.callActivityOnPause(main));
+        main.qvExpireBackground();
         Thread.sleep(1500);
         assertEquals("Deferred while copying","true",js(instrumentation,view,"!!document.querySelector('.shell')"));
         awaitHeading(instrumentation,view,"Welcome back");
@@ -207,6 +215,7 @@ public class PlatformTest extends InstrumentationTestCase {
             submitFixture(instrumentation,view);
             awaitJs(instrumentation,view,"window.qvDeviceFixture.opening()","opening before pause");
             instrumentation.runOnMainSync(()->instrumentation.callActivityOnPause(main));
+            main.qvExpireBackground();
             Thread.sleep(500);
             instrumentation.runOnMainSync(()->instrumentation.callActivityOnResume(main));
             awaitHeading(instrumentation,view,"Welcome back");
@@ -228,6 +237,7 @@ public class PlatformTest extends InstrumentationTestCase {
         } finally {
             // Ensure no fixture session remains live before deleting only its files.
             instrumentation.runOnMainSync(()->instrumentation.callActivityOnPause(main));
+            main.qvExpireBackground();
             Thread.sleep(300);
             instrumentation.runOnMainSync(()->instrumentation.callActivityOnResume(main));
             removeFixture(root,root);
@@ -276,6 +286,10 @@ public class PlatformTest extends InstrumentationTestCase {
             instrumentation.runOnMainSync(()->instrumentation.callActivityOnPause(activity));
             Thread.sleep(500);
             assertEquals("Background metadata observed",0,main.qvStatus()&1);
+            assertTrue("Background time counts",main.qvBackgroundMillis()>0);
+            assertEquals("Short background keeps the typed form","true",js(instrumentation,view[0],"document.querySelector('input[type=password]').value==='synthetic-input'"));
+            main.qvExpireBackground();
+            Thread.sleep(500);
             instrumentation.runOnMainSync(()->instrumentation.callActivityOnResume(activity));
             assertTrue("Pause transition retained",main.qvGeneration()>generation);
             Thread.sleep(500);

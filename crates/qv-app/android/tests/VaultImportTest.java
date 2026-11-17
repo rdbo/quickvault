@@ -163,7 +163,7 @@ public final class VaultImportTest extends PlatformTest {
             assertTrue("Slow stream opened",opens(os,provider)>beforeSlow);
             os.runOnMainSync(() -> main.qvForgetPickFor(previousPick));
             assertEquals("Old cleanup cannot clear the current selection",1,main.qvPickState(lastPick));
-            os.runOnMainSync(() -> os.callActivityOnPause(main)); Thread.sleep(1000);
+            os.runOnMainSync(() -> os.callActivityOnPause(main)); main.qvExpireBackground(); Thread.sleep(1000);
             os.runOnMainSync(() -> {
                 try {
                     java.lang.reflect.Method callback = MainActivity.class.getDeclaredMethod("onActivityResult",int.class,int.class,Intent.class);

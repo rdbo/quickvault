@@ -134,8 +134,9 @@ class MainActivity : WryActivity() {
                             cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
                             mediaPlaybackRequiresUserGesture = true
                         }
-                        view.isLongClickable = false
-                        view.setOnLongClickListener { true }
+                        // Long press stays on: it gives text fields Android's
+                        // selection and Paste (plan 0069). The page cancels
+                        // copy/cut, and rows use their own hold (app.js).
                         view.setDownloadListener { _,_,_,_,_ -> }
                         view.webChromeClient = object : WebChromeClient() {
                             override fun onPermissionRequest(request: PermissionRequest) { request.deny() }
@@ -242,11 +243,33 @@ class MainActivity : WryActivity() {
         }
         return null
     }
-    override fun onResume() { super.onResume(); foreground = true }
+    // Background time by the boot clock, which counts deep sleep and time
+    // frozen by the cached-app freezer (plan 0069): Rust locks once it
+    // reaches the inactivity limit. A device that slept meanwhile counts as
+    // a screen lock even if the screen-off broadcast is still queued.
+    @Volatile private var pausedAt = 0L
+    @Volatile private var pausedUptime = 0L
+    override fun onResume() {
+        super.onResume()
+        if (pausedAt != 0L) {
+            val slept = (android.os.SystemClock.elapsedRealtime() - pausedAt) - (android.os.SystemClock.uptimeMillis() - pausedUptime)
+            if (slept > 1000) screenGeneration++
+        }
+        foreground = true
+    }
+    fun qvBackgroundMillis(): Long {
+        val since = pausedAt
+        return if (foreground || since == 0L) 0L else (android.os.SystemClock.elapsedRealtime() - since).coerceAtLeast(0L)
+    }
+    /** Instrumentation only: age the current background past any limit. It can only lock sooner. */
+    fun qvExpireBackground() { if (!foreground) pausedAt = 1L }
     // The camera permission prompt that Scan opens pauses this activity; that
     // pause keeps the scan (Rust defers the background lock for it, as for the
     // document picker). Any other pause ends the scan.
-    override fun onPause() { foreground = false; lifecycleGeneration++; if (!qr.awaitingPermission()) qr.cancel(); super.onPause() }
+    override fun onPause() {
+        pausedAt = android.os.SystemClock.elapsedRealtime(); pausedUptime = android.os.SystemClock.uptimeMillis()
+        foreground = false; lifecycleGeneration++; if (!qr.awaitingPermission()) qr.cancel(); super.onPause()
+    }
     // Leaving the app also leaves the video's full screen (the lock closes the
     // preview anyway).
     override fun onStop() { fullCallback?.let { it.onCustomViewHidden(); hideFull() }; super.onStop() }

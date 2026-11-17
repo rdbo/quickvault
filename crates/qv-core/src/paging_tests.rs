@@ -22,6 +22,52 @@ fn tiny_cache(session: &Session) {
         .unwrap();
 }
 
+#[test]
+fn child_groups_are_listed_by_name_not_creation_order() {
+    // 0004 §7.3 (plan 0069): new groups are appended to the stored order,
+    // but every group list shows them by lowercase name.
+    let env = Env::new();
+    let session = env.unlock();
+    let root = session.root().unwrap();
+    let parent = add_group(&session, root, "Parent");
+    for name in ["work", "Banking", "zeta", "alpha"] {
+        add_group(&session, parent, name);
+    }
+    let names = |groups: Vec<GroupSummary>| -> Vec<String> {
+        groups.iter().map(|g| g.name.expose().to_owned()).collect()
+    };
+    let expected = ["alpha", "Banking", "work", "zeta"];
+    let page = session
+        .groups_page(Some(parent), "", None, limit(32), &CancelToken::new())
+        .unwrap();
+    assert_eq!(names(page.items), expected);
+    let page = session
+        .list_page(parent, None, limit(32), &CancelToken::new())
+        .unwrap();
+    let listed: Vec<String> = page
+        .items
+        .iter()
+        .filter_map(|h| match h {
+            SearchHit::Group(g) => Some(g.name.expose().to_owned()),
+            SearchHit::Entry(_) => None,
+        })
+        .collect();
+    assert_eq!(listed, expected);
+    let page = session
+        .browse_items_page(parent, "", None, limit(32), &CancelToken::new())
+        .unwrap();
+    let browsed: Vec<String> = page
+        .items
+        .iter()
+        .filter_map(|h| match h {
+            SearchHit::Group(g) => Some(g.name.expose().to_owned()),
+            SearchHit::Entry(_) => None,
+        })
+        .collect();
+    assert_eq!(browsed, expected);
+    assert_eq!(names(session.list(parent).unwrap().groups), expected);
+}
+
 // 0012 §1: Budget inconsistency
 #[test]
 fn paging_complete_order_matches_eager_reference_with_an_uncacheable_row() {

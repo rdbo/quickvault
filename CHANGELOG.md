@@ -7,6 +7,25 @@ Dates are ISO 8601. Newest first within each section.
 
 ## Unreleased
 
+## 1.1.1 — 2026-11-17
+
+- 2026-11-17: Version 1.1.1 (release notes: `docs/release-notes/1.1.1.md`).
+- 2026-11-17: Owner phone report (plan 0069). Android APKs now carry an
+  increasing version code from the workspace version (1.0.0 and 1.1.0 both
+  shipped as code 1, so installers refused the update). Switching to
+  another app no longer locks the vault: it locks once the inactivity time
+  runs out, now 5 minutes instead of 1; screen lock, and a phone that slept
+  meanwhile, still lock at once. Text fields accept paste again (Android's
+  long-press Paste; on Linux a right-click menu with Paste, Delete and
+  Select All), and plain fields being edited allow copy and cut. Groups are
+  listed by name. Copying an empty field says "Nothing to copy" instead of
+  claiming the clipboard is missing; a clipboard replaced by another copy
+  is reported as such, and other copy failures say to try again. Fix the
+  screen freezing (taps doing nothing) after leaving and quickly returning
+  to the app: update batches are now numbered, so one resent after its
+  connection dropped while the app was in the background is applied once
+  and acknowledged on its own connection (vendored dioxus-desktop).
+
 ## 1.1.0 — 2026-11-17
 
 - 2026-11-17: Version 1.1.0 (release notes: `docs/release-notes/1.1.0.md`).

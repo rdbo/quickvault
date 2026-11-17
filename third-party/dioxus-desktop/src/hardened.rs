@@ -272,6 +272,35 @@ fn admit(
     msg.permit = Some(Arc::new(Permit(queued.clone())));
     Some(msg)
 }
+/// The context-menu actions an editable field keeps (QuickVault plan 0069):
+/// pasting needs them, while copy and cut stay cancelled by the page so
+/// copies go through the app's clearing clipboard. Everything else (reload,
+/// inspect, links, spelling, input methods) is removed.
+#[cfg(target_os = "linux")]
+pub(crate) fn editing_menu_action(action: webkit2gtk::ContextMenuAction) -> bool {
+    use webkit2gtk::ContextMenuAction::{Delete, Paste, SelectAll};
+    matches!(action, Paste | Delete | SelectAll)
+}
+
+/// Applies [`editing_menu_action`] to a WebKitGTK context menu: suppressed
+/// (`true`) unless the target is editable and an allowed item remains.
+#[cfg(target_os = "linux")]
+pub(crate) fn editing_menu(
+    menu: &webkit2gtk::ContextMenu,
+    hit: &webkit2gtk::HitTestResult,
+) -> bool {
+    use webkit2gtk::{ContextMenuExt, ContextMenuItemExt, HitTestResultExt};
+    if !hit.context_is_editable() {
+        return true;
+    }
+    for item in menu.items() {
+        if item.is_separator() || !editing_menu_action(item.stock_action()) {
+            menu.remove(&item);
+        }
+    }
+    menu.items().is_empty()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,6 +344,31 @@ mod tests {
             assert!(!policy.contains("blob:"));
         }
     }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn hardened_editing_menu_keeps_only_paste_delete_and_select_all() {
+        use webkit2gtk::ContextMenuAction as A;
+        for allowed in [A::Paste, A::Delete, A::SelectAll] {
+            assert!(editing_menu_action(allowed));
+        }
+        for refused in [
+            A::Copy,
+            A::Cut,
+            A::Reload,
+            A::InspectElement,
+            A::OpenLink,
+            A::CopyLinkToClipboard,
+            A::OpenImageInNewWindow,
+            A::SpellingGuess,
+            A::InputMethods,
+            A::Unicode,
+            A::NoAction,
+            A::Custom,
+        ] {
+            assert!(!editing_menu_action(refused), "{refused:?}");
+        }
+    }
+
     #[test]
     fn hardened_events_are_an_allow_list() {
         // Plan 0044: a right click reaches the app like a click; hover,

@@ -548,7 +548,9 @@ impl WebviewInstance {
             };
             use wry::WebViewExtUnix;
             let view = webview.webview();
-            view.connect_context_menu(|_, _, _, _| true);
+            // Only editable fields get a menu, with editing actions only
+            // (QuickVault plan 0069: right-click Paste).
+            view.connect_context_menu(|_, menu, _, hit| crate::hardened::editing_menu(menu, hit));
             view.connect_permission_request(|_, request| {
                 request.deny();
                 true

@@ -522,7 +522,9 @@ reduce the fixed working budget. Excess outstanding cursors/concurrent view
 work may fail a transient resource request; it never changes vault eligibility.
 No field or
 row truncation; a maximum valid row must remain readable. Preserve current
-case-insensitive matching and order: group order/ID, entry lowercase title/ID,
+case-insensitive matching and order: group lowercase name/ID (owner,
+2026-11-17; the stored `order` key is kept but not used for display), entry
+lowercase title/ID,
 search groups by lowercase name/ID before entries by lowercase title/ID. Use bounded top-k selection/on-demand reads
 rather than all-results plaintext accumulation. A session may keep a few
 text-free match sets: the ascending record IDs of every match of one
@@ -533,7 +535,7 @@ newer sets. A matching cursor may page through its set without rematching;
 a new query at the same revision and scope may scan only a prior set when the
 new normalized query contains the prior one. Exhausting the ceiling falls
 back to a full scan, never a failure. The cache keeps labels (titles, type
-hints, icons, group names/order and their normalized copies) apart from
+hints, icons, group names and their normalized copies) apart from
 searchable field text and evicts field text first; a sequential scan must not
 evict resident views to admit new ones. Private redacted/zeroizing
 cursors bind session, revision, query/scope and order; mismatches return
@@ -586,6 +588,8 @@ is unsupported ([SQLite warning](https://www.sqlite.org/howtocorrupt.html)).
 
 ## Changelog
 
+- 2026-11-17: §7.3: groups are listed by lowercase name, then ID, instead
+  of the stored order key (owner report, plan 0069).
 - 2026-11-16: §1.4: compare complete compaction ciphertext, interrupt copying
   on cancellation, and retain the Windows source process lock (plan 0065).
 - 2026-11-16: §5.4: reject unsuitable picked streams at the fixed SQLite

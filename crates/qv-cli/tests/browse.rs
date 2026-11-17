@@ -104,7 +104,8 @@ fn browse_ls() {
     assert_eq!(out.code, 0, "{}", out.stderr);
     no_raw_controls(&out.stdout);
     let lines: Vec<&str> = out.stdout.lines().collect();
-    assert_eq!(&lines[..4], ["Work/", "Home/", "Same/", "Same/"]);
+    // Groups by name, whatever their creation order (0004 §7.3, plan 0069).
+    assert_eq!(&lines[..4], ["Home/", "Same/", "Same/", "Work/"]);
     // Root entries by title (case-insensitive); the hostile one escaped.
     assert!(lines.contains(&"Loose"));
     assert!(lines.contains(&format!("{HOSTILE_ESCAPED}  {HOSTILE_ESCAPED}").as_str()));

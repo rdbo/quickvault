@@ -153,10 +153,11 @@ fn offline_lifecycle() {
         before,
         [
             "Personal vault entries=2 groups=2 trash=2 conflicts=0",
+            // Groups by name (0004 §7.3, plan 0069).
+            "group Home",
             "group Work",
             "  entry Mail (work) [login] Username=me@example.org Password=<s3cret> notes=recovery codes in the safe",
             "  entry Wifi [note] Key=<hunter22>",
-            "group Home",
             "trash Legacy",
             "trash Old",
         ]

@@ -488,7 +488,7 @@ fn key(ctx: &Ctx<'_>, request: &Request, id: RecordId) -> Result<Option<SortKey>
     let mut category = 0;
     let mut date = Reverse(None);
     let sort = match &**label {
-        Label::Group { name, order } => match request.scope {
+        Label::Group { name } => match request.scope {
             Scope::Search | Scope::Groups(None) => {
                 if matches!(request.scope, Scope::Groups(None)) {
                     category = u8::from(id != index.root);
@@ -506,7 +506,9 @@ fn key(ctx: &Ctx<'_>, request: &Request, id: RecordId) -> Result<Option<SortKey>
                 {
                     return Ok(None);
                 }
-                text(ctx, Zeroizing::new(order.as_str().to_owned()))?
+                // By name like every group list (0004 §7.3, plan 0069); the
+                // stored order key is not edited by any client.
+                text(ctx, Zeroizing::new(name.as_str().to_owned()))?
             }
             Scope::Trash => {
                 date = Reverse(deleted_at);
@@ -1139,7 +1141,7 @@ impl Session {
         })
     }
 
-    /// Group choices: direct children in group order, or all visible groups by name.
+    /// Group choices: direct children, or all visible groups, by name.
     pub fn groups_page(
         &self,
         parent: Option<GroupHandle>,

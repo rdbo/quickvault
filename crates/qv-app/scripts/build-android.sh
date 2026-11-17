@@ -64,6 +64,21 @@ s=p.read_text()
 if len(re.findall(r"minSdk = (?:24|29)\b",s))!=1:
     raise SystemExit('Unexpected upstream minSdk template; review it before packaging')
 s=re.sub(r'minSdk = (?:24|29)\b','minSdk = 29',s,count=1)
+# The template hard-codes versionCode = 1, so every release looked like the
+# same build and installers refused updates (plan 0069). Derive both from the
+# workspace version: major*10000 + minor*100 + patch (1.0.0 shipped as 1).
+version=re.search(r'(?ms)^\[workspace\.package\].*?^version = "(\d+)\.(\d+)\.(\d+)"',
+                  (root.parent.parent/'Cargo.toml').read_text())
+if version is None:
+    raise SystemExit('No workspace version in Cargo.toml')
+major,minor,patch=(int(v) for v in version.groups())
+if minor>99 or patch>99 or not 1<=major<=20000:
+    raise SystemExit('Workspace version does not fit the Android version code')
+if len(re.findall(r'versionCode = \d+\n',s))!=1 or len(re.findall(r'versionName = "[^"\n]*"',s))!=1:
+    raise SystemExit('Unexpected upstream version template; review it before packaging')
+s=re.sub(r'versionCode = \d+\n',f'versionCode = {major*10000+minor*100+patch}\n',s,count=1)
+s=re.sub(r'versionName = "[^"\n]*"',f'versionName = "{major}.{minor}.{patch}"',s,count=1)
+(destination/'version-code').write_text(f'{major*10000+minor*100+patch} {major}.{minor}.{patch}\n')
 s=s.replace('android {','android {\n    useLibrary("android.test.runner")\n    useLibrary("android.test.base")\n    useLibrary("android.test.mock")',1)
 s=s.replace('defaultConfig {','defaultConfig {\n        testInstrumentationRunner = "android.test.InstrumentationTestRunner"',1)
 # Release (plan 0056): no R8. Minification could strip the Kotlin methods the
@@ -156,6 +171,9 @@ badging=Path('dist/apk-badging.txt').read_text()
 permissions=Path('dist/apk-permissions.txt').read_text()
 if "package: name='org.quickvault.app'" not in badging or "sdkVersion:'29'" not in badging:
     raise SystemExit('Unexpected package or minimum SDK')
+code,name=Path('dist/android-project/version-code').read_text().split()
+if f"versionCode='{code}' versionName='{name}'" not in badging:
+    raise SystemExit('The APK does not carry the workspace version code')
 for line in permissions.splitlines():
     if line.startswith('uses-permission:') and not any(allowed in line for allowed in (
         "name='org.quickvault.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'",

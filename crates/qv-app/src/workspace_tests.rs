@@ -29,6 +29,8 @@ pub(crate) struct Os {
     pub(crate) holds: Mutex<Vec<Vec<u8>>>,
     pub(crate) cancelled: AtomicU64,
     pub(crate) no_clipboard: AtomicBool,
+    /// The next hold reports that another copy replaced it.
+    pub(crate) replaced: AtomicBool,
 }
 struct Guard(Arc<Os>, u64);
 impl Watch for Guard {}
@@ -62,6 +64,9 @@ impl Clipboard for Platform {
             .lock()
             .unwrap()
             .push(value.expose_secret().to_vec());
+        if self.0.replaced.swap(false, Ordering::SeqCst) {
+            return Err(PlatformError::ClipboardReplaced);
+        }
         // Twenty fast ticks stand in for the 20 s hold.
         for left in (0..timeout.as_secs()).rev() {
             if cancel() {
@@ -370,7 +375,7 @@ fn workspace_phrase_screen_survives_short_idle_and_locks_with_explanation() {
     assert_eq!(env.c.snapshot().phase, Phase::Phrase);
     env.c.state().active = Instant::now() - Duration::from_secs(61);
     assert_eq!(env.c.snapshot().phase, Phase::Phrase);
-    env.c.state().active = Instant::now() - Duration::from_secs(301);
+    env.c.state().active = Instant::now() - crate::workspace::PHRASE_IDLE - Duration::from_secs(1);
     let view = env.c.snapshot();
     assert_eq!(view.phase, Phase::Locked);
     assert!(view.status.contains("Show recovery phrase"));
@@ -917,6 +922,42 @@ fn clipboard_copy_replace_lock_cancel_and_unavailable() {
     env.act(WsAction::Copy(CopyKey::Field(e, pw.handle)));
     assert_eq!(env.error(), Some(AppError::ClipboardUnavailable));
     assert_eq!(env.os.holds.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn copying_nothing_says_so_and_a_replaced_hold_is_not_an_error() {
+    // Plan 0069: an empty value never reaches the clipboard, and another
+    // copy replacing ours is reported as such, not as a missing clipboard.
+    use crate::workspace::{CLIPBOARD_REPLACED, NO_NOTES, NOTHING_TO_COPY};
+    let _k = KDF.lock().unwrap_or_else(|p| p.into_inner());
+    let env = Env::unlocked();
+    let e = env.add_entry("Blank", "");
+    let view = env.read(|s| views::entry(s, e));
+    let empty = view
+        .fields
+        .iter()
+        .find(|f| f.protected)
+        .expect("the login keeps its empty password field");
+    env.act(WsAction::Copy(CopyKey::Field(e, empty.handle)));
+    assert_eq!(env.error(), None);
+    assert_eq!(env.notice(), Some(NOTHING_TO_COPY));
+    env.act(WsAction::Copy(CopyKey::Notes(e)));
+    assert_eq!(env.error(), None);
+    assert_eq!(env.notice(), Some(NO_NOTES));
+    assert!(env.os.holds.lock().unwrap().is_empty());
+    assert_eq!(env.c.snapshot().live.clipboard, 0);
+    env.os.replaced.store(true, Ordering::SeqCst);
+    env.act(WsAction::Copy(CopyKey::Field(
+        e,
+        field(&view, "username").handle,
+    )));
+    let end = Instant::now() + Duration::from_secs(5);
+    while env.notice() != Some(CLIPBOARD_REPLACED) && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(env.notice(), Some(CLIPBOARD_REPLACED));
+    assert_eq!(env.error(), None);
+    assert_eq!(env.os.holds.lock().unwrap().len(), 1);
 }
 
 // 0012 §1: Mixed credentials

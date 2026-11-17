@@ -150,6 +150,8 @@ pub enum AppError {
     Conflict,
     /// The clipboard backend is unavailable on this system.
     ClipboardUnavailable,
+    /// A copy failed for another reason; it may work again (plan 0069).
+    ClipboardFailed,
     /// The stored value is larger than the app's edit bound; use the CLI.
     TooLargeForApp,
     /// An interrupted key rotation must be finished before unlocking.
@@ -174,8 +176,6 @@ pub enum AppError {
     /// A LAN code or address that cannot be used (missing, malformed, or a
     /// typed code without an address).
     LanInput,
-    /// The item has nothing to copy there (an empty note, plan 0063).
-    NothingToCopy,
     /// Quick unlock failed; it may still work (plan 0045), with the step
     /// that refused it when known (plan 0063).
     QuickFailed(Option<qv_core::QuickFailure>),
@@ -273,6 +273,7 @@ impl AppError {
             Self::ClipboardUnavailable => {
                 "Copying is unavailable: no supported clipboard was found on this system."
             }
+            Self::ClipboardFailed => "Copying did not work. Try again.",
             Self::TooLargeForApp => {
                 "This value is larger than the app can edit. View or copy it here, and edit it with the CLI."
             }
@@ -308,7 +309,6 @@ impl AppError {
             Self::PreviewUnavailable => {
                 "This file can't be previewed. Save a copy to open it elsewhere."
             }
-            Self::NothingToCopy => "There is nothing to copy: this item has no notes.",
             // The step that refused quick unlock, when known (plan 0063).
             Self::QuickFailed(why) => quick_message!(
                 "Fingerprint unlock didn't work. Try again, or use your master password.",
@@ -1346,7 +1346,7 @@ impl Controller {
         } else if s.pickers > 0 {
             crate::workspace::PICKER_IDLE
         } else {
-            Duration::from_secs(60)
+            crate::workspace::IDLE
         };
         // Only a bounded listener with no unanswered question defers idle lock.
         let lan_running = s.lan.as_ref().is_some_and(crate::lan::LanRun::defers_idle);
@@ -2772,7 +2772,8 @@ mod tests {
             .unwrap();
         env.wait();
         assert_eq!(env.controller.snapshot().phase, Phase::Unlocked);
-        env.controller.state().active = Instant::now() - Duration::from_secs(61);
+        env.controller.state().active =
+            Instant::now() - crate::workspace::IDLE - Duration::from_secs(1);
         assert_eq!(env.controller.snapshot().phase, Phase::Locked);
         env.controller
             .select_mode(env.controller.snapshot().epoch, Mode::Recover);
@@ -3077,7 +3078,8 @@ mod tests {
                 .recovery_skipped_at
                 .is_some()
         );
-        env.controller.state().active = Instant::now() - Duration::from_secs(61);
+        env.controller.state().active =
+            Instant::now() - crate::workspace::IDLE - Duration::from_secs(1);
         assert_eq!(env.controller.snapshot().phase, Phase::Locked);
         assert!(session.is_locked());
     }

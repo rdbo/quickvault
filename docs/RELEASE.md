@@ -52,6 +52,12 @@ state at build time; a later Edge ABI change can require a rebuild.
 The original 1.0.0 stable asset used the shorter `alpine-x86_64` filename;
 it targets 3.22 and does not provide an Edge build.
 
+The APK's `versionName` is the workspace version and its `versionCode` is
+`major·10000 + minor·100 + patch` (1.1.0 → 10100; the build refuses a minor
+or patch above 99). Android installs an update only with a higher code, so
+never re-release a version number. 1.0.0 and 1.1.0 were published with code
+1; every later release updates over them.
+
 Without `QV_APP_RELEASE=1`, `build-android.sh` builds the development APK
 (`android:debuggable="true"`, debug key); never publish it. The release
 build refuses validation features and refuses an APK that is still

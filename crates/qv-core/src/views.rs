@@ -480,7 +480,7 @@ pub(crate) fn child_groups(ctx: &Ctx<'_>, group: RecordId) -> Result<Vec<RecordI
     for id in ctx.open.index.tree.children(group) {
         let view = ctx.view(id)?;
         let g = group_info(&view).ok_or(CoreError::Internal)?;
-        kids.push((Zeroizing::new(g.order.expose().to_owned()), id));
+        kids.push((Zeroizing::new(g.name.expose().to_lowercase()), id));
     }
     kids.sort_by(|a, b| (a.0.as_str(), a.1).cmp(&(b.0.as_str(), b.1)));
     Ok(kids.into_iter().map(|(_, id)| id).collect())
@@ -1021,8 +1021,8 @@ mod tests {
             .iter()
             .map(|g| g.name.expose().to_owned())
             .collect();
-        // Appended in creation order (fractional keys).
-        assert_eq!(names, ["Work", "Home"]);
+        // Created as Work, Home; listed by name (0004 §7.3, plan 0069).
+        assert_eq!(names, ["Home", "Work"]);
         assert!(l.entries.is_empty());
         let l = s.list(work).unwrap();
         assert_eq!(titles(&l.entries), ["beta", "GitHub", "Zulu"]);

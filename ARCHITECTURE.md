@@ -552,7 +552,7 @@ Plan 0053 (performance) keeps those bounds and changes how work is done:
   record is decoded once at unlock, and only conflicted representatives are
   read again.
 - The cache has two tiers under the same 64 MiB budget: labels (lowercased
-  titles and names, type buckets, group order) and full views. Views are
+  titles and group names, type buckets) and full views. Views are
   evicted first. A scan never evicts to admit what it reads, so a scan larger
   than the cache keeps a stable resident set instead of missing on every read.
 - Query-bearing scans keep up to four text-free match sets (record IDs only)

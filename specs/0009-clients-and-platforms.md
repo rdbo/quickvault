@@ -167,16 +167,31 @@ release, but no longer gates the feature.
     picker reports the missing desktop portal instead (owner, 2026-11-07).
     Only validation fixtures type a private path. Inside an unlocked vault, a
     path field appears only when no picker is available.
-- **Inactivity.** The 60-second inactivity lock counts any use of the window
+- **Inactivity.** The 5-minute inactivity lock (owner, 2026-11-17; it was
+  60 seconds) counts any use of the window
   as activity: keys, clicks, typing, pointer movement, scrolling and touch.
   Pointer movement and scrolling are reported at most once a second, without
   positions, because the webview bridge forwards only click, input, change,
   key and focus events. A playing audio or video preview also counts as
   activity, reported the same way (owner bug report, 2026-11-15); a paused
   one does not. The app sees no activity while a system file picker
-  is open, so the limit is then 5 minutes, and closing the picker (choosing
-  or cancelling) counts as activity. Screen lock, sleep and lost protection
-  still lock at once (owner bug report, 2026-11-15; plan 0058).
+  is open, so the limit is then at least 5 minutes, and closing the picker
+  (choosing or cancelling) counts as activity. Screen lock, sleep and lost
+  protection still lock at once (owner bug report, 2026-11-15; plan 0058).
+  On Android, switching to another app does not lock: the inactivity time
+  keeps running, and the vault locks once it has run out, in the
+  background or on return (0008 §1.4 background expiry; returning is not
+  activity). Screen lock and a device that slept meanwhile still lock
+  (owner report, 2026-11-17; plan 0069).
+- **Paste and copy.** Text fields accept pasting through the system's own
+  means (keyboard shortcuts, Android's long-press Paste, and on Linux a
+  context menu with only Paste, Delete and Select All on editable fields);
+  the page cancels copy and cut outside plain text fields being edited
+  (shown values and protected inputs copy only through the app's clearing
+  clipboard). Copying an empty or missing value shows "Nothing to
+  copy" and leaves the clipboard alone; a clipboard replaced by another
+  copy during the hold is reported as such, not as a missing clipboard
+  (0008 §3; owner report, 2026-11-17; plan 0069).
 - **Vault list** (plan 0041).
   - **Names (owner, 2026-11-06, refining 2026-11-05):** a vault has one
     name, the one stored (encrypted and synced) in its metadata.
@@ -586,7 +601,7 @@ use key/sync without comparison/password prompts. All enrollment paths confirm
 the received vault name/destination before publication. Show incompatible-peer
 errors without offering an insecure legacy fallback. Report possible key
 disclosure, peer receipt, local publication/commit and anchor errors accurately.
-Clear controls/pending answers on use, cancellation, lock, background or expiry
+Clear controls/pending answers on use, cancellation, lock, background expiry or expiry
 and reject late results by form/session epoch (0008). No secret goes into argv,
 logs or non-secret UI preferences. No extra password prompt after transfer.
 
@@ -613,6 +628,11 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-17: §1.8: 5-minute inactivity lock; on Android leaving the app
+  locks only when that time runs out (0008 §1.4); paste in text fields
+  (Android long press, Linux editing-only context menu); "Nothing to copy"
+  and clipboard-replaced notices; §7 LAN prompts clear on background expiry
+  (owner report, plan 0069).
 - 2026-11-15: §1.8: group chips on narrow layouts; the last group per vault,
   kept per device and sealed under `device-view` (owner request, plan 0063).
 - 2026-11-15: §1.8 conflict comparison: field names, types, hidden settings

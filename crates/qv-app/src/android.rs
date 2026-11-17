@@ -475,6 +475,7 @@ pub(crate) fn initialize() {
                 call(|env, a| env.call_method(a, "qvInitialSdk", "()I", &[])?.i()).unwrap_or(0);
             let os = Arc::new(
                 AndroidPlatform::default()
+                    .with_background_limit(crate::workspace::IDLE)
                     .with_storage(encryption, initial_sdk)
                     .with_clipboard(Arc::new(NativeClipboard))
                     .with_keystore(Arc::new(qv_core::platform::AndroidKeystore::new(quick))),
@@ -534,11 +535,22 @@ pub(crate) fn initialize() {
                     stopped(&mut env, &activity);
                     break;
                 }
+                let background = env
+                    .call_method(activity.as_obj(), "qvBackgroundMillis", "()J", &[])
+                    .and_then(|v| v.j());
+                let Ok(background) = background else {
+                    os.update(AndroidState::default());
+                    stopped(&mut env, &activity);
+                    break;
+                };
                 let observed = AndroidState {
                     monitoring: true,
                     foreground: flags & 1 != 0,
                     screen_unlocked: flags & 2 != 0,
                     secure_window: flags & 4 != 0 && flags & 8 != 0,
+                    background: std::time::Duration::from_millis(
+                        u64::try_from(background).unwrap_or(0),
+                    ),
                 };
                 let next = env
                     .call_method(activity.as_obj(), "qvGeneration", "()J", &[])
@@ -554,9 +566,9 @@ pub(crate) fn initialize() {
                     break;
                 };
                 // Preserve a pause/resume or screen-off transition that happened
-                // entirely between two polls. A screen-off locks at once; a
-                // pause is a background transition (deferred only by a clipboard
-                // hold started in the foreground).
+                // entirely between two polls. A screen-off (or sleep, see
+                // MainActivity.onResume) locks at once; a short pause is a
+                // background transition that expires only at the limit.
                 if let Some((pause, screen)) = generation {
                     if screen != next.1 {
                         os.update(AndroidState {

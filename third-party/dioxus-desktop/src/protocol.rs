@@ -127,7 +127,7 @@ fn index_request(
     // Might want to document this
     index.insert_str(
         index.find("</body>").expect("Body element to exist"),
-        &module_loader(root_name, headless, edit_state),
+        &module_loader(root_name, headless, edit_state, ""),
     );
 
     Response::builder()
@@ -146,7 +146,55 @@ fn index_request(
 /// - port: the port that the websocket server is listening on for edits
 /// - webview_id: the id of the webview that we're loading this into. This is used to differentiate between
 ///   multiple webviews in the same application, so that we can send edits to the correct one.
-fn module_loader(root_id: &str, headless: bool, edit_state: &WebviewEdits) -> String {
+/// QuickVault (plan 0069): the hardened page's side of numbered edit batches
+/// (see `edits.rs`). Each frame starts with its batch number; a batch is
+/// queued once, even when it is resent on a new connection after the old
+/// one closed while the animation frame was paused in the background, and
+/// it is acknowledged on the connection that carried it, only while that is
+/// open. The stock client acknowledged on whichever socket was current
+/// (throwing while it was still connecting) and applied a resent batch a
+/// second time, which broke the page until the app restarted.
+pub(crate) const HARDENED_TRANSPORT_JS: &str = r#"
+    (() => {
+        const it = window.interpreter;
+        let queued = 0n;
+        it.waitForRequest = function (editsPath, key) {
+            const ws = new WebSocket(editsPath);
+            ws.binaryType = "arraybuffer";
+            it.edits = ws;
+            let authenticated = false;
+            ws.onclose = () => {
+                setTimeout(() => {
+                    if (it.edits === ws) it.waitForRequest(editsPath, key);
+                }, 100);
+            };
+            ws.onmessage = (event) => {
+                const data = event.data;
+                if (typeof data === "string") {
+                    if (data === key) authenticated = true;
+                    return;
+                }
+                if (!authenticated || !(data instanceof ArrayBuffer) || data.byteLength < 8) return;
+                const seq = new DataView(data).getBigUint64(0, true);
+                if (seq > queued) {
+                    queued = seq;
+                    it.enqueueBytes(data.slice(8));
+                }
+                requestAnimationFrame(() => {
+                    it.flushQueuedBytes();
+                    if (ws.readyState === WebSocket.OPEN) ws.send(new ArrayBuffer(0));
+                });
+            };
+        };
+    })();
+"#;
+
+fn module_loader(
+    root_id: &str,
+    headless: bool,
+    edit_state: &WebviewEdits,
+    transport: &str,
+) -> String {
     let edits_path = edit_state.wry_queue.edits_path();
     let expected_key = edit_state.wry_queue.required_server_key();
 
@@ -161,6 +209,7 @@ fn module_loader(root_id: &str, headless: bool, edit_state: &WebviewEdits) -> St
 
     // The native interpreter extends the sledgehammer interpreter with a few extra methods that we use for IPC
     window.interpreter = new NativeInterpreter("{BASE_URI}", {headless});
+    {transport}
 
     // Wait for the page to load before sending the initialize message
     window.onload = function() {{
@@ -306,7 +355,7 @@ pub(crate) fn hardened_handler(
         br#"<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QuickVault</title><link rel="stylesheet" href="app.css"></head><body><div id="main"></div><script type="module" src="bootstrap.js"></script><script type="module" src="app.js"></script></body></html>"#.to_vec()
     } else if path == "/bootstrap.js" {
         mime = "text/javascript";
-        let loader = module_loader("main", false, edits);
+        let loader = module_loader("main", false, edits, HARDENED_TRANSPORT_JS);
         // Externalize only the interpreter/bootstrap; query/eval module is absent.
         loader
             .split("<script type=\"module\">")

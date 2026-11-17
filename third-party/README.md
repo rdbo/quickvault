@@ -87,6 +87,25 @@ Upstream license files are unchanged.
   not misread as a drop); plus a metadata-only counter of refused native IPC
   messages used by the real-engine boundary harness.
 
+- Plan 0069 (owner report), in hardened.rs/webview.rs: the hardened Linux
+  view no longer suppresses every WebKitGTK context menu. On an editable
+  target it keeps only Paste, Delete and Select All (copy and cut stay
+  cancelled by the page; reload, inspect, links, spelling and input methods
+  are removed), so right-click Paste works in text fields; elsewhere the
+  menu stays suppressed. Test
+  `hardened_editing_menu_keeps_only_paste_delete_and_select_all`.
+
+- Plan 0069 (owner report: the screen froze after leaving and quickly
+  returning to the app), in edits.rs/protocol.rs: hardened edit frames
+  start with a batch number (u64, little endian) and an unacknowledged
+  batch is resent with the same number; the hardened bootstrap replaces
+  the interpreter's `waitForRequest` so a batch is queued once, is
+  acknowledged on the connection that carried it only while that is open,
+  and a superseded socket does not reconnect. The stock client
+  acknowledged on whichever socket was current and applied a resent batch
+  twice. Test
+  `hardened_unacknowledged_batch_is_resent_with_its_number_after_reconnect`.
+
 Unmodified upstream unsafe is retained; product code adds none.
 
 - Plan 0044 (owner feedback), in hardened.rs/protocol.rs: the native event

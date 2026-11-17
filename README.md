@@ -72,7 +72,7 @@ that only ever sees ciphertext) but is not planned for now.
 | ⚖️ **Conflicts** | Causal, whole-record merging. Concurrent versions stay intact until you pick one. |
 | 📦 **Archives** | Authenticated encrypted archives for backups, or for exchanging a vault through Syncthing, Dropbox or a USB stick. |
 | 📱 **Android** | Fingerprint quick unlock backed by hardware keys, exact-match autofill, in-app QR scanner, `FLAG_SECURE`. |
-| 🧹 **Secret hygiene** | Secrets held in zeroizing containers, clipboard cleared after 20 s, reveal times out after 30 s, auto-lock after 60 s idle or on screen lock. |
+| 🧹 **Secret hygiene** | Secrets held in zeroizing containers, clipboard cleared after 20 s, reveal times out after 30 s, auto-lock after 5 minutes idle or on screen lock. |
 | ⌨️ **CLI** | `qv`, a full scriptable client for the same vaults, with JSON output. |
 
 ## Screenshots

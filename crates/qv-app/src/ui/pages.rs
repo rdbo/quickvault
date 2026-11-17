@@ -1114,11 +1114,11 @@ fn Settings(controller: Controller, epoch: FormEpoch, revision: u64, pane: Pane)
                 div { class: "group-t", "SECURITY" }
                 div { class: "card",
                     if idle_only {
-                        div { class: "set-row", id: "settings-autolock", span { class: "si", Svg { icon: Icon::Clock } } span { class: "l", b { "Auto-lock" } span { "After 1 minute without activity. This system does not report screen lock or sleep, so they do not lock QuickVault; lock it yourself before leaving." } }
+                        div { class: "set-row", id: "settings-autolock", span { class: "si", Svg { icon: Icon::Clock } } span { class: "l", b { "Auto-lock" } span { "After 5 minutes without activity. This system does not report screen lock or sleep, so they do not lock QuickVault; lock it yourself before leaving." } }
                             span { class: "r warn", "Idle only" }
                         }
                     } else {
-                        div { class: "set-row", id: "settings-autolock", span { class: "si", Svg { icon: Icon::Clock } } span { class: "l", b { "Auto-lock" } span { "After 1 minute without activity, and when the screen locks or the device sleeps" } } }
+                        div { class: "set-row", id: "settings-autolock", span { class: "si", Svg { icon: Icon::Clock } } span { class: "l", b { "Auto-lock" } span { if cfg!(target_os = "android") { "After 5 minutes without activity, also while you use other apps, and when the screen locks" } else { "After 5 minutes without activity, and when the screen locks or the device sleeps" } } } }
                     }
                     div { class: "set-row", id: "settings-protection", span { class: "si", Svg { icon: Icon::Shield } } span { class: "l", b { "Device protection" }
                         span { "{detail}" } }

@@ -25,10 +25,22 @@ pub const CLIPBOARD_FOR: Duration = Duration::from_secs(20);
 // The toast's countdown bar has one CSS width class per second (`.drain0`–
 // `.drain19` in app.css, plan 0062).
 const _: () = assert!(CLIPBOARD_FOR.as_secs() == 20);
+/// The inactivity lock (0009 §1.8; 5 minutes since plan 0069, owner). On
+/// Android it is also the background expiry limit (0008 §1.4).
+pub const IDLE: Duration = Duration::from_secs(300);
 /// Inactivity limit while a recovery phrase is displayed (plan 0031 decision 5).
 pub const PHRASE_IDLE: Duration = Duration::from_secs(300);
 /// Inactivity limit while a system file picker is open (0009 §1.8).
 pub const PICKER_IDLE: Duration = Duration::from_secs(300);
+// The phrase and picker limits never shorten the ordinary one.
+const _: () =
+    assert!(PHRASE_IDLE.as_secs() >= IDLE.as_secs() && PICKER_IDLE.as_secs() >= IDLE.as_secs());
+/// Copy feedback without touching the clipboard (plan 0069).
+pub(crate) const NOTHING_TO_COPY: &str = "Nothing to copy: this field is empty.";
+pub(crate) const NO_NOTES: &str = "Nothing to copy: this item has no notes.";
+/// The hold ended because something else was copied (0008 §3 replacement).
+pub(crate) const CLIPBOARD_REPLACED: &str =
+    "The clipboard now holds something else, so QuickVault left it alone.";
 /// Single-line input bound, in UTF-8 bytes (plan 0031 decision 4).
 pub const LINE_MAX: usize = 1024;
 /// Multi-line notes and protected value bound, below the 64 KiB IPC ingress
@@ -1581,7 +1593,15 @@ impl Controller {
                                 Arc::new(move || token.is_cancelled()),
                                 &mut progress,
                             )
-                            .map_err(|_| AppError::ClipboardUnavailable)
+                            .map_err(|e| match e {
+                                qv_core::platform::PlatformError::ClipboardReplaced => {
+                                    AppError::Core(CoreError::ClipboardReplaced)
+                                }
+                                qv_core::platform::PlatformError::Unavailable => {
+                                    AppError::ClipboardUnavailable
+                                }
+                                _ => AppError::ClipboardFailed,
+                            })
                     }
                 };
                 let mut s = controller.state();
@@ -1596,8 +1616,17 @@ impl Controller {
                 {
                     ws.clip = None;
                     // The countdown toast is the only copy feedback (plan 0054).
-                    if result.is_err() && !mine.is_cancelled() {
-                        ws.error = Some(AppError::ClipboardUnavailable);
+                    // Another copy replacing ours is not a failure (plan 0069).
+                    match result {
+                        _ if mine.is_cancelled() => {}
+                        Ok(()) => {}
+                        Err(AppError::Core(CoreError::ClipboardReplaced)) => {
+                            ws.notice = Some(CLIPBOARD_REPLACED);
+                        }
+                        Err(
+                            AppError::ClipboardUnavailable | AppError::Core(CoreError::NotAllowed),
+                        ) => ws.error = Some(AppError::ClipboardUnavailable),
+                        Err(_) => ws.error = Some(AppError::ClipboardFailed),
                     }
                     s.revision = s.revision.wrapping_add(1);
                 }

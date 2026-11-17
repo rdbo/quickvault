@@ -467,7 +467,7 @@ impl Bridge {
         if s.lock_gen != self.generation {
             return false;
         }
-        let idle = s.active.elapsed() >= Duration::from_secs(60);
+        let idle = s.active.elapsed() >= crate::workspace::IDLE;
         let Some(run) = s.lan.as_mut() else {
             return false;
         };
@@ -1346,7 +1346,8 @@ mod repair_tests {
                     let mut s = env.c.state();
                     if s.lan.as_ref().is_some_and(|r| r.question.is_some()) {
                         if idle {
-                            s.active = Instant::now() - Duration::from_secs(61);
+                            s.active =
+                                Instant::now() - crate::workspace::IDLE - Duration::from_secs(1);
                         } else {
                             s.lan.as_mut().unwrap().expires =
                                 Some(Instant::now() - Duration::from_secs(1));
@@ -1398,7 +1399,7 @@ mod repair_tests {
             {
                 let mut s = env.c.state();
                 s.phase = Phase::Opening;
-                s.active = Instant::now() - Duration::from_secs(61);
+                s.active = Instant::now() - crate::workspace::IDLE - Duration::from_secs(1);
             }
             assert_eq!(env.c.snapshot().phase, Phase::Locked);
             assert!(env.c.state().lan.is_none());

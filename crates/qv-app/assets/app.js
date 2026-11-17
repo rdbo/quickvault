@@ -221,5 +221,9 @@ for(const name of ["keydown","keyup","pointerdown"])document.addEventListener(na
     capsHint();
 },true);
 for(const name of ["focusin","focusout"])document.addEventListener(name,()=>setTimeout(capsHint,0),true);
-// Clipboard commands must go from Rust to the OS with bounded ownership.
-for(const name of ["copy","cut"])document.addEventListener(name,event=>event.preventDefault());
+// Clipboard commands must go from Rust to the OS with bounded ownership:
+// shown values copy through the app's clearing clipboard. Text the user
+// selects in a plain field being edited may be copied or cut; password
+// inputs never copy (plan 0069).
+const plainField=t=>t instanceof HTMLTextAreaElement||(t instanceof HTMLInputElement&&t.type!=="password");
+for(const name of ["copy","cut"])document.addEventListener(name,event=>{if(!plainField(event.target))event.preventDefault()});

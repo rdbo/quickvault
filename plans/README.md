@@ -107,3 +107,4 @@ plan, or a new plan that names the one it supersedes.
 | [0066](0066-alpine-edge-package/PLAN.md) | Separate Alpine 3.22 and Edge release packages with install checks | Implemented — local gates and workflow lint pass; clean-container CI and fresh review pending |
 | [0067](0067-windows-webview-startup/PLAN.md) | Windows WebView2 startup origins | Implemented — origin tests pass; Wine hang also reproduces in a plain WebView2 host; fresh review and native Windows startup retest pending |
 | [0068](0068-phone-ui-polish/PLAN.md) | Phone UI polish and a stuck scan panel (owner QA) | Implemented — gates pass; phone check and fresh-context review pending |
+| [0069](0069-phone-owner-report/PLAN.md) | Phone owner report: update version code, background lock at the inactivity limit (5 min), screen freeze after a quick app switch (numbered UI batches), paste, groups by name, copy notices | Implemented — gates pass; phone check and fresh-context review pending |

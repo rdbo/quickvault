@@ -319,6 +319,12 @@ pub(crate) fn ListPane(
                 .and_then(Result::ok);
             if let Some(h) = handles.and_then(|(u, p)| if secret { p } else { u }) {
                 c.act(epoch, WsAction::Copy(CopyKey::Field(e, h)));
+            } else {
+                // No such field: say so instead of doing nothing (plan 0069).
+                c.with_ws(epoch, |ws, _| {
+                    ws.notice = Some(crate::workspace::NOTHING_TO_COPY);
+                    ws.error = None;
+                });
             }
         }
     };

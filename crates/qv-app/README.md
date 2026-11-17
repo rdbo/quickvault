@@ -141,8 +141,8 @@ App limits (plan 0031):
   viewed, revealed and copied, and are edited with the CLI.
 - Protected values are never prefilled into inputs; leaving a protected value
   blank keeps it unchanged.
-- A recovery phrase on screen allows 5 minutes of inactivity; other screens
-  lock after 60 seconds.
+- The vault locks after 5 minutes of inactivity (plan 0069; a recovery
+  phrase on screen and an open file picker allow the same).
 - Linux files are chosen by absolute path and opened through the CLI's
   no-follow owner rules. Linux copy uses the X11 clipboard (XWayland on
   Wayland sessions); without an X server, copy is unavailable and says so.
@@ -155,13 +155,19 @@ App limits (plan 0031):
 - Android marks clips sensitive (API 33+) and clears them at expiry or lock
   only when it can verify the clip is still its own. While another app has
   focus, Android may hide that, so the clip is left for the system to expire.
-- Background locking is immediate on Android, except for three app-started OS
-  interactions begun in the foreground: a copy keeps the vault open until its
-  20 s hold ends, so it can be pasted; the system document picker (which
-  always backgrounds the app) keeps it open until the app is back with a
-  choice or cancellation; and the camera permission prompt of a Scan keeps
-  it open while that scan runs (at most 30 s), then the camera opens. Screen-off, lost protection and the 60 s inactivity
-  lock still apply.
+- Leaving the app on Android does not lock it: the background expires once
+  it has lasted the 5-minute inactivity limit, measured on the boot clock
+  (deep sleep and frozen time count), and the inactivity timer itself keeps
+  running (plan 0069). Three app-started OS interactions begun in the
+  foreground defer that expiry: a copy until its 20 s hold ends; the system
+  document picker until the app is back with a choice or cancellation; and
+  the camera permission prompt of a Scan while that scan runs (at most
+  30 s). Screen-off, a device that slept while the app was in the
+  background, lost protection and the inactivity lock still apply.
+- Text fields keep Android's long-press selection and Paste toolbar, and on
+  Linux an editing-only context menu (Paste, Delete, Select All). Copy and
+  cut work only in plain fields being edited; shown values copy through the
+  app's clearing clipboard.
 
 On Linux, install GTK 3, WebKitGTK 4.1, libxdo and the AppIndicator development
 libraries, then run:
@@ -172,13 +178,13 @@ cargo run --locked -p qv-app --features desktop --bin quickvault
 
 The app requires private owner-only state storage. Linux OS screen-lock/sleep
 monitoring uses logind when available; sessions without it can use vaults after
-acknowledging the displayed reduced protection. Manual lock and the 60-second
+acknowledging the displayed reduced protection. Manual lock and the 5-minute
 inactivity timeout remain active. Linux uses `$XDG_STATE_HOME/quickvault`, or
 `$HOME/.local/state/quickvault`, with separate vaults, anchors and snapshots.
 A second instance refuses startup. A blank vault path
 selects the app vault. Persistent use requires acknowledging the displayed
-protection limits. Inactivity locks after 60 seconds; background locks immediately
-on Android (except during a foreground clipboard hold or document pick, above). Resume never unlocks.
+protection limits. Inactivity locks after 5 minutes; on Android the background
+expires after the same time (above). Resume never unlocks.
 
 Startup failures identify the missing prerequisite:
 

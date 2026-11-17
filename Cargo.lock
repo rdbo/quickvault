@@ -3679,7 +3679,7 @@ dependencies = [
 
 [[package]]
 name = "qv-app"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "ctutils",
  "dioxus",
@@ -3693,7 +3693,7 @@ dependencies = [
 
 [[package]]
 name = "qv-cli"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "clap",
  "proptest",
@@ -3707,7 +3707,7 @@ dependencies = [
 
 [[package]]
 name = "qv-core"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "proptest",
  "qv-crypto",
@@ -3723,7 +3723,7 @@ dependencies = [
 
 [[package]]
 name = "qv-crypto"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "argon2 0.5.3",
  "argon2 0.6.0",
@@ -3747,7 +3747,7 @@ dependencies = [
 
 [[package]]
 name = "qv-encoding"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "proptest",
  "zeroize",
@@ -3755,7 +3755,7 @@ dependencies = [
 
 [[package]]
 name = "qv-model"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "proptest",
  "qv-crypto",
@@ -3765,7 +3765,7 @@ dependencies = [
 
 [[package]]
 name = "qv-platform"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "async-io",
  "futures-lite",
@@ -3780,7 +3780,7 @@ dependencies = [
 
 [[package]]
 name = "qv-protocol"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "proptest",
  "qv-encoding",
@@ -3789,7 +3789,7 @@ dependencies = [
 
 [[package]]
 name = "qv-store"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "proptest",
  "qv-crypto",
@@ -3803,7 +3803,7 @@ dependencies = [
 
 [[package]]
 name = "qv-sync"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "qv-crypto",
  "qv-encoding",
@@ -3816,7 +3816,7 @@ dependencies = [
 
 [[package]]
 name = "qv-win"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "windows-sys 0.61.2",
 ]

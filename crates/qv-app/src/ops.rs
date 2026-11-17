@@ -294,7 +294,7 @@ pub(crate) fn run(
             })
             .ok_or(AppError::InvalidInput)?,
         WsAction::Copy(key) => {
-            let (value, session) = c
+            let copy = c
                 .with_ws(epoch, |ws, session| -> Result<_, AppError> {
                     let value = match &key {
                         CopyKey::Field(entry, field) => {
@@ -317,18 +317,29 @@ pub(crate) fn run(
                             if session.entry_version_count(*entry)? > 1 {
                                 return Err(AppError::Conflict);
                             }
-                            let notes = crate::views::entry(session, *entry)?
-                                .notes
-                                .filter(|n| !n.is_empty())
-                                .ok_or(AppError::NothingToCopy)?;
-                            protect(notes.as_bytes())?
+                            let notes = crate::views::entry(session, *entry)?.notes;
+                            match notes.filter(|n| !n.is_empty()) {
+                                Some(notes) => protect(notes.as_bytes())?,
+                                None => {
+                                    ws.notice = Some(crate::workspace::NO_NOTES);
+                                    return Ok(None);
+                                }
+                            }
                         }
                     };
+                    // An empty value never reaches the clipboard (plan 0069).
+                    if value.is_empty() {
+                        ws.notice = Some(crate::workspace::NOTHING_TO_COPY);
+                        return Ok(None);
+                    }
                     let session = (!matches!(key, CopyKey::Generated)).then(|| session.clone());
-                    Ok((value, session))
+                    Ok(Some((value, session)))
                 })
                 .ok_or(AppError::InvalidInput)??;
-            c.start_clip(epoch, value, session)
+            match copy {
+                Some((value, session)) => c.start_clip(epoch, value, session),
+                None => Ok(()),
+            }
         }
         WsAction::NewEntry(group) => c
             .with_ws(epoch, |ws, session| -> Result<(), AppError> {

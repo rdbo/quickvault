@@ -54,7 +54,12 @@ exception.
 
 1.4. Manual locking and the application inactivity timeout MUST work without
 OS lifecycle services. Lock on OS screen lock/sleep when the platform provides
-usable notifications, and on mobile background expiry. On Linux, automatic
+usable notifications, and on mobile background expiry. Background expiry
+is the application inactivity limit measured on a clock that counts sleep:
+leaving the app for another one does not lock until that limit is reached
+(the inactivity timer keeps running meanwhile), and a device that slept
+while the app was in the background counts as a screen lock (owner,
+2026-11-17). On Linux, automatic
 OS lock/sleep notification support is an optional detected capability, not a
 prerequisite for local vault use. If unavailable, show that limitation clearly
 before persistent use and while unlocked; retain §1.3's explicit reduced-
@@ -215,6 +220,9 @@ out of scope. Remotely supplied parser/rendering inputs remain in scope.
 
 ## Changelog
 
+- 2026-11-17: §1.4: background expiry is the inactivity limit on a
+  sleep-counting clock, not immediate; sleep in the background counts as a
+  screen lock (owner report, plan 0069).
 - 2026-11-17: Clarify exact Dioxus document and preview origins per platform,
   distinguishing mapped WebView2 URLs from native resource requests, to repair
   Windows initialization without broadening the bridge (owner request, plan 0067).

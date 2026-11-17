@@ -205,7 +205,6 @@ pub(crate) fn label_of(view: &ViewData) -> Result<Label, CoreError> {
         }
         ViewData::Group(g) => Label::Group {
             name: Zeroizing::new(g.name.expose().to_lowercase()),
-            order: Zeroizing::new(g.order.expose().to_owned()),
         },
         ViewData::Meta(_) | ViewData::Attachment { .. } | ViewData::None => Label::Other,
     })

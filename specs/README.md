@@ -10,6 +10,11 @@ rows of 0012) is not planned (owner, 2026-11-14). Those sections stay as
 design records with unchanged statuses; QuickVault 1.0 is offline plus
 direct LAN sync.
 
+Plan 0069 (2026-11-17, owner report) amends 0008 §1.4 (mobile background
+expiry is the inactivity limit on a sleep-counting clock; sleep counts as a
+screen lock), 0009 §1.8/§7 (5-minute inactivity, paste in text fields, copy
+notices) and 0004 §7.3 (groups listed by name). Statuses are unchanged.
+
 Plan 0067 (2026-11-17, owner repair request) clarifies 0008 §4's exact
 platform document and preview origins: Windows navigation/IPC use WebView2's
 mapped HTTP URL; native resource requests retain Wry's restored custom scheme.

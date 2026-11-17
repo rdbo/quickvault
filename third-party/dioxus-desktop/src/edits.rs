@@ -254,6 +254,9 @@ pub(crate) struct EditWebsocket {
     max_webview_id: Arc<AtomicU32>,
     connections: Arc<RwLock<HashMap<u32, WebviewConnectionState>>>,
     server_location: Arc<Notify>,
+    /// QuickVault (plan 0069): each batch's number, so a page that already
+    /// queued a batch can recognise it when it is resent on a new connection.
+    next_batch: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl EditWebsocket {
@@ -287,6 +290,7 @@ impl EditWebsocket {
             max_webview_id: Default::default(),
             current_location,
             server_location: notify,
+            next_batch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
         }
     }
 
@@ -517,7 +521,19 @@ impl EditWebsocket {
                 let mut queued_message = None;
                 // Wait until there are edits ready to send
                 'connection: while let Ok(msg) = edits_incoming_rx.recv() {
-                    let data = msg.edits.clone();
+                    // QuickVault (plan 0069): hardened frames start with the
+                    // batch number (u64, little endian). A batch whose
+                    // connection closed before its acknowledgement is resent
+                    // with the same number; the page applies each number once
+                    // and acknowledges on the connection that carried it.
+                    let data = if hardened {
+                        let mut framed = Vec::with_capacity(8 + msg.edits.len());
+                        framed.extend_from_slice(&msg.seq.to_le_bytes());
+                        framed.extend_from_slice(&msg.edits);
+                        framed
+                    } else {
+                        msg.edits.clone()
+                    };
                     queued_message = Some(msg);
                     // Send the edits to the webview
                     if websocket
@@ -631,9 +647,12 @@ impl EditWebsocket {
     }
 
     fn send_edits(&mut self, webview: u32, edits: Vec<u8>) -> oneshot::Receiver<()> {
+        let seq = self
+            .next_batch
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut connections_mut = self.connections.write().unwrap();
         let connection = connections_mut.entry(webview).or_default();
-        connection.add_message(edits)
+        connection.add_message(seq, edits)
     }
 }
 
@@ -659,9 +678,10 @@ impl Default for WebviewConnectionState {
 impl WebviewConnectionState {
     /// Add a message to the active connection or queue and return a receiver that will be resolved
     /// when the webview has applied the edits.
-    fn add_message(&mut self, edits: Vec<u8>) -> oneshot::Receiver<()> {
+    fn add_message(&mut self, seq: u64, edits: Vec<u8>) -> oneshot::Receiver<()> {
         let (response_sender, response_receiver) = oneshot::channel();
         let pair = MsgPair {
+            seq,
             edits,
             response: response_sender,
         };
@@ -689,6 +709,7 @@ impl WebviewConnectionState {
 }
 
 struct MsgPair {
+    seq: u64,
     edits: Vec<u8>,
     response: oneshot::Sender<()>,
 }
@@ -771,15 +792,15 @@ mod hardened_transport_tests {
     #[test]
     fn hardened_dropped_batches_resolve_as_not_applied() {
         let mut state = WebviewConnectionState::default();
-        let mut kept: Vec<_> = (0..2).map(|_| state.add_message(vec![1])).collect();
-        let mut dropped = state.add_message(vec![2]);
+        let mut kept: Vec<_> = (0..2).map(|i| state.add_message(i, vec![1])).collect();
+        let mut dropped = state.add_message(2, vec![2]);
         assert!(matches!(dropped.try_recv(), Err(oneshot::Canceled)));
-        let mut huge = state.add_message(vec![0; 8 * 1024 * 1024 + 1]);
+        let mut huge = state.add_message(3, vec![0; 8 * 1024 * 1024 + 1]);
         assert!(matches!(huge.try_recv(), Err(oneshot::Canceled)));
         assert!(kept.iter_mut().all(|r| matches!(r.try_recv(), Ok(None))));
         let (tx, rx) = std::sync::mpsc::sync_channel(0);
         let mut full = WebviewConnectionState::Connected { edits_outgoing: tx };
-        let mut lost = full.add_message(vec![3]);
+        let mut lost = full.add_message(4, vec![3]);
         assert!(matches!(lost.try_recv(), Err(oneshot::Canceled)));
         drop(rx);
     }
@@ -845,11 +866,13 @@ mod hardened_transport_tests {
             .unwrap()
             .get_mut(&0)
             .unwrap()
-            .add_message(vec![1, 2, 3]);
-        assert!(matches!(
-            page.read().unwrap(),
-            tungstenite::Message::Binary(_)
-        ));
+            .add_message(7, vec![1, 2, 3]);
+        match page.read().unwrap() {
+            tungstenite::Message::Binary(b) => {
+                assert_eq!(&b[..], &[7, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3]);
+            }
+            other => panic!("{other:?}"),
+        }
         // A page in the background acknowledges only after the handshake
         // bound has passed; the batch must still count as applied.
         std::thread::sleep(std::time::Duration::from_millis(3500));
@@ -857,6 +880,109 @@ mod hardened_transport_tests {
             .unwrap();
         let waker = futures_util::task::noop_waker();
         let mut cx = std::task::Context::from_waker(&waker);
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let result = loop {
+            if let std::task::Poll::Ready(r) = applied.poll_unpin(&mut cx) {
+                break r;
+            }
+            assert!(std::time::Instant::now() < end, "acknowledgement lost");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(result.is_ok());
+    }
+    // QuickVault plan 0069: a page whose connection closes while a batch
+    // waits for its (background-paused) animation frame reconnects. The batch
+    // comes again with the same number, so the page can apply it once, and
+    // the acknowledgement on the new connection completes it.
+    #[test]
+    fn hardened_unacknowledged_batch_is_resent_with_its_number_after_reconnect() {
+        let (location, listener) = start_server();
+        let port = listener.local_addr().unwrap().port();
+        let client_key = encode_key_string(&location.client_key);
+        let location = Arc::new(Mutex::new(location));
+        let connections = Arc::new(RwLock::new(HashMap::new()));
+        connections
+            .write()
+            .unwrap()
+            .insert(0u32, WebviewConnectionState::default());
+        let listener = Arc::new(listener);
+        let accept = || {
+            let (listener, location, connections) =
+                (listener.clone(), location.clone(), connections.clone());
+            std::thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                EditWebsocket::handle_connection(
+                    stream,
+                    location,
+                    connections,
+                    true,
+                    None,
+                    &Pending::default(),
+                );
+            })
+        };
+        let connect = || {
+            let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let url = format!("ws://127.0.0.1:{port}/0/{client_key}");
+            tungstenite::client(url.as_str(), stream).unwrap().0
+        };
+        let key = |page: &mut tungstenite::WebSocket<TcpStream>| {
+            assert!(matches!(
+                page.read().unwrap(),
+                tungstenite::Message::Text(_)
+            ));
+        };
+        let batch = |page: &mut tungstenite::WebSocket<TcpStream>| match page.read().unwrap() {
+            tungstenite::Message::Binary(b) => b.to_vec(),
+            other => panic!("{other:?}"),
+        };
+        let connected = || {
+            let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                if matches!(
+                    connections.read().unwrap().get(&0),
+                    Some(WebviewConnectionState::Connected { .. })
+                ) {
+                    return;
+                }
+                assert!(std::time::Instant::now() < end, "never connected");
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        };
+        let server = accept();
+        let mut first = connect();
+        server.join().unwrap();
+        key(&mut first);
+        connected();
+        let mut applied = connections
+            .write()
+            .unwrap()
+            .get_mut(&0)
+            .unwrap()
+            .add_message(42, vec![9, 8]);
+        let sent = batch(&mut first);
+        assert_eq!(&sent[..8], &42u64.to_le_bytes());
+        // The page's connection closes before it acknowledges.
+        drop(first);
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !matches!(
+            connections.read().unwrap().get(&0),
+            Some(WebviewConnectionState::Pending { pending }) if pending.len() == 1
+        ) {
+            assert!(std::time::Instant::now() < end, "batch not kept");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let waker = futures_util::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+        assert!(applied.poll_unpin(&mut cx).is_pending());
+        let server = accept();
+        let mut second = connect();
+        server.join().unwrap();
+        key(&mut second);
+        assert_eq!(batch(&mut second), sent, "same number and bytes");
+        second
+            .send(tungstenite::Message::Binary(Vec::new().into()))
+            .unwrap();
         let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let result = loop {
             if let std::task::Poll::Ready(r) = applied.poll_unpin(&mut cx) {

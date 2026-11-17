@@ -106,17 +106,19 @@ fn password() -> MasterPassword {
     MasterPassword::from_utf8(PASSWORD).unwrap()
 }
 
+// Groups are listed by name (0004 §7.3, plan 0069); the stored bytes and
+// order keys are unchanged.
 const CONTENTS: &[&str] = &[
     "Golden vault entries=4 groups=2 trash=2 conflicts=0",
+    "group Home",
+    "  entry Card [card] Cardholder=A. Holder Number=<4111111111111111> Expires=2030-01 CVV=<123>",
+    "  entry Note [note] Text=line 1\nline 2",
     "group Work",
     "  entry Mail (work) [login] Username=me@example.invalid Password=<s3cret> \
      Website=https://mail.example.invalid Email=me@example.invalid \
      One-time code=<otpauth://totp/Mail?secret=JBSWY3DPEHPK3PXP> \
      notes=recovery codes in the safe",
     "  entry Wifi [wifi] Password=<hunter22>",
-    "group Home",
-    "  entry Card [card] Cardholder=A. Holder Number=<4111111111111111> Expires=2030-01 CVV=<123>",
-    "  entry Note [note] Text=line 1\nline 2",
     "trash Legacy",
     "trash Old",
 ];

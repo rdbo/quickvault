@@ -522,10 +522,12 @@ fn moving_the_pointer_postpones_the_inactivity_lock() {
     use std::time::{Duration, Instant};
     let _k = lock();
     let env = Env::unlocked();
-    let idle = |env: &Env| env.c.state().active = Instant::now() - Duration::from_secs(61);
+    let idle = |env: &Env| {
+        env.c.state().active = Instant::now() - crate::workspace::IDLE - Duration::from_secs(1)
+    };
     // (Read the epoch first: a snapshot applies the idle lock.)
     let epoch = env.epoch();
-    // Activity reported after a minute without actions keeps it unlocked.
+    // Activity reported after the limit without actions keeps it unlocked.
     idle(&env);
     env.c.activity(epoch);
     assert_eq!(env.c.snapshot().phase, Phase::Unlocked);
@@ -543,14 +545,14 @@ fn an_open_file_picker_lengthens_the_inactivity_lock() {
     let _k = lock();
     let env = Env::unlocked();
     let idle = |env: &Env, d: Duration| env.c.state().active = Instant::now() - d;
-    // A picker open for over a minute keeps the vault unlocked.
+    // A picker open for almost its limit keeps the vault unlocked.
     let open = env.c.picker_open();
-    idle(&env, Duration::from_secs(61));
+    idle(&env, PICKER_IDLE - Duration::from_secs(1));
     assert_eq!(env.c.snapshot().phase, Phase::Unlocked);
-    // Closing it counts as activity; the usual minute applies again.
+    // Closing it counts as activity; the usual limit applies again.
     drop(open);
     assert_eq!(env.c.snapshot().phase, Phase::Unlocked);
-    idle(&env, Duration::from_secs(61));
+    idle(&env, crate::workspace::IDLE + Duration::from_secs(1));
     assert_eq!(env.c.snapshot().phase, Phase::Locked);
     // Still bounded: the longer limit expires too.
     drop(env);

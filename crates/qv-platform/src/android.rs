@@ -32,6 +32,9 @@ pub struct AndroidState {
     pub monitoring: bool,
     /// Activity is in the foreground.
     pub foreground: bool,
+    /// How long the activity has been out of the foreground, by a clock
+    /// that counts deep sleep and frozen time; zero in the foreground.
+    pub background: Duration,
     /// Display is interactive and keyguard is not locked.
     pub screen_unlocked: bool,
     /// FLAG_SECURE was observed on this window before enabling inputs.
@@ -58,6 +61,9 @@ pub struct AndroidPlatform {
     keystore: Option<Arc<dyn Keystore>>,
     /// Storage and swap evidence from [`AndroidPlatform::with_storage`].
     storage: Option<(Evidence, Evidence)>,
+    /// Background time before background expiry (0008 §1.4); zero expires
+    /// on leaving the foreground.
+    background_limit: Duration,
 }
 /// `DevicePolicyManager.ENCRYPTION_STATUS_ACTIVE_PER_USER`: file-based encryption.
 pub const ENCRYPTION_ACTIVE_PER_USER: i32 = 5;
@@ -98,12 +104,12 @@ impl Drop for Guard {
         }
     }
 }
-fn lock_event(observed: AndroidState) -> Option<LockEvent> {
+fn lock_event(observed: AndroidState, limit: Duration) -> Option<LockEvent> {
     if !observed.monitoring || !observed.secure_window {
         Some(LockEvent::ProtectionLost)
     } else if !observed.screen_unlocked {
         Some(LockEvent::ScreenLocked)
-    } else if !observed.foreground {
+    } else if !observed.foreground && observed.background >= limit {
         Some(LockEvent::BackgroundExpired)
     } else {
         None
@@ -120,15 +126,24 @@ impl AndroidPlatform {
         self.storage = Some(storage_evidence(encryption, initial_sdk));
         self
     }
+    /// Expire the background only after `limit` out of the foreground: the
+    /// app's inactivity limit, so switching apps briefly keeps the vault
+    /// open (0008 §1.4, plan 0069). Without it, expiry is immediate.
+    pub fn with_background_limit(mut self, limit: Duration) -> Self {
+        self.background_limit = limit;
+        self
+    }
     /// Enable copying through a native clipboard backend.
     pub fn with_clipboard(mut self, backend: Arc<dyn AndroidClipboardBackend>) -> Self {
         self.backend = Some(backend);
         self
     }
     /// Apply observations from native OS polling/events, never from webview IPC.
-    /// Background expiry is immediate, except that a clipboard hold started in
-    /// the foreground defers it until the hold ends (at most its timeout), so
-    /// the copied value can be pasted. Screen lock and lost protection never wait.
+    /// Background expiry fires once the background time reaches the limit,
+    /// except that a deferral started in the foreground (a clipboard hold, a
+    /// picker) defers it until the deferral ends. Screen lock and lost
+    /// protection never wait. Callbacks run when an observation changes the
+    /// outcome, so reaching the limit fires once.
     pub fn update(&self, observed: AndroidState) {
         let (callbacks, event) = {
             let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
@@ -137,7 +152,8 @@ impl AndroidPlatform {
             if observed.foreground && !previous.foreground {
                 state.entries += 1;
             }
-            let mut event = lock_event(observed);
+            let limit = self.background_limit;
+            let mut event = lock_event(observed, limit);
             if event == Some(LockEvent::BackgroundExpired) && state.holding > 0 {
                 state.deferred = true;
                 event = None;
@@ -145,7 +161,8 @@ impl AndroidPlatform {
             let changed = previous.monitoring != observed.monitoring
                 || previous.foreground != observed.foreground
                 || previous.screen_unlocked != observed.screen_unlocked
-                || previous.secure_window != observed.secure_window;
+                || previous.secure_window != observed.secure_window
+                || lock_event(previous, limit) != lock_event(observed, limit);
             (
                 if changed {
                     state.callbacks.values().cloned().collect::<Vec<_>>()
@@ -163,11 +180,11 @@ impl AndroidPlatform {
     }
 }
 /// Defers background expiry while it lives; see [`AndroidPlatform::defer_background`].
-pub struct BackgroundDeferral(Weak<Mutex<State>>);
+pub struct BackgroundDeferral(Weak<Mutex<State>>, Duration);
 impl Drop for BackgroundDeferral {
     fn drop(&mut self) {
         if let Some(state) = self.0.upgrade() {
-            release(&state);
+            release(&state, self.1);
         }
     }
 }
@@ -182,14 +199,18 @@ impl AndroidPlatform {
     /// those callbacks take.
     pub fn defer_background(&self) -> Option<BackgroundDeferral> {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        if lock_event(state.observed).is_some() {
+        if !state.observed.foreground || lock_event(state.observed, self.background_limit).is_some()
+        {
             return None;
         }
         state.holding += 1;
-        Some(BackgroundDeferral(Arc::downgrade(&self.state)))
+        Some(BackgroundDeferral(
+            Arc::downgrade(&self.state),
+            self.background_limit,
+        ))
     }
 }
-fn release(state: &Mutex<State>) {
+fn release(state: &Mutex<State>, limit: Duration) {
     let (callbacks, event) = {
         let mut state = state.lock().unwrap_or_else(|p| p.into_inner());
         state.holding = state.holding.saturating_sub(1);
@@ -197,7 +218,7 @@ fn release(state: &Mutex<State>) {
             return;
         }
         state.deferred = false;
-        match lock_event(state.observed) {
+        match lock_event(state.observed, limit) {
             Some(event) => (state.callbacks.values().cloned().collect::<Vec<_>>(), event),
             None => return,
         }
@@ -266,10 +287,9 @@ impl Lifecycle for AndroidPlatform {
             state.callbacks.insert(id, callback.clone());
             (id, state.observed)
         };
-        if !observed.screen_unlocked {
-            callback(LockEvent::ScreenLocked)
-        } else if !observed.foreground {
-            callback(LockEvent::BackgroundExpired)
+        match lock_event(observed, self.background_limit) {
+            Some(LockEvent::ProtectionLost) | None => {}
+            Some(event) => callback(event),
         }
         Ok(Box::new(Guard {
             state: Arc::downgrade(&self.state),
@@ -330,6 +350,7 @@ mod tests {
             foreground: true,
             screen_unlocked: true,
             secure_window: true,
+            background: Duration::ZERO,
         });
         let events = Arc::new(Mutex::new(Vec::new()));
         let capture = events.clone();
@@ -341,12 +362,14 @@ mod tests {
             foreground: false,
             screen_unlocked: true,
             secure_window: true,
+            background: Duration::ZERO,
         });
         os.update(AndroidState {
             monitoring: true,
             foreground: true,
             screen_unlocked: true,
             secure_window: true,
+            background: Duration::ZERO,
         });
         os.update(AndroidState::default());
         assert_eq!(
@@ -397,6 +420,7 @@ mod tests {
             foreground: true,
             screen_unlocked: true,
             secure_window: true,
+            background: Duration::ZERO,
         }
     }
     fn protected(text: &str) -> SecretBytes {
@@ -585,5 +609,89 @@ mod tests {
         assert_eq!(os.foreground_entries(), 1);
         os.update(visible());
         assert_eq!(os.foreground_entries(), 2);
+    }
+    fn away(seconds: u64) -> AndroidState {
+        AndroidState {
+            foreground: false,
+            background: Duration::from_secs(seconds),
+            ..visible()
+        }
+    }
+    fn watched(os: &AndroidPlatform) -> (Arc<Mutex<Vec<LockEvent>>>, Box<dyn Watch>) {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let capture = events.clone();
+        let guard = os
+            .watch(Arc::new(move |event| capture.lock().unwrap().push(event)))
+            .unwrap();
+        (events, guard)
+    }
+    #[test]
+    fn android_background_expires_only_at_the_limit_and_once() {
+        // Plan 0069: switching apps keeps the vault open until the
+        // inactivity limit; reaching it locks once.
+        let os = AndroidPlatform::default().with_background_limit(Duration::from_secs(300));
+        os.update(visible());
+        let (events, _guard) = watched(&os);
+        os.update(away(0));
+        os.update(away(120));
+        os.update(visible());
+        assert!(events.lock().unwrap().is_empty(), "short background kept");
+        assert_eq!(os.foreground_entries(), 2);
+        os.update(away(0));
+        os.update(away(299));
+        assert!(events.lock().unwrap().is_empty());
+        os.update(away(300));
+        os.update(away(301));
+        os.update(away(900));
+        assert_eq!(*events.lock().unwrap(), [LockEvent::BackgroundExpired]);
+        // Returning is not activity, and never unlocks.
+        os.update(visible());
+        assert_eq!(*events.lock().unwrap(), [LockEvent::BackgroundExpired]);
+        // A watch registered while already past the limit fires at once.
+        os.update(away(400));
+        let (late, _late_guard) = watched(&os);
+        assert_eq!(*late.lock().unwrap(), [LockEvent::BackgroundExpired]);
+    }
+    #[test]
+    fn android_screen_lock_and_lost_protection_ignore_the_background_limit() {
+        let os = AndroidPlatform::default().with_background_limit(Duration::from_secs(300));
+        os.update(visible());
+        let (events, _guard) = watched(&os);
+        os.update(away(5));
+        os.update(AndroidState {
+            screen_unlocked: false,
+            ..away(5)
+        });
+        os.update(visible());
+        os.update(AndroidState {
+            secure_window: false,
+            ..away(1)
+        });
+        assert_eq!(
+            *events.lock().unwrap(),
+            [LockEvent::ScreenLocked, LockEvent::ProtectionLost]
+        );
+    }
+    #[test]
+    fn android_deferral_holds_a_reached_limit_until_released() {
+        let os = AndroidPlatform::default().with_background_limit(Duration::from_secs(300));
+        os.update(visible());
+        let (events, _guard) = watched(&os);
+        let pick = os.defer_background().unwrap();
+        os.update(away(10));
+        // No new deferral in the background, even within the limit.
+        assert!(os.defer_background().is_none());
+        os.update(away(600));
+        assert!(events.lock().unwrap().is_empty());
+        drop(pick);
+        assert_eq!(*events.lock().unwrap(), [LockEvent::BackgroundExpired]);
+        // Released within the limit: nothing fires, the limit still applies.
+        os.update(visible());
+        let pick = os.defer_background().unwrap();
+        os.update(away(10));
+        drop(pick);
+        assert_eq!(events.lock().unwrap().len(), 1);
+        os.update(away(300));
+        assert_eq!(events.lock().unwrap().len(), 2);
     }
 }

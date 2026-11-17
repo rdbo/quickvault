@@ -78,10 +78,8 @@ pub(crate) enum Label {
         bucket: u8,
     },
     Group {
-        /// The lowercased name.
+        /// The lowercased name, which also orders groups (0004 §7.3).
         name: Zeroizing<String>,
-        /// The order key, unchanged.
-        order: Zeroizing<String>,
     },
     Other,
 }
@@ -90,7 +88,7 @@ impl Label {
     pub(crate) fn bytes(&self) -> usize {
         match self {
             Self::Entry { title, .. } => title.capacity(),
-            Self::Group { name, order } => name.capacity() + order.capacity(),
+            Self::Group { name } => name.capacity(),
             Self::Other => 0,
         }
     }

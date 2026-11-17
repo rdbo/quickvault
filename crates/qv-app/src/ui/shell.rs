@@ -67,6 +67,8 @@ pub(crate) fn TitleBar(
         } else {
             Theme::Light
         };
+        // The ring stays full and drains over the last minute before the
+        // inactivity lock, as a warning (the limit is 5 minutes, plan 0069).
         let offset = 66.0 - 66.0 * (idle_left.min(60) as f64) / 60.0;
         rsx! {
             div { class: "titlebar", onmousedown: drag.clone(), ondoubleclick: maximize.clone(),
@@ -105,7 +107,7 @@ pub(crate) fn TitleBar(
                     // Without screen-lock/sleep detection (0008 §1.4) the lock
                     // carries a lasting mark and says so, instead of a banner.
                     button { class: if idle_only { "tb-btn lock-button idle-only" } else { "tb-btn lock-button" }, id: "lock",
-                        title: if idle_only { "Lock now (Ctrl L). Locks after 60 s without activity. This system does not report screen lock or sleep, so they do not lock QuickVault." } else { "Lock now (Ctrl L). Locks after 60 s without activity, and when the screen locks or the device sleeps." },
+                        title: if idle_only { "Lock now (Ctrl L). Locks after 5 minutes without activity. This system does not report screen lock or sleep, so they do not lock QuickVault." } else { "Lock now (Ctrl L). Locks after 5 minutes without activity, and when the screen locks or the device sleeps." },
                         "aria-label": if idle_only { "Lock. Screen lock and sleep do not lock QuickVault on this system." } else { "Lock" },
                         "data-qv-clear": "true", onmousedown: |e| e.stop_propagation(), onclick: move |_| c.lock(),
                         Svg { icon: Icon::Lock }
