@@ -9,7 +9,6 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.webkit.WebView;
-import dev.dioxus.main.MainActivity;
 import java.io.File;
 import java.io.FileInputStream;
 import java.security.MessageDigest;
@@ -111,7 +110,7 @@ public final class VaultImportTest extends PlatformTest {
         assertTrue("Private fixture preference",prefs.setReadable(false,false) && prefs.setWritable(false,false)
             && prefs.setReadable(true,true) && prefs.setWritable(true,true));
         Uri provider = Uri.parse("content://"+os.getContext().getPackageName()+".vault-import");
-        MainActivity main = (MainActivity)os.startActivitySync(new Intent().setClassName("org.quickvault.validation49", "dev.dioxus.main.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        MainActivity main = (MainActivity)os.startActivitySync(new Intent().setClassName("org.quickvault.validation49", "org.quickvault.app.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         activity = main;
         staleStreamsCannotTouchTheCurrentStream(main);
         WebView[] found = new WebView[1];

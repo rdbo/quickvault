@@ -25,8 +25,9 @@ Dates are ISO 8601. Newest first within each section.
   incognito; previews, harnesses and tests keep the webview's folder out of
   the user's home. Android uses Tauri's project in `crates/qv-app/gen/android`
   with the same activity, autofill service, tests, signing and version-code
-  rule, and the same component names (`dev.dioxus.main.*`) so autofill
-  settings survive. The Windows build gets an `.ico` and swallows browser
+  rule; its classes moved from `dev.dioxus.main` to `org.quickvault.app`, so
+  after updating from 1.1.1 select QuickVault as the autofill service again
+  (Android turns it off because the service's name changed). The Windows build gets an `.ico` and swallows browser
   shortcuts (reload, find, print). The vendored `third-party/dioxus-desktop`,
   the Dioxus CLI and `Dioxus.toml` are gone; the SPDX checker now rejects any
   vendored source. Specs 0003 §6.4, 0008 §1.1/§4, 0009 (table, §1.8, §4,

@@ -263,9 +263,9 @@ assets/icon.ico`) and the adaptive launcher icon in
 
 Android arm64/API 29+ packaging uses the repository's pinned SDK/NDK recipe,
 JDK 21, tauri-cli 2.12.4 and the page tools. The Android project is
-`gen/android` (Tauri's, kept in the repository): the activity, autofill
-service and handoff keep their `dev.dioxus.main` component names, so
-launcher entries and autofill settings survive the update.
+`gen/android` (Tauri's, kept in the repository); the app's Kotlin classes
+(activity, autofill service and handoff, QR camera, quick unlock) are in
+`gen/android/app/src/main/java/org/quickvault/app/MainActivity.kt`.
 
 ```sh
 sh scripts/setup-android.sh --accept-licenses

@@ -64,8 +64,10 @@ macOS; tagging or publishing a release (owner).
    build again, so build commands keep working.
 5. **Android.** The Tauri Android project lives in `crates/qv-app/gen/android`
    (Tauri layout), application ID `org.quickvault.app`, `MainActivity`
-   extending `TauriActivity`; the Kotlin service classes keep their current
-   package so the autofill service component name is unchanged; the version
+   extending `TauriActivity`; all Kotlin classes move to the
+   `org.quickvault.app` package (owner decision 2026-11-18, replacing the
+   original choice to keep the `dev.dioxus.main` component names: users
+   select the autofill service again once after updating); the version
    code formula moves to the Tauri build script; AGP 8.7.0 / Gradle 9.1.0 /
    SDK 35 as phase A.
 6. **Page build.** `crates/qv-ui/build.sh` (cargo wasm32, wasm-bindgen
@@ -267,3 +269,17 @@ that named the Dioxus bridge are remapped in F1.
 - 2026-11-18: G2. Version 1.2.0 (workspace, lockfiles, fuzz manifest),
   CHANGELOG, `docs/release-notes/1.2.0.md`. Final gate results are in the
   release notes.
+- 2026-11-18: Owner decision: no Dioxus leftovers, so the F2 deviation is
+  reversed. `MainActivity`, the autofill service and handoff, the QR camera
+  and quick unlock now live in `org.quickvault.app`
+  (`gen/android/app/src/main/java/org/quickvault/app/MainActivity.kt`);
+  manifest, instrumentation tests, `build-android.sh` and `test-android.sh`
+  follow. The changed autofill component name means Android turns the
+  QuickVault autofill service off on the update from 1.1.1; users select it
+  again once (CHANGELOG, release notes). Older plans' validation records
+  keep the old names as history.
+  `build-android.sh` rebuilt both APKs (version code 10200); the final
+  manifest names `org.quickvault.app.MainActivity`, `AutofillAuthActivity`
+  and `QvAutofillService`. The script now deletes Gradle's previous APK
+  outputs first: debug packaging is incremental and left replaced entries
+  as dead space (a 68 MB APK holding 41 MB of entries).

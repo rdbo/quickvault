@@ -5,9 +5,6 @@ import android.app.Instrumentation;
 import android.content.Intent;
 import android.view.autofill.AutofillId;
 import android.webkit.WebView;
-import dev.dioxus.main.AutofillIdentity;
-import dev.dioxus.main.AutofillRegistry;
-import dev.dioxus.main.MainActivity;
 
 /**
  * In-process handoff: native registry -> JNI poll -> Rust validation and exact
@@ -37,7 +34,7 @@ public final class AutofillTest extends PlatformTest {
         // top, so the runner starts QuickVault from adb shell (VALIDATION.md).
         Instrumentation.ActivityMonitor monitor=os.addMonitor(MainActivity.class.getName(),null,false);
         try {
-            try { os.getTargetContext().startActivity(new Intent().setClassName("org.quickvault.app","dev.dioxus.main.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception ignored) {}
+            try { os.getTargetContext().startActivity(new Intent().setClassName("org.quickvault.app","org.quickvault.app.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception ignored) {}
             activity=(MainActivity)os.waitForMonitorWithTimeout(monitor,120000);
         } finally { os.removeMonitor(monitor); }
         assertNotNull("QuickVault started (runner must start it on the vendor ROM)",activity);

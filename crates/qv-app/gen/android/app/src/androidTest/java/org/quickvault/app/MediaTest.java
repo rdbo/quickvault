@@ -3,7 +3,6 @@ package org.quickvault.app;
 
 import android.app.Instrumentation;
 import android.content.Intent;
-import dev.dioxus.main.MainActivity;
 
 /** Bounded synthetic native media flow; requires the dedicated media APK. */
 @SuppressWarnings("deprecation")
@@ -13,7 +12,7 @@ public final class MediaTest extends PlatformTest {
         assertEquals("Dedicated disposable UID", "org.quickvault.validation50", os.getTargetContext().getPackageName());
         java.io.File fixture=new java.io.File(os.getTargetContext().getNoBackupFilesDir(),"quickvault/validation-current");
         assertFalse("Only a fresh isolated fixture may be used", fixture.exists());
-        Intent intent=new Intent().setClassName("org.quickvault.validation50","dev.dioxus.main.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent intent=new Intent().setClassName("org.quickvault.validation50","org.quickvault.app.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         MainActivity activity=(MainActivity)os.startActivitySync(intent);
         os.runOnMainSync(()->activity.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
         try {

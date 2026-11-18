@@ -8,7 +8,6 @@ import android.test.InstrumentationTestCase;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
-import dev.dioxus.main.MainActivity;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -245,7 +244,7 @@ public class PlatformTest extends InstrumentationTestCase {
     }
     public void testSecureWindowKeyboardSettingsLifecycleAndEngineBoundary() throws Exception {
         Instrumentation instrumentation=getInstrumentation();
-        Intent intent=new Intent().setClassName("org.quickvault.app","dev.dioxus.main.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent intent=new Intent().setClassName("org.quickvault.app","org.quickvault.app.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         Activity activity=instrumentation.startActivitySync(intent);
         try {
             // Only this test window stays awake; do not change device settings

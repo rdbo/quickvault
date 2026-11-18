@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-package dev.dioxus.main
+package org.quickvault.app
 
 import android.os.Bundle
 import android.os.PowerManager
@@ -38,12 +38,9 @@ import android.view.autofill.AutofillManager
 import android.view.autofill.AutofillValue
 import android.widget.RemoteViews
 
-typealias BuildConfig = org.quickvault.app.BuildConfig
-
-// Tauri's generated activity (gen/android, plan 0071). The package and class
-// names stay as they were, so the launcher entry, autofill settings and the
-// instrumentation tests keep their component names.
-class MainActivity : org.quickvault.app.TauriActivity() {
+// Extends Tauri's generated activity (gen/android, plan 0071), which tauri-cli
+// writes into generated/ in this package at build time (git-ignored).
+class MainActivity : TauriActivity() {
     // Back is the app's Escape (below), not the webview's history.
     override val handleBackNavigation: Boolean = false
     private val qr by lazy { NativeQrCamera(this) }

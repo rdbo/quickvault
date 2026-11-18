@@ -4,7 +4,6 @@ package org.quickvault.app;
 import android.app.Instrumentation;
 import android.content.Intent;
 import android.test.InstrumentationTestCase;
-import dev.dioxus.main.MainActivity;
 import java.util.Arrays;
 
 /** Explicit interactive tests, separate from PlatformTest's automatic runner.
@@ -14,7 +13,7 @@ import java.util.Arrays;
 public final class QuickUnlockTest extends InstrumentationTestCase {
     private MainActivity launch() throws Exception {
         Instrumentation os=getInstrumentation();
-        MainActivity activity=(MainActivity)os.startActivitySync(new Intent().setClassName("org.quickvault.app","dev.dioxus.main.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        MainActivity activity=(MainActivity)os.startActivitySync(new Intent().setClassName("org.quickvault.app","org.quickvault.app.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         os.runOnMainSync(()->activity.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
         long deadline=android.os.SystemClock.elapsedRealtime()+60000;
         while((activity.qvStatus()&15)!=15 && android.os.SystemClock.elapsedRealtime()<deadline)Thread.sleep(100);

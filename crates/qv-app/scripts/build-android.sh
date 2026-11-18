@@ -75,6 +75,9 @@ QV_UI_PROFILE=wasm sh "$repo/crates/qv-ui/build.sh"
 qv_config="{\"version\":\"$qv_name\",\"bundle\":{\"android\":{\"versionCode\":$qv_code}}}"
 qv_flavor="$app_dir/gen/android/app/build/outputs/apk/universal"
 qv_tools="$ANDROID_HOME/build-tools/35.0.0"
+# Gradle repackages debug APKs in place, leaving the replaced entries as dead
+# space in the zip; start from no output so each package is built whole.
+rm -rf "$qv_flavor" "$app_dir/gen/android/app/build/outputs/apk/androidTest"
 if [ "$qv_release" = 1 ]; then
     "$qv_tauri" android build --ci --apk --target aarch64 --features "$qv_features" --config "$qv_config"
     qv_unsigned="$qv_flavor/release/app-universal-release-unsigned.apk"
@@ -136,13 +139,13 @@ if app is None or app.get(ns+'allowBackup')!='false':
     raise SystemExit('Backup policy is not disabled')
 if app.get(ns+'usesCleartextTraffic')!='false':
     raise SystemExit('Cleartext traffic must stay disabled')
-auth=[a for a in app.findall('activity') if a.get(ns+'name')=='dev.dioxus.main.AutofillAuthActivity']
+auth=[a for a in app.findall('activity') if a.get(ns+'name')=='org.quickvault.app.AutofillAuthActivity']
 if len(auth)!=1 or auth[0].get(ns+'exported')!='false':
     raise SystemExit('Autofill handoff activity must exist and stay non-exported')
-service=[s for s in app.findall('service') if s.get(ns+'name')=='dev.dioxus.main.QvAutofillService']
+service=[s for s in app.findall('service') if s.get(ns+'name')=='org.quickvault.app.QvAutofillService']
 if len(service)!=1 or service[0].get(ns+'permission')!='android.permission.BIND_AUTOFILL_SERVICE':
     raise SystemExit('Autofill service must be bindable only by the system')
-main=[a for a in app.findall('activity') if a.get(ns+'name')=='dev.dioxus.main.MainActivity']
+main=[a for a in app.findall('activity') if a.get(ns+'name')=='org.quickvault.app.MainActivity']
 if len(main)!=1 or main[0].get(ns+'launchMode')!='singleTask':
     raise SystemExit('The Rust-bridged activity must stay single-instance')
 p=Path(os.environ['QV_APP_BUILT_APK'])

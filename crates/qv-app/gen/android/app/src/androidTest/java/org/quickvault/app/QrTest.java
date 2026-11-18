@@ -4,8 +4,6 @@ package org.quickvault.app;
 import android.app.Instrumentation;
 import android.content.Intent;
 import android.test.InstrumentationTestCase;
-import dev.dioxus.main.MainActivity;
-import dev.dioxus.main.NativeQrCamera;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
@@ -173,7 +171,7 @@ public class QrTest extends InstrumentationTestCase {
             stage(ins,"waiting for activity");
             try {
                 ins.getTargetContext().startActivity(new Intent()
-                    .setClassName("org.quickvault.app","dev.dioxus.main.MainActivity")
+                    .setClassName("org.quickvault.app","org.quickvault.app.MainActivity")
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             } catch (Exception ignored) { /* Runner performs the shell launch. */ }
             main=(MainActivity)ins.waitForMonitorWithTimeout(monitor,30000);
