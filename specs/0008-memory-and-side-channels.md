@@ -17,8 +17,8 @@ code.
 
 1.1. Application-controlled Rust keys, passwords, plaintext payloads, metadata
 and serialization/normalization buffers use zeroizing allocations with redacted
-Debug/Display. GUI input MAY use ordinary Dioxus/webview controls and their
-framework event/bridge buffers. Bound input, minimize copies and lifetime,
+Debug/Display. GUI input MAY use ordinary webview controls and their framework
+event/bridge buffers (the Tauri/Leptos page, 0009 §6). Bound input, minimize copies and lifetime,
 transfer secrets to protected Rust containers promptly, and clear controls and
 application state after use and on lock. Never log or persist these values.
 
@@ -96,7 +96,7 @@ query, as matching already does.
 |---------|------|
 | Clipboard | Use sensitive/no-history flags, clear after 20 seconds only if still owned; flags cannot force all clipboard managers to comply |
 | Screenshots/recents | Android FLAG_SECURE; hide previews where supported; no universal desktop screenshot-prevention claim |
-| Keyboard | Password/no-learning hints where supported; masked Dioxus/webview secret inputs are permitted; clear controls after use and on lock, with framework/OS memory limits documented |
+| Keyboard | Password/no-learning hints where supported; masked webview secret inputs are permitted; clear controls after use and on lock, with framework/OS memory limits documented |
 | Logs/crash reports | No plaintext, keys, recovery phrases, tokens or secret-bearing URLs; redact at type boundaries |
 | Temp files | No plaintext; explicit plaintext export is a separately confirmed operation to a user-selected path |
 | Autofill | Match verified app identity/web origin, not display labels or URL substrings; require choosing conflicted credentials |
@@ -116,24 +116,32 @@ Cleanup must never clear a successor's selection.
 
 ### 4. Frontend boundary and webview contract
 
-The bundled Dioxus main document has an exact platform URL: Linux
-`dioxus://index.html/`, Windows `http://dioxus.index.html/`, Android
-`https://dioxus.index.html/`. Navigation and initialization/event IPC admit only
-that platform's document, with a single initial navigation. Preview requests
-with an Origin admit only that document's origin (without its trailing slash).
-Linux may also accept the engine's opaque `null` origin for capability media
-requests, but never grant it CORS access. Absent Origin remains permitted on
-capability media requests. Native custom-protocol resource requests use Wry's
-restored `dioxus://index.html/` base, distinct from the mapped document URL on
-Windows and Android. Do not broaden admission to arbitrary HTTP URLs,
-lookalike hosts, alternate ports or paths.
+The bundled main document has an exact platform URL: Linux
+`tauri://localhost`, Windows and Android `http://tauri.localhost`. Navigation
+admits only that platform's document; new windows are refused. The page
+reaches Rust through one allowlisted command over the framework's in-process
+IPC (custom protocol, or Android's `postMessage` interface); no Tauri plugin
+with file, shell, HTTP, dialog, opener or window rights is granted, and nothing
+in the app listens on a socket. The command body is length-checked (64 KiB)
+before typed decoding with unknown fields refused; on Android the framework
+first decodes its own message envelope (depth-limited) and the check applies
+to the request bytes it carries. Media requests on the app's `qvmedia` scheme
+(Linux `qvmedia://localhost/…`, Windows and Android
+`http://qvmedia.localhost/…`) admit no Origin or only the document's origin;
+Linux may also accept the engine's opaque `null` origin, but never grants it
+CORS access. Do not broaden admission to other schemes, hosts or paths.
 
-Preview transport follows 0003 §6.4: protected per-range buffers, a Weak session
-binding, no detached vault key or plaintext response Vec, and revocation on
-close/navigation/lock. Do not hold a session lock during socket writes. In-flight
-kernel/renderer copies cannot be recalled or deterministically wiped. Loopback
-capabilities never enter logs and are separate from edit-transport credentials.
-These bounds constrain application-owned buffers, not total renderer/GPU RSS.
+The page renders view models (frames) built in Rust and never receives Rust
+handles: it gets random per-session references that a lock invalidates.
+Frames reach the page as command replies, not as script evaluated in the
+page, so values on screen never pass through script source.
+
+Preview transport follows 0003 §6.4: protected per-range buffers of at most
+64 KiB per response, a Weak session binding, no detached vault key, and
+revocation on close/navigation/lock/hide. Do not hold a session lock while a
+response is handed to the engine. In-flight framework/renderer copies cannot
+be recalled or deterministically wiped. Media tokens never enter logs. These
+bounds constrain application-owned buffers, not total renderer/GPU RSS.
 
 4.1. The trusted client includes Rust crypto/model/store/sync code, platform
 adapters and any frontend that handles secret input or can request reveal.
@@ -156,7 +164,7 @@ UI action, expires after 30 seconds and is cleared on lock. Copy/autofill goes
 Rust directly to the OS. A compromised authorized webview remains a compromise
 of the trusted client; do not advertise handles as an XSS defense.
 
-4.4. Use the shared Dioxus UI and its standard webview controls for GUI master
+4.4. Use the shared UI and its standard webview controls for GUI master
 password/recovery/protected-value input. Secrets may cross the framework's local
 input/event bridge into Rust. Apply §1.1's input bounds, prompt conversion,
 no-log/no-persistence rules and best-effort cleanup. Do not retain protected
@@ -165,7 +173,7 @@ input, use password/no-learning hints where available, clear inputs on
 submit/cancel/lock and discard late events/results from an old session. The
 CLI continues to use non-echoing OS TTY input.
 
-Dioxus and the web engine are part of the trusted client, not a secret-isolation
+The UI framework (Tauri, Leptos) and the web engine are part of the trusted client, not a secret-isolation
 boundary. Do not claim that clearing the DOM, dropping Rust state, forcing GC
 or choosing native controls guarantees erasure of all copies. Native adapters
 remain appropriate for actual OS functions such as clipboard, keystore,
@@ -217,9 +225,16 @@ out of scope. Remotely supplied parser/rendering inputs remain in scope.
    not required for deterministic framework-memory wiping. Platform validation
    and the active-content/bridge requirements remain; this decision is not
    evidence that they pass.
+   The framework changed to Tauri 2 + Leptos on 2026-11-17 (owner, 0009 §6);
+   the same standard webview controls and rules apply.
 
 ## Changelog
 
+- 2026-11-17: §1.1, keyboard row, §4, §4.4: the shared UI is Tauri 2 with a
+  Leptos page (0009 §6): Tauri document URLs, one bounded in-process command,
+  frames as command replies, references instead of handles, the `qvmedia`
+  scheme instead of the loopback listener; nothing listens on a socket
+  (owner decision, plan 0071).
 - 2026-11-17: §1.4: background expiry is the inactivity limit on a
   sleep-counting clock, not immediate; sleep in the background counts as a
   screen lock (owner report, plan 0069).

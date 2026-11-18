@@ -36,8 +36,8 @@ function revokeHiddenPreview(){
 function clearRevealed(){
     for(const node of document.querySelectorAll(".phrase,.revealed"))node.textContent="";
 }
-// Dioxus can reuse a control's DOM node across a Rust form reset. Observe the
-// Rust epoch explicitly rather than assuming a virtual-DOM key wipes its value.
+// The renderer can reuse a control's DOM node across a Rust form reset. Observe
+// the Rust epoch explicitly rather than assuming a re-render wipes its value.
 let currentFormEpoch;
 // HTML autofocus only applies at page load, and Rust-side focus needs eval,
 // which the policy forbids: focus newly inserted autofocus controls here, and

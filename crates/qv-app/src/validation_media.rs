@@ -139,7 +139,6 @@ pub(crate) fn finish(controller: &Controller, passed: bool) {
             controller.0.base.join("media-result"),
             if passed { b"PASS" } else { b"FAIL" },
         );
-        return;
     }
     #[cfg(not(target_os = "android"))]
     if passed {

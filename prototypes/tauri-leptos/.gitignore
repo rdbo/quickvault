@@ -1,0 +1,12 @@
+# Build output of the plan 0070 prototype.
+/target/
+/ui/dist/
+/app/gen/schemas/
+/app/gen/android/.gradle/
+/app/gen/android/build/
+/app/gen/android/app/build/
+/app/gen/android/buildSrc/build/
+/app/gen/android/buildSrc/.gradle/
+/app/gen/android/local.properties
+/app/gen/android/app/src/main/jniLibs/
+/app/gen/android/app/src/main/assets/

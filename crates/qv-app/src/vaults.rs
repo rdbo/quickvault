@@ -169,7 +169,7 @@ impl VaultList {
 /// directory, so fixtures and tests never touch a real vault folder.
 pub fn default_folder(base: &Path, chosen: Option<&Path>) -> PathBuf {
     let private = base.join("vaults");
-    if cfg!(any(target_os = "android", feature = "validation", test)) {
+    if cfg!(any(target_os = "android", feature = "fixture", test)) {
         return private;
     }
     if let Some(c) = chosen {

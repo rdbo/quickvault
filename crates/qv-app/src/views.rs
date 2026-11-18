@@ -295,7 +295,7 @@ pub struct ItemRow {
     pub modified: i64,
 }
 // Used by native UI page workers; absent from the headless product interface.
-#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub(crate) fn paged_item(e: qv_core::EntrySummary) -> ItemRow {
     let row = entry_row(&e);
     ItemRow {
@@ -546,7 +546,7 @@ pub struct TrashView {
     pub clock_anomaly: bool,
 }
 // Used by native UI page workers; absent from the headless product interface.
-#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub(crate) fn trash_row(t: qv_core::TrashItem) -> TrashRow {
     TrashRow {
         item: t.item,
@@ -623,7 +623,7 @@ pub struct ConflictRow {
     pub versions: usize,
 }
 // Used by native UI page workers; absent from the headless product interface.
-#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
 pub(crate) fn conflict_row(r: qv_core::ConflictRecordSummary) -> ConflictRow {
     ConflictRow {
         record: r.record.handle.id_hex(),

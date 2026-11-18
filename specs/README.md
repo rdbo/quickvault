@@ -10,6 +10,17 @@ rows of 0012) is not planned (owner, 2026-11-14). Those sections stay as
 design records with unchanged statuses; QuickVault 1.0 is offline plus
 direct LAN sync.
 
+Plan 0071 (2026-11-17, owner decision) amends 0008 §1.1/§4/§4.4, 0003 §6.4
+and 0009 (client table, §1.8 previews, §4.1, §4.3, §6) for the Tauri 2 +
+Leptos app: Tauri document URLs, one bounded in-process command, frames as
+command replies, references instead of handles, and the in-process `qvmedia`
+media scheme; nothing listens on a socket. Statuses are unchanged.
+
+Plan 0070 (2026-11-17, owner decision) records in 0009 §6 that the Dioxus
+renderer is replaced by Tauri 2 with a Leptos frontend, with no listening
+sockets; plan 0071 completed the migration for 1.2.0 (0012's two rows that
+named Dioxus are now framework-neutral). Statuses are unchanged.
+
 Plan 0069 (2026-11-17, owner report) amends 0008 §1.4 (mobile background
 expiry is the inactivity limit on a sleep-counting clock; sleep counts as a
 screen lock), 0009 §1.8/§7 (5-minute inactivity, paste in text fields, copy
@@ -63,8 +74,8 @@ The same plan specifies accurate clipboard replacement reporting (0008 §3,
 0011 §3.6) and shared display-only escapes for bidi/invisible controls without
 changing editor or stored values (0009 §1, 0011 §5).
 It also specifies core-enforced recovery-copy authorization and cooperative
-file leases (0004 §6, 0007 §3.2), protected ranged media with separate loopback
-capabilities and exact CSP bounds (0003 §6.4, 0008 §4, 0009 §1.8), and explicit
+file leases (0004 §6, 0007 §3.2), protected ranged media with separate revocable
+capabilities (an in-process scheme since plan 0071) and exact CSP bounds (0003 §6.4, 0008 §4, 0009 §1.8), and explicit
 loading before large/unmeasured image decoding. Actual device validation remains
 separate from these contracts and local test results.
 

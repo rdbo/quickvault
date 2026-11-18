@@ -7,6 +7,49 @@ Dates are ISO 8601. Newest first within each section.
 
 ## Unreleased
 
+## 1.2.0 — 2026-11-18
+
+- 2026-11-18: Version 1.2.0 (release notes: `docs/release-notes/1.2.0.md`).
+- 2026-11-18: The app moves from Dioxus to Tauri 2 with a Leptos page in
+  WebAssembly (plan 0071), on Linux, Windows and Android. Nothing listens on
+  a socket any more: Rust builds every screen as a frame, the page renders it
+  and sends typed actions back through one bounded command (64 KiB, strict
+  decoding), handles reach the page only as random references cleared on
+  lock, and previews stream over the in-process `qvmedia` scheme (64 KiB per
+  response). The screens, classes and ids are the same, so the look, the
+  keyboard shortcuts and `app.css`/`app.js`/`player.js` carry over. New
+  crates `qv-ui-api` (the protocol) and `qv-ui` (the page, built by
+  `crates/qv-ui/build.sh`). The Linux webview keeps the old hardening
+  (editing-only context menu, no permission/file/auth prompts, no web
+  storage, page cache, developer extras or element full screen) and is
+  incognito; previews, harnesses and tests keep the webview's folder out of
+  the user's home. Android uses Tauri's project in `crates/qv-app/gen/android`
+  with the same activity, autofill service, tests, signing and version-code
+  rule, and the same component names (`dev.dioxus.main.*`) so autofill
+  settings survive. The Windows build gets an `.ico` and swallows browser
+  shortcuts (reload, find, print). The vendored `third-party/dioxus-desktop`,
+  the Dioxus CLI and `Dioxus.toml` are gone; the SPDX checker now rejects any
+  vendored source. Specs 0003 §6.4, 0008 §1.1/§4, 0009 (table, §1.8, §4,
+  §6) and 0012 §1 were amended; see their changelogs. CI builds the page
+  (pinned wasm-bindgen-cli 0.2.129), lints it for wasm32 and packages Android
+  with tauri-cli 2.12.4. Dependency record:
+  `plans/0071-tauri-leptos-migration/DEPENDENCIES.md` (exact licence
+  exceptions, two unmaintained-crate advisories with reasons, 204 new vet
+  exemptions as audit debt).
+- 2026-11-17: Plan 0070 phase A prototype in `prototypes/tauri-leptos/`, a
+  separate workspace outside the product (its own lockfile; the product
+  workspace excludes `prototypes`). One bounded command, opaque references,
+  lock generations and an in-process `qvmedia` media scheme; on Linux it
+  passes its tests, the CSP probe and the no-listening-socket check, and
+  plays every media sample through `player.js`. The Android APK awaits the
+  owner's phone checklist (`plans/0070-tauri-leptos-ui/VALIDATION.md`).
+  New WEBKIT.md entry W13: media elements cannot load a custom URI scheme.
+- 2026-11-17: Owner decision to move the app UI from the Dioxus renderer
+  (screen updates over a loopback websocket) to Tauri 2 with a Leptos
+  frontend, fully in process with no listening sockets (0009 §6). Plan 0070
+  starts with a prototype on the Android phone and Linux; Dioxus stays the
+  shipped UI until the migration completes.
+
 ## 1.1.1 — 2026-11-17
 
 - 2026-11-17: Version 1.1.1 (release notes: `docs/release-notes/1.1.1.md`).

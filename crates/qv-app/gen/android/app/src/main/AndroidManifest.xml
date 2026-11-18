@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Explicit LAN sync actions only. The page talks to Rust in process
+         (Tauri IPC); nothing listens on a socket (plan 0071). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <application android:hasCode="true" android:supportsRtl="true"
+        android:allowNativeHeapPointerTagging="false"
+        android:allowBackup="false" android:fullBackupContent="false"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:usesCleartextTraffic="false"
+        android:label="QuickVault" android:theme="@style/Theme.qv_app"
+        android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher">
+        <!-- The component names predate Tauri (plan 0071 keeps them): the
+             launcher entry, autofill settings and tests refer to them. -->
+        <activity android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize|keyboardHidden|keyboard|navigation|touchscreen|uiMode|density|fontScale|locale|layoutDirection|colorMode|mcc|mnc|fontWeightAdjustment"
+            android:exported="true" android:name="dev.dioxus.main.MainActivity"
+            android:launchMode="singleTask"
+            android:label="QuickVault">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- Autofill handoff: never exported; started only via the service's
+             immutable PendingIntent (0009 §4.4). -->
+        <activity android:name="dev.dioxus.main.AutofillAuthActivity"
+            android:exported="false" android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <!-- Only the system may bind (BIND_AUTOFILL_SERVICE). -->
+        <service android:name="dev.dioxus.main.QvAutofillService"
+            android:label="QuickVault"
+            android:exported="true"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

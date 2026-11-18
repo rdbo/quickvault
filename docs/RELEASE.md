@@ -10,6 +10,9 @@ gate has not passed is disabled or left out of the release.
 1. The tree is clean and `master` CI is green on every job (`gates`,
    `app-boundary`, `windows`, `android-app-build`, `supply-chain`, `fuzz`).
 2. All `AGENTS.md` gates pass locally on the release commit, plus
+   `cargo clippy --locked -p qv-ui --target wasm32-unknown-unknown -- -D warnings`,
+   `sh crates/qv-ui/build.sh` (the page every app build embeds; release
+   builds refuse to run without it) and
    `RUST_TEST_THREADS=1 cargo test --locked -p qv-app --features validation`.
 3. `cargo deny check` and `cargo vet --locked` pass (workspace and
    `fuzz/`).

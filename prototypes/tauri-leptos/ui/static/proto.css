@@ -1,0 +1,14 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* Layout of the prototype's few screens, on top of the app's app.css. */
+.proto{display:flex;flex-direction:column;height:100%;min-height:0}
+.proto-bar{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.proto-bar .sp,.v-top .sp{flex:1}
+.proto-body{flex:1;min-height:0;overflow:auto;padding:12px 16px 32px;display:flex;flex-direction:column;gap:12px}
+.proto-body .choice{display:block;width:100%;text-align:left;margin:4px 0}
+.proto-body .fld{display:flex;flex-direction:column;gap:4px;margin:8px 0}
+.proto-body .fld input,.proto-body .fld textarea{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:transparent}
+.proto-value{display:block;word-break:break-all;margin-top:2px}
+.proto-title{font-size:20px;margin:0 0 8px}
+.r-actions{display:flex;gap:6px}
+.proto-body>*{flex-shrink:0}
+.proto-body .fld span{text-align:left}

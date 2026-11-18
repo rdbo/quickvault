@@ -1,21 +1,30 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Build and inspect only; this script never connects to or installs on a phone.
+#
+# The Android project is crates/qv-app/gen/android (Tauri 2, plan 0071). The
+# page is built first (crates/qv-ui/build.sh), then the pinned tauri-cli
+# builds the Rust library and the APK through Gradle.
 set -eu
 app_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repo=$(CDPATH= cd -- "$app_dir/../.." && pwd)
 cd "$app_dir"
 # Keep tooling caches and the debug signing key out of read-only user homes.
 qv_cache=${QV_APP_BUILD_CACHE:-$app_dir/dist/.build-cache}
-mkdir -p "$qv_cache"
-export DX_HOME=${DX_HOME:-$qv_cache/dx}
+mkdir -p "$qv_cache" dist
 export GRADLE_USER_HOME=${GRADLE_USER_HOME:-$qv_cache/gradle}
 export ANDROID_USER_HOME=${QV_ANDROID_USER_HOME:-$qv_cache/android-user}
-qv_dx=${QV_DX:-dx}
-case "$("$qv_dx" --version)" in
-    'dioxus 0.7.10'*) ;;
-    *) echo 'Use the pinned Dioxus CLI 0.7.10 (QV_DX selects its path).' >&2; exit 1 ;;
+export GRADLE_OPTS="${GRADLE_OPTS:-} -Duser.home=$ANDROID_USER_HOME"
+mkdir -p "$ANDROID_USER_HOME"
+qv_tauri=${QV_TAURI:-cargo-tauri}
+case "$("$qv_tauri" --version)" in
+    'tauri-cli 2.12.4'*) ;;
+    *) echo 'Use the pinned tauri-cli 2.12.4 (QV_TAURI selects its path).' >&2; exit 1 ;;
 esac
 : "${ANDROID_HOME:?Source scripts/setup-android.sh --print-env first}"
+# tauri-cli reads NDK_HOME; scripts/setup-android.sh exports ANDROID_NDK_HOME.
+export NDK_HOME="${NDK_HOME:-${ANDROID_NDK_HOME:-}}"
+: "${NDK_HOME:?Source scripts/setup-android.sh --print-env first}"
 : "${JAVA_HOME:?Select a supported JDK (validated with JDK 21)}"
 qv_features=mobile
 qv_artifact=quickvault
@@ -42,107 +51,33 @@ if [ "$qv_release" = 1 ]; then
 else
     export QV_APP_BUILT_APK="dist/$qv_artifact-debug.apk"
 fi
-"$qv_dx" build --platform android --target aarch64-linux-android --release \
-    --features "$qv_features" --package qv-app --bin quickvault --cargo-args=--locked
-# Dioxus 0.7.10 uses android_min_sdk_version for native linking but hardcodes
-# minSdk=24 in Gradle. Copy its generated package and enforce the baseline in
-# the APK as well, without patching the framework or its registry source.
-qv_project=$(python3 - <<'PY'
-from pathlib import Path
-import shutil,time,re,os
-root=Path.cwd()
-source=root.parent.parent/'target/dx/quickvault/release/android/app'
-# One reusable generated copy; earlier timestamped copies are not created.
-destination=root/'dist'/'android-project'
-if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
-    raise SystemExit('Unexpected android-project path')
-if destination.exists():
-    shutil.rmtree(destination)
-shutil.copytree(source,destination,ignore=shutil.ignore_patterns('build','.gradle'))
-p=destination/'app/build.gradle.kts'
-s=p.read_text()
-if len(re.findall(r"minSdk = (?:24|29)\b",s))!=1:
-    raise SystemExit('Unexpected upstream minSdk template; review it before packaging')
-s=re.sub(r'minSdk = (?:24|29)\b','minSdk = 29',s,count=1)
-# The template hard-codes versionCode = 1, so every release looked like the
-# same build and installers refused updates (plan 0069). Derive both from the
-# workspace version: major*10000 + minor*100 + patch (1.0.0 shipped as 1).
-version=re.search(r'(?ms)^\[workspace\.package\].*?^version = "(\d+)\.(\d+)\.(\d+)"',
-                  (root.parent.parent/'Cargo.toml').read_text())
-if version is None:
-    raise SystemExit('No workspace version in Cargo.toml')
-major,minor,patch=(int(v) for v in version.groups())
-if minor>99 or patch>99 or not 1<=major<=20000:
-    raise SystemExit('Workspace version does not fit the Android version code')
-if len(re.findall(r'versionCode = \d+\n',s))!=1 or len(re.findall(r'versionName = "[^"\n]*"',s))!=1:
-    raise SystemExit('Unexpected upstream version template; review it before packaging')
-s=re.sub(r'versionCode = \d+\n',f'versionCode = {major*10000+minor*100+patch}\n',s,count=1)
-s=re.sub(r'versionName = "[^"\n]*"',f'versionName = "{major}.{minor}.{patch}"',s,count=1)
-(destination/'version-code').write_text(f'{major*10000+minor*100+patch} {major}.{minor}.{patch}\n')
-s=s.replace('android {','android {\n    useLibrary("android.test.runner")\n    useLibrary("android.test.base")\n    useLibrary("android.test.mock")',1)
-s=s.replace('defaultConfig {','defaultConfig {\n        testInstrumentationRunner = "android.test.InstrumentationTestRunner"',1)
-# Release (plan 0056): no R8. Minification could strip the Kotlin methods the
-# Rust side calls through JNI, which only a device run would reveal.
-if s.count('isMinifyEnabled = true')!=1:
-    raise SystemExit('Unexpected upstream release buildType; review it before packaging')
-s=s.replace('isMinifyEnabled = true','isMinifyEnabled = false\n            isDebuggable = false\n            isJniDebuggable = false',1)
-p.write_text(s)
-# Plan 0040: the shared CSS follows the OS light/dark setting. A Light parent
-# theme makes the WebView report light always; DayNight follows the system.
-# No WebView force-dark (it would recolour the app's own dark palette).
-styles=destination/'app/src/main/res/values/styles.xml'
-s=styles.read_text()
-if s.count('Theme.AppCompat.Light.NoActionBar')!=1:
-    raise SystemExit('Unexpected upstream AppTheme template; review it before packaging')
-styles.write_text(s.replace('Theme.AppCompat.Light.NoActionBar','Theme.AppCompat.DayNight.NoActionBar'))
-tests=destination/'app/src/androidTest/java/org/quickvault/app'
-tests.mkdir(parents=True)
-shutil.copyfile(root/'android/tests/PlatformTest.java',tests/'PlatformTest.java')
-shutil.copyfile(root/'android/tests/QuickUnlockTest.java',tests/'QuickUnlockTest.java')
-shutil.copyfile(root/'android/tests/QuickUnlockUiTest.java',tests/'QuickUnlockUiTest.java')
-shutil.copyfile(root/'android/tests/MediaTest.java',tests/'MediaTest.java')
-shutil.copyfile(root/'android/tests/VaultImportTest.java',tests/'VaultImportTest.java')
-shutil.copyfile(root/'android/tests/VaultImportProvider.java',tests/'VaultImportProvider.java')
-fixture_assets=destination/'app/src/androidTest/assets'
-fixture_assets.mkdir(parents=True)
-shutil.copyfile(root/'android/tests/flows.js',fixture_assets/'flows.js')
-shutil.copyfile(root/'android/tests/AndroidManifest.xml',destination/'app/src/androidTest/AndroidManifest.xml')
-# Preserve the framework's required loopback transport exception, explicitly
-# disallowing cleartext to remote hosts. The custom manifest references it.
-shutil.copyfile(root/'android/network_security_config.xml',
-                destination/'app/src/main/res/xml/network_security_config.xml')
-# The launcher icon from docs/logo/logo.svg (plan 0043), replacing the template's
-# adaptive icon files in place; refuse a changed template layout.
-res=destination/'app/src/main/res'
-icons={'mipmap-anydpi-v26/ic_launcher.xml':'ic_launcher.xml',
-       'drawable/ic_launcher_background.xml':'ic_launcher_background.xml',
-       'drawable-v24/ic_launcher_foreground.xml':'ic_launcher_foreground.xml'}
-for target,name in icons.items():
-    if not (res/target).is_file():
-        raise SystemExit('Unexpected upstream launcher icon template; review it before packaging')
-    shutil.copyfile(root/'android/res'/name,res/target)
-# Autofill and quick unlock are on wherever the device supports them (owner
-# decision 2026-11-07, plan 0044); no build switch.
-main_activity=destination/'app/src/main/kotlin/dev/dioxus/main/MainActivity.kt'
-source=main_activity.read_text()
-if 'validatedFingerprints' in source:
-    raise SystemExit('Unexpected device gate in MainActivity; review it before packaging')
-if source.count('const val QR_CAMERA = true')!=1:
-    raise SystemExit('Unexpected QR camera source')
+# The version code follows the workspace version: major*10000 + minor*100 +
+# patch (plan 0069; 1.0.0 shipped as 1), so installers accept each update.
+qv_version=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)"$/\1 \2 \3/p' "$repo/Cargo.toml")
+set -- $qv_version
+[ $# = 3 ] || { echo 'No workspace version in Cargo.toml' >&2; exit 1; }
+if [ "$2" -gt 99 ] || [ "$3" -gt 99 ] || [ "$1" -lt 1 ] || [ "$1" -gt 20000 ]; then
+    echo 'Workspace version does not fit the Android version code' >&2
+    exit 1
+fi
+qv_code=$(($1 * 10000 + $2 * 100 + $3))
+qv_name="$1.$2.$3"
 # QR camera scanning (0009 §1.7) is on in every package by default (owner
 # decision 2026-11-07, plan 0043). QV_APP_QR_CAMERA=0 builds an ordinary
 # package without it; validation packages always keep it.
-if os.environ.get('QV_APP_QR_CAMERA')=='0' and os.environ.get('QV_APP_DEVICE_VALIDATION')!='1':
-    main_activity.write_text(main_activity.read_text().replace('const val QR_CAMERA = true','const val QR_CAMERA = false'))
-shutil.copyfile(root/'android/tests/QrTest.java',tests/'QrTest.java')
-shutil.copyfile(root/'android/tests/AutofillTest.java',tests/'AutofillTest.java')
-print(destination)
-PY
-)
+qv_qr=true
+if [ "${QV_APP_QR_CAMERA:-1}" = 0 ] && [ "${QV_APP_DEVICE_VALIDATION:-0}" != 1 ]; then
+    qv_qr=false
+fi
+export ORG_GRADLE_PROJECT_qvQrCamera=$qv_qr
+# The page, embedded into the library at compile time.
+QV_UI_PROFILE=wasm sh "$repo/crates/qv-ui/build.sh"
+qv_config="{\"version\":\"$qv_name\",\"bundle\":{\"android\":{\"versionCode\":$qv_code}}}"
+qv_flavor="$app_dir/gen/android/app/build/outputs/apk/universal"
 qv_tools="$ANDROID_HOME/build-tools/35.0.0"
 if [ "$qv_release" = 1 ]; then
-    sh "$qv_project/gradlew" -p "$qv_project" :app:assembleRelease --no-daemon
-    qv_unsigned="$qv_project/app/build/outputs/apk/release/app-release-unsigned.apk"
+    "$qv_tauri" android build --ci --apk --target aarch64 --features "$qv_features" --config "$qv_config"
+    qv_unsigned="$qv_flavor/release/app-universal-release-unsigned.apk"
     rm -f "$QV_APP_BUILT_APK"
     "$qv_tools/zipalign" -p -f 4 "$qv_unsigned" "$QV_APP_BUILT_APK.aligned"
     # shellcheck disable=SC2086 # the optional password source is one word
@@ -157,13 +92,20 @@ if [ "$qv_release" = 1 ]; then
         exit 1
     fi
 else
-    sh "$qv_project/gradlew" -p "$qv_project" :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
-    cp "$qv_project/app/build/outputs/apk/debug/app-debug.apk" "dist/$qv_artifact-debug.apk"
-    cp "$qv_project/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk" "dist/$qv_artifact-tests.apk"
+    # A debug package with optimized Rust: unoptimized Argon2id and decoding
+    # make the app unusably slow on a phone.
+    CARGO_PROFILE_DEV_OPT_LEVEL=2 CARGO_PROFILE_DEV_DEBUG=false \
+        "$qv_tauri" android build --ci --apk --debug --target aarch64 --features "$qv_features" --config "$qv_config"
+    # The instrumentation package, against the library just built.
+    sh gen/android/gradlew -p gen/android :app:assembleUniversalDebugAndroidTest --no-daemon \
+        -PabiList=arm64-v8a -ParchList=arm64 -PtargetList=aarch64 -x rustBuildUniversalDebug
+    cp "$qv_flavor/debug/app-universal-debug.apk" "$QV_APP_BUILT_APK"
+    cp "$app_dir/gen/android/app/build/outputs/apk/androidTest/universal/debug/app-universal-debug-androidTest.apk" \
+        "dist/$qv_artifact-tests.apk"
 fi
 "$qv_tools/aapt" dump badging "$QV_APP_BUILT_APK" > dist/apk-badging.txt
 "$qv_tools/aapt" dump permissions "$QV_APP_BUILT_APK" > dist/apk-permissions.txt
-python3 - <<'PY'
+QV_CODE=$qv_code QV_NAME=$qv_name QV_QR=$qv_qr python3 - <<'PY'
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import hashlib,os
@@ -171,18 +113,17 @@ badging=Path('dist/apk-badging.txt').read_text()
 permissions=Path('dist/apk-permissions.txt').read_text()
 if "package: name='org.quickvault.app'" not in badging or "sdkVersion:'29'" not in badging:
     raise SystemExit('Unexpected package or minimum SDK')
-code,name=Path('dist/android-project/version-code').read_text().split()
-if f"versionCode='{code}' versionName='{name}'" not in badging:
+if f"versionCode='{os.environ['QV_CODE']}' versionName='{os.environ['QV_NAME']}'" not in badging:
     raise SystemExit('The APK does not carry the workspace version code')
 for line in permissions.splitlines():
     if line.startswith('uses-permission:') and not any(allowed in line for allowed in (
         "name='org.quickvault.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'",
         "name='android.permission.USE_BIOMETRIC'",
         "name='android.permission.CAMERA'",  # explicit QR scan action only
-        "name='android.permission.INTERNET'",  # Dioxus loopback UI transport
+        "name='android.permission.INTERNET'",  # explicit LAN sync actions only
     )):
         raise SystemExit('Unexpected requested permission; inspect before installing')
-manifest=ET.parse('android/AndroidManifest.xml')
+manifest=ET.parse('gen/android/app/src/main/AndroidManifest.xml')
 ns='{http://schemas.android.com/apk/res/android}'
 for feature in ('android.hardware.camera.any','android.hardware.camera','android.hardware.camera.autofocus'):
     declared=[f for f in manifest.findall('uses-feature') if f.get(ns+'name')==feature]
@@ -193,6 +134,8 @@ for feature in ('android.hardware.camera.any','android.hardware.camera','android
 app=manifest.find('application')
 if app is None or app.get(ns+'allowBackup')!='false':
     raise SystemExit('Backup policy is not disabled')
+if app.get(ns+'usesCleartextTraffic')!='false':
+    raise SystemExit('Cleartext traffic must stay disabled')
 auth=[a for a in app.findall('activity') if a.get(ns+'name')=='dev.dioxus.main.AutofillAuthActivity']
 if len(auth)!=1 or auth[0].get(ns+'exported')!='false':
     raise SystemExit('Autofill handoff activity must exist and stay non-exported')
@@ -204,7 +147,7 @@ if len(main)!=1 or main[0].get(ns+'launchMode')!='singleTask':
     raise SystemExit('The Rust-bridged activity must stay single-instance')
 p=Path(os.environ['QV_APP_BUILT_APK'])
 print('APK SHA-256:',hashlib.sha256(p.read_bytes()).hexdigest())
-if os.environ.get('QV_APP_QR_CAMERA')=='0' and os.environ.get('QV_APP_DEVICE_VALIDATION')!='1':
+if os.environ['QV_QR']=='false':
     print('QR camera: OFF in this package (QV_APP_QR_CAMERA=0).')
 else:
     print('QR camera: on.')

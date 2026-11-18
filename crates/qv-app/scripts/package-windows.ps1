@@ -10,6 +10,10 @@ Set-StrictMode -Version Latest
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 Push-Location $root
 try {
+    # The app's page (plan 0071), with Git for Windows' sh; run
+    # crates/qv-ui/setup-tools.sh once for its tools.
+    sh crates/qv-ui/build.sh
+    if ($LASTEXITCODE -ne 0) { throw 'building the page failed' }
     cargo build --release --locked -p qv-cli --bin qv
     if ($LASTEXITCODE -ne 0) { throw 'building qv failed' }
     cargo build --release --locked -p qv-app --features desktop --bin quickvault

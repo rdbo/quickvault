@@ -22,9 +22,6 @@ url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 [imports.zcash]
 url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/audits.toml"
 
-[policy.dioxus-desktop]
-audit-as-crates-io = false
-
 [[exemptions.aead]]
 version = "0.6.1"
 criteria = "safe-to-deploy"
@@ -41,6 +38,11 @@ criteria = "safe-to-deploy"
 [[exemptions.anstyle]]
 version = "1.0.14"
 criteria = "safe-to-deploy"
+
+[[exemptions.any_spawner]]
+version = "0.3.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.anyhow]]
 version = "1.0.104"
@@ -62,6 +64,16 @@ version = "2.6.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.async-lock]]
+version = "3.5.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.async-once-cell]]
+version = "0.5.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.async-trait]]
 version = "0.1.92"
 criteria = "safe-to-deploy"
@@ -77,14 +89,44 @@ version = "0.18.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
+[[exemptions.atomic-waker]]
+version = "1.1.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.attribute-derive]]
+version = "0.11.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.attribute-derive-macro]]
+version = "0.11.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.autocfg]]
 version = "1.5.1"
 criteria = "safe-to-deploy"
+
+[[exemptions.base16]]
+version = "0.2.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.base16ct]]
 version = "0.2.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
+
+[[exemptions.base64]]
+version = "0.21.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.base64]]
+version = "0.23.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.base64ct]]
 version = "1.8.3"
@@ -95,6 +137,16 @@ notes = "Plan0050: constant-time base64 support in the password-hash dependency 
 version = "0.72.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
+[[exemptions.bit-set]]
+version = "0.11.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.bit-vec]]
+version = "0.10.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.bitflags]]
 version = "2.13.2"
@@ -110,23 +162,18 @@ version = "0.11.0"
 criteria = "safe-to-deploy"
 notes = "Plan0050: Argon2 compression/hash support. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
-[[exemptions.block]]
-version = "0.1.6"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.block-buffer]]
 version = "0.12.1"
 criteria = "safe-to-deploy"
 notes = "Plan0050: digest block buffering. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
+[[exemptions.bs58]]
+version = "0.5.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.bytemuck]]
 version = "1.25.2"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.byteorder-lite]]
-version = "0.1.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
@@ -145,6 +192,26 @@ version = "0.18.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
+[[exemptions.camino]]
+version = "1.2.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.cargo-platform]]
+version = "0.1.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.cargo_metadata]]
+version = "0.19.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.cargo_toml]]
+version = "1.0.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.cc]]
 version = "1.8.0"
 criteria = "safe-to-deploy"
@@ -160,9 +227,9 @@ criteria = "safe-to-deploy"
 notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
 
 [[exemptions.cfb]]
-version = "0.7.3"
+version = "0.14.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.cfg-if]]
 version = "1.0.5"
@@ -204,15 +271,15 @@ version = "0.5.4"
 criteria = "safe-to-deploy"
 notes = "Plan0050: constant-time selection support. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
-[[exemptions.cocoa]]
-version = "0.26.1"
+[[exemptions.codee]]
+version = "0.3.5"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
-[[exemptions.cocoa-foundation]]
-version = "0.2.1"
+[[exemptions.collection_literals]]
+version = "1.0.3"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.combine]]
 version = "4.6.9"
@@ -224,10 +291,25 @@ version = "2.5.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.config]]
+version = "0.15.27"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.const-oid]]
 version = "0.9.6"
 criteria = "safe-to-deploy"
 notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
+
+[[exemptions.const-oid]]
+version = "0.10.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.const-str]]
+version = "1.1.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.const_format]]
 version = "0.2.37"
@@ -239,10 +321,25 @@ version = "0.2.37"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.convert_case]]
-version = "0.8.0"
+[[exemptions.const_str_slice_concat]]
+version = "0.1.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.convert_case]]
+version = "0.6.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.convert_case]]
+version = "0.11.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.convert_case_extras]]
+version = "0.2.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.cookie]]
 version = "0.18.2"
@@ -304,6 +401,26 @@ version = "0.2.2"
 criteria = "safe-to-deploy"
 notes = "Plan0050: cryptographic key/block interfaces. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
+[[exemptions.cssparser]]
+version = "0.37.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.cssparser]]
+version = "0.38.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.cssparser-macros]]
+version = "0.7.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.ctor]]
+version = "1.0.14"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.ctutils]]
 version = "0.4.5"
 criteria = "safe-to-deploy"
@@ -320,24 +437,19 @@ criteria = "safe-to-deploy"
 notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
 
 [[exemptions.darling]]
-version = "0.21.3"
+version = "0.24.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.darling_core]]
-version = "0.21.3"
+version = "0.24.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.darling_macro]]
-version = "0.21.3"
+version = "0.24.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.data-encoding]]
-version = "2.11.1"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.der]]
 version = "0.7.10"
@@ -350,9 +462,14 @@ criteria = "safe-to-deploy"
 notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
 
 [[exemptions.derive_more]]
-version = "0.99.20"
+version = "2.1.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.derive_more-impl]]
+version = "2.1.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.digest]]
 version = "0.10.7"
@@ -364,100 +481,10 @@ version = "0.11.3"
 criteria = "safe-to-deploy"
 notes = "Plan0050: hash/MAC interfaces and state. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
-[[exemptions.dioxus]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-asset-resolver]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-cli-config]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-config-macro]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-config-macros]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-core]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-core-macro]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-core-types]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-document]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-history]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-hooks]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-html]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-html-internal-macro]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-interpreter-js]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-rsx]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-signals]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-stores]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.dioxus-stores-macro]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.dirs]]
-version = "6.0.0"
+version = "7.0.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.dirs-sys]]
 version = "0.5.0"
@@ -484,10 +511,25 @@ version = "0.4.3"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
+[[exemptions.dom_query]]
+version = "0.28.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.dom_query]]
+version = "0.29.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.dpi]]
 version = "0.1.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.drain_filter_polyfill]]
+version = "0.1.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.dtoa]]
 version = "1.0.11"
@@ -499,34 +541,64 @@ version = "0.3.5"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
+[[exemptions.dyn-clone]]
+version = "1.0.20"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.either]]
 version = "1.19.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.either_of]]
+version = "0.1.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.elliptic-curve]]
 version = "0.13.8"
 criteria = "safe-to-deploy"
 notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
 
+[[exemptions.embed-resource]]
+version = "3.0.12"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.embed_plist]]
+version = "1.2.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.endi]]
 version = "1.1.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
-[[exemptions.enumset]]
-version = "1.1.15"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.enumset_derive]]
-version = "0.15.1"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.equivalent]]
 version = "1.0.3"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.erased]]
+version = "0.1.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.erased-serde]]
+version = "0.4.11"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.event-listener]]
+version = "5.4.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.event-listener-strategy]]
+version = "0.5.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.fancy-regex]]
 version = "0.18.0"
@@ -561,15 +633,20 @@ version = "1.1.10"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
+[[exemptions.foldhash]]
+version = "0.2.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.foreign-types-macros]]
 version = "0.2.4"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.futf]]
-version = "0.1.5"
+[[exemptions.futures]]
+version = "0.3.34"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.futures-channel]]
 version = "0.3.34"
@@ -596,6 +673,11 @@ version = "0.3.34"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
+[[exemptions.futures-sink]]
+version = "0.3.34"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.futures-task]]
 version = "0.3.21"
 criteria = "safe-to-deploy"
@@ -605,11 +687,6 @@ notes = "Plan0050: retained delta-audit base, not a currently compiled version. 
 version = "0.3.21"
 criteria = "safe-to-deploy"
 notes = "Plan0050: retained delta-audit base, not a currently compiled version. Removing it breaks the imported audit chain for the locked version. See plans/0050-complete-audit-remediation/DEPENDENCIES.md; the unaudited base remains development debt, and imported delta reviews do not audit that base."
-
-[[exemptions.fxhash]]
-version = "0.2.1"
-criteria = "safe-to-deploy"
-notes = "Plan 0032: published crate replaces a removed vendored fork or its restored dependency chain (owner, 2026-11-02); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.gdk]]
 version = "0.18.2"
@@ -636,16 +713,6 @@ version = "0.18.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.gdkx11-sys]]
-version = "0.18.2"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.generational-box]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.generic-array]]
 version = "0.14.7"
 criteria = "safe-to-deploy"
@@ -654,16 +721,6 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 [[exemptions.gethostname]]
 version = "1.1.0"
 criteria = "safe-to-deploy"
-
-[[exemptions.getrandom]]
-version = "0.1.16"
-criteria = "safe-to-deploy"
-notes = "Plan 0032: published crate replaces a removed vendored fork or its restored dependency chain (owner, 2026-11-02); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.getrandom]]
-version = "0.2.17"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.getrandom]]
 version = "0.3.4"
@@ -700,10 +757,15 @@ version = "0.3.4"
 criteria = "safe-to-deploy"
 notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
 
-[[exemptions.global-hotkey]]
-version = "0.7.0"
+[[exemptions.gloo-net]]
+version = "0.6.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.gloo-utils]]
+version = "0.2.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.gobject-sys]]
 version = "0.18.0"
@@ -729,6 +791,16 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "0.18.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0032: published crate replaces a removed vendored fork or its restored dependency chain (owner, 2026-11-02); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.guardian]]
+version = "1.3.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.hashbrown]]
+version = "0.12.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.hashbrown]]
 version = "0.17.1"
@@ -790,15 +862,35 @@ version = "0.13.0"
 criteria = "safe-to-deploy"
 notes = "Plan0050: keyed authentication and HKDF support. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
-[[exemptions.html5ever]]
-version = "0.29.1"
+[[exemptions.html-escape]]
+version = "0.2.15"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.html5ever]]
+version = "0.39.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.html5ever]]
+version = "0.40.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.http]]
 version = "1.5.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.http-body]]
+version = "1.1.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.http-body-util]]
+version = "0.1.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.httparse]]
 version = "1.10.1"
@@ -810,9 +902,29 @@ version = "0.4.15"
 criteria = "safe-to-deploy"
 notes = "Plan0050: fixed-size cryptographic buffers. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
+[[exemptions.hydration_context]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.hyper]]
+version = "1.12.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.hyper-util]]
+version = "0.1.21"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.iana-time-zone]]
 version = "0.1.65"
 criteria = "safe-to-deploy"
+
+[[exemptions.ico]]
+version = "0.6.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.icu_collections]]
 version = "2.4.0"
@@ -854,10 +966,10 @@ version = "1.2.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.image]]
-version = "0.25.10"
+[[exemptions.indexmap]]
+version = "1.9.3"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.indexmap]]
 version = "2.14.2"
@@ -865,14 +977,24 @@ criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.infer]]
-version = "0.19.0"
+version = "0.22.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.inout]]
 version = "0.2.5"
 criteria = "safe-to-deploy"
 notes = "Plan0050: cipher input/output buffers. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
+
+[[exemptions.interpolator]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.ipnet]]
+version = "2.12.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.itertools]]
 version = "0.10.3"
@@ -899,15 +1021,30 @@ version = "1.1.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.jni]]
-version = "0.22.4"
+[[exemptions.jiff]]
+version = "0.2.46"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
-[[exemptions.jni-macros]]
-version = "0.22.4"
+[[exemptions.jiff-core]]
+version = "0.1.8"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.jiff-static]]
+version = "0.2.46"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.jiff-tzdb]]
+version = "0.1.10"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.jiff-tzdb-platform]]
+version = "0.1.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.jni-sys]]
 version = "0.3.1"
@@ -928,10 +1065,20 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "0.3.106"
 criteria = "safe-to-deploy"
 
-[[exemptions.keyboard-types]]
-version = "0.7.0"
+[[exemptions.json-patch]]
+version = "4.2.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.jsonptr]]
+version = "0.7.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.keyboard-types]]
+version = "0.8.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.konst]]
 version = "0.2.20"
@@ -943,29 +1090,39 @@ version = "0.2.19"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.kuchikiki]]
-version = "0.8.8-speedreader"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.lazy-js-bundle]]
-version = "0.7.10"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.lazy_static]]
 version = "1.5.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.libappindicator]]
-version = "0.9.0"
+[[exemptions.leptos]]
+version = "0.8.23"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
-[[exemptions.libappindicator-sys]]
-version = "0.9.0"
+[[exemptions.leptos_config]]
+version = "0.8.10"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.leptos_dom]]
+version = "0.8.8"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.leptos_hot_reload]]
+version = "0.8.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.leptos_macro]]
+version = "0.8.20"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.leptos_server]]
+version = "0.8.8"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.libc]]
 version = "0.2.191"
@@ -1037,11 +1194,6 @@ criteria = "safe-to-deploy"
 notes = "Plan 0036: libcrux-kem X-Wing tree (Cryspen, Apache-2.0), owner-delegated; audit debt, not an audit or release/security approval. ML-KEM is formally verified upstream; no independent audit of the composition is claimed."
 
 [[exemptions.libloading]]
-version = "0.7.4"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.libloading]]
 version = "0.8.9"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
@@ -1056,15 +1208,10 @@ version = "0.39.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0047: owner-approved SQLite advisory repair (2026-11-09); carry forward the existing exact development baseline as unaudited debt, not certification or release approval."
 
-[[exemptions.libxdo]]
-version = "0.6.0"
+[[exemptions.link-section]]
+version = "0.19.4"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.libxdo-sys]]
-version = "0.11.0"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.linux-raw-sys]]
 version = "0.12.1"
@@ -1084,48 +1231,43 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "0.4.34"
 criteria = "safe-to-deploy"
 
-[[exemptions.longest-increasing-subsequence]]
-version = "0.1.0"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.mac]]
-version = "0.1.1"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.mach2]]
 version = "0.7.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.markup5ever]]
+[[exemptions.manyhow]]
 version = "0.14.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
-[[exemptions.match_token]]
-version = "0.1.0"
+[[exemptions.manyhow-macros]]
+version = "0.14.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.markup5ever]]
+version = "0.39.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.markup5ever]]
+version = "0.40.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.memchr]]
 version = "2.8.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.memfd]]
-version = "0.6.6"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.memmap2]]
-version = "0.9.12"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.memoffset]]
 version = "0.9.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
+
+[[exemptions.mime]]
+version = "0.3.18"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.minimal-lexical]]
 version = "0.2.1"
@@ -1137,20 +1279,15 @@ version = "0.9.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.moxcms]]
-version = "0.8.1"
+[[exemptions.mio]]
+version = "1.2.5"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.muda]]
-version = "0.17.2"
+version = "0.20.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.native-tls]]
-version = "0.2.18"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.ndk]]
 version = "0.9.0"
@@ -1167,10 +1304,10 @@ version = "1.0.6"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.nodrop]]
-version = "0.1.14"
+[[exemptions.next_tuple]]
+version = "0.1.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.nom]]
 version = "7.1.3"
@@ -1202,35 +1339,70 @@ version = "0.7.6"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.objc]]
-version = "0.2.7"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.objc2-app-kit]]
 version = "0.3.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.objc2-cloud-kit]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.objc2-core-data]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.objc2-core-image]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.objc2-core-location]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.objc2-core-text]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.objc2-exception-helper]]
 version = "0.1.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
+[[exemptions.objc2-io-surface]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.objc2-quartz-core]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.objc2-ui-kit]]
 version = "0.3.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.objc2-user-notifications]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.objc2-web-kit]]
 version = "0.3.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.objc_id]]
-version = "0.1.1"
+[[exemptions.oco_ref]]
+version = "0.2.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.once_cell]]
 version = "1.12.0"
@@ -1242,20 +1414,10 @@ version = "4.0.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
 
-[[exemptions.openssl]]
-version = "0.10.81"
+[[exemptions.or_poisoned]]
+version = "0.1.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.openssl-probe]]
-version = "0.2.2"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.openssl-sys]]
-version = "0.9.117"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.ordered-stream]]
 version = "0.2.0"
@@ -1287,55 +1449,70 @@ version = "0.5.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
 
+[[exemptions.paste]]
+version = "1.0.15"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.pastey]]
 version = "0.2.3"
 criteria = "safe-to-deploy"
 notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
 
-[[exemptions.phf]]
-version = "0.8.0"
+[[exemptions.pathdiff]]
+version = "0.2.3"
 criteria = "safe-to-deploy"
-notes = "Plan 0032: published crate replaces a removed vendored fork or its restored dependency chain (owner, 2026-11-02); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.phf]]
-version = "0.10.1"
+version = "0.13.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.phf]]
+version = "0.14.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.phf_codegen]]
-version = "0.8.0"
+version = "0.13.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0032: published crate replaces a removed vendored fork or its restored dependency chain (owner, 2026-11-02); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.phf_codegen]]
-version = "0.11.3"
+version = "0.14.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.phf_generator]]
-version = "0.8.0"
+version = "0.13.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0032: published crate replaces a removed vendored fork or its restored dependency chain (owner, 2026-11-02); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.phf_generator]]
-version = "0.10.0"
+version = "0.14.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.phf_macros]]
-version = "0.10.0"
+version = "0.13.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.phf_macros]]
+version = "0.14.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.phf_shared]]
-version = "0.8.0"
+version = "0.13.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0032: published crate replaces a removed vendored fork or its restored dependency chain (owner, 2026-11-02); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.phf_shared]]
-version = "0.10.0"
+version = "0.14.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.pin-project]]
 version = "1.1.13"
@@ -1351,6 +1528,11 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "0.2.17"
 criteria = "safe-to-deploy"
 
+[[exemptions.plist]]
+version = "1.10.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.png]]
 version = "0.18.1"
 criteria = "safe-to-deploy"
@@ -1361,15 +1543,20 @@ version = "3.11.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
-[[exemptions.pollster]]
-version = "0.4.0"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.poly1305]]
 version = "0.9.1"
 criteria = "safe-to-deploy"
 notes = "Plan0050: AEAD authenticator. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
+
+[[exemptions.portable-atomic]]
+version = "1.15.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.portable-atomic-util]]
+version = "0.2.8"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.potential_utf]]
 version = "0.1.6"
@@ -1380,15 +1567,15 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "0.2.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.ppv-lite86]]
-version = "0.2.21"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.prettyplease]]
 version = "0.2.37"
 criteria = "safe-to-deploy"
 notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
+
+[[exemptions.prettyplease]]
+version = "0.3.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.proc-macro-crate]]
 version = "1.3.1"
@@ -1425,38 +1612,48 @@ version = "2.0.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0036: reached only through libcrux cfg(hax)/cfg(valgrind_ct_test) verification tooling or optional features, not compiled into QuickVault builds; audit debt, not an audit."
 
-[[exemptions.proc-macro-hack]]
-version = "0.5.20+deprecated"
+[[exemptions.proc-macro-utils]]
+version = "0.10.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.proc-macro2]]
 version = "1.0.107"
 criteria = "safe-to-deploy"
 
 [[exemptions.proc-macro2-diagnostics]]
-version = "0.10.1"
+version = "0.11.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.proptest]]
 version = "1.12.0"
 criteria = "safe-to-run"
-
-[[exemptions.pxfm]]
-version = "0.1.30"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.qrcodegen-no-heap]]
 version = "1.8.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0039: owner-delegated QR encoder development baseline. Caller-owned protected scratch; targeted source inspection, no independent audit. Audit debt, not security certification or release approval."
 
+[[exemptions.quick-xml]]
+version = "0.42.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.quircs]]
 version = "0.10.3"
 criteria = "safe-to-deploy"
 notes = "Plan 0039: owner-delegated QR decoder development baseline. Bound dimensions and exact pixel length before allocation/unsafe library indexing, wipe exposed buffers; targeted source inspection, no independent audit. Audit debt, not security certification or release approval."
+
+[[exemptions.quote-use]]
+version = "0.9.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.quote-use-macros]]
+version = "0.9.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.r-efi]]
 version = "5.3.0"
@@ -1468,43 +1665,28 @@ version = "6.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rand]]
-version = "0.7.3"
-criteria = "safe-to-deploy"
-notes = "Plan 0032: published crate replaces a removed vendored fork or its restored dependency chain (owner, 2026-11-02); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.rand]]
 version = "0.8.8"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.rand]]
-version = "0.9.5"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.rand_chacha]]
-version = "0.2.2"
-criteria = "safe-to-deploy"
-notes = "Plan 0032: published crate replaces a removed vendored fork or its restored dependency chain (owner, 2026-11-02); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.rand_core]]
-version = "0.5.1"
-criteria = "safe-to-deploy"
-notes = "Plan 0032: published crate replaces a removed vendored fork or its restored dependency chain (owner, 2026-11-02); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.rand_hc]]
-version = "0.2.0"
-criteria = "safe-to-deploy"
-notes = "Plan 0032: published crate replaces a removed vendored fork or its restored dependency chain (owner, 2026-11-02); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.rand_pcg]]
-version = "0.2.1"
-criteria = "safe-to-deploy"
-notes = "Plan 0032: published crate replaces a removed vendored fork or its restored dependency chain (owner, 2026-11-02); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.rand_xorshift]]
 version = "0.5.0"
 criteria = "safe-to-run"
+
+[[exemptions.reactive_graph]]
+version = "0.2.16"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.reactive_stores]]
+version = "0.4.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.reactive_stores_macro]]
+version = "0.4.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.redox_syscall]]
 version = "0.5.18"
@@ -1515,6 +1697,16 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "0.5.3"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.ref-cast]]
+version = "1.0.27"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.ref-cast-impl]]
+version = "1.0.27"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.regex]]
 version = "1.13.1"
@@ -1533,15 +1725,15 @@ version = "4.0.1"
 criteria = "safe-to-deploy"
 notes = "Plan0050: best-effort protected-memory OS adapter; not a full memory-erasure guarantee. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
-[[exemptions.rfd]]
-version = "0.17.2"
+[[exemptions.reqwest]]
+version = "0.13.5"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
-[[exemptions.ring]]
-version = "0.17.14"
+[[exemptions.rstml]]
+version = "0.13.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.rusqlite]]
 version = "0.41.0"
@@ -1553,21 +1745,6 @@ version = "1.1.6"
 criteria = "safe-to-deploy"
 notes = "Plan0050: memory/filesystem/process OS boundaries; 1.1.5 -> 1.1.6 in plan 0052 for RUSTSEC-2026-0486 (xattr, unused by QuickVault). Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
 
-[[exemptions.rustls]]
-version = "0.23.46"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.rustls-pki-types]]
-version = "1.15.1"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.rustls-webpki]]
-version = "0.103.16"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.rustversion]]
 version = "1.0.23"
 criteria = "safe-to-deploy"
@@ -1577,10 +1754,25 @@ version = "1.0.6"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.schannel]]
-version = "0.1.30"
+[[exemptions.schemars]]
+version = "0.8.22"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.schemars]]
+version = "0.9.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.schemars]]
+version = "1.2.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.schemars_derive]]
+version = "0.8.22"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.scopeguard]]
 version = "1.2.0"
@@ -1592,25 +1784,30 @@ version = "0.7.3"
 criteria = "safe-to-deploy"
 notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
 
-[[exemptions.security-framework]]
-version = "3.7.0"
+[[exemptions.selectors]]
+version = "0.38.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.security-framework-sys]]
-version = "2.17.0"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.selectors]]
-version = "0.24.0"
+version = "0.41.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0032: published crate replaces a removed vendored fork or its restored dependency chain (owner, 2026-11-02); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.send_wrapper]]
+version = "0.6.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.serde]]
 version = "1.0.229"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
+
+[[exemptions.serde-untagged]]
+version = "0.1.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.serde_core]]
 version = "1.0.229"
@@ -1620,10 +1817,20 @@ criteria = "safe-to-deploy"
 version = "1.0.229"
 criteria = "safe-to-deploy"
 
+[[exemptions.serde_derive_internals]]
+version = "0.29.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.serde_json]]
 version = "1.0.154"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.serde_qs]]
+version = "0.15.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.serde_repr]]
 version = "0.1.21"
@@ -1635,15 +1842,55 @@ version = "0.6.9"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.servo_arc]]
-version = "0.2.0"
+[[exemptions.serde_spanned]]
+version = "1.1.3"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
-[[exemptions.sha1]]
-version = "0.10.7"
+[[exemptions.serde_with]]
+version = "3.24.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval. Plan0050: legacy TOTP HMAC-SHA-1 compatibility only, not vault authentication. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.serde_with_macros]]
+version = "3.24.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.serialize-to-javascript]]
+version = "0.1.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.serialize-to-javascript-impl]]
+version = "0.1.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.server_fn]]
+version = "0.8.13"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.server_fn_macro]]
+version = "0.8.12"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.server_fn_macro_default]]
+version = "0.8.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.servo_arc]]
+version = "0.4.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.servo_arc]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.sha1]]
 version = "0.11.0"
@@ -1654,11 +1901,6 @@ notes = "Plan0050: legacy TOTP HMAC-SHA-1 compatibility only, not vault authenti
 version = "0.11.1"
 criteria = "safe-to-deploy"
 notes = "Plan0050: SHA-256/SHA-512 hash and authentication profiles. Exact-version development exemption inherited from the approved baseline, not an independent crate/composition audit. Review and current advisory reachability remain release debt under specs/0012 section3 and plans/0048-security-release-validation/DEPENDENCY-REVIEW.md."
-
-[[exemptions.signal-hook]]
-version = "0.3.18"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.signal-hook]]
 version = "0.4.5"
@@ -1673,16 +1915,6 @@ version = "0.3.10"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.simd_cesu8]]
-version = "1.2.0"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.siphasher]]
-version = "0.3.11"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.siphasher]]
 version = "1.0.4"
 criteria = "safe-to-deploy"
@@ -1691,21 +1923,6 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 [[exemptions.slab]]
 version = "0.4.12"
 criteria = "safe-to-deploy"
-
-[[exemptions.sledgehammer_bindgen]]
-version = "0.6.0"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.sledgehammer_bindgen_macro]]
-version = "0.6.5"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.sledgehammer_utils]]
-version = "0.3.1"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.slotmap]]
 version = "1.1.1"
@@ -1720,6 +1937,11 @@ criteria = "safe-to-deploy"
 version = "0.6.5"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
+
+[[exemptions.softbuffer]]
+version = "0.4.8"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.soup3]]
 version = "0.5.0"
@@ -1736,25 +1958,40 @@ version = "1.2.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.string_cache]]
-version = "0.8.9"
+[[exemptions.static_vcruntime]]
+version = "3.0.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.string_cache]]
+version = "0.9.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.string_cache]]
+version = "0.11.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.string_cache_codegen]]
-version = "0.5.4"
+version = "0.6.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
-[[exemptions.subsecond]]
-version = "0.7.10"
+[[exemptions.string_cache_codegen]]
+version = "0.11.2"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
-[[exemptions.subsecond-types]]
-version = "0.7.10"
+[[exemptions.strsim]]
+version = "0.11.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.swift-rs]]
+version = "1.0.9"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.syn]]
 version = "1.0.109"
@@ -1769,6 +2006,11 @@ criteria = "safe-to-deploy"
 version = "3.0.9"
 criteria = "safe-to-deploy"
 
+[[exemptions.sync_wrapper]]
+version = "1.0.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.synstructure]]
 version = "0.14.0"
 criteria = "safe-to-deploy"
@@ -1779,10 +2021,15 @@ version = "6.2.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.tao]]
-version = "0.34.8"
+[[exemptions.tachys]]
+version = "0.2.19"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.tao]]
+version = "0.37.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.tao-macros]]
 version = "0.1.4"
@@ -1794,15 +2041,55 @@ version = "0.12.16"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
+[[exemptions.tauri]]
+version = "2.12.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.tauri-build]]
+version = "2.7.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.tauri-codegen]]
+version = "2.7.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.tauri-macros]]
+version = "2.7.5"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.tauri-runtime]]
+version = "2.12.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.tauri-runtime-wry]]
+version = "2.12.4"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.tauri-utils]]
+version = "2.10.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.tauri-winres]]
+version = "0.3.7"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.tempfile]]
 version = "3.27.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
 [[exemptions.tendril]]
-version = "0.4.3"
+version = "0.5.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.thiserror]]
 version = "2.0.21"
@@ -1813,6 +2100,11 @@ notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11
 version = "2.0.21"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.throw_error]]
+version = "0.3.1"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.time]]
 version = "0.3.55"
@@ -1843,20 +2135,25 @@ version = "1.54.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.tokio-macros]]
-version = "2.7.2"
+[[exemptions.tokio-util]]
+version = "0.7.20"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.toml]]
 version = "0.8.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.toml_datetime]]
-version = "1.1.2+spec-1.1.0"
+[[exemptions.toml]]
+version = "1.2.1+spec-1.1.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.toml_datetime]]
+version = "1.1.3+spec-1.1.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.toml_edit]]
 version = "0.19.15"
@@ -1873,25 +2170,55 @@ version = "1.1.5+spec-1.1.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
+[[exemptions.toml_writer]]
+version = "1.2.0+spec-1.1.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.tower]]
+version = "0.5.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.tower-http]]
+version = "0.6.11"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.tower-layer]]
+version = "0.3.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.tower-service]]
+version = "0.3.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.tracing]]
 version = "0.1.44"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.tracing-attributes]]
-version = "0.1.31"
+[[exemptions.try-lock]]
+version = "0.2.5"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
-[[exemptions.tray-icon]]
-version = "0.21.3"
+[[exemptions.typed-builder]]
+version = "0.23.2"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
-[[exemptions.tungstenite]]
-version = "0.28.0"
+[[exemptions.typed-builder-macro]]
+version = "0.23.2"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.typeid]]
+version = "1.0.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.typenum]]
 version = "1.20.1"
@@ -1915,6 +2242,11 @@ notes = "Plan0050: Poly1305 interfaces. Exact-version development exemption inhe
 version = "2.5.8"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+
+[[exemptions.urlpattern]]
+version = "0.6.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.utf8_iter]]
 version = "1.1.0"
@@ -1946,25 +2278,25 @@ version = "0.5.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0047: exact-version development baseline; unaudited debt, not certification or LAN release approval. Owner instructed continuation after the separate development-exemption question (2026-11-09). See plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md; D12 and dependency review remain release gates."
 
+[[exemptions.vswhom]]
+version = "0.1.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.vswhom-sys]]
+version = "0.1.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.walkdir]]
 version = "2.5.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.warnings]]
-version = "0.2.1"
+[[exemptions.want]]
+version = "0.3.2"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.warnings-macro]]
-version = "0.2.0"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.wasi]]
-version = "0.9.0+wasi-snapshot-preview1"
-criteria = "safe-to-deploy"
-notes = "Plan 0032: published crate replaces a removed vendored fork or its restored dependency chain (owner, 2026-11-02); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.wasi]]
 version = "0.11.1+wasi-snapshot-preview1"
@@ -1994,29 +2326,54 @@ version = "0.2.100"
 criteria = "safe-to-deploy"
 notes = "Plan0050: retained delta-audit base, not a currently compiled version. Removing it breaks the imported audit chain for the locked version. See plans/0050-complete-audit-remediation/DEPENDENCIES.md; the unaudited base remains development debt, and imported delta reviews do not audit that base."
 
+[[exemptions.wasm-streams]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.wasm_split_helpers]]
+version = "0.2.3"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.wasm_split_macros]]
+version = "0.2.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.web-sys]]
 version = "0.3.106"
 criteria = "safe-to-deploy"
 
-[[exemptions.webbrowser]]
-version = "1.2.6"
+[[exemptions.web-time]]
+version = "1.1.0"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.web_atoms]]
+version = "0.2.6"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.web_atoms]]
+version = "0.3.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.webkit2gtk]]
-version = "2.0.1"
+version = "2.0.2"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.webkit2gtk-sys]]
-version = "2.0.1"
+version = "2.0.2"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.webview2-com]]
-version = "0.38.2"
+version = "0.39.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.webview2-com-macros]]
 version = "0.8.1"
@@ -2024,9 +2381,9 @@ criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.webview2-com-sys]]
-version = "0.38.2"
+version = "0.39.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.winapi]]
 version = "0.3.9"
@@ -2048,29 +2405,29 @@ version = "0.4.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.windows]]
-version = "0.61.3"
+[[exemptions.window-vibrancy]]
+version = "0.8.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
+[[exemptions.windows]]
+version = "0.62.2"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.windows-collections]]
-version = "0.2.0"
+version = "0.3.2"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows-core]]
-version = "0.61.2"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.windows-core]]
 version = "0.62.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-future]]
-version = "0.2.1"
+version = "0.3.2"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.windows-implement]]
 version = "0.60.2"
@@ -2081,23 +2438,13 @@ version = "0.59.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-numerics]]
-version = "0.2.0"
+version = "0.3.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows-result]]
-version = "0.3.4"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.windows-result]]
 version = "0.4.1"
 criteria = "safe-to-deploy"
-
-[[exemptions.windows-strings]]
-version = "0.4.2"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.windows-strings]]
 version = "0.5.1"
@@ -2109,21 +2456,6 @@ criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.windows-sys]]
-version = "0.52.0"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows-sys]]
-version = "0.59.0"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows-sys]]
-version = "0.60.2"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows-sys]]
 version = "0.61.2"
 criteria = "safe-to-deploy"
 
@@ -2132,20 +2464,10 @@ version = "0.42.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.windows-targets]]
-version = "0.52.6"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows-targets]]
-version = "0.53.5"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.windows-threading]]
-version = "0.1.0"
+version = "0.2.1"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.windows-version]]
 version = "0.1.7"
@@ -2157,28 +2479,8 @@ version = "0.42.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.windows_aarch64_gnullvm]]
-version = "0.52.6"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows_aarch64_gnullvm]]
-version = "0.53.1"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.windows_aarch64_msvc]]
 version = "0.42.2"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows_aarch64_msvc]]
-version = "0.52.6"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows_aarch64_msvc]]
-version = "0.53.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
@@ -2187,38 +2489,8 @@ version = "0.42.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.windows_i686_gnu]]
-version = "0.52.6"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows_i686_gnu]]
-version = "0.53.1"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows_i686_gnullvm]]
-version = "0.52.6"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows_i686_gnullvm]]
-version = "0.53.1"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.windows_i686_msvc]]
 version = "0.42.2"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows_i686_msvc]]
-version = "0.52.6"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows_i686_msvc]]
-version = "0.53.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
@@ -2227,43 +2499,13 @@ version = "0.42.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.windows_x86_64_gnu]]
-version = "0.52.6"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows_x86_64_gnu]]
-version = "0.53.1"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.windows_x86_64_gnullvm]]
 version = "0.42.2"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
-[[exemptions.windows_x86_64_gnullvm]]
-version = "0.52.6"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows_x86_64_gnullvm]]
-version = "0.53.1"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
 [[exemptions.windows_x86_64_msvc]]
 version = "0.42.2"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows_x86_64_msvc]]
-version = "0.52.6"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.windows_x86_64_msvc]]
-version = "0.53.1"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
@@ -2277,25 +2519,20 @@ version = "1.0.4"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
 
+[[exemptions.winreg]]
+version = "0.56.0"
+criteria = "safe-to-deploy"
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
+
 [[exemptions.writeable]]
 version = "0.6.4"
 criteria = "safe-to-deploy"
 notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.wry]]
-version = "0.53.5"
+version = "0.57.2"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.x11]]
-version = "2.21.0"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.x11-dl]]
-version = "2.21.0"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.x11rb]]
 version = "0.13.2"
@@ -2306,10 +2543,10 @@ notes = "Plan 0032: published crate replaces a removed vendored fork or its rest
 version = "0.13.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.xkeysym]]
-version = "0.2.1"
+[[exemptions.xxhash-rust]]
+version = "0.8.21"
 criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
+notes = "Plan 0071: Tauri 2 / Leptos UI dependency tree (or a version it selects). Exact-version development exemption, not an audit; review remains release debt under specs/0012 section 3."
 
 [[exemptions.yoke]]
 version = "0.8.4"
@@ -2340,16 +2577,6 @@ notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt,
 version = "1.2.0"
 criteria = "safe-to-deploy"
 notes = "Plan 0029: owner-delegated Linux D-Bus dependency baseline; audit debt, not an audit or release/security approval. See plans/0029-linux-platform/DEPENDENCIES.md."
-
-[[exemptions.zerocopy]]
-version = "0.8.63"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
-
-[[exemptions.zerocopy-derive]]
-version = "0.8.63"
-criteria = "safe-to-deploy"
-notes = "Plan 0030: owner-delegated app dependency development baseline (2026-11-01); unperformed audit recorded as debt, not certification or release/security approval."
 
 [[exemptions.zerofrom]]
 version = "0.1.8"

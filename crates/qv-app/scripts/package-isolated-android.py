@@ -45,7 +45,9 @@ if "ANDROID_HOME" not in os.environ:
     raise SystemExit('Run eval "$(sh scripts/setup-android.sh --print-env)" first')
 work = Path(tempfile.mkdtemp(prefix=f"qv-{name}-android-", dir="/var/tmp"))
 project = work / "project"
-shutil.copytree(app / "dist/android-project", project,
+# The Tauri project (plan 0071), with the native library build-android.sh
+# placed in jniLibs; Gradle reuses it rather than building Rust again.
+shutil.copytree(app / "gen/android", project,
                 ignore=shutil.ignore_patterns("build", ".gradle"))
 build = project / "app/build.gradle.kts"
 text = build.read_text()
@@ -67,12 +69,14 @@ env = dict(os.environ, GRADLE_USER_HOME=str(app / "dist/.build-cache/gradle"),
            ANDROID_USER_HOME=str(app / "dist/.build-cache/android-user"))
 with (work / "build.log").open("w") as log:
     result = subprocess.run(["sh", str(project / "gradlew"), "-p", str(project),
-                             ":app:assembleDebug", ":app:assembleDebugAndroidTest", "--no-daemon"],
+                             ":app:assembleUniversalDebug", ":app:assembleUniversalDebugAndroidTest",
+                             "-PabiList=arm64-v8a", "-ParchList=arm64", "-PtargetList=aarch64",
+                             "-x", "rustBuildUniversalDebug", "--no-daemon"],
                             cwd=repo, env=env, stdout=log, stderr=subprocess.STDOUT)
 if result.returncode:
     raise SystemExit(f"Build failed: {work / 'build.log'}")
-apk = project / "app/build/outputs/apk/debug/app-debug.apk"
-test_apk = project / "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
+apk = project / "app/build/outputs/apk/universal/debug/app-universal-debug.apk"
+test_apk = project / "app/build/outputs/apk/androidTest/universal/debug/app-universal-debug-androidTest.apk"
 
 
 def native_hashes(path):

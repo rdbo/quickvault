@@ -22,7 +22,8 @@ and instrument commands; remove the isolated pair afterwards. The remaining
 attended picker evidence is in `plans/0049-android-vault-file-picker/VALIDATION.md`.
 Never install test builds over a personal-vault application.
 
-The shared Android/Linux Dioxus UI provides the CLI's offline feature set:
+The shared Android/Linux/Windows UI (Tauri 2 with a Leptos page, plan 0071)
+provides the CLI's offline feature set:
 - create, phrase confirmation or recorded skip, password/phrase unlock,
   snapshot-backed anchor recovery and lock;
 - browsing, search, entry view and edit, groups, move, trash;
@@ -45,8 +46,8 @@ Other details:
 - The theme (dark by default) and the acknowledged reduced-protection status
   are kept in the non-secret `preferences` file in the app's private
   directory (`src/prefs.rs`).
-- The Android build patches the generated AppTheme to AppCompat DayNight, so
-  "system" follows the device.
+- The Android theme (`gen/android`) is Material 3 DayNight, so "system"
+  follows the device.
 - Android shell (plan 0044): the activity pads the content by the status
   bar, cutout, navigation bar and keyboard insets and paints that padding
   with the theme background (`qvTheme`). Back is sent to the page as Escape,
@@ -54,7 +55,9 @@ Other details:
   level the first Back shows "Press back again to close QuickVault" and a
   second within 2 seconds closes it (`qvBackAtRoot`).
 - Attachment previews (plan 0044, 0003 §6.4) decrypt into memory only; the
-  webview loads media from a one-time `/preview/<token>` route.
+  webview loads media from the in-process `qvmedia` scheme
+  (`/preview/<token>`, at most 64 KiB per response). On Linux `player.js`
+  reads it range by range and plays from memory ([WEBKIT.md](WEBKIT.md) W13).
 - Files come from the system picker: the xdg-desktop-portal on Linux
   (`qv-platform` `linux::portal`) and the Storage Access Framework on Android.
   The locked screen never shows a typed vault path (validation fixtures
@@ -66,12 +69,13 @@ Other details:
   those in the folder by their stored name (a private copy; files are never
   renamed). Imported vaults are used where they
   are. The list is the private `vault-list` file.
-- The item editor (`src/ui/editor.rs`, rules in `src/editor.rs`) starts from
+- The item editor (page `crates/qv-ui/src/editor.rs`, frame
+  `src/bridge/frame/editor.rs`, rules in `src/editor.rs`) starts from
   one box that recognises sites, card numbers and Wi‑Fi names on the device.
   The form follows the item type. Field tools sit behind ⋯, and one "Add a
   field" infers the kind. Colours are stored as `hue:<0–11>` in the record's
   `icon` text (0003 §5.5).
-- Icons are QuickVault's own stroke paths (`src/ui/icons.rs`); fonts are the
+- Icons are QuickVault's own stroke paths (`crates/qv-ui/src/icons.rs`); fonts are the
   system's. The webview policy forbids inline styles, so all styling is in
   `assets/app.css`.
 - Shortcuts trigger only existing actions: Ctrl K command bar, Ctrl N new
@@ -169,10 +173,19 @@ App limits (plan 0031):
   cut work only in plain fields being edited; shown values copy through the
   app's clearing clipboard.
 
+How the app is put together (plan 0071): Rust builds every screen as a
+frame (`src/bridge/frame/`), the Leptos page in `crates/qv-ui` renders it and
+sends typed actions back through one bounded Tauri command, and previews use
+the in-process `qvmedia` scheme. Nothing listens on a socket. The page is
+built into `dist/ui`, which the binary embeds; without it a placeholder page
+is embedded (release builds refuse that).
+
 On Linux, install GTK 3, WebKitGTK 4.1, libxdo and the AppIndicator development
-libraries, then run:
+libraries, then build the page and run:
 
 ```sh
+sh crates/qv-ui/setup-tools.sh   # once: wasm32 target, wasm-bindgen-cli 0.2.129
+sh crates/qv-ui/build.sh         # QV_UI_PROFILE=dev for a faster debug page
 cargo run --locked -p qv-app --features desktop --bin quickvault
 ```
 
@@ -211,10 +224,10 @@ temporary directory, then removes only that fixture directory. These harnesses
 are excluded from ordinary desktop/mobile builds.
 
 Run protected-controller tests with `cargo test --locked -p qv-app`. Run actual
-WebKit boundary and shared-screen flow tests with:
+WebKit boundary and shared-screen flow tests (after building the page) with:
 
 ```sh
-cargo test --locked -p qv-app --features validation
+RUST_TEST_THREADS=1 cargo test --locked -p qv-app --features validation
 ```
 
 These tests require Xvfb (`QV_TEST_XVFB` can select its executable). They start
@@ -242,22 +255,27 @@ The logo comes from the repository's `docs/logo/logo.svg`, with
 `docs/logo/logo-small.svg` as its cut for 32 px and below (`docs/logo/logo.png`
 is a 2048 px render): `assets/icon-256.png` (desktop window icon,
 `rsvg-convert -w 256 -h 256 docs/logo/logo.svg`), the inline `Logo` component in
-`src/ui/icons.rs` (the title bar uses the small cut; the dial is an exact
-outline, so no SVG mask is needed), and the adaptive
-launcher icon in `android/res/`. Regenerate all of them when the logo
-changes.
+`crates/qv-ui/src/icons.rs` (the title bar uses the small cut; the dial is an
+exact outline, so no SVG mask is needed), the Windows icon `assets/icon.ico`
+(`magick assets/icon-256.png -define icon:auto-resize=256,128,64,48,32,24,16
+assets/icon.ico`) and the adaptive launcher icon in
+`gen/android/app/src/main/res/`. Regenerate all of them when the logo changes.
 
 Android arm64/API 29+ packaging uses the repository's pinned SDK/NDK recipe,
-JDK 21 and Dioxus CLI 0.7.10:
+JDK 21, tauri-cli 2.12.4 and the page tools. The Android project is
+`gen/android` (Tauri's, kept in the repository): the activity, autofill
+service and handoff keep their `dev.dioxus.main` component names, so
+launcher entries and autofill settings survive the update.
 
 ```sh
 sh scripts/setup-android.sh --accept-licenses
 eval "$(sh scripts/setup-android.sh --print-env)"
-# Set JAVA_HOME to JDK 21 and install/select dx 0.7.10.
+# Set JAVA_HOME to JDK 21; once: cargo install --locked tauri-cli --version 2.12.4
+sh crates/qv-ui/setup-tools.sh
 sh crates/qv-app/scripts/build-android.sh
 ```
 
-`QV_DX` selects the CLI. The script writes ignored app/test APKs and tooling
+`QV_TAURI` selects the tauri-cli binary. The script writes ignored app/test APKs and tooling
 caches under `dist/`; it does not install or contact a device. APKs are debug
 signed, intended for synthetic validation. Device instructions and artifact
 identities are in the validation record. After building, the repeatable runner
@@ -294,9 +312,8 @@ visibility changes. Framework, WebKit and OS input/renderer copies have
 best-effort cleanup, not deterministic erasure. Linux automatic OS monitoring
 is an optional reported capability. Manual and
 inactivity locking work without it; Android requires its native lifecycle
-monitoring and secure window. The maintained renderer
-integration and dependency patch scope are documented in
-[third-party](../../third-party/README.md).
+monitoring and secure window. The webview boundary is described in
+`ARCHITECTURE.md` §3 and [plan 0071](../../plans/0071-tauri-leptos-migration/PLAN.md).
 
 
 LAN sync (plans 0038, 0039, 0042; 0013 as amended by 0014). The Sync screen's

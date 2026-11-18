@@ -121,7 +121,7 @@ pub enum InputPurpose {
     /// A protected record field.
     ProtectedField,
 }
-/// Optional native input service; ordinary Dioxus input does not require one.
+/// Optional native input service; ordinary webview input does not require one.
 pub trait SecureInput: Send + Sync {
     /// Return protected bytes, respecting a caller bound and cancellation.
     fn read_secret(

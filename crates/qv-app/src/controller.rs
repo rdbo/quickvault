@@ -62,7 +62,7 @@ impl Drop for PickerOpen {
 impl Controller {
     /// Mark a system file picker open until the guard drops. Never hold the
     /// state lock while the guard drops.
-    #[cfg_attr(not(feature = "desktop"), allow(dead_code))] // Pickers need the UI.
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))] // Pickers need the UI.
     pub(crate) fn picker_open(&self) -> PickerOpen {
         let mut s = self.state();
         s.pickers = s.pickers.saturating_add(1);
@@ -76,7 +76,7 @@ impl Controller {
 
 /// Waits until [`wake_ui`] or `timeout`, whichever comes first; true when woken.
 /// Only the UI poll (built with `desktop`) and tests wait.
-#[cfg(any(feature = "desktop", test))]
+#[cfg(any(feature = "ui", test))]
 pub(crate) fn wait_ui(timeout: Duration) -> bool {
     let (flag, ready) = &UI_WAKE;
     let guard = flag
@@ -405,6 +405,11 @@ const ROTATION_CANCELLED: &str = "Key rotation cancelled; nothing changed.";
 /// A scanned code with endpoints that waits for the protection
 /// acknowledgement, which Join asks for first.
 const QR_READY: &str = "Code scanned. Choose Join to continue.";
+/// The app's one controller, or why it could not start; set once by the
+/// app's startup (Tauri, plan 0071) or the Android glue.
+#[cfg(feature = "ui")]
+pub(crate) static ACTIVE: std::sync::OnceLock<Result<Controller, AppError>> =
+    std::sync::OnceLock::new();
 /// A current form generation; late input cannot affect a new generation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FormEpoch(pub u64);
@@ -597,7 +602,7 @@ impl State {
         if let Some(scan) = self.scan.take() {
             scan.cancel.cancel();
         }
-        #[cfg(all(feature = "desktop", target_os = "android"))]
+        #[cfg(all(feature = "ui", target_os = "android"))]
         crate::android::forget_scan();
         let creating = self.phase == Phase::Opening
             && matches!(self.status, "Creating vault…" | "Importing vault…");
@@ -606,7 +611,7 @@ impl State {
         let interrupted = self.op_running;
         self.lock_gen = self.lock_gen.wrapping_add(1);
         self.pickers = 0;
-        #[cfg(all(feature = "desktop", target_os = "android"))]
+        #[cfg(all(feature = "ui", target_os = "android"))]
         crate::android::forget_pick();
         self.op_running = false;
         self.rotating = false;
@@ -656,7 +661,7 @@ pub(crate) struct Inner {
     state: Mutex<State>,
     pub(crate) working: AtomicBool,
     // Component IDs are only requested by the optional native UI reader.
-    #[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub(crate) page_owner: AtomicU64,
     /// Worker permits released; part of the view revision because reads that
     /// were refused while busy become available (lock-free, so a guard may be
@@ -683,9 +688,9 @@ pub(crate) struct Inner {
     /// selected vault).
     #[allow(clippy::type_complexity)]
     quick_auto: Mutex<Option<((u64, u64, Option<PathBuf>), Instant, bool)>>,
-    #[cfg(feature = "validation")]
+    #[cfg(feature = "fixture")]
     preview: AtomicBool,
-    #[cfg(feature = "validation")]
+    #[cfg(feature = "fixture")]
     pub(crate) fixture: AtomicBool,
 }
 /// Shared application controller; event callbacks contain only a weak reference.
@@ -776,9 +781,9 @@ impl Controller {
             quick_prompted: AtomicU64::new(0),
             quick_opened: AtomicU64::new(0),
             quick_auto: Mutex::new(None),
-            #[cfg(feature = "validation")]
+            #[cfg(feature = "fixture")]
             preview: AtomicBool::new(false),
-            #[cfg(feature = "validation")]
+            #[cfg(feature = "fixture")]
             fixture: AtomicBool::new(false),
         });
         let weak = Arc::downgrade(&inner);
@@ -807,13 +812,13 @@ impl Controller {
         Ok(controller)
     }
     /// Whether this controller is a synthetic read-only preview.
-    #[cfg(feature = "validation")]
+    #[cfg(feature = "fixture")]
     pub fn is_preview(&self) -> bool {
         self.0.preview.load(Ordering::SeqCst)
     }
 
     /// Read-only synthetic UI preview. It cannot create or open a vault.
-    #[cfg(feature = "validation")]
+    #[cfg(feature = "fixture")]
     pub fn preview() -> Result<Self, AppError> {
         use qv_core::platform::*;
         struct Preview;
@@ -854,7 +859,7 @@ impl Controller {
     }
     /// Full-flow synthetic fixture. It owns a newly created private temporary
     /// root and simulates only OS lifecycle; vault crypto/storage are real.
-    #[cfg(feature = "validation")]
+    #[cfg(feature = "fixture")]
     pub fn validation_fixture() -> Result<Self, AppError> {
         use qv_core::platform::*;
         struct Fixture;
@@ -922,11 +927,11 @@ impl Controller {
         crate::documents::force_no_picker();
         Ok(controller)
     }
-    #[cfg(feature = "validation")]
+    #[cfg(feature = "fixture")]
     pub(crate) fn is_fixture(&self) -> bool {
         self.0.fixture.load(Ordering::SeqCst)
     }
-    #[cfg(feature = "validation")]
+    #[cfg(feature = "fixture")]
     pub(crate) fn finish_fixture(&self, passed: bool) -> ! {
         if !self.is_fixture() {
             std::process::exit(2)
@@ -968,7 +973,7 @@ impl Controller {
     }
     /// Current platform protection; configuration uncertainty is never hidden.
     /// Show a data-free error on the current screen, if it is still current.
-    #[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub(crate) fn report(&self, epoch: FormEpoch, error: AppError) {
         let mut s = self.state();
         if s.epoch != epoch.0 {
@@ -1561,7 +1566,7 @@ impl Controller {
         action: Action,
         acknowledged: bool,
     ) -> Result<(), AppError> {
-        #[cfg(feature = "validation")]
+        #[cfg(feature = "fixture")]
         if self.0.preview.load(Ordering::SeqCst) {
             return Err(AppError::Unavailable);
         }
@@ -1824,7 +1829,7 @@ impl Controller {
             .map_err(|_| AppError::Unavailable)?;
         Ok(())
     }
-    #[cfg(feature = "desktop")]
+    #[cfg(feature = "ui")]
     pub(crate) fn perform(&self, epoch: FormEpoch, action: Action, consent: bool) {
         if let Err(error) = self.submit(epoch, action, consent) {
             let mut s = self.state();
@@ -1891,7 +1896,7 @@ impl Controller {
         if creating && std::fs::symlink_metadata(&path).is_ok() {
             return Err(AppError::VaultExists);
         }
-        #[cfg(all(feature = "validation", target_os = "android"))]
+        #[cfg(all(feature = "fixture", target_os = "android"))]
         if self.is_fixture() && path.parent() != Some(self.0.base.join("vaults").as_path()) {
             return Err(AppError::InvalidInput);
         }
@@ -2454,7 +2459,7 @@ impl Controller {
         }
     }
     /// Record a data-free startup failure in the current rendered form.
-    #[cfg(feature = "desktop")]
+    #[cfg(feature = "ui")]
     pub(crate) fn request_qr(&self, epoch: FormEpoch, target: crate::qr::QrTarget) {
         if let Err(error) = self.scan_qr(epoch, target) {
             let mut s = self.state();
@@ -2560,7 +2565,7 @@ impl Controller {
             scan.cancel.cancel();
             s.active = Instant::now();
             s.revision = s.revision.wrapping_add(1);
-            #[cfg(all(feature = "desktop", target_os = "android"))]
+            #[cfg(all(feature = "ui", target_os = "android"))]
             crate::android::forget_scan();
         }
     }

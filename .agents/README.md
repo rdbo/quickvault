@@ -50,12 +50,14 @@ provided; the roadmap itself is not an implementation plan.
 | `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `clippy.toml` | Virtual workspace, lockfile, pinned toolchain, clippy test exemptions |
 | `.cargo/config.toml` | Build environment: compile options of the bundled SQLite (checked by a `qv-store` test) |
 | `crates/<name>/` | Workspace crates (`ARCHITECTURE.md` §3) |
-| `crates/qv-app/` | Shared UI/controller (lock screens in `controller.rs`; unlocked workspace in `workspace.rs`, `ops.rs`, `views.rs`, `documents.rs`, `ui/`), local assets, Android packaging/tests; build and validation commands in its README; WebKitGTK limits in `WEBKIT.md` |
+| `crates/qv-app/` | App controller and Tauri backend (lock screens in `controller.rs`; unlocked workspace in `workspace.rs`, `ops.rs`, `views.rs`, `documents.rs`; frames, dispatch and the media scheme in `bridge/`), local assets, the Tauri Android project (`gen/android`, with its instrumentation tests); build and validation commands in its README; WebKitGTK limits in `WEBKIT.md` |
+| `crates/qv-ui-api/` | The page/backend protocol: requests, actions and frames (plan 0071) |
+| `crates/qv-ui/` | The Leptos page (wasm32); `build.sh` builds it into `qv-app/dist/ui` |
 | `deny.toml`, `supply-chain/` | `cargo deny` policy and `cargo vet` audits/exemptions |
 | `fuzz/` | cargo-fuzz targets; own workspace and lockfile, outside the shipped workspace; pinned nightly in CI |
+| `prototypes/tauri-leptos/` | Plan 0070 phase A prototype (Tauri 2 + Leptos); own workspace and lockfile, outside the shipped workspace and its gates; see its README |
 | `scripts/` | Repository checks (`check-spdx.sh`, `check-matrix.sh` with its 0012 row list `matrix-offline.txt`, `check-supply-chain.py`); Android SDK/NDK and Rust Android targets setup (`setup-android.sh`, versions pinned inside); the public-API performance harness (`perf/`, plan 0053) |
 | `docs/` | Release procedure (`RELEASE.md`), README screenshots (`images/`) and the logo (`logo/`: `logo.svg`, the small cut `logo-small.svg`, a 2048 px `logo.png`) |
-| `third-party/` | The one approved snapshot (hardened dioxus-desktop, 0030/0032) and its provenance, plus an isolated focused-test workspace; see its README |
 | `.github/workflows/` | CI (gates, supply chain, fuzzing), actions pinned by SHA |
 | `.agents/skills/` | Agent skills (source of truth) |
 | `.claude/skills` | Symlink to `../.agents/skills` for Claude Code |

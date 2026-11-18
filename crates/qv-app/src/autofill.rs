@@ -33,7 +33,7 @@ impl AutofillSink for NoSink {
 }
 static SINK: OnceLock<Box<dyn AutofillSink>> = OnceLock::new();
 /// Install the native sink once (Android startup or a test recorder).
-#[cfg(any(test, all(feature = "desktop", target_os = "android")))]
+#[cfg(any(test, all(feature = "ui", target_os = "android")))]
 pub(crate) fn set_sink(sink: Box<dyn AutofillSink>) {
     let _ = SINK.set(sink);
 }
@@ -119,7 +119,7 @@ pub(crate) fn on_lock(s: &mut State) {
 
 impl Controller {
     /// A validated native request. It replaces (and cancels) any earlier one.
-    #[cfg(any(test, all(feature = "desktop", target_os = "android")))]
+    #[cfg(any(test, all(feature = "ui", target_os = "android")))]
     pub(crate) fn autofill_offer(&self, native: i64, requester: Requester, roles: Roles) {
         let mut s = self.state();
         if let Some(old) = s.autofill.take() {
@@ -204,11 +204,11 @@ impl Controller {
     }
     /// Whether the native autofill service is enabled for this device.
     pub fn autofill_available(&self) -> bool {
-        #[cfg(all(feature = "desktop", target_os = "android"))]
+        #[cfg(all(feature = "ui", target_os = "android"))]
         {
             crate::android::autofill_available()
         }
-        #[cfg(not(all(feature = "desktop", target_os = "android")))]
+        #[cfg(not(all(feature = "ui", target_os = "android")))]
         {
             false
         }

@@ -931,7 +931,7 @@ impl Workspace {
         self.pending.as_ref().map(|p| p.kind)
     }
     /// Whether the pending deletion keeps the snapshots holding its data.
-    #[cfg_attr(not(feature = "desktop"), allow(dead_code))] // Read by the UI.
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))] // Read by the UI.
     pub(crate) fn pending_keep(&self) -> bool {
         self.pending.as_ref().is_some_and(|p| p.keep)
     }
@@ -1020,7 +1020,7 @@ impl Controller {
     }
     /// Advance the revision for an outside change screens must show (a
     /// system file picker finishing).
-    #[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub(crate) fn touch(&self) {
         let mut s = self.state();
         s.revision = s.revision.wrapping_add(1);

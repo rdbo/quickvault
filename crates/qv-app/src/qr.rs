@@ -43,21 +43,21 @@ impl Scan {
 
 /// Whether the native camera path is available and its platform gate is open.
 pub fn camera_available() -> bool {
-    #[cfg(all(feature = "desktop", target_os = "android"))]
+    #[cfg(all(feature = "ui", target_os = "android"))]
     {
         crate::android::qr_available()
     }
-    #[cfg(not(all(feature = "desktop", target_os = "android")))]
+    #[cfg(not(all(feature = "ui", target_os = "android")))]
     {
         false
     }
 }
 pub(crate) fn capture(cancel: &qv_core::CancelToken) -> Result<SecretBytes, AppError> {
-    #[cfg(all(feature = "desktop", target_os = "android"))]
+    #[cfg(all(feature = "ui", target_os = "android"))]
     {
         crate::android::capture_qr(cancel)
     }
-    #[cfg(not(all(feature = "desktop", target_os = "android")))]
+    #[cfg(not(all(feature = "ui", target_os = "android")))]
     {
         let _ = cancel;
         Err(AppError::Unavailable)
@@ -204,7 +204,7 @@ pub fn decode_frame(frame: &[u8]) -> Result<Option<SecretBytes>, AppError> {
 /// code, with several codes or with a code that is not a binary payload is
 /// skipped; the caller validates a decoded payload and ends the scan on a
 /// foreign or hostile one. Only the Android camera adapter scans.
-#[cfg(any(test, all(feature = "desktop", target_os = "android")))]
+#[cfg(any(test, all(feature = "ui", target_os = "android")))]
 pub(crate) fn scan_frame(frame: &[u8]) -> Option<SecretBytes> {
     decode_frame(frame).ok().flatten()
 }

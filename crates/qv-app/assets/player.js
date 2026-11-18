@@ -48,10 +48,11 @@ function loadBlob(media,startPlaying=false,startAt=0){
 // The largest file fetched whole (the app refuses larger non-MP4 previews).
 const MEMORY_MAX=256*1024*1024;
 function loadWhole(media,held,source,type,startAt,begin){
-    fetch(source,{cache:"no-store",credentials:"omit",referrerPolicy:"no-referrer",signal:held.abort.signal})
-        .then(response=>{if(!response.ok)throw new Error("preview unavailable");return response.arrayBuffer();})
-        .then(buffer=>{
-            const bytes=new Uint8Array(buffer);
+    // The in-process scheme answers at most 64 KiB per request, so the
+    // whole file is read range by range (plan 0071).
+    const total=Number(media.getAttribute("data-qv-size")||0);
+    (Number.isSafeInteger(total)&&total>0&&total<=MEMORY_MAX?fetchRange(source,held,0,total):Promise.reject(new Error("size")))
+        .then(bytes=>{
             if(blobs.get(media)!==held||!media.isConnected){bytes.fill(0);return;}
             playFromMemory(media,held,bytes,type);
             // A seek after EOS uses a new decoder too. Before metadata loads,
@@ -120,13 +121,20 @@ function playFromMemory(media,held,bytes,type){
 // video fragment always starts at a keyframe). One range request covers the
 // samples of several fragments, at most 32 MiB.
 const AHEAD=30,BEHIND=30,WINDOW_BYTES=32*1024*1024,MOOV_MAX=64*1024*1024;
+// One request per 64 KiB, the scheme's largest answer (plan 0071).
+const CHUNK=64*1024;
 async function fetchRange(source,held,start,end){
-    const response=await fetch(source,{cache:"no-store",credentials:"omit",referrerPolicy:"no-referrer",
-        signal:held.abort.signal,headers:{Range:`bytes=${start}-${end-1}`}});
-    if(response.status!==206)throw new Error("range");
-    const bytes=new Uint8Array(await response.arrayBuffer());
-    if(bytes.byteLength!==end-start){bytes.fill(0);throw new Error("range");}
-    return bytes;
+    const out=new Uint8Array(end-start);
+    for(let at=start;at<end;){
+        const last=Math.min(at+CHUNK,end);
+        const response=await fetch(source,{cache:"no-store",credentials:"omit",referrerPolicy:"no-referrer",
+            signal:held.abort.signal,headers:{Range:`bytes=${at}-${last-1}`}});
+        if(response.status!==206){out.fill(0);throw new Error("range");}
+        const bytes=new Uint8Array(await response.arrayBuffer());
+        if(bytes.byteLength!==last-at){bytes.fill(0);out.fill(0);throw new Error("range");}
+        out.set(bytes,at-start);bytes.fill(0);at=last;
+    }
+    return out;
 }
 // Walks the top-level boxes with small reads and returns the `moov` box.
 async function readMoov(source,held,total){
@@ -580,7 +588,7 @@ function full(type,version,flags,...parts){return box(type,u32(version<<24|flags
 const wired=new WeakSet();
 // A drag from a control can synthesize a click on the common ancestor of
 // press and release (the viewer's backdrop). Consume that one gesture before
-// Dioxus receives it. Keep no element reference after the preview is removed.
+// the page receives it. Keep no element reference after the preview is removed.
 let playerPress=false;
 document.addEventListener("pointerdown",event=>{
     playerPress=event.target instanceof Element&&!!event.target.closest(".v-player");

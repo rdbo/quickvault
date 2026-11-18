@@ -24,8 +24,8 @@ does not make these characters visible.
 
 | Client | Crate | Framework | v1 |
 |--------|-------|-----------|----|
-| Desktop app | `qv-app` | Dioxus desktop | ✅ |
-| Mobile app | `qv-app` | Dioxus mobile | ✅ |
+| Desktop app | `qv-app` | Tauri 2 + Leptos | ✅ |
+| Mobile app | `qv-app` | Tauri 2 + Leptos | ✅ |
 | CLI | `qv-cli` | clap | ✅ |
 | Browser extension | — | — | later |
 | Auto-type | — | — | not planned yet |
@@ -342,13 +342,12 @@ release, but no longer gates the feature.
   playing, 0003 §6.4), text
   (reader). Other types offer only
   saving a copy. Verify through bounded protected chunks and serve authenticated
-  ranges through an unguessable per-preview route on the app's existing numeric
-  loopback listener (0003 §6.4), never a plaintext file or whole-media response
-  vector. Closing, navigating away, lock and hiding the window revoke the source.
-  CSP img/media allow only self and that exact HTTP listener origin; retain the
-  separate edit websocket policy. On Linux, media plays from renderer memory
-  instead (0003 §6.4), so the CSP also allows `blob:` media and a fetch from
-  that listener. No autoplay; an opened preview may load its media before play
+  ranges through an unguessable per-preview token on the app's in-process
+  `qvmedia` scheme (0003 §6.4, 0008 §4), never a plaintext file or whole-media
+  response. Closing, navigating away, lock and hiding the window revoke the
+  source. CSP img/media allow only self and that scheme's origin. On Linux,
+  media plays from renderer memory instead (0003 §6.4), so the CSP also allows
+  `blob:` media and a fetch from that scheme. No autoplay; an opened preview may load its media before play
   to show the first frame and duration (0003 §6.4). Explicit replay after the
   end uses a fresh memory source on Linux (0003 §6.4), as does a backward seek
   after the end; seeking restores the chosen position while paused. A pointer
@@ -427,7 +426,7 @@ The OS controls how password managers plug in:
 This is a packaging/OS constraint, not a language one: the logic can be Rust.
 Plan:
 
-4.1. Dioxus provides the shared UI, including standard webview secret-input
+4.1. The Tauri 2 + Leptos app provides the shared UI, including standard webview secret-input
 controls under 0008 §1.1/§4.4. Native OS autofill, keystore, biometric and
 lifecycle entry points remain platform adapters. No native password dialog
 is required solely to avoid framework-managed memory copies.
@@ -439,7 +438,7 @@ on iOS a minimal extension linking the Rust static library.
 
 4.3. Autofill uses an implemented authenticated platform-wrap backend. If it
 is unavailable/expired or a full KDF exceeds extension limits, hand off to the
-main app for the Dioxus unlock flow; never weaken the vault KDF. Process separation
+main app for its unlock flow; never weaken the vault KDF. Process separation
 uses an authenticated OS-protected channel with short-lived scoped results,
 not a shared plaintext key file. Verify app signing identity and web origin using
 platform association APIs; never match by app label, substring or unverified
@@ -563,8 +562,9 @@ Evergreen runtime.
 
 ### 6. Early cross-platform framework validation
 
-Dioxus with its standard webview renderer and input controls is the owner's
-selected shared UI framework (2026-10-26; 0008 OQ2). Validate integration on
+Tauri 2 with a Leptos page (client-side rendering, WebAssembly) and standard
+webview input controls is the owner's selected shared UI framework
+(2026-11-17, replacing Dioxus selected 2026-10-26; 0008 OQ2). Validate integration on
 Android and Linux during phase 1, before building the full application.
 Demonstrate shared vault-list and entry-editing flows against the same core,
 offline persistence, bounded secret-input cleanup and lifecycle
@@ -580,9 +580,16 @@ merely because internal copies are outside application control. Active-content,
 session, OS and release requirements remain in force. A framework replacement
 requires a new owner decision; do not create separate Android/Linux app UIs.
 
-The [Dioxus mobile guide](https://dioxuslabs.com/learn/0.7/guides/platforms/mobile/)
-describes Android/iOS support with a WebView renderer and experimental rendering
-alternatives. Android's [autofill service requirements](https://developer.android.com/identity/autofill/autofill-services)
+Owner decision, 2026-11-17: the Dioxus desktop/mobile renderer is replaced
+by Tauri 2 with a Leptos frontend compiled to WebAssembly, so the app runs
+fully in process with no listening sockets (plan 0070). One shared UI
+remains. Plan 0071 carried out the migration for 1.2.0 (owner, 2026-11-17:
+continue through the phases and test the result); the validation above
+applies to the new app on Android and Linux.
+
+The [Tauri 2 documentation](https://v2.tauri.app/) describes Android and iOS
+support with the platform WebView; the earlier [Dioxus mobile guide](https://dioxuslabs.com/learn/0.7/guides/platforms/mobile/)
+covers the previous framework. Android's [autofill service requirements](https://developer.android.com/identity/autofill/autofill-services)
 and Apple's [credential-provider extension requirements](https://developer.apple.com/documentation/authenticationservices/ascredentialproviderviewcontroller)
 remain OS integration work. These sources establish platform mechanisms, not
 QuickVault implementation readiness or validation (consulted 2026-10-24).
@@ -625,9 +632,19 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 3. **Framework choice resolved 2026-10-26 (owner):** use Dioxus and standard
    webview input. Phase 1 (§6) validates integration and records gaps; it does
    not reconsider native input or a custom engine just for memory-copy concerns.
+   Superseded 2026-11-17 (owner): Tauri 2 + Leptos with the same standard
+   webview input (§6, plan 0071).
 
 ## Changelog
 
+- 2026-11-18: §6: the migration is complete in 1.2.0 (plan 0071); Dioxus is
+  no longer shipped.
+- 2026-11-17: client table, §1.8 previews, §4.1, §4.3, §6: the shared UI is
+  Tauri 2 + Leptos; previews use the in-process `qvmedia` scheme; no listening
+  sockets (owner decision, plan 0071).
+- 2026-11-17: §6: owner decision to replace the Dioxus renderer with Tauri 2
+  and Leptos, with no listening sockets (plan 0070); Dioxus remains shipped
+  until the migration completes.
 - 2026-11-17: §1.8: 5-minute inactivity lock; on Android leaving the app
   locks only when that time runs out (0008 §1.4); paste in text fields
   (Android long press, Linux editing-only context menu); "Nothing to copy"

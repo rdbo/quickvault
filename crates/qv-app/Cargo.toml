@@ -9,9 +9,19 @@ repository.workspace = true
 publish.workspace = true
 [features]
 default = []
-desktop = ["dep:dioxus", "dep:dioxus-desktop", "qv-platform/gtk"]
+# Code the app UI uses beyond the headless library (controller UI calls,
+# pickers, previews, Android glue).
+ui = ["qv-platform/gtk"]
+# Synthetic validation fixtures.
+fixture = ["ui"]
+# The app: Tauri 2 backend for the Leptos page (plan 0071).
+desktop = ["ui", "dep:tauri", "dep:tauri-runtime", "dep:tauri-build", "dep:qv-ui-api", "dep:serde_json", "dep:webkit2gtk"]
 mobile = ["desktop"]
-validation = ["desktop"]
+validation = ["desktop", "fixture"]
+[lib]
+# `cdylib`: the Android project loads libqv_app.so (Tauri, plan 0071).
+crate-type = ["cdylib", "rlib"]
+
 [[bin]]
 name = "quickvault"
 path = "src/main.rs"
@@ -22,12 +32,26 @@ ctutils.workspace = true
 zeroize.workspace = true
 qrcodegen-no-heap = "=1.8.1"
 quircs = "=0.10.3"
-dioxus = { version = "=0.7.10", optional = true, default-features = false, features = ["minimal"] }
-dioxus-desktop = { version = "=0.7.10", optional = true, default-features = false, features = ["tokio_runtime"] }
-# Only to enable its GTK clipboard with `desktop` (plan 0055); the app reaches
+tauri = { version = "=2.12.5", optional = true, default-features = false, features = ["wry"] }
+# Only for `ResizeDirection` (window resize from the app's own edges), which
+# tauri does not re-export.
+tauri-runtime = { version = "=2.12.3", optional = true }
+qv-ui-api = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+getrandom.workspace = true
+# Android: the activity's methods through JNI, at the version both webview
+# stacks use.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "=0.21.1", default-features = false }
+# Only to enable its GTK clipboard with `ui` (plan 0055); the app reaches
 # platform services through qv-core.
 [target.'cfg(target_os = "linux")'.dependencies]
 qv-platform.workspace = true
+# The WebKitGTK settings and handlers Tauri does not expose (context menu,
+# permission and file-chooser requests); the version wry already uses.
+webkit2gtk = { version = "=2.0.2", optional = true, default-features = false }
+[build-dependencies]
+tauri-build = { version = "=2.7.4", optional = true , features = [] }
 [dev-dependencies]
 qv-core = { workspace = true, features = ["test-kdf-limit", "test-eager-views"] }
 

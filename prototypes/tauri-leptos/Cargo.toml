@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Plan 0070 phase A: Tauri 2 + Leptos prototype. A separate workspace with its
+# own lockfile, excluded from the product workspace until phase B reviews
+# these dependencies (0012 §3).
+[workspace]
+resolver = "3"
+members = ["api", "app", "ui"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98.1"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[workspace.dependencies]
+qv-proto-api = { path = "api" }
+serde = { version = "=1.0.229", default-features = false, features = ["std", "derive"] }
+serde_json = { version = "=1.0.154", default-features = false, features = ["std"] }
+zeroize = { version = "=1.9.1", default-features = false, features = ["alloc"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+# The product's dev profile (root Cargo.toml): crypto crates optimized so
+# unlock is usable. Unlike the product, tests share the dev build (no
+# separate optimized test profile), which halves the target directory.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
+[profile.dev.package.qv-crypto]
+opt-level = 3
+
+[profile.dev.package.chacha20]
+opt-level = 3
+
+[profile.dev.package.poly1305]
+opt-level = 3
+
+[profile.dev.package.chacha20poly1305]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.zeroize]
+opt-level = 3
+
+# The page (build-ui.sh): small wasm, since the engine compiles it at startup.
+[profile.wasm]
+inherits = "release"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

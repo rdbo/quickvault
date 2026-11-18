@@ -172,18 +172,6 @@ pub(crate) struct Reads {
     slots: [Slot; 3],
 }
 impl Reads {
-    #[cfg(test)]
-    pub(crate) fn main_items(&self) -> usize {
-        match self.slots[Lane::Main as usize]
-            .ready
-            .as_deref()
-            .map(|p| &p.rows)
-        {
-            Some(Rows::Items { items, .. }) => items.len(),
-            _ => 0,
-        }
-    }
-
     pub(crate) fn clear(&mut self) {
         for slot in &mut self.slots {
             slot.clear();

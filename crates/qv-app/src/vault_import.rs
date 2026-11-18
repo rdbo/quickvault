@@ -2,13 +2,13 @@
 
 //! Controller-owned selected-document import. Provider I/O stays off the UI.
 use super::*;
-#[cfg(any(test, all(feature = "desktop", target_os = "android")))]
+#[cfg(any(test, all(feature = "ui", target_os = "android")))]
 use std::io::Read;
 
 impl Controller {
     /// Begin one bounded ciphertext read. Its result belongs to this exact form
     /// epoch; background/lock drops it without changing the selected vault.
-    #[cfg(any(test, all(feature = "desktop", target_os = "android")))]
+    #[cfg(any(test, all(feature = "ui", target_os = "android")))]
     pub(crate) fn stage_vault_input(
         &self,
         epoch: FormEpoch,
@@ -91,7 +91,7 @@ impl Controller {
 
     /// The local filename is explicitly non-secret, as in the existing vault
     /// list. No provider URI or candidate payload is returned to the renderer.
-    #[cfg(any(test, feature = "desktop"))]
+    #[cfg(any(test, feature = "ui"))]
     pub(crate) fn import_name(&self, epoch: FormEpoch) -> String {
         let s = self.state();
         if s.epoch == epoch.0 && s.mode == Mode::Import {
@@ -101,7 +101,7 @@ impl Controller {
         }
     }
 
-    #[cfg(any(test, feature = "desktop"))]
+    #[cfg(any(test, feature = "ui"))]
     pub(crate) fn acknowledge_vault_import(&self, epoch: FormEpoch, accepted: bool) {
         let mut s = self.state();
         if s.epoch == epoch.0 && s.phase == Phase::Locked && s.pending_import.is_some() {

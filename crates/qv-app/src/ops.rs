@@ -1085,7 +1085,7 @@ pub(crate) fn run(
             })
         }
         WsAction::OpenAutofillSettings => {
-            #[cfg(all(feature = "desktop", target_os = "android"))]
+            #[cfg(all(feature = "ui", target_os = "android"))]
             crate::android::open_autofill_settings();
             Ok(())
         }
