@@ -44,7 +44,16 @@ public class PlatformTest extends InstrumentationTestCase {
             Thread.sleep(50);
         }
         // AppError messages are fixed, data-free categories, never input text.
-        fail("Synthetic device stage: "+stage+"; "+js(instrumentation,view,"document.querySelector('.error')?.textContent || 'no app error'")+"; "+js(instrumentation,view,"window.qvDeviceFixture?.summary?.() || ''"));
+        // A data-free page summary: origin, load state and the structure the
+        // page rendered (screens are FLAG_SECURE, so screenshots are black).
+        String page=js(instrumentation,view,"[location.origin+location.pathname,document.readyState,document.body?document.body.childElementCount:-1,Array.from(document.querySelectorAll('h1,h2')).filter(e=>e.getClientRects().length).map(e=>e.textContent.trim().slice(0,30)).join('/'),Array.from(document.querySelectorAll('button')).filter(b=>b.getClientRects().length&&!b.closest('.titlebar')).slice(0,12).map(b=>(b.id||b.textContent.trim().slice(0,12)||b.getAttribute('aria-label'))+(b.disabled?'(off)':'')).join(' '),(()=>{const f=document.querySelector('.fab');if(!f)return 'no fab';const r=f.getBoundingClientRect(),h=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return 'fab '+Math.round(r.left)+','+Math.round(r.top)+' '+Math.round(r.width)+'px hit '+(h?h.tagName.toLowerCase()+'.'+String(h.className).split(' ')[0]:'none')+' viewport '+innerWidth+'x'+innerHeight})()].join(' | ')");
+        // The app's own worker threads (this test runs in the app's process).
+        StringBuilder threads=new StringBuilder();
+        java.io.File[] tasks=new java.io.File("/proc/self/task").listFiles();
+        if(tasks!=null)for(java.io.File task:tasks){
+            try{String name=new String(java.nio.file.Files.readAllBytes(new java.io.File(task,"comm").toPath())).trim();if(name.startsWith("qv"))threads.append(name).append(' ');}catch(java.io.IOException ignored){}
+        }
+        fail("Synthetic device stage: "+stage+"; "+js(instrumentation,view,"document.querySelector('.err,.error')?.textContent || 'no app error'")+"; "+js(instrumentation,view,"window.qvDeviceFixture?.summary?.() || ''")+"; page: "+page+"; threads: "+threads);
     }
     protected void submitFixture(Instrumentation instrumentation,WebView view) throws Exception {
         awaitJs(instrumentation,view,"window.qvDeviceFixture.consent()","protection acknowledged");
@@ -55,7 +64,7 @@ public class PlatformTest extends InstrumentationTestCase {
         awaitJs(instrumentation,view,"window.qvDeviceFixture.at("+org.json.JSONObject.quote(heading)+")",heading);
     }
     protected void lockFixture(Instrumentation instrumentation,WebView view) throws Exception {
-        js(instrumentation,view,"window.qvDeviceFixture.lock()");
+        awaitJs(instrumentation,view,"window.qvDeviceFixture.lock()","lock pressed");
         awaitHeading(instrumentation,view,"Welcome back");
     }
     protected void awaitUnlocked(Instrumentation instrumentation,WebView view) throws Exception {
@@ -122,6 +131,9 @@ public class PlatformTest extends InstrumentationTestCase {
         assertEquals("Deferred while copying","true",js(instrumentation,view,"!!document.querySelector('.shell')"));
         awaitHeading(instrumentation,view,"Welcome back");
         instrumentation.runOnMainSync(()->instrumentation.callActivityOnResume(main));
+        // Type only once the returning screen is drawn (app.js uncovers it).
+        awaitJs(instrumentation,view,"!document.documentElement.classList.contains('qv-cover')","returned screen drawn");
+        Thread.sleep(500);
         js(instrumentation,view,"window.qvDeviceFixture.unlock(false)");
         submitFixture(instrumentation,view);
         awaitUnlocked(instrumentation,view);
@@ -144,7 +156,7 @@ public class PlatformTest extends InstrumentationTestCase {
         pick(instrumentation,view,"Choose a file",input,"picked input");
         js(instrumentation,view,"window.qvDeviceFixture.attachmentFields()");
         click(instrumentation,view,"Add attachment");
-        awaitJs(instrumentation,view,"Array.from(document.querySelectorAll('.row-title')).some(t=>t.textContent==='phone-canary.bin')","attachment added");
+        awaitJs(instrumentation,view,"Array.from(document.querySelectorAll('.row-title, .dev .l b')).some(t=>t.textContent==='phone-canary.bin')","attachment added");
         java.io.File output=new java.io.File(root,"output.bin");
         pick(instrumentation,view,"Choose where to save",output,"picked output");
         // Back and a late native result must not carry a destination to a new screen.
@@ -161,21 +173,26 @@ public class PlatformTest extends InstrumentationTestCase {
         awaitJs(instrumentation,view,"window.qvDeviceFixture.nav('Archives')","archives");
         awaitHeading(instrumentation,view,"Archive exchange");
         java.io.File archive=new java.io.File(root,"export.qvsnap");
-        pick(instrumentation,view,"Choose where to save",archive,"picked archive output");
+        pick(instrumentation,view,"Choose where to export",archive,"picked archive output");
         click(instrumentation,view,"Export archive");
         awaitJs(instrumentation,view,"(document.querySelector('.report')?.textContent||'').includes('Archive published')","archive exported");
         assertTrue("Exported archive bytes: exists="+archive.exists()+" files="+java.util.Arrays.toString(root.list())+" report="+js(instrumentation,view,"(document.querySelector('.report')?.textContent||'').slice(0,120)"),archive.length()>0);
-        pick(instrumentation,view,"Choose a file",archive,"picked archive input");
+        pick(instrumentation,view,"Choose an archive",archive,"picked archive input");
         click(instrumentation,view,"Merge archive");
         // Own fresh export: core may record a new acceptance or report it as known.
-        awaitJs(instrumentation,view,"!document.querySelector('.error') && /Archive merged|already accepted/.test(document.querySelector('.report')?.textContent||'')","archive merged");
-        java.io.File staging=new java.io.File(new java.io.File(main.getNoBackupFilesDir(),"quickvault"),"staging");
+        awaitJs(instrumentation,view,"!document.querySelector('.err,.error') && /Archive merged|already accepted/.test(document.querySelector('.report')?.textContent||'')","archive merged");
+        // Validation builds keep their state under validation-current.
+        java.io.File staging=new java.io.File(main.getNoBackupFilesDir(),"quickvault/validation-current/staging");
         String[] left=staging.list();
         assertTrue("Staged ciphertext removed",left==null || left.length==0);
     }
     private void runSyntheticFlows(Instrumentation instrumentation, MainActivity main, WebView view) throws Exception {
         java.io.File root=new java.io.File(main.getNoBackupFilesDir(),"qv-device-test-"+System.nanoTime());
         assertTrue("New private fixture",root.mkdir());
+        // Validation builds create vaults only in their own vaults folder (plan 0041).
+        java.io.File vaults=new java.io.File(main.getNoBackupFilesDir(),"quickvault/validation-current/vaults").getCanonicalFile();
+        java.io.File vault=new java.io.File(vaults,root.getName()+".qvault");
+        java.io.File skipVault=new java.io.File(vaults,root.getName()+"-skip.qvault");
         try {
             java.io.ByteArrayOutputStream source=new java.io.ByteArrayOutputStream();
             try(java.io.InputStream input=instrumentation.getContext().getAssets().open("flows.js")) {
@@ -183,8 +200,9 @@ public class PlatformTest extends InstrumentationTestCase {
                 while((count=input.read(buffer))!=-1) {source.write(buffer,0,count);assertTrue("Bounded fixture script",source.size()<=32768);}
             }
             String script=new String(source.toByteArray(),java.nio.charset.StandardCharsets.UTF_8);
-            js(instrumentation,view,"window.qvDeviceFixturePath="+org.json.JSONObject.quote(new java.io.File(root,"vault.qvault").getCanonicalPath())+";"+script);
-            awaitHeading(instrumentation,view,"Welcome back");
+            js(instrumentation,view,"window.qvDeviceFixturePath="+org.json.JSONObject.quote(vault.getPath())+";"+script);
+            // A fresh install shows the welcome screen; tab(1) opens Create from it.
+            awaitJs(instrumentation,view,"window.qvDeviceFixture.at('Welcome back')||!!document.querySelector('#welcome-create')","first screen");
             awaitJs(instrumentation,view,"window.qvDeviceFixture.tab(1)","mode 1");
             awaitJs(instrumentation,view,"!!document.querySelector('#vault-name')","create form");
             js(instrumentation,view,"window.qvDeviceFixture.create(false)");
@@ -198,7 +216,7 @@ public class PlatformTest extends InstrumentationTestCase {
             assertEquals("Phrase display removed","true",js(instrumentation,view,"!document.querySelector('.phrase')"));
             js(instrumentation,view,"window.qvDeviceFixture.unlock(true)");
             submitFixture(instrumentation,view);
-            awaitJs(instrumentation,view,"!!document.querySelector('.error')","wrong password refused");
+            awaitJs(instrumentation,view,"!!document.querySelector('.err,.error')","wrong password refused");
             assertEquals("Wrong-password control cleared","true",js(instrumentation,view,"!document.querySelector('#password').value"));
             js(instrumentation,view,"window.qvDeviceFixture.unlock(false)");
             submitFixture(instrumentation,view);
@@ -240,6 +258,7 @@ public class PlatformTest extends InstrumentationTestCase {
             Thread.sleep(300);
             instrumentation.runOnMainSync(()->instrumentation.callActivityOnResume(main));
             removeFixture(root,root);
+            for(java.io.File made:new java.io.File[]{vault,skipVault})if(made.exists())assertTrue("Fixture vault cleanup",made.delete());
         }
     }
     public void testSecureWindowKeyboardSettingsLifecycleAndEngineBoundary() throws Exception {
@@ -276,17 +295,24 @@ public class PlatformTest extends InstrumentationTestCase {
                 assertFalse(view[0].getSettings().getJavaScriptCanOpenWindowsAutomatically());
                 assertFalse(view[0].getSettings().getDomStorageEnabled());
             });
-            awaitJs(instrumentation,view[0],"document.readyState === 'complete' && !!document.querySelector('input[type=password]')","initial password form ready");
+            // A fresh install opens on the welcome screen; Create has the form.
+            awaitJs(instrumentation,view[0],"document.readyState === 'complete' && !!document.querySelector('#welcome-create, input[type=password]')","first screen ready");
+            js(instrumentation,view[0],"document.querySelector('#welcome-create')?.click(),true");
+            awaitJs(instrumentation,view[0],"!!document.querySelector('input[type=password]')","initial password form ready");
             assertEquals("true",js(instrumentation,view[0],"(()=>{try{eval('1');return false}catch(e){return true}})()"));
             assertEquals("true",js(instrumentation,view[0],"(()=>{let s=document.createElement('script');s.textContent='window.inlineBad=true';document.body.append(s);return !window.inlineBad})()"));
             assertEquals("true",js(instrumentation,view[0],"document.querySelector('input[type=password]').autocomplete === 'off'"));
             assertEquals("true",js(instrumentation,view[0],"(()=>{const el=document.querySelector('input[type=password]');el.value='synthetic-input';el.dispatchEvent(new Event('input',{bubbles:true}));return true})()"));
+            // The page clears typed controls whenever it is hidden (app.js); Tauri's
+            // webview reports the activity pause as hidden. Rust must keep the
+            // form's session (same control, same epoch) until background expiry.
+            js(instrumentation,view[0],"(()=>{window.qvProbe={node:document.querySelector('input[type=password]'),epoch:document.querySelector('[data-qv-epoch]')?.getAttribute('data-qv-epoch')};return true})()");
             long generation=main.qvGeneration();
             instrumentation.runOnMainSync(()->instrumentation.callActivityOnPause(activity));
             Thread.sleep(500);
             assertEquals("Background metadata observed",0,main.qvStatus()&1);
             assertTrue("Background time counts",main.qvBackgroundMillis()>0);
-            assertEquals("Short background keeps the typed form","true",js(instrumentation,view[0],"document.querySelector('input[type=password]').value==='synthetic-input'"));
+            assertEquals("Short background keeps the form's session","true",js(instrumentation,view[0],"(()=>{const p=window.qvProbe||{};return document.querySelector('input[type=password]')===p.node&&document.querySelector('[data-qv-epoch]')?.getAttribute('data-qv-epoch')===p.epoch})()"));
             main.qvExpireBackground();
             Thread.sleep(500);
             instrumentation.runOnMainSync(()->instrumentation.callActivityOnResume(activity));

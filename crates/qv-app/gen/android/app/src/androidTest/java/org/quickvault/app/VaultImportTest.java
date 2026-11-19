@@ -34,7 +34,7 @@ public final class VaultImportTest extends PlatformTest {
     private void pick(Instrumentation os, WebView web, Uri uri, boolean cancel) throws Exception {
         if ("true".equals(js(os,web,"!!document.getElementById('password')"))) {
             input(os,web,"password","");
-            awaitJs(os,web,"!document.querySelector('.error')", "previous error cleared");
+            awaitJs(os,web,"!document.querySelector('.err,.error')", "previous error cleared");
         }
         js(os, web, "document.getElementById('vault-menu').click()");
         awaitJs(os, web, "!!document.getElementById('menu-open-file')", "vault picker menu");
@@ -149,10 +149,10 @@ public final class VaultImportTest extends PlatformTest {
                 os.getTargetContext().getContentResolver().call(provider,"source",null,setup);
             }
             pick(os,web,Uri.withAppendedPath(provider,"pipe"),true);
-            awaitJs(os,web,"!!document.getElementById('password') && !document.querySelector('.error')", "picker cancellation");
+            awaitJs(os,web,"!!document.getElementById('password') && !document.querySelector('.err,.error')", "picker cancellation");
             for (String kind : new String[]{"refused","denied","malformed","short"}) {
                 pick(os,web,Uri.withAppendedPath(provider,kind),false);
-                awaitJs(os,web,"!!document.querySelector('.error') && !!document.getElementById('password') && !document.getElementById('unlock-submit').disabled", "hostile provider refused");
+                awaitJs(os,web,"!!document.querySelector('.err,.error') && !!document.getElementById('password') && !document.getElementById('unlock-submit').disabled", "hostile provider refused");
                 assertTrue("Source unchanged after refusal", java.util.Arrays.equals(original,digest(source)));
             }
             int beforeSlow = opens(os,provider);
@@ -180,7 +180,7 @@ public final class VaultImportTest extends PlatformTest {
             assertEquals("Consent required", "true", js(os,web,"document.getElementById('import-submit').disabled"));
             input(os,web,"import-name","Imported fixture"); input(os,web,"import-password","wrong password");
             js(os,web,"document.getElementById('import-ack').click()"); click(os,web,"Verify and import");
-            awaitJs(os,web,"!!document.querySelector('.error') && !!document.getElementById('import-password')", "wrong password refused");
+            awaitJs(os,web,"!!document.querySelector('.err,.error') && !!document.getElementById('import-password')", "wrong password refused");
             assertEquals("Password cleared", "true", js(os,web,"!document.getElementById('import-password').value"));
             assertEquals("Candidate not reread", selectedOpens, opens(os,provider));
             input(os,web,"import-password",PASSWORD); click(os,web,"Verify and import"); awaitUnlocked(os,web);

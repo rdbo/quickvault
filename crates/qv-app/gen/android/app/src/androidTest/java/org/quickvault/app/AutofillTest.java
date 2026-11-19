@@ -50,7 +50,8 @@ public final class AutofillTest extends PlatformTest {
             byte[] b=new byte[4096];int n;while((n=in.read(b))!=-1){code.write(b,0,n);assertTrue("Bounded driver",code.size()<=32768);}
         }
         js(os,view,"window.qvDeviceFixturePath='';"+new String(code.toByteArray(),java.nio.charset.StandardCharsets.UTF_8));
-        awaitHeading(os,view,"Welcome back");
+        // A fresh install shows the welcome screen; tab(1) opens Create from it.
+        awaitJs(os,view,"window.qvDeviceFixture.at('Welcome back')||!!document.querySelector('#welcome-create')","first screen");
     }
     private void foreground() throws Exception {
         long deadline=android.os.SystemClock.elapsedRealtime()+120000;
@@ -130,6 +131,8 @@ public final class AutofillTest extends PlatformTest {
             stage("request waits on lock screen");
             input("password",PASSWORD);submitFixture(os,view);
             awaitHeading(os,view,"Fill a login");
+            // The heading is drawn before the candidate search ends; wait for either outcome.
+            awaitJs(os,view,"document.querySelectorAll('[data-qv-autofill=candidate]').length>0 || document.body.textContent.includes('No entry matches this verified identity.')","candidate search finished");
             assertEquals("Title naming the app is not a candidate","true",js(os,view,"document.querySelectorAll('[data-qv-autofill=candidate]').length===0 && document.body.textContent.includes('No entry matches this verified identity.')"));
             stage("label spoof refused");
             js(os,view,"document.querySelector('details').open=true;true");

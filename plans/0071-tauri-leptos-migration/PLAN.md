@@ -283,3 +283,37 @@ that named the Dioxus bridge are remapped in F1.
   and `QvAutofillService`. The script now deletes Gradle's previous APK
   outputs first: debug packaging is incremental and left replaced entries
   as dead space (a 68 MB APK holding 41 MB of entries).
+- 2026-11-19: First phone run of the Tauri build: the isolated validation
+  pair (`package-isolated-android.py --baseline validation`) on the owner's
+  Android test phone. `PlatformTest` passes: secure window and hardening,
+  create, phrase, lock, unlock, recover, wrong password, items, history,
+  attachments, clipboard, archive export and merge, background expiry,
+  cancelled worker and phrase skip. Most failures before that were test
+  drift, much of it older than 1.2.0, fixed in the instrumentation sources:
+  the first-run Welcome screen, the two-step create, the `.err` class, the
+  `vaults/` folder rule for validation vaults (2026-11-06), the staging path
+  under `validation-current/`, hidden desktop-only twins of phone buttons,
+  phone navigation and Lock through the tab bar and vault chip, attachment
+  markup and archive picker labels. `flows.js` keeps a short step trace and
+  failure messages summarize the page (headings and button labels only, no
+  values). The short-background step now asserts that the form keeps its
+  session (same node, same epoch): app.js clears typed controls whenever the
+  page is hidden, and Tauri's webview reports an instrumentation pause as
+  hidden.
+  Finding, not fixed: an unlock started about half a second after a lock
+  sometimes fails with the generic operation error; a temporary diagnostic
+  (removed) showed `Store(Locked)`, the vault's process lock still held by
+  the previous session. With a 5 s wait the run passed; the test keeps the
+  0.5 s wait so it still catches the race. It touches the store's lock and
+  lease lifetime, so it needs its own plan (architect → developer →
+  reviewer); it has not been seen on Linux.
+  `AutofillTest`: the first-run screen fix is in; the label-spoof check read
+  the page as soon as "Fill a login" appeared, before the candidate search
+  ended, and now waits for the search to finish before asserting that no
+  candidate is offered (the assertion is unchanged). Not yet re-run, nor
+  `QrTest`, `MediaTest`, `VaultImportTest` or the fingerprint tests
+  (`QuickUnlockTest`, `QuickUnlockUiTest`).
+  Device note for future runs: some vendor ROMs refuse an app's own
+  background activity starts unless the tester allows it once per install
+  (an app-ops setting); the run hangs at `startActivitySync` otherwise, and
+  also when the phone is locked.

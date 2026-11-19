@@ -23,7 +23,7 @@ public final class QuickUnlockUiTest extends PlatformTest {
             if("true".equals(js(os,view,condition)))return;
             Thread.sleep(100);
         }
-        fail("Synthetic hardware stage: "+stage+"; "+js(os,view,"document.querySelector('.error')?.textContent || 'no app error'"));
+        fail("Synthetic hardware stage: "+stage+"; "+js(os,view,"document.querySelector('.err,.error')?.textContent || 'no app error'"));
     }
     private void input(String id,String value) throws Exception {
         assertEquals("Synthetic input control exists", "true",js(os,view,"(()=>{let e=document.getElementById("+org.json.JSONObject.quote(id)+");if(!e)return false;e.value="+org.json.JSONObject.quote(value)+";e.dispatchEvent(new Event('input',{bubbles:true}));return true})()"));
@@ -118,7 +118,7 @@ public final class QuickUnlockUiTest extends PlatformTest {
         try {
             input("vault-path",new java.io.File(activity.getNoBackupFilesDir(),"quickvault/vaults/main.qvault").getAbsolutePath());
             input("password",PASSWORD);submitFixture(os,view);
-            awaitJs(os,view,"!!document.querySelector('.error')","outside fixture path refused");
+            awaitJs(os,view,"!!document.querySelector('.err,.error')","outside fixture path refused");
             input("vault-path","");stage("isolated path guard passed");
             create();stage("vault created");enroll(policy,PASSWORD);stage("enrollment passed");
             lockFixture(os,view);assertTrue("Enrolled quick action",quickButton());
