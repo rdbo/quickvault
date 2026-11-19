@@ -269,6 +269,8 @@ pub struct Locked {
     pub weak_seconds: u64,
     /// The password is fair.
     pub fair_warning: bool,
+    /// The live rating of the new master password (plan 0072).
+    pub meter: Option<StrengthMeter>,
     /// The suggestion shows.
     pub suggestion_visible: bool,
     /// The two passwords differ.
@@ -281,6 +283,8 @@ pub struct Locked {
     pub import_ack: bool,
     /// The join code came from a scan.
     pub code_scanned: bool,
+    /// A scanned join waits only for the protection review (plan 0072).
+    pub join_review: bool,
     /// Quick unlock prompts by itself for this foreground entry.
     pub autoprompt: Option<u64>,
     /// The autofill banner.
@@ -319,6 +323,12 @@ pub struct PageNav {
     pub loading: bool,
     /// A read failed.
     pub error: Option<String>,
+    /// A scrolling list (plan 0072): `next` loads more when the end comes
+    /// into view while `more` is set, otherwise it offers "Show more";
+    /// `previous` offers "Back to the start".
+    pub window: bool,
+    /// The window can take another page.
+    pub more: bool,
 }
 
 /// A row's glyph: its type's icon, or the title's monogram.
@@ -1520,11 +1530,25 @@ pub struct General {
     pub trash_days: String,
 }
 
+/// The live rating of a new master password (0010 §4.2, plan 0072): its
+/// label and estimated bits, never the password.
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub struct StrengthMeter {
+    /// "Weak", "Fair", "Strong" or "Very strong".
+    pub label: String,
+    /// Whole estimated bits.
+    pub bits: u32,
+    /// 0 (weak) to 3 (very strong).
+    pub level: u8,
+}
+
 /// Password guidance.
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct Guidance {
     /// The password is fair.
     pub fair: bool,
+    /// The live rating of the new master password.
+    pub meter: Option<StrengthMeter>,
     /// The suggestion.
     pub suggestion: Option<Z>,
 }

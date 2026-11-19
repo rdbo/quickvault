@@ -114,6 +114,16 @@ pub(crate) fn Locked() -> impl IntoView {
             perform(a, Consent::Recorded);
         }
     };
+    // A scanned join that waits only for the review opens it at once and
+    // joins when it is acknowledged; "Not now" leaves the filled form
+    // (0014 §6.3, plan 0072).
+    let join_review = field(l, false, |l| l.join_review);
+    Effect::new(move |_| {
+        if join_review.get() && gate_on.get_untracked() {
+            after_ack.set(Some(Action::JoinDevice));
+            sheet.set(Sheet::Protection);
+        }
+    });
     let to_mode = move |m: Mode| -> Box<dyn Fn(web_sys::MouseEvent) + Send + Sync> {
         Box::new(move |_| {
             sheet.set(Sheet::None);
@@ -360,7 +370,7 @@ pub(crate) fn Locked() -> impl IntoView {
                         {move || if scanned.get() {
                             view! { <p class="banner ok" role="status" id="lan-code-scanned"><Svg icon=Icon::Check/>" Code from the QR code"</p> }.into_any()
                         } else {
-                            view! { <SecretInput field=LockedField::LanCode label="Code" id="lan-join-code" secret=true disabled=busy/> }.into_any()
+                            view! { <SecretInput field=LockedField::LanCode label="Code" id="lan-join-code" secret=true disabled=busy reveal=true/> }.into_any()
                         }}
                         <SecretInput field=LockedField::LanEndpoint label="The other device's address (ip:port)" id="lan-join-endpoint" secret=false disabled=busy/>
                         {err_view}
@@ -487,6 +497,7 @@ fn create(
     };
     let mismatch = field(l, false, |l| l.mismatch);
     let fair = field(l, false, |l| l.fair_warning);
+    let meter = field(l, None, |l| l.meter.clone());
     let weak = field(l, false, |l| l.phase == Phase::WeakPassword);
     let weak_seconds = field(l, 0, |l| l.weak_seconds);
     let suggestion = field(l, None, |l| l.suggestion.as_ref().map(|s| s.to_string()));
@@ -534,10 +545,11 @@ fn create(
             <div hidden=move || wizard() != 1>
                 <h2>"Choose a master password"</h2>
                 <p class="muted">"It is the key to this vault. QuickVault cannot reset it, so make it long and memorable."</p>
-                <SecretInput field=LockedField::Password label="Master password" id="password" secret=true disabled=busy/>
+                <SecretInput field=LockedField::Password label="Master password" id="password" secret=true disabled=busy rate=true/>
+                {move || crate::input::meter_view(meter.get())}
                 <SecretInput field=LockedField::Repeat label="Type it again" id="repeat" secret=true disabled=busy/>
                 <Show when=move || mismatch.get()><p class="hint" role="status">"The two passwords do not match yet."</p></Show>
-                <Show when=move || fair.get()><div class="banner"><Svg icon=Icon::Warn/><span>"This password is fair. Consider a longer, less predictable passphrase."</span></div></Show>
+                <Show when=move || fair.get() && meter.with(Option::is_none)><div class="banner"><Svg icon=Icon::Warn/><span>"This password is fair. Consider a longer, less predictable passphrase."</span></div></Show>
                 <div class="banner ok"><Svg icon=Icon::Generator/>
                     <div class="sp">
                         "Want one that is easy to remember? "

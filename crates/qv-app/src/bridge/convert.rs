@@ -31,6 +31,22 @@ pub(crate) fn item_hue(colour: Option<u8>, id_hex: &str) -> &'static str {
     colour.map_or_else(|| id_hue(id_hex), hue_class)
 }
 /// A type's start-tile colour.
+/// The live password rating for the page (plan 0072).
+pub(crate) fn meter(m: crate::meter::Meter) -> api::StrengthMeter {
+    use qv_core::Strength;
+    let (label, level) = match m.strength {
+        Strength::Weak => ("Weak", 0),
+        Strength::Fair => ("Fair", 1),
+        Strength::Strong => ("Strong", 2),
+        _ => ("Very strong", 3),
+    };
+    api::StrengthMeter {
+        label: label.to_owned(),
+        bits: m.bits,
+        level,
+    }
+}
+
 pub(crate) fn type_hue(kind: ItemType) -> &'static str {
     match kind {
         ItemType::Login => "h6",

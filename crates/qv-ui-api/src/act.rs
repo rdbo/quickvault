@@ -388,6 +388,7 @@ pub enum WsAct {
     Answer(bool),
     KeepSnapshots(bool),
     Dismiss,
+    RatePassword,
 }
 
 /// Locked-screen actions (`controller::Action`).
@@ -549,6 +550,8 @@ pub enum Act {
     AcknowledgeProtection(Option<Action>),
     /// The quick-unlock button was pressed (before its gated action).
     QuickStarted,
+    /// Rate the new master password; sent once typing pauses (plan 0072).
+    RatePassword,
     /// Choose a locked-screen workflow.
     SelectMode(Mode),
     /// Choose a listed vault (clears a typed path first).

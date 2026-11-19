@@ -80,6 +80,97 @@ pub(crate) struct Page {
     pub(crate) revision: u64,
 }
 
+/// The main list's window (0004 §7.4, plan 0072): consecutive pages loaded
+/// as the list scrolls, so an ordinary vault shows every row. A full window
+/// is replaced by the next one ("Show more"), never trimmed while it
+/// scrolls: WebKitGTK has no scroll anchoring, so removing rows above the
+/// viewport would make the list jump.
+pub(crate) const WINDOW_PAGES: usize = 32;
+/// Row text the window may hold, a bound beside the page count.
+pub(crate) const WINDOW_TEXT: usize = 8 * 1024 * 1024;
+
+impl Rows {
+    /// Lists that scroll as one window; others keep one page.
+    fn windowed(&self) -> bool {
+        matches!(
+            self,
+            Self::Items { .. } | Self::Trash(_) | Self::Conflicts(_)
+        )
+    }
+    /// Approximate owned row text, for [`WINDOW_TEXT`].
+    fn text_bytes(&self) -> usize {
+        const ROW: usize = 64;
+        match self {
+            Self::Items { items, groups } => {
+                items
+                    .iter()
+                    .map(|i| ROW + i.row.title.len() + i.row.subtitle.len())
+                    .sum::<usize>()
+                    + groups.iter().map(|g| ROW + g.name.len()).sum::<usize>()
+            }
+            Self::Trash(rows) => rows
+                .iter()
+                .map(|r| ROW + r.name.len() + r.deleted.as_ref().map_or(0, String::len))
+                .sum(),
+            Self::Conflicts(rows) => rows
+                .iter()
+                .map(|r| ROW + r.record.len() + r.name.as_ref().map_or(0, |n| n.len()))
+                .sum(),
+            _ => 0,
+        }
+    }
+}
+
+/// One page holding a window's rows in order, with the outer cursors.
+fn merge(parts: &[Arc<Page>]) -> Option<Arc<Page>> {
+    let (first, last) = (parts.first()?, parts.last()?);
+    if parts.len() == 1 {
+        return Some(first.clone());
+    }
+    let rows = match &first.rows {
+        Rows::Items { .. } => {
+            let (mut items, mut groups) = (Vec::new(), Vec::new());
+            for part in parts {
+                if let Rows::Items {
+                    items: i,
+                    groups: g,
+                } = &part.rows
+                {
+                    items.extend(i.iter().cloned());
+                    groups.extend(g.iter().cloned());
+                }
+            }
+            Rows::Items { items, groups }
+        }
+        Rows::Trash(_) => Rows::Trash(
+            parts
+                .iter()
+                .flat_map(|p| match &p.rows {
+                    Rows::Trash(r) => r.clone(),
+                    _ => Vec::new(),
+                })
+                .collect(),
+        ),
+        Rows::Conflicts(_) => Rows::Conflicts(
+            parts
+                .iter()
+                .flat_map(|p| match &p.rows {
+                    Rows::Conflicts(r) => r.clone(),
+                    _ => Vec::new(),
+                })
+                .collect(),
+        ),
+        // Not windowed: never more than one part.
+        _ => return Some(last.clone()),
+    };
+    Some(Arc::new(Page {
+        rows,
+        next: last.next.clone(),
+        previous: first.previous.clone(),
+        revision: last.revision,
+    }))
+}
+
 impl PartialEq for Page {
     fn eq(&self, other: &Self) -> bool {
         std::ptr::eq(self, other)
@@ -95,6 +186,9 @@ pub(crate) struct Read {
     /// `page` is the owner's previous page, kept on screen while its
     /// replacement loads (plan 0051); see `ui::use_page`.
     pub(crate) stale: bool,
+    /// A scrolling window (plan 0072): it starts at the list's first row,
+    /// and it can take another page.
+    pub(crate) window: Option<(bool, bool)>,
 }
 
 struct Job {
@@ -103,6 +197,8 @@ struct Job {
     serial: u64,
     cancel: CancelToken,
     revision: u64,
+    /// Adds a page to the window instead of replacing it.
+    append: bool,
 }
 
 #[derive(Default)]
@@ -114,8 +210,18 @@ struct Slot {
     ready: Option<Arc<Page>>,
     /// The owner's previous page while its replacement loads (plan 0051), so
     /// a new filter, query, revision or page swaps rows instead of blanking
-    /// them. It takes `ready`'s place, so a lane still holds one page.
+    /// them. It takes `ready`'s place until the replacement is shown.
     held: Option<Arc<Page>>,
+    /// The window's pages; `ready` is their merged view.
+    parts: Vec<Arc<Page>>,
+    /// The window starts at the list's first row.
+    origin: bool,
+    /// Pages to reload before showing a replaced window (a revision change
+    /// keeps the rows the user had, plan 0072); 0 shows the first page.
+    fill: usize,
+    /// A smaller page bound for tests.
+    #[cfg(test)]
+    test_pages: Option<usize>,
     error: Option<AppError>,
     running: bool,
     cancel: Option<CancelToken>,
@@ -131,6 +237,8 @@ impl Slot {
         }
         self.ready = None;
         self.held = None;
+        self.parts.clear();
+        self.fill = 0;
         self.error = None;
         self.spec = None;
         self.revision = None;
@@ -140,6 +248,7 @@ impl Slot {
         let held = self.ready.take().or_else(|| self.held.take());
         self.clear();
         self.held = held;
+        self.origin = cursor.is_none();
         self.spec = Some(spec.clone());
         self.revision = Some(revision);
         self.pending = Some(Job {
@@ -148,25 +257,95 @@ impl Slot {
             cursor,
             serial: self.serial,
             cancel: CancelToken::new(),
+            append: false,
         });
+    }
+    /// Whether the window can take another page.
+    fn room(&self) -> bool {
+        #[cfg(test)]
+        let pages = self.test_pages.unwrap_or(WINDOW_PAGES);
+        #[cfg(not(test))]
+        let pages = WINDOW_PAGES;
+        self.parts.len() < pages
+            && self
+                .parts
+                .iter()
+                .map(|p| p.rows.text_bytes())
+                .sum::<usize>()
+                < WINDOW_TEXT
+    }
+    /// Queues the window's next page, keeping what is shown.
+    fn append(&mut self, cursor: ViewCursor) {
+        let (Some(spec), Some(revision)) = (self.spec.clone(), self.revision) else {
+            return;
+        };
+        self.pending = Some(Job {
+            spec,
+            revision,
+            cursor: Some(cursor),
+            serial: self.serial,
+            cancel: CancelToken::new(),
+            append: true,
+        });
+    }
+    /// A failed read: a refill shows the pages it already has.
+    fn failed(&mut self, error: AppError) {
+        if self.fill > 0 && !self.parts.is_empty() {
+            self.ready = merge(&self.parts);
+        }
+        self.held = None;
+        self.fill = 0;
+        self.error = Some(error);
+    }
+    /// A loaded page: grows or replaces the window, keeps refilling a
+    /// replaced window up to `fill` pages, then shows it.
+    fn loaded(&mut self, page: Page, append: bool) {
+        let page = Arc::new(page);
+        if !append {
+            self.parts.clear();
+        }
+        let windowed = page.rows.windowed();
+        self.parts.push(page);
+        if windowed
+            && self.parts.len() < self.fill
+            && self.room()
+            && let Some(next) = self.parts.last().and_then(|p| p.next.clone())
+        {
+            // Still refilling: the held rows stay on screen.
+            self.append(next);
+            return;
+        }
+        self.fill = 0;
+        self.held = None;
+        self.ready = merge(&self.parts);
     }
     fn snapshot(&self) -> Read {
         let loading = self.running || self.pending.is_some();
         let held = self
             .held
             .clone()
-            .filter(|_| loading && self.ready.is_none());
+            .filter(|_| (loading || self.fill > 0) && self.ready.is_none());
+        let window = self
+            .ready
+            .as_ref()
+            .filter(|p| p.rows.windowed())
+            .map(|_| (self.origin, self.room()));
         Read {
-            stale: held.is_some(),
+            // Reloading the same list after a vault change shows its rows as
+            // current (no dimming); another list's rows are stale.
+            stale: held.is_some() && self.fill == 0,
             page: self.ready.clone().or(held),
             loading,
             error: self.error,
             serial: self.serial,
+            window,
         }
     }
 }
 
-/// At most three cached pages and three active view workers; no page history.
+/// Three lanes and at most three active view workers; no page history. A
+/// scrolling list's lane holds its window (at most [`WINDOW_PAGES`] pages),
+/// the others one page.
 #[derive(Default)]
 pub(crate) struct Reads {
     slots: [Slot; 3],
@@ -393,6 +572,7 @@ impl Controller {
                     error: Some(error.into()),
                     serial: 0,
                     stale: false,
+                    window: None,
                 });
             }
         };
@@ -409,7 +589,15 @@ impl Controller {
                 return None;
             }
             if slot.spec.as_ref() != Some(&spec) || slot.revision != Some(revision) {
+                // A changed vault reloads the same list as far as it was
+                // read, so an edit keeps the user's rows and place.
+                let fill = if slot.spec.as_ref() == Some(&spec) && slot.origin {
+                    slot.parts.len()
+                } else {
+                    0
+                };
                 slot.request(spec, revision, None);
+                slot.fill = fill;
             }
             let start = !slot.running && slot.pending.is_some();
             if start {
@@ -437,16 +625,36 @@ impl Controller {
             return;
         }
         let Some(page) = &slot.ready else { return };
+        let revision = page.revision;
+        let Some(spec) = slot.spec.clone() else {
+            return;
+        };
+        if page.rows.windowed() {
+            // The window grows as the list scrolls; a full one is replaced
+            // by the next ("Show more"), and Back returns to the start.
+            if slot.running || slot.pending.is_some() {
+                return;
+            }
+            if !forward {
+                if !slot.origin {
+                    slot.request(spec, revision, None);
+                }
+            } else if let Some(next) = page.next.clone() {
+                if slot.room() {
+                    slot.append(next);
+                } else {
+                    slot.request(spec, revision, Some(next));
+                }
+            }
+            state.revision = state.revision.wrapping_add(1);
+            return;
+        }
         let cursor = if forward {
             page.next.clone()
         } else {
             page.previous.clone()
         };
         let Some(cursor) = cursor else { return };
-        let revision = page.revision;
-        let Some(spec) = slot.spec.clone() else {
-            return;
-        };
         slot.request(spec, revision, Some(cursor));
         state.revision = state.revision.wrapping_add(1);
     }
@@ -493,14 +701,15 @@ impl Controller {
                     let slot = &mut state.pages.slots[lane as usize];
                     if slot.serial == job.serial && !job.cancel.is_cancelled() {
                         slot.cancel = None;
-                        slot.held = None;
                         match result {
                             Ok(page) if page.revision == job.revision => {
-                                slot.ready = Some(Arc::new(page));
+                                slot.loaded(page, job.append);
                                 slot.error = None;
                             }
-                            Ok(_) => slot.error = Some(AppError::Core(CoreError::StaleHandle)),
-                            Err(error) => slot.error = Some(error.into()),
+                            Ok(_) => {
+                                slot.failed(AppError::Core(CoreError::StaleHandle));
+                            }
+                            Err(error) => slot.failed(error.into()),
                         }
                         state.revision = state.revision.wrapping_add(1);
                         drop(state);
@@ -684,33 +893,33 @@ mod tests {
     fn page_reader_preemption_is_bounded_and_previous_pages_need_no_retained_history() {
         let _k = KDF.lock().unwrap_or_else(|e| e.into_inner());
         let env = Env::unlocked();
+        // Groups are not a scrolling window: they turn page by page.
+        let root = env.read(|s| s.root());
         env.read(|s| {
-            let root = s.root()?;
             for i in 0..40 {
-                s.save_entry(s.new_entry(root, "login", &format!("row {i:02}"))?)?;
+                s.save_group(s.new_group(root, &format!("group {i:02}"))?)?;
             }
             Ok(())
         });
-        let owner = env.c.page_owner(Lane::Main, 1).unwrap();
-        let first = ready(&env, owner, items(""));
-        let Rows::Items { items: rows, .. } = &first.rows else {
-            panic!("items")
+        let groups = || Spec::Groups {
+            parent: Some(root),
+            query: Zeroizing::new(String::new()),
         };
-        assert_eq!(rows.len(), 32);
+        let count = |p: &Page| match &p.rows {
+            Rows::Groups(g) => g.len(),
+            _ => panic!("groups"),
+        };
+        let owner = env.c.page_owner(Lane::Main, 1).unwrap();
+        let first = ready(&env, owner, groups());
+        assert_eq!(count(&first), 32);
         let serial = env.c.state().pages.slots[Lane::Main as usize].serial;
         env.c.page_turn(env.epoch(), owner, serial, true);
-        let second = ready(&env, owner, items(""));
-        let Rows::Items { items: rows, .. } = &second.rows else {
-            panic!("items")
-        };
-        assert_eq!(rows.len(), 8);
+        let second = ready(&env, owner, groups());
+        assert_eq!(count(&second), 8);
         let serial = env.c.state().pages.slots[Lane::Main as usize].serial;
         env.c.page_turn(env.epoch(), owner, serial, false);
-        let previous = ready(&env, owner, items(""));
-        let Rows::Items { items: rows, .. } = &previous.rows else {
-            panic!("items")
-        };
-        assert_eq!(rows.len(), 32);
+        let previous = ready(&env, owner, groups());
+        assert_eq!(count(&previous), 32);
         // A callback captured on the preceding page cannot turn the current page.
         let stable_serial = env.c.state().pages.slots[Lane::Main as usize].serial;
         env.c.page_turn(env.epoch(), owner, serial, true);
@@ -720,15 +929,15 @@ mod tests {
         );
         let peer = env.c.page_owner(Lane::Main, 1).unwrap();
         ready(&env, peer, items("absent"));
-        assert!(env.c.page(env.epoch(), owner, items("")).is_none());
+        assert!(env.c.page(env.epoch(), owner, groups()).is_none());
         env.c.release_page(peer);
-        ready(&env, owner, items(""));
+        ready(&env, owner, groups());
         let overlay = env.c.page_owner(Lane::Main, 2).unwrap();
         ready(&env, overlay, items("absent"));
-        assert!(env.c.page(env.epoch(), owner, items("")).is_none());
+        assert!(env.c.page(env.epoch(), owner, groups()).is_none());
         env.c.release_page(overlay);
-        let restored = ready(&env, owner, items(""));
-        assert!(matches!(&restored.rows, Rows::Items { items, .. } if items.len() == 32));
+        let restored = ready(&env, owner, groups());
+        assert_eq!(count(&restored), 32);
         assert!(
             env.c
                 .state()
@@ -739,5 +948,136 @@ mod tests {
                 .count()
                 <= 3
         );
+    }
+
+    fn rows(page: &Page) -> usize {
+        match &page.rows {
+            Rows::Items { items, .. } => items.len(),
+            _ => panic!("items"),
+        }
+    }
+    fn slot(env: &Env) -> std::sync::MutexGuard<'_, crate::controller::State> {
+        env.c.state()
+    }
+
+    // 0012 §1: Ambiguous trust boundary
+    #[test]
+    fn the_item_window_grows_as_the_list_scrolls_and_keeps_its_rows_across_an_edit() {
+        let _k = KDF.lock().unwrap_or_else(|e| e.into_inner());
+        let env = Env::unlocked();
+        env.read(|s| {
+            let root = s.root()?;
+            for i in 0..40 {
+                s.save_entry(s.new_entry(root, "login", &format!("row {i:02}"))?)?;
+            }
+            Ok(())
+        });
+        let owner = env.c.page_owner(Lane::Main, 1).unwrap();
+        let first = ready(&env, owner, items(""));
+        assert_eq!(rows(&first), 32);
+        let read = env.c.page(env.epoch(), owner, items("")).unwrap();
+        assert_eq!(read.window, Some((true, true)), "at the start, with room");
+        // Scrolling to the end appends the next page to the same window.
+        let serial = read.serial;
+        env.c.page_turn(env.epoch(), owner, serial, true);
+        let read = env.c.page(env.epoch(), owner, items("")).unwrap();
+        assert!(
+            read.loading && !read.stale,
+            "the shown rows stay while it loads"
+        );
+        assert!(read.page.as_ref().is_some_and(|p| Arc::ptr_eq(p, &first)));
+        let all = ready(&env, owner, items(""));
+        assert_eq!(rows(&all), 40);
+        assert!(all.next.is_none());
+        assert_eq!(slot(&env).pages.slots[Lane::Main as usize].parts.len(), 2);
+        // At the start, Back does nothing; a stale callback turns nothing.
+        env.c.page_turn(env.epoch(), owner, serial, false);
+        env.c
+            .page_turn(env.epoch(), owner, serial.wrapping_sub(1), true);
+        assert!(
+            slot(&env).pages.slots[Lane::Main as usize]
+                .pending
+                .is_none()
+        );
+        // An edit reloads the window as far as it was read, showing the old
+        // rows as current (not dimmed) until the whole window is back.
+        env.add_entry("row 99", "secret");
+        let read = env.c.page(env.epoch(), owner, items("")).unwrap();
+        assert!(read.loading && !read.stale);
+        assert!(read.page.as_ref().is_some_and(|p| Arc::ptr_eq(p, &all)));
+        let after = ready(&env, owner, items(""));
+        assert_eq!(rows(&after), 41, "both pages reloaded before showing");
+        // Another list starts from its first page; a lock drops the window.
+        let other = ready(&env, owner, items("row 0"));
+        assert_eq!(rows(&other), 10);
+        env.c.lock();
+        assert!(
+            slot(&env)
+                .pages
+                .slots
+                .iter()
+                .all(|s| s.parts.is_empty() && s.ready.is_none() && s.held.is_none())
+        );
+    }
+
+    #[test]
+    fn a_full_window_is_replaced_by_the_next_and_back_returns_to_the_start() {
+        let _k = KDF.lock().unwrap_or_else(|e| e.into_inner());
+        let env = Env::unlocked();
+        env.read(|s| {
+            let root = s.root()?;
+            for i in 0..40 {
+                s.save_entry(s.new_entry(root, "login", &format!("row {i:02}"))?)?;
+            }
+            Ok(())
+        });
+        let owner = env.c.page_owner(Lane::Main, 1).unwrap();
+        ready(&env, owner, items(""));
+        slot(&env).pages.slots[Lane::Main as usize].test_pages = Some(1);
+        let read = env.c.page(env.epoch(), owner, items("")).unwrap();
+        assert_eq!(read.window, Some((true, false)), "full: Show more");
+        env.c.page_turn(env.epoch(), owner, read.serial, true);
+        let rest = ready(&env, owner, items(""));
+        assert_eq!(rows(&rest), 8, "the next window replaces the full one");
+        let read = env.c.page(env.epoch(), owner, items("")).unwrap();
+        assert_eq!(
+            read.window.map(|w| w.0),
+            Some(false),
+            "Back to the start offered"
+        );
+        env.c.page_turn(env.epoch(), owner, read.serial, false);
+        let start = ready(&env, owner, items(""));
+        assert_eq!(rows(&start), 32);
+        let read = env.c.page(env.epoch(), owner, items("")).unwrap();
+        assert_eq!(read.window.map(|w| w.0), Some(true));
+    }
+
+    #[test]
+    fn the_window_is_bounded_by_pages_and_by_row_text() {
+        let page = |text: usize| {
+            Arc::new(Page {
+                rows: Rows::Conflicts(vec![crate::views::ConflictRow {
+                    record: "r".repeat(text),
+                    kind: "entry",
+                    name: None,
+                    versions: 2,
+                }]),
+                next: None,
+                previous: None,
+                revision: 0,
+            })
+        };
+        let mut s = Slot {
+            parts: (0..WINDOW_PAGES - 1).map(|_| page(10)).collect(),
+            ..Slot::default()
+        };
+        assert!(s.room());
+        s.parts.push(page(10));
+        assert!(!s.room(), "at most {WINDOW_PAGES} pages");
+        s.parts = vec![page(WINDOW_TEXT / 2), page(WINDOW_TEXT / 2)];
+        assert!(!s.room(), "at most {WINDOW_TEXT} bytes of row text");
+        let merged = merge(&s.parts).unwrap();
+        assert!(matches!(&merged.rows, Rows::Conflicts(r) if r.len() == 2));
+        assert!(merge(&[]).is_none());
     }
 }

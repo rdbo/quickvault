@@ -302,7 +302,7 @@ fn devices(body: Memo<Option<PageBody>>, busy: Memo<bool>) -> impl IntoView {
                     {move || if scanned.get() {
                         view! { <p class="banner ok" role="status" id="lan-code-scanned"><Svg icon=Icon::Check/>" Code from the QR code"</p> }.into_any()
                     } else {
-                        view! { <Input field=WsField::LanCode label="Code" kind=Kind::Secret autofocus=true/> }.into_any()
+                        view! { <Input field=WsField::LanCode label="Code" kind=Kind::Secret autofocus=true reveal=true/> }.into_any()
                     }}
                     <Input field=WsField::LanEndpoint label="The other device's address (ip:port)" kind=Kind::Line autofocus=scanned.get_untracked()/>
                     <div class="actions">
@@ -578,8 +578,10 @@ fn settings_row(
 }
 
 fn guidance(g: qv_ui_api::Guidance) -> impl IntoView {
+    let rated = g.meter.is_some();
     view! {
-        {g.fair.then(|| view! { <div class="banner"><Svg icon=Icon::Warn/><span>"This password is fair. Consider a longer, less predictable passphrase."</span></div> })}
+        {crate::input::meter_view(g.meter)}
+        {(g.fair && !rated).then(|| view! { <div class="banner"><Svg icon=Icon::Warn/><span>"This password is fair. Consider a longer, less predictable passphrase."</span></div> })}
         <button class="link" on:click=act(WsAct::SuggestPassword)>"Suggest a six-word passphrase"</button>
         {g.suggestion.map(|s| view! { <div class="phrase single mono revealed">{s.to_string()}</div><p class="hint">"Visible for 30 seconds."</p> })}
     }
@@ -760,7 +762,7 @@ fn settings(body: Memo<Option<PageBody>>, pane: Pane) -> impl IntoView {
                 <div class="group-t">"CHANGE MASTER PASSWORD"</div>
                 <div class="card card-pad">
                     <p class="hint">"Older copies of the vault and its password slot still open with the old password. After a suspected compromise, rotate keys instead."</p>
-                    <Input field=WsField::NewPassword label="New master password" kind=Kind::Secret/>
+                    <Input field=WsField::NewPassword label="New master password" kind=Kind::Secret rate=true/>
                     <Input field=WsField::Repeat label="Type it again" kind=Kind::Secret/>
                     {move || g.get().map(guidance)}
                     <div class="actions"><button class="btn primary" id="change-password" data-qv-clear="true" on:click=act(WsAct::ChangePassword)>"Change master password"</button></div>
@@ -819,7 +821,7 @@ fn settings(body: Memo<Option<PageBody>>, pane: Pane) -> impl IntoView {
                 {head("Rotate vault keys".into(), "Creates a new key generation with a new master password and a new recovery phrase. It can take a while, can be resumed, and locks the vault when it finishes.".into(), nested)}
                 <div class="card card-pad">
                     <Input field=WsField::Confirmation label="Type rotate to continue" kind=Kind::Line/>
-                    <Input field=WsField::NewPassword label="New master password" kind=Kind::Secret/>
+                    <Input field=WsField::NewPassword label="New master password" kind=Kind::Secret rate=true/>
                     <Input field=WsField::Repeat label="Type it again" kind=Kind::Secret/>
                     {move || g.get().map(guidance)}
                     <div class="actions"><button class="btn danger" data-qv-clear="true" on:click=act(WsAct::BeginRotation)>"Prepare key rotation"</button></div>

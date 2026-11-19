@@ -507,6 +507,8 @@ pub enum WsAction {
     KeepSnapshots(bool),
     /// Dismiss the current notice or report.
     Dismiss,
+    /// Rate the new master password once typing pauses (0010 §4.2).
+    RatePassword,
 }
 /// The notice of a change saved without its snapshot (0007 §3.3).
 pub(crate) const SNAPSHOT_SKIPPED: &str = "Saved, but there wasn't enough free space to keep a snapshot of the vault from before this change.";
@@ -691,6 +693,8 @@ pub struct Workspace {
     pub(crate) weak_until: Option<Instant>,
     pub(crate) weak_accepted: bool,
     pub(crate) fair_warning: bool,
+    /// The live rating of the new master password (0010 §4.2, plan 0072).
+    pub(crate) rating: crate::meter::Rating,
     clip: Option<Clip>,
 }
 impl Drop for Workspace {
@@ -798,6 +802,7 @@ impl Workspace {
             weak_until: None,
             weak_accepted: false,
             fair_warning: false,
+            rating: crate::meter::Rating::default(),
             clip: None,
         };
         if recovered_with_phrase {
@@ -819,6 +824,7 @@ impl Workspace {
             crate::preview::close();
         }
         self.inputs.clear();
+        self.rating.clear();
         self.lan_scanned = false;
         self.generated = None;
         self.weak_until = None;
@@ -1227,10 +1233,9 @@ impl Controller {
                 apply_input(ws, field, value)
             };
             if matches!(field, WsField::NewPassword) {
-                ws.fair_warning =
-                    qv_core::MasterPassword::from_utf8(ws.input(field)).is_ok_and(|p| {
-                        qv_core::password_strength(&p).verdict == qv_core::PasswordVerdict::Warn
-                    });
+                // Rated once typing pauses (WsAction::RatePassword), not per
+                // keystroke (plan 0072).
+                ws.rating.typed(ws.input(field).is_empty());
             }
             match result {
                 Ok(()) => ws.error = None,

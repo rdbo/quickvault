@@ -57,6 +57,13 @@ let stage=1,passed=false,lastMedia=null;
 const mark=n=>{stage=n;const result=document.getElementById("validation-result");if(result){result.value=`MEDIA-STAGE:${n}`;result.dispatchEvent(new Event("input",{bubbles:true}));}};
 try{
  await wait(()=>!!document.querySelector(".shelf"));
+ // The list scrolls as one window (plan 0072): 41 rows arrive as two pages,
+ // the second when the list's end comes into view; no Previous/Next.
+ mark(60);const rowCount=()=>document.querySelectorAll("#rows .row").length;
+ await wait(()=>rowCount()===32&&!!document.querySelector("[data-qv-more]"));
+ if([...document.querySelectorAll("button")].some(b=>["Next","Previous"].includes(b.textContent.trim())))throw new Error("paging buttons");
+ document.querySelector("[data-qv-more]").scrollIntoView({block:"end"});
+ await wait(()=>rowCount()===41&&!document.querySelector("[data-qv-more]"));
  mark(2);await open("a-audio.wav");await wait(()=>!!document.querySelector(".viewer audio"));
  const audio=document.querySelector(".viewer audio");lastMedia=audio;
  // Linux plays verified media from memory (WebKitGTK buffers HTTP media to disk; plan 0057).
@@ -134,15 +141,32 @@ try{
  const ahead=()=>long.buffered.length?long.buffered.end(long.buffered.length-1):0;
  if(blobbed){await wait(()=>ahead()>=20);if(ahead()>45)throw new Error("buffered too far ahead");}
  press(long,".v-play");await moving(long,0.1,10);
+ // Far seeks append at the target in the same source: no reload, so the
+ // picture is never blanked (plan 0072).
+ let emptied=0;const count=()=>emptied++;long.addEventListener("emptied",count);
  mark(91);long.currentTime=70;await wait(()=>!long.seeking);mark(93);await moving(long,70,80);
  if(blobbed&&(!long.buffered.length||long.buffered.start(0)<60))throw new Error("stale data kept");
+ // A paused jump far back (the data there was dropped) shows the chosen
+ // frame before Play, again without a reload.
+ if(blobbed){
+  mark(95);press(long,".v-play");await wait(()=>long.paused);
+  await select(long,10);press(long,".v-play");await moving(long,10,14);
+ }
+ long.removeEventListener("emptied",count);
+ if(blobbed&&emptied)throw new Error("far seek reloaded the source");
  mark(92);await tap("viewer-close");await wait(()=>reset(long));
  mark(8);await open("c-image.png");await wait(()=>!!document.querySelector(".viewer img"));
  await wait(()=>document.querySelector(".viewer img").naturalWidth===64);
  await tap("viewer-close");await wait(()=>!document.querySelector(".viewer"));
  mark(9);await open("d-large.png");await wait(()=>!!document.getElementById("viewer-load-image"));
  if(document.querySelector(".viewer img")||!document.querySelector(".viewer").textContent.includes("5000 × 4000"))throw new Error("implicit large decode");
+ // Consent loads it: over 64 KiB, so it arrives range by range as a blob
+ // image (plan 0072); closing drops the blob.
+ mark(94);await tap("viewer-load-image");await wait(()=>!!document.querySelector(".viewer img"));
+ const big=document.querySelector(".viewer img");await wait(()=>big.naturalWidth===5000&&big.naturalHeight===4000);
+ if(!big.src.startsWith("blob:"))throw new Error("image not from memory");
  await tap("viewer-close");await wait(()=>!document.querySelector(".viewer"));
+ if(big.hasAttribute("src"))throw new Error("image source kept");
  mark(10);await open("a-audio.wav");await wait(()=>!!document.querySelector(".viewer audio"));
  const lockedAudio=document.querySelector(".viewer audio");lastMedia=lockedAudio;await ready(lockedAudio);lockedAudio.muted=true;press(lockedAudio,".v-play");await wait(()=>lockedAudio.currentTime>0.2);
  document.querySelector("[data-qv-epoch]").dispatchEvent(new KeyboardEvent("keydown",{key:"l",ctrlKey:true,bubbles:true}));

@@ -450,6 +450,12 @@ fn colours_and_groups_are_saved_with_the_item() {
     env.act(WsAction::StartAs(Some(ItemType::Login)));
     assert_eq!(form(&env).group, root);
     env.act(WsAction::SetGroup(work));
+    // The form's group chip shows the group's own color, not the item's
+    // or an automatic one (plan 0072).
+    let (name, colour) = env.read(|s| views::group_chip(s, work));
+    assert_eq!((name.as_str(), colour), ("Work", Some(5)));
+    let (name, colour) = env.read(|s| views::group_chip(s, root));
+    assert_eq!((name.as_str(), colour), ("No group", None));
     env.act(WsAction::SetHue(Some(3)));
     env.act(WsAction::SetHue(Some(12)));
     assert_eq!(env.error(), Some(AppError::InvalidInput));

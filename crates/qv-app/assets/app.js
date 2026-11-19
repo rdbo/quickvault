@@ -24,7 +24,7 @@ function stopMedia(root){
             // detaching the source and resetting the decoder.
             if(node.readyState===0)node.currentTime=0;
         }
-        else if(node instanceof HTMLImageElement)node.removeAttribute("src");
+        else if(node instanceof HTMLImageElement){dropBlob(node);node.removeAttribute("src");}
     }
 }
 function revokeHiddenPreview(){
@@ -50,6 +50,23 @@ function focusInserted(records){
     }
     if(document.activeElement===document.body)document.querySelector("[data-qv-epoch]")?.focus();
 }
+// A scrolling list loads its next page when its end comes near the viewport
+// (plan 0072): the page marks that end with an enabled [data-qv-more].
+let moreQueued=false;
+function loadMore(){
+    if(moreQueued)return;
+    moreQueued=true;
+    requestAnimationFrame(()=>{
+        moreQueued=false;
+        if(document.hidden)return;
+        for(const button of document.querySelectorAll("[data-qv-more='true']:not([disabled])")){
+            const box=button.getBoundingClientRect();
+            if(button.getClientRects().length&&box.top<window.innerHeight+800&&box.bottom>-800)button.click();
+        }
+    });
+}
+document.addEventListener("scroll",loadMore,{capture:true,passive:true});
+window.addEventListener("resize",loadMore,{passive:true});
 const forms=new MutationObserver(records=>{
     for(const record of records)for(const node of record.removedNodes)stopMedia(node);
     const epoch=document.querySelector("[data-qv-epoch]")?.getAttribute("data-qv-epoch");
@@ -59,6 +76,7 @@ const forms=new MutationObserver(records=>{
     focusInserted(records);
     revokeHiddenPreview();
     autoPrompt();
+    loadMore();
 });
 forms.observe(document,{subtree:true,childList:true,attributes:true,attributeFilter:["data-qv-epoch","data-qv-autoprompt","data-qv-src"]});
 document.addEventListener("click",event=>{

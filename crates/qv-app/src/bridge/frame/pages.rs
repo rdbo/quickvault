@@ -296,6 +296,16 @@ fn protection_gaps(
 fn guidance(ctx: &Ctx<'_>) -> api::Guidance {
     api::Guidance {
         fair: ctx.c.peek(ctx.epoch, |ws| ws.fair_warning).unwrap_or(false),
+        // Cleared inputs show no stale rating.
+        meter: ctx
+            .c
+            .peek(ctx.epoch, |ws| {
+                ws.rating
+                    .meter
+                    .filter(|_| !ws.input(crate::workspace::WsField::NewPassword).is_empty())
+            })
+            .flatten()
+            .map(convert::meter),
         suggestion: generated(ctx.c, ctx.epoch),
     }
 }

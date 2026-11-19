@@ -7,6 +7,25 @@ Dates are ISO 8601. Newest first within each section.
 
 ## Unreleased
 
+- 2026-11-19: Owner feedback batch (plan 0072). Lists (items, trash,
+  conflicts) scroll as one list: the next page loads as the end comes into
+  view, up to 1,024 rows at once; beyond that "Show more" and "Back to the
+  start" replace Previous/Next, and an edit keeps the rows on screen. The
+  new master password shows its strength (label, bits, bar) while you type,
+  rated in Rust once typing pauses; the weak-password confirmation is
+  unchanged, and the Settings password field no longer runs the estimate on
+  every keystroke. The join and sync code fields have Show/Hide. Scanning a
+  join code on a new install opens the protection review and joins once it
+  is acknowledged. Toasts and the sync receipt fade out. The item editor's
+  group chip shows the group's own color. Fixed: images over 64 KiB opened
+  to an empty viewer (1.2.0; the media scheme answers 64 KiB per request and
+  an image asks only once), so the viewer now reads images in ranges into a
+  blob, up to 64 MB. Desktop video: a jump to an unbuffered position (for
+  example the end, after a replay) appends there in the same stream instead
+  of rebuilding it, so the picture no longer blanks. Specs 0003 §6.4, 0004
+  §7.4, 0009, 0010 §4.2, 0014 §6.3–§6.4 amended; WEBKIT.md W4 and W5
+  updated.
+
 ## 1.2.0 — 2026-11-18
 
 - 2026-11-18: Version 1.2.0 (release notes: `docs/release-notes/1.2.0.md`).

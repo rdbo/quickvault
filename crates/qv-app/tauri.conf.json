@@ -12,7 +12,7 @@
         "default-src": "'none'",
         "script-src": "'self' 'wasm-unsafe-eval'",
         "style-src": "'self'",
-        "img-src": "'self' qvmedia: http://qvmedia.localhost",
+        "img-src": "'self' qvmedia: http://qvmedia.localhost blob:",
         "font-src": "'self'",
         "media-src": "'self' qvmedia: http://qvmedia.localhost blob:",
         "connect-src": "'self' ipc: http://ipc.localhost qvmedia: http://qvmedia.localhost",

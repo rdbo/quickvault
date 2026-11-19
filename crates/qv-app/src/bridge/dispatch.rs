@@ -174,6 +174,7 @@ fn ws_back(c: &Controller, epoch: FormEpoch, refs: &Refs, a: &api::WsAct) -> Opt
         A::Answer(b) => WsAction::Answer(*b),
         A::KeepSnapshots(b) => WsAction::KeepSnapshots(*b),
         A::Dismiss => WsAction::Dismiss,
+        A::RatePassword => WsAction::RatePassword,
     })
 }
 
@@ -441,6 +442,7 @@ fn handle_act(
             c.touch();
         }
         Act::QuickStarted => c.quick_started(),
+        Act::RatePassword => c.rate_password(epoch),
         Act::SelectMode(m) => c.select_mode(epoch, convert::mode_back(m)),
         Act::SelectVault(r) => {
             let path = refs.vault(r).ok_or(missing)?;

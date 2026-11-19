@@ -441,6 +441,8 @@ pub struct View {
     pub positions: [usize; 3],
     /// A fair master password receives an inline warning.
     pub fair_warning: bool,
+    /// The live rating of the new master password (0010 §4.2).
+    pub meter: Option<crate::meter::Meter>,
     /// A generated six-word suggestion is currently visible.
     pub suggestion_visible: bool,
     /// Current process and memory-lock hardening is reduced.
@@ -477,6 +479,11 @@ impl View {
     /// Whether the Join form's code came from a scan (it is never rendered).
     pub fn code_scanned(&self) -> bool {
         self.status == QR_SCANNED || self.status == QR_READY
+    }
+    /// A scanned join with endpoints waits only for the protection review,
+    /// which the page opens at once (0014 §6.3, plan 0072).
+    pub fn join_review(&self) -> bool {
+        self.status == QR_READY
     }
     /// A locked-screen confirmation to show, if the status is one.
     pub fn notice(&self) -> Option<&'static str> {
@@ -545,6 +552,7 @@ pub(crate) struct State {
     pub(crate) active: Instant,
     weak_until: Option<Instant>,
     fair_warning: bool,
+    rating: crate::meter::Rating,
     suggestion: Option<qv_core::Generated>,
     suggestion_until: Option<Instant>,
     /// Advanced only by a lock; worker results apply to the same generation.
@@ -587,6 +595,7 @@ pub(crate) struct State {
 }
 impl State {
     fn clear_inputs(&mut self) {
+        self.rating.clear();
         self.suggestion = None;
         self.suggestion_until = None;
         for input in &mut self.inputs {
@@ -744,6 +753,7 @@ impl Controller {
                 active: Instant::now(),
                 weak_until: None,
                 fair_warning: false,
+                rating: crate::meter::Rating::default(),
                 suggestion: None,
                 suggestion_until: None,
                 lock_gen: 0,
@@ -1398,6 +1408,11 @@ impl Controller {
             reduced_lifecycle: cfg!(target_os = "linux")
                 && !self.0.monitoring.load(Ordering::SeqCst),
             fair_warning: s.fair_warning,
+            // Cleared inputs show no stale rating.
+            meter: s
+                .rating
+                .meter
+                .filter(|_| !s.inputs[InputField::Password.index()].is_empty()),
             suggestion_visible: s.suggestion.is_some()
                 && s.suggestion_until.is_some_and(|t| Instant::now() < t),
             rotation_confirmed: s.rotation_confirmed,
@@ -1499,6 +1514,9 @@ impl Controller {
                     // The chosen file name and the repeat check gate creation.
                     s.revision = s.revision.wrapping_add(1);
                 }
+                if field == InputField::Password {
+                    s.rating.typed(value.is_empty());
+                }
                 if matches!(field, InputField::Password | InputField::Repeat) {
                     s.weak_until = None;
                     if s.phase == Phase::WeakPassword {
@@ -1509,6 +1527,21 @@ impl Controller {
         }
         value.zeroize();
         value.clear();
+    }
+    /// Rates the new master password once typing pauses (0010 §4.2, plan
+    /// 0072); a no-op unless it changed since the last rating.
+    pub fn rate_password(&self, epoch: FormEpoch) {
+        let mut s = self.state();
+        if epoch.0 != s.epoch || s.mode != Mode::Create || self.0.working.load(Ordering::SeqCst) {
+            return;
+        }
+        let s = &mut *s;
+        if s.rating.rate(
+            s.inputs[InputField::Password.index()].expose_secret(),
+            s.suggestion.as_ref(),
+        ) {
+            s.revision = s.revision.wrapping_add(1);
+        }
     }
     /// Copy the phrase only for the current confirmation screen. Application
     /// state never holds a plaintext String; the trusted renderer has best-effort
@@ -2903,6 +2936,46 @@ mod tests {
         );
         assert!(!env.dir.join("vaults/main.qvault").exists());
     }
+    #[test]
+    fn create_rates_the_new_password_only_when_asked_and_drops_it_on_lock() {
+        let env = Env::new();
+        env.controller
+            .select_mode(env.controller.snapshot().epoch, Mode::Create);
+        env.fill(InputField::Password, "password");
+        assert_eq!(
+            env.controller.snapshot().meter,
+            None,
+            "typing alone rates nothing"
+        );
+        let epoch = env.controller.snapshot().epoch;
+        env.controller.rate_password(epoch);
+        let weak = env.controller.snapshot().meter.unwrap();
+        assert_eq!(weak.strength, qv_core::Strength::Weak);
+        // The repeat field is not rated; the rating stays until the next pause.
+        env.fill(InputField::Repeat, "password");
+        env.fill(
+            InputField::Password,
+            "correct horse battery staple tumbles over quietly",
+        );
+        assert_eq!(env.controller.snapshot().meter, Some(weak));
+        env.controller.rate_password(epoch);
+        assert!(env.controller.snapshot().meter.unwrap().bits > weak.bits);
+        // An emptied field shows no rating; a stale epoch rates nothing.
+        env.fill(InputField::Password, "");
+        assert_eq!(env.controller.snapshot().meter, None);
+        env.fill(InputField::Password, "password");
+        env.controller
+            .rate_password(FormEpoch(epoch.0.wrapping_add(1)));
+        assert_eq!(env.controller.snapshot().meter, None);
+        env.controller.rate_password(epoch);
+        assert!(env.controller.snapshot().meter.is_some());
+        env.os.event();
+        assert_eq!(
+            env.controller.snapshot().meter,
+            None,
+            "lock clears the rating"
+        );
+    }
     // 0012 §1: Webview exposure
     #[test]
     fn controller_generator_display_expires_and_lock_discards_the_suggestion() {
@@ -3140,6 +3213,7 @@ mod qr_tests {
             );
             assert_eq!(env.c.snapshot().notice(), Some(QR_READY));
             assert!(env.c.snapshot().code_scanned());
+            assert!(env.c.snapshot().join_review(), "the page opens the review");
         }
         assert!(
             !env.c.snapshot().busy,

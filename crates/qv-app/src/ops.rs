@@ -283,6 +283,16 @@ pub(crate) fn run(
                 ws.undo = None;
             })
             .ok_or(AppError::InvalidInput),
+        WsAction::RatePassword => c
+            .with_ws(epoch, |ws, _| {
+                // Disjoint fields: no copy of the password.
+                let typed = ws
+                    .inputs
+                    .get(&WsField::NewPassword)
+                    .map_or(&[][..], qv_core::SecretBytes::expose_secret);
+                ws.rating.rate(typed, ws.generated.as_ref().map(|(g, _)| g));
+            })
+            .ok_or(AppError::InvalidInput),
         WsAction::Hide => c
             .with_ws(epoch, |ws, _| Controller::hide(ws))
             .ok_or(AppError::InvalidInput),

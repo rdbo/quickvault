@@ -988,6 +988,11 @@ fn security_settings_password_change_phrase_redisplay_and_rotation() {
     env.act(WsAction::ChangePassword);
     assert_eq!(env.error(), Some(AppError::InvalidInput));
     env.put(WsField::NewPassword, "password");
+    // The live rating runs only when the page asks after a pause (plan 0072).
+    let meter = |env: &Env| env.c.peek(env.epoch(), |ws| ws.rating.meter).flatten();
+    assert_eq!(meter(&env), None);
+    env.act(WsAction::RatePassword);
+    assert_eq!(meter(&env).unwrap().strength, qv_core::Strength::Weak);
     env.put(WsField::Repeat, "password");
     env.act(WsAction::ChangePassword);
     assert_eq!(env.c.pending(env.epoch()), Some(ConfirmKind::WeakPassword));
@@ -1004,6 +1009,12 @@ fn security_settings_password_change_phrase_redisplay_and_rotation() {
     if let Some(ConfirmKind::OldSnapshots(_)) = env.c.pending(env.epoch()) {
         env.act(WsAction::Answer(false));
     }
+    assert_eq!(
+        env.c
+            .peek(env.epoch(), |ws| ws.input(WsField::NewPassword).is_empty()),
+        Some(true),
+        "the change clears the field, so no rating is shown"
+    );
     env.c.lock();
     env.unlock(PASSWORD);
     assert_eq!(env.c.snapshot().phase, Phase::Locked);

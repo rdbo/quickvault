@@ -172,6 +172,18 @@ pub(crate) fn group_row(g: &qv_core::GroupSummary) -> GroupRow {
         entries: g.entries,
     }
 }
+/// The group chip of an item form: its name and its chosen color, or
+/// "No group" and no color for the root (plan 0072).
+pub fn group_chip(s: &Session, group: GroupHandle) -> Result<(Z, Option<u8>), CoreError> {
+    if s.root()? == group {
+        return Ok((z("No group"), None));
+    }
+    let g = s.group(group)?;
+    Ok((
+        z(g.name.expose()),
+        crate::editor::colour(g.icon.as_ref().map(Text::expose)),
+    ))
+}
 /// The vault at a glance.
 #[derive(Clone, PartialEq)]
 pub struct OverviewView {

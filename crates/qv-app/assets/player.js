@@ -12,7 +12,8 @@
 // playback position are fetched and rewritten as fragments, so memory stays
 // bounded whatever the file size (plan 0059). Other files, and an MP4 the
 // engine cannot stream this way, are fetched whole into a blob (the app
-// refuses those over 256 MiB). Everything is dropped with the preview.
+// refuses those over 256 MiB). Images are read whole into a blob on every
+// platform (loadImage). Everything is dropped with the preview.
 const blobs=new WeakMap();
 function dropBlob(media){
     const held=blobs.get(media);
@@ -62,13 +63,37 @@ function loadWhole(media,held,source,type,startAt,begin){
         })
         .catch(()=>{if(blobs.get(media)===held)dropBlob(media);});
 }
+// Images on every platform (plan 0072): an <img> asks once and the scheme
+// answers at most 64 KiB, so the image is read range by range into a blob,
+// at most 64 MiB (the viewer offers a saved copy for larger ones).
+const IMAGE_MAX=64*1024*1024;
+function loadImage(img){
+    dropBlob(img);
+    img.removeAttribute("src");
+    img.removeAttribute("data-qv-failed");
+    const source=img.getAttribute("data-qv-src");
+    if(!source||document.hidden)return;
+    const type=img.getAttribute("data-qv-type")||"";
+    const total=Number(img.getAttribute("data-qv-size")||0);
+    const held={abort:new AbortController(),url:null,wipe(){}};
+    blobs.set(img,held);
+    (Number.isSafeInteger(total)&&total>0&&total<=IMAGE_MAX?fetchRange(source,held,0,total):Promise.reject(new Error("size")))
+        .then(bytes=>{
+            if(blobs.get(img)!==held||!img.isConnected){bytes.fill(0);return;}
+            held.url=URL.createObjectURL(new Blob([bytes],{type}));
+            bytes.fill(0);
+            img.src=held.url;
+        })
+        .catch(()=>{if(blobs.get(img)===held){dropBlob(img);img.setAttribute("data-qv-failed","true");}});
+}
+function loadSource(node){if(node instanceof HTMLImageElement)loadImage(node);else loadBlob(node);}
 function loadBlobs(records){
     for(const record of records){
-        if(record.type==="attributes"&&record.attributeName==="data-qv-src"){loadBlob(record.target);continue;}
+        if(record.type==="attributes"&&record.attributeName==="data-qv-src"){loadSource(record.target);continue;}
         for(const node of record.addedNodes){
             if(!(node instanceof Element))continue;
-            if(node.matches("audio[data-qv-src],video[data-qv-src]"))loadBlob(node);
-            for(const media of node.querySelectorAll("audio[data-qv-src],video[data-qv-src]"))loadBlob(media);
+            if(node.matches("audio[data-qv-src],video[data-qv-src],img[data-qv-src]"))loadSource(node);
+            for(const media of node.querySelectorAll("audio[data-qv-src],video[data-qv-src],img[data-qv-src]"))loadSource(media);
         }
     }
 }
@@ -202,7 +227,7 @@ async function streamMp4(media,held,source,type,total,startAt){
     const first=fragmentFor(plan,Math.max(0,startAt-1));
     // Until the first fragments are in, the position is `startAt`: WebKit
     // buffers nothing for a seek made before any media data (plan 0059).
-    const st={next:first,busy:false,window:null,seq:1,pending:startAt>0?startAt:null};
+    const st={next:first,first,turn:0,busy:false,window:null,seq:1,pending:startAt>0?startAt:null};
     held.attached=true;
     const ms=new MediaSource();
     media.setAttribute("data-qv-playback","stream");
@@ -215,6 +240,7 @@ async function streamMp4(media,held,source,type,total,startAt){
         st.busy=true;
         try{
             while(live()&&st.next<plan.runs.length){
+                const turn=st.turn;
                 const time=st.pending??media.currentTime;
                 if(plan.runs[st.next].start>time+AHEAD)break;
                 const from=st.next;
@@ -232,6 +258,8 @@ async function streamMp4(media,held,source,type,total,startAt){
                         try{await appendPart(buffer,part);}finally{part.fill(0);}
                     }
                 }finally{bytes.fill(0);st.window=null;}
+                // A seek moved the read position while this window loaded.
+                if(st.turn!==turn)continue;
                 st.next=to;
                 if(st.pending!==null){
                     const r=buffer.buffered;
@@ -247,20 +275,24 @@ async function streamMp4(media,held,source,type,total,startAt){
             if(blobs.get(media)===held)dropBlob(media);
         }finally{st.busy=false;}
     };
-    // A seek outside what is buffered starts a fresh MediaSource at the
-    // target: WebKitGTK's decoder presents no frames after its buffer is
-    // emptied and refilled, the same fault class as replay after the end
-    // (plan 0057), so the source is rebuilt from the live capability there.
-    // Positions this source will still reach by reading ahead (including its
-    // own starting seek) need no rebuild.
+    // A seek outside what is buffered moves the read position to the
+    // fragment before the target and appends there, in this MediaSource:
+    // the old data is removed only afterwards, so the buffer is never
+    // emptied (WebKitGTK presents no frames after its buffer is emptied and
+    // refilled, W5). A fresh MediaSource instead would blank the picture
+    // until its first frame (plan 0072). Positions this source will still
+    // reach by reading ahead (including its own starting seek) need nothing.
     const restart=()=>{
         if(!buffer||!live())return;
         const time=media.currentTime;
         if(buffered(buffer,time))return;
-        const from=plan.runs[first]?.start??0;
+        const from=plan.runs[st.first]?.start??0;
         const next=st.next<plan.runs.length?plan.runs[st.next].start:Infinity;
         if(time>=from&&time<=next+AHEAD)return;
-        loadBlob(media,!media.paused,time);
+        st.first=st.next=fragmentFor(plan,Math.max(0,time-1));st.turn++;
+        // Before any data the start position is still pending (W5).
+        if(st.pending!==null)st.pending=time;
+        pump();
     };
     held.wipe=()=>{
         if(st.window)st.window.fill(0);

@@ -345,7 +345,8 @@ release, but no longer gates the feature.
   ranges through an unguessable per-preview token on the app's in-process
   `qvmedia` scheme (0003 §6.4, 0008 §4), never a plaintext file or whole-media
   response. Closing, navigating away, lock and hiding the window revoke the
-  source. CSP img/media allow only self and that scheme's origin. On Linux,
+  source. CSP img/media allow only self and that scheme's origin, plus `blob:`
+images that the page assembles from range fetches (0003 §6.4). On Linux,
   media plays from renderer memory instead (0003 §6.4), so the CSP also allows
   `blob:` media and a fetch from that scheme. No autoplay; an opened preview may load its media before play
   to show the first frame and duration (0003 §6.4). Explicit replay after the
@@ -613,8 +614,15 @@ and reject late results by form/session epoch (0008). No secret goes into argv,
 logs or non-secret UI preferences. No extra password prompt after transfer.
 
 Browse/search/sidebar/trash/conflicts/All items consume 0004 §7's bounded page
-APIs; app residency is at most three pages plus selected detail. Do not rebuild
-a full All items vector or accumulate all pages in the frontend. Stale results
+APIs. The item, trash and conflict lists scroll continuously over a window
+of at most 32 consecutive pages (1,024 rows, 8 MiB of row text): the next
+page loads as the list's end comes into view. A full window is not trimmed
+while it scrolls (removing rows above the viewport would move the list);
+"Show more" replaces it with the next window, and "Back to the start"
+returns. A vault change reloads the window as far as it was read before
+showing it, so an edit keeps the user's rows. Other lists keep one page;
+selected detail is extra. Do not rebuild a full All items vector or
+accumulate pages beyond that window. Stale results
 are discarded and a changed-snapshot result is surfaced/restarted explicitly.
 
 ## Security Considerations
@@ -636,6 +644,11 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
    webview input (§6, plan 0071).
 
 ## Changelog
+
+- 2026-11-19: §1.8 previews: images over 64 KiB load through range fetches
+  into a `blob:` image; list residency is a scrolling window of at most 32
+  pages instead of three pages, with "Show more" beyond it (owner report,
+  plan 0072).
 
 - 2026-11-18: §6: the migration is complete in 1.2.0 (plan 0071); Dioxus is
   no longer shipped.

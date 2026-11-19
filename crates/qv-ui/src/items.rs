@@ -15,6 +15,9 @@ use qv_ui_api::{
 };
 use std::collections::BTreeSet;
 
+/// The largest image the viewer reads into renderer memory (0003 §6.4).
+const IMAGE_MAX: u64 = 64 * 1024 * 1024;
+
 const MASK: &str = "••••••••";
 
 fn ui_op(op: UiOp) {
@@ -1062,11 +1065,21 @@ pub(crate) fn Viewer(s: Memo<Option<S>>) -> impl IntoView {
                 }.into_any()
             } else {
                 match (p.kind.as_str(), p.src.is_some(), p.text.clone()) {
+                    ("image", true, _) if p.size > IMAGE_MAX => view! {
+                        <div class="v-none" on:click=stop>
+                            <div class="v-none-glyph"><Svg icon=Icon::File large=true/></div>
+                            <b>"This image is too large to preview"</b>
+                            <span>"QuickVault previews images up to 64 MB. Save a copy to open it in another app."</span>
+                        </div>
+                    }.into_any(),
                     ("image", true, _) => {
                         let alt = name.clone();
+                        // An <img> asks the media scheme once and gets at most
+                        // 64 KiB, so player.js reads the image range by range
+                        // into a blob (0003 §6.4, plan 0072).
                         view! {
                             <div class=move || if actual.get() { "v-img actual" } else { "v-img" }>
-                                <img src=src.clone() alt=alt draggable="false" on:click=move |e: web_sys::MouseEvent| { e.stop_propagation(); actual.update(|a| *a = !*a); }/>
+                                <img data-qv-src=src.clone() data-qv-type=mime.clone() data-qv-size=size.clone() alt=alt draggable="false" on:click=move |e: web_sys::MouseEvent| { e.stop_propagation(); actual.update(|a| *a = !*a); }/>
                             </div>
                         }.into_any()
                     }

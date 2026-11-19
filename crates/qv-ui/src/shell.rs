@@ -19,6 +19,53 @@ pub(crate) fn field<T: Clone + PartialEq + Send + Sync + 'static>(
     Memo::new(move |_| s.with(|s| s.as_ref().map_or_else(|| d.clone(), &f)))
 }
 
+/// Keeps a value that disappears for its exit fade (plan 0072): a new value
+/// shows at once; `None` marks the old one leaving for 180 ms, then drops
+/// it. Only status text passes through here, never a secret.
+pub(crate) fn fading<T: Clone + PartialEq + Send + Sync + 'static>(
+    src: Memo<Option<T>>,
+) -> (RwSignal<Option<T>>, RwSignal<bool>) {
+    let shown = RwSignal::new(src.get_untracked());
+    let leaving = RwSignal::new(false);
+    let turn = StoredValue::new(0u64);
+    Effect::new(move |_| {
+        let v = src.get();
+        turn.update_value(|t| *t = t.wrapping_add(1));
+        match v {
+            Some(v) => {
+                leaving.set(false);
+                shown.set(Some(v));
+            }
+            None if shown.with_untracked(Option::is_some) => {
+                leaving.set(true);
+                let mine = turn.get_value();
+                set_timeout(
+                    move || {
+                        if turn.try_get_value() == Some(mine) {
+                            let _ = shown.try_set(None);
+                            let _ = leaving.try_set(false);
+                        }
+                    },
+                    std::time::Duration::from_millis(180),
+                );
+            }
+            None => {}
+        }
+    });
+    (shown, leaving)
+}
+
+/// `class`, plus ` leaving` while it fades out.
+fn leave(class: &'static str, leaving: RwSignal<bool>) -> impl Fn() -> String {
+    move || {
+        if leaving.get() {
+            format!("{class} leaving")
+        } else {
+            class.to_owned()
+        }
+    }
+}
+
 /// The shell frame as a memo.
 pub(crate) fn shell_memo() -> Memo<Option<S>> {
     ui().sel(None, |f| match &f.body {
@@ -41,6 +88,30 @@ pub(crate) fn PageNavBar(#[prop(into)] nav: Signal<Option<PageNav>>) -> impl Int
         nav.get().map(|n| {
             let back = n.clone();
             let fwd = n.clone();
+            if n.window {
+                // A scrolling list (plan 0072): app.js presses the sentinel
+                // when it comes near the viewport; past the window's bound,
+                // "Show more" starts the next window.
+                let start = n.clone();
+                let more = n.clone();
+                return view! {
+                    {n.error.clone().map(|e| view! { <p class="banner warn">{e}</p> })}
+                    {(n.next && n.more).then(|| view! {
+                        <button type="button" class="list-more" data-qv-more="true" disabled=n.loading
+                            on:click=move |_| ui().page_turn(&more, true)>"Loading more…"</button>
+                    })}
+                    {((n.next && !n.more) || n.previous).then(|| {
+                        let next = n.clone();
+                        view! {
+                            <div class="actions start">
+                                {n.previous.then(|| view! { <button type="button" class="btn subtle" disabled=n.loading on:click=move |_| ui().page_turn(&start, false)>"Back to the start"</button> })}
+                                {n.loading.then(|| view! { <span class="muted">"Loading…"</span> })}
+                                {(n.next && !n.more).then(|| view! { <button type="button" class="btn subtle" id="list-show-more" disabled=n.loading on:click=move |_| ui().page_turn(&next, true)>"Show more"</button> })}
+                            </div>
+                        }
+                    })}
+                }.into_any();
+            }
             view! {
                 {n.error.clone().map(|e| view! { <p class="banner warn">{e}</p> })}
                 {(n.previous || n.next).then(|| view! {
@@ -50,7 +121,7 @@ pub(crate) fn PageNavBar(#[prop(into)] nav: Signal<Option<PageNav>>) -> impl Int
                         <button type="button" class="btn subtle" disabled=n.loading || !n.next on:click=move |_| ui().page_turn(&fwd, true)>"Next"</button>
                     </div>
                 })}
-            }
+            }.into_any()
         })
     }
 }
@@ -236,7 +307,9 @@ fn LanDialog(lan: Memo<Option<Lan>>) -> impl IntoView {
 /// The finished operation as a receipt docked at the bottom (0009 §1.8).
 #[component]
 fn ReceiptView(lan: Memo<Option<Lan>>, expanded: RwSignal<bool>) -> impl IntoView {
-    let r = Memo::new(move |_| lan.with(|l| l.as_ref().and_then(|l| l.done.clone())));
+    let (r, leaving) = fading(Memo::new(move |_| {
+        lan.with(|l| l.as_ref().and_then(|l| l.done.clone()))
+    }));
     let keep = move |_| ui().act(Act::LanKeep);
     move || {
         r.get().map(|r: Receipt| {
@@ -244,7 +317,7 @@ fn ReceiptView(lan: Memo<Option<Lan>>, expanded: RwSignal<bool>) -> impl IntoVie
             let more = r.total.saturating_sub(shown);
             let counts = r.counts;
             view! {
-                <div class=format!("receipt {}", r.tone) id="lan-receipt" role="status" aria-live="polite" tabindex="0" on:click=keep on:focus=move |_| ui().act(Act::LanKeep)>
+                <div class=move || format!("receipt {}{}", r.tone, if leaving.get() { " leaving" } else { "" }) id="lan-receipt" role="status" aria-live="polite" tabindex="0" on:click=keep on:focus=move |_| ui().act(Act::LanKeep)>
                     <div class="r-mark"><Svg icon=r.icon large=true/></div>
                     <div class="r-body">
                         <b class="r-title" id="lan-receipt-title">{r.title.clone()}</b>
@@ -589,6 +662,17 @@ pub(crate) fn Shell() -> impl IntoView {
     let busy_toast = field(s, false, |s| s.busy_toast);
     let scanning = field(s, false, |s| s.scanning);
     let toasts = field(s, Default::default(), |s| s.toasts.clone());
+    // Each toast fades out on its own (plan 0072); the copy toast keeps its
+    // element while the seconds count down.
+    let (busy_shown, busy_leaving) = fading(Memo::new(move |_| busy_toast.get().then_some(())));
+    let clip = Memo::new(move |_| toasts.with(|t| (t.clipboard > 0).then_some(t.clipboard)));
+    let (clip_shown, clip_leaving) = fading(clip);
+    let clip_on = Memo::new(move |_| clip_shown.with(Option::is_some));
+    let clip_left = Memo::new(move |_| clip_shown.get().unwrap_or(0));
+    let (err_shown, err_leaving) = fading(Memo::new(move |_| toasts.with(|t| t.error.clone())));
+    let (note_shown, note_leaving) = fading(Memo::new(move |_| {
+        toasts.with(|t| t.notice.clone().map(|n| (n, t.undo.clone())))
+    }));
     let palette_open = field(s, false, |s| s.palette.is_some());
     let viewer_key = field(s, None, |s| s.viewer.as_ref().map(|v| v.key.clone()));
     let anchor = field(s, false, |s| s.anchor_warning);
@@ -683,43 +767,35 @@ pub(crate) fn Shell() -> impl IntoView {
                 }
             }).collect_view()}
         </nav>
-        <Show when=move || busy_toast.get()>
-            <div class="toasts"><div class="toast busy-toast" role="status">"Working… other actions wait until this finishes."</div></div>
-        </Show>
+        {move || busy_shown.get().map(|_| view! {
+            <div class="toasts"><div class=leave("toast busy-toast", busy_leaving) role="status">"Working… other actions wait until this finishes."</div></div>
+        })}
         <LanPanel source=LanSource::Unlocked/>
         <Show when=move || scanning.get()><ScanPanel/></Show>
         <Show when=move || sheet.get() && !busy.get()><VaultCards s open=sheet/></Show>
         {move || viewer_key.get().map(|_| view! { <items::Viewer s/> })}
         <Show when=move || !busy.get()><ConfirmView s/></Show>
         <Show when=move || !busy.get()>
-            {move || {
-                let t = toasts.get();
-                view! {
-                    <div class="toasts">
-                        {(t.clipboard > 0).then(|| view! {
-                            <div class="toast" role="status"><Svg icon=Icon::Copy/><span>{format!("Copied · clears in {} s", t.clipboard)}</span>
-                                // One width per second with a 1 s transition (classes:
-                                // the CSP forbids inline styles).
-                                <span class=format!("bar drain{}", t.clipboard.saturating_sub(1).min(19))></span>
-                            </div>
-                        })}
-                        {t.error.clone().map(|e| view! {
-                            <div class="toast bad" role="alert"><Svg icon=Icon::Warn/><span class="error">{e}</span>
-                                <button on:click=act(WsAct::Dismiss)>"Dismiss"</button>
-                            </div>
-                        })}
-                        {t.notice.clone().map(|n| {
-                            let undo = t.undo.clone();
-                            view! {
-                                <div class="toast" role="status"><Svg icon=Icon::Check/><span class="notice">{n}</span>
-                                    {undo.map(|u| view! { <button id="toast-undo" on:click=act(u.clone())>"Undo"</button> })}
-                                    <button aria-label="Dismiss" on:click=act(WsAct::Dismiss)><Svg icon=Icon::Close/></button>
-                                </div>
-                            }
-                        })}
+            <div class="toasts">
+                {move || clip_on.get().then(|| view! {
+                    <div class=leave("toast", clip_leaving) role="status"><Svg icon=Icon::Copy/><span>{move || format!("Copied · clears in {} s", clip_left.get())}</span>
+                        // One width per second with a 1 s transition (classes:
+                        // the CSP forbids inline styles).
+                        <span class=move || format!("bar drain{}", clip_left.get().saturating_sub(1).min(19))></span>
                     </div>
-                }
-            }}
+                })}
+                {move || err_shown.get().map(|e| view! {
+                    <div class=leave("toast bad", err_leaving) role="alert"><Svg icon=Icon::Warn/><span class="error">{e}</span>
+                        <button on:click=act(WsAct::Dismiss)>"Dismiss"</button>
+                    </div>
+                })}
+                {move || note_shown.get().map(|(n, undo)| view! {
+                    <div class=leave("toast", note_leaving) role="status"><Svg icon=Icon::Check/><span class="notice">{n}</span>
+                        {undo.map(|u| view! { <button id="toast-undo" on:click=act(u.clone())>"Undo"</button> })}
+                        <button aria-label="Dismiss" on:click=act(WsAct::Dismiss)><Svg icon=Icon::Close/></button>
+                    </div>
+                })}
+            </div>
         </Show>
         <Show when=move || palette_open.get() && !busy.get()><Palette s/></Show>
     }

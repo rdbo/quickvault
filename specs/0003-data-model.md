@@ -165,7 +165,11 @@ app's in-process media scheme (`qvmedia`, 0008 §4), with an unguessable
 per-preview token, strict origin/range checks and exact CSP origin; nothing
 listens on a socket. Responses are no-store and carry at most 64 KiB each,
 read into a protected buffer for that one response; the engine and `player.js`
-ask again for the rest. Malformed/multiple/unsatisfiable ranges fail 416
+ask again for the rest. An `<img>` asks only once, so the page fetches an
+image's route in ranges into a renderer-memory `Blob` and shows it from a
+`blob:` URL; it fetches at most 64 MiB of image bytes and revokes the URL and
+drops its copy on close, navigation, lock and hiding (owner report, plan
+0072). Malformed/multiple/unsatisfiable ranges fail 416
 without a full content fallback. Where the platform media engine would buffer streamed media
 to a file (WebKitGTK on Linux writes playing HTTP media to an unlinked file in
 `/var/tmp`), the client instead fetches the verified content over that
@@ -184,8 +188,9 @@ application-owned plaintext for either action. Close, navigation, lock or hiding
 cancels pending playback loads, and late completions must not restore playback.
 A seek restores the selected position and preserves the paused state; moving
 the slider alone does not start playback.
-For that fetch the scheme grants CORS to the app's own origin only, and the
-CSP adds `blob:` to media-src and the scheme's origin to connect-src.
+For these fetches the scheme grants CORS to the app's own origin only, and the
+CSP adds `blob:` to media-src and img-src and the scheme's origin to
+connect-src.
 An audio preview may show levels read by the engine's audio analyser from the
 playing element (owner request, 2026-11-15; plan 0061), only where the engine
 routes media through its analyser without changing what is heard: on Android,
@@ -248,6 +253,11 @@ searchable. Paging MUST NOT silently omit records, fields or conflicts.
    proposed in 0010 §5.
 
 ## Changelog
+
+- 2026-11-19: §6.4: images are fetched in ranges into a renderer `Blob`
+  and shown from a `blob:` URL (at most 64 MiB), since an image element
+  makes one request and the scheme answers at most 64 KiB; img-src adds
+  `blob:` (owner report, plan 0072).
 
 - 2026-11-17: §6.4: previews are served by the in-process `qvmedia` scheme,
   at most 64 KiB per response, instead of the loopback listener (owner

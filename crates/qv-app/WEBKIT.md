@@ -86,6 +86,9 @@ Whenever a new WebKitGTK bug, workaround or limit is found, add an entry here
 - **Code:** `assets/player.js` (`toggle`, the seek `change` handler).
 - **Docs:** 0003 §6.4 ("explicit replay or backward seek after the end"),
   plan 0057.
+- **Limit:** the rebuild swaps the element's source, so the picture is
+  blank for a frame or two (≈ 50–100 ms) before the first frame of the new
+  source (recorded under Xvfb with compositing, plan 0072). Not masked.
 - **On change:** if the new engine replays correctly, use an ordinary
   `currentTime = 0`.
 
@@ -94,12 +97,18 @@ Whenever a new WebKitGTK bug, workaround or limit is found, add an entry here
 - **Symptom:** the decoder presents no frames after its buffer is emptied
   and refilled. A seek made before any media data buffers nothing. A seek
   into a gap at the start stalls.
-- **Response:** a seek outside the buffered data rebuilds the MediaSource at
-  the target. The start position is set after the first window, one second
-  early (B-frames). The fragmenter starts each track at 0, so an edit
-  list's few milliseconds of encoder delay are not applied.
+- **Response:** a seek outside the buffered data moves the read position to
+  the fragment before the target and appends there in the same
+  MediaSource; data far behind is removed only after that, so the buffer
+  is never emptied. Until plan 0072 the MediaSource was rebuilt at the
+  target, which reloaded the element and could blank the picture (the
+  owner saw a flicker on a jump to the unbuffered end after a replay). The
+  start position is set after the first window, one second early
+  (B-frames). The fragmenter starts each track at 0, so an edit list's few
+  milliseconds of encoder delay are not applied.
 - **Code:** `assets/player.js` (`restart`, `streamMp4`, `fragmentMp4`).
-- **Docs:** plan 0059 (step 8).
+- **Docs:** plan 0059 (step 8), plan 0072 (step 8; the media flow asserts
+  that far seeks fire no `emptied`).
 - **On change:** drops out with W1; otherwise re-test seeks outside the
   buffer by counting presented frames.
 

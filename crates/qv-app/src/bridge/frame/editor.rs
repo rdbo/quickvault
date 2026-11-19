@@ -97,15 +97,11 @@ fn form_view(ctx: &mut Ctx<'_>, form: &EntryFormView, types: Vec<api::TypeChoice
     let hue = convert::item_hue(form.colour, &form.id);
     let group = c
         .read(epoch, |s| {
-            let root = s.root()?;
-            let name = if root == form.group {
-                zeroize::Zeroizing::new("No group".to_owned())
-            } else {
-                crate::views::z(s.group(form.group)?.name.expose())
-            };
-            Ok((
+            // The group's own color, as the sidebar shows it (plan 0072).
+            let (name, colour) = crate::views::group_chip(s, form.group)?;
+            Ok::<_, qv_core::CoreError>((
                 Z::from(name),
-                convert::id_hue(&form.group.id_hex()).to_owned(),
+                convert::item_hue(colour, &form.group.id_hex()).to_owned(),
             ))
         })
         .and_then(Result::ok);

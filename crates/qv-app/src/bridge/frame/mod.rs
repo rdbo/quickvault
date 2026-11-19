@@ -46,13 +46,19 @@ impl Ctx<'_> {
         read: Option<&crate::page_read::Read>,
     ) -> Option<api::PageNav> {
         let read = read?;
+        let window = read.window;
         Some(api::PageNav {
             slot: slot.to_owned(),
             serial: read.serial,
-            previous: read.page.as_ref().is_some_and(|p| p.previous.is_some()),
+            previous: match window {
+                Some((origin, _)) => !origin,
+                None => read.page.as_ref().is_some_and(|p| p.previous.is_some()),
+            },
             next: read.page.as_ref().is_some_and(|p| p.next.is_some()),
             loading: read.loading,
             error: read.error.map(|e| e.message().to_owned()),
+            window: window.is_some(),
+            more: window.is_some_and(|(_, room)| room),
         })
     }
 }
