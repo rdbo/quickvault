@@ -2,7 +2,7 @@
 
 | Status | Created | Approved | Specs |
 |--------|---------|----------|-------|
-| Implemented — gates pass; phone check and fresh-context review pending | 2026-11-19 | 2026-11-19 (owner feedback list: "do all of it"; design delegated, standing 2026-11-02) | 0003 §6.4, 0004 §7.4, 0009 §1.8 and list residency, 0010 §4.2, 0014 §6.3–§6.4 |
+| Implemented — gates pass; phone check and fresh-context review pending | 2026-11-19 | 2026-11-19 (owner feedback list: "do all of it"; design delegated, standing 2026-11-02) | 0003 §6.4, 0004 §7.4, 0009 §1.8 and list residency, 0010 §4.2, 0014 §6.3–§6.4; 0009 §1.8 one quick-unlock enrollment (item 10) |
 
 ## Intent
 
@@ -75,6 +75,14 @@ fixed in one batch:
    elements and `player.js` ask again for the rest, an `<img>` does not, so
    every image over 64 KiB is truncated and draws nothing. The validation
    image samples were smaller than 64 KiB.
+10. (Owner report during the phone check, 2026-11-19.) "Joined vault"'s
+   Settings said fingerprint unlock was on, but its locked screen never
+   asked. The phone keeps one enrollment, bound to a vault ID and key
+   generation, and it belonged to the other vault on the test copy
+   (checked against both vault headers). Settings read only "is there an
+   enrollment", and the post-unlock offer skips any vault while one exists
+   (so it never moves another vault's silently), although 0009 §1.8 said
+   "no enrollment for that vault". Older than 1.2.0 (plan 0068).
 
 ## Decisions (owner-delegated, standing 2026-11-02)
 
@@ -116,6 +124,15 @@ fixed in one batch:
   `blob:` in img-src only. An image over 64 MiB of file bytes is not
   fetched (the 64 MiB decode-consent bound still applies first). No
   response grows beyond 64 KiB. 0003 §6.4 and 0008 §4 are amended.
+- D7 (item 10): keep one enrollment per device and keep the offer
+  device-wide; amend 0009 §1.8 to say so. `Session::quick_enrolled`
+  compares the live binding with the open vault (vault ID and key
+  generation, as the locked screen judges a closed vault). Settings shows
+  "on" only in that vault; elsewhere it says off for this vault, names the
+  holder and offers to enroll this vault instead, which ends the other
+  vault's enrollment (the existing enroll replaces the slot). The vault
+  sheet's "open vault has quick unlock" uses the same check instead of
+  "no other listed vault has it".
 
 ## Steps
 
@@ -250,3 +267,11 @@ owner.
   Not done here: the phone check of items 2, 3, 5, 7 and 9 and the
   fresh-context review (preview transport, secret inputs and the list
   window touch 0008 boundaries).
+- 2026-11-19 (item 10, D7): 0009 §1.8 amended. `Session::quick_enrolled`
+  (qv-core), `Controller::quick_holder`, Settings' line and card
+  (`#quick-elsewhere`, `#quick-move`), the vault sheet's open-vault mark.
+  Tests: `dismissal_and_another_vault_keep_the_enrollment` (core: the open
+  other vault is not enrolled, a locked session names none) and
+  `quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only`
+  (app: the second vault names the holder, a password unlock offers
+  nothing, enrolling from its Settings moves the enrollment).

@@ -413,6 +413,16 @@ pub(crate) static ACTIVE: std::sync::OnceLock<Result<Controller, AppError>> =
 /// A current form generation; late input cannot affect a new generation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FormEpoch(pub u64);
+/// Which vault holds the device's one quick-unlock enrollment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum QuickHolder {
+    /// No live enrollment.
+    None,
+    /// The open vault.
+    Open,
+    /// Another vault: its name, when the vault list has it.
+    Other(Option<String>),
+}
 /// Redacted UI snapshot. Phrase display is a separate protected operation.
 #[derive(PartialEq, Eq)]
 pub struct View {
@@ -1231,6 +1241,27 @@ impl Controller {
     pub fn quick_policy(&self) -> Option<qv_core::platform::QuickPolicy> {
         self.0.services.keystore().policy()
     }
+    /// Where the device's one quick-unlock enrollment is (0009 §1.8, plan
+    /// 0072): the open vault, another vault (with its name when it is
+    /// listed), or nowhere.
+    pub fn quick_holder(&self) -> QuickHolder {
+        if self.quick_policy().is_none() {
+            return QuickHolder::None;
+        }
+        let session = self.state().session.clone();
+        if session.is_some_and(|s| s.quick_enrolled()) {
+            return QuickHolder::Open;
+        }
+        let open = self.state().vault_path.clone();
+        QuickHolder::Other(
+            self.vaults()
+                .into_iter()
+                .find(|v| {
+                    open.as_ref() != Some(&v.path) && v.exists && self.quick_ready_for(&v.path)
+                })
+                .map(|v| v.name),
+        )
+    }
     /// Background work the polled UI drives (plan 0045): run the pending
     /// quick-unlock offer once the vault is open.
     pub fn pump(&self) {
@@ -1997,8 +2028,9 @@ impl Controller {
                     core.unlock(&path, &password, Some(token))?
                 };
                 // Offer quick unlock with this password where the device
-                // has it, the user did not turn it off and this vault has
-                // no enrollment yet (0009 §1.8, plan 0045).
+                // has it, the user did not turn it off and the device has
+                // no enrollment yet: another vault's is never moved without
+                // asking (0009 §1.8, plans 0045 and 0072).
                 let offer = matches!(action, Action::Unlock)
                     && !self.prefs().quick_off
                     && self.0.services.status().quick_unlock

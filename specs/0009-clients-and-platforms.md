@@ -317,11 +317,16 @@ release, but no longer gates the feature.
   system prompt opens by itself when the app starts or returns to the
   foreground (not after a manual lock), only once the locked screen itself
   is drawn, and the master password field below
-  stays usable, unfocused, after a dismissal. After a master-password unlock
-  on a device that supports it, with no enrollment for that vault and quick
-  unlock not turned off, the app asks the system to enroll biometric quick
-  unlock with that password; dismissing skips it until the next password
-  unlock. The device-credential policy is offered only in Settings.
+  stays usable, unfocused, after a dismissal. The device keeps one
+  enrollment, for one vault. After a master-password unlock on a device
+  that supports it, with no enrollment on the device and quick unlock not
+  turned off, the app asks the system to enroll biometric quick unlock with
+  that password; dismissing skips it until the next password unlock. While
+  another vault holds the enrollment, nothing moves it by itself: the open
+  vault's Settings says quick unlock is off for it, names the vault that
+  has it, and offers to enroll this vault instead, which ends the other
+  vault's enrollment (owner report, 2026-11-19, plan 0072). The
+  device-credential policy is offered only in Settings.
 - **Sync page** (named Devices before 2026-11-07). It names the vault that
   will be synced, with a way to change it, because phones show no title
   bar; the code window and a running sync name it too. Two large choices,
@@ -645,6 +650,9 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-19: §1.8: the device keeps one quick-unlock enrollment; the
+  post-unlock offer needs none on the device, and another vault's Settings
+  names the holder and offers to move it (owner report, plan 0072).
 - 2026-11-19: §1.8 previews: images over 64 KiB load through range fetches
   into a `blob:` image; list residency is a scrolling window of at most 32
   pages instead of three pages, with "Show more" beyond it (owner report,

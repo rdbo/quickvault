@@ -247,7 +247,7 @@ fn cards(ctx: &mut Ctx<'_>) -> api::VaultCards {
         .iter()
         .map(|v| current.as_ref() != Some(&v.path) && v.exists && c.quick_ready_for(&v.path))
         .collect();
-    let open_quick = c.quick_policy().is_some() && !quick.contains(&true);
+    let open_quick = c.quick_holder() == crate::controller::QuickHolder::Open;
     api::VaultCards {
         vaults: vaults
             .iter()

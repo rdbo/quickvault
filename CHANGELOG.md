@@ -24,7 +24,10 @@ Dates are ISO 8601. Newest first within each section.
   example the end, after a replay) appends there in the same stream instead
   of rebuilding it, so the picture no longer blanks. Specs 0003 §6.4, 0004
   §7.4, 0009, 0010 §4.2, 0014 §6.3–§6.4 amended; WEBKIT.md W4 and W5
-  updated.
+  updated. Fixed: Settings said fingerprint unlock was on in every vault
+  while the phone's one enrollment belongs to a single vault; another
+  vault's Settings now names the vault that has it and offers to move it
+  here (0009 §1.8 amended).
 
 ## 1.2.0 — 2026-11-18
 
