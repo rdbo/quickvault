@@ -7,6 +7,14 @@ Dates are ISO 8601. Newest first within each section.
 
 ## Unreleased
 
+- 2026-11-20: Fixed (owner report, plan 0074): a correct master password
+  could fail with an error right after switching vaults on the phone, until
+  the app was restarted. The locked screen and the vault cards checked
+  each vault's fingerprint unlock by opening its file on every refresh,
+  which holds the file's lock; an unlock starting at that moment found the
+  file taken. The vault ID and key generation are now read once per file
+  version. The locked screen's button again says "Unlock with screen
+  lock" for a vault set up with the screen lock.
 - 2026-11-20: Fingerprint unlock per vault (plan 0074, owner report). Each
   vault on a phone can have its own fingerprint (or screen-lock) unlock, up
   to 16, instead of one per device: turning it on for one no longer turns

@@ -1248,6 +1248,12 @@ impl Controller {
         let session = self.state().session.clone()?;
         session.quick_policy()
     }
+    /// The quick-unlock policy of the vault the locked screen opens, for
+    /// its button label (each vault has its own, plan 0074).
+    pub fn quick_policy_selected(&self) -> Option<qv_core::platform::QuickPolicy> {
+        let vault = self.selected_vault().filter(|v| v.exists)?;
+        self.core().ok()?.quick_policy_for(&vault.path)
+    }
     /// The open vault has a live quick-unlock enrollment.
     pub fn quick_open(&self) -> bool {
         let session = self.state().session.clone();

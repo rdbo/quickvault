@@ -2263,6 +2263,29 @@ fn quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only() 
             .quick_off
             .is_empty()
     );
+    // Owner report (plan 0074): turned off in the first vault, the second
+    // opened by fingerprint, then back to the first: its password opens it.
+    env.c
+        .navigate(env.epoch(), Screen::Settings(Pane::Password));
+    env.act(WsAction::DisableQuick);
+    assert!(env.c.switch_vault(
+        env.epoch(),
+        crate::controller::SwitchTo::Vault(second.clone())
+    ));
+    page(&env);
+    assert_eq!(env.c.open_vault().unwrap().path, second);
+    assert!(env.c.switch_vault(
+        env.epoch(),
+        crate::controller::SwitchTo::Vault(first.clone())
+    ));
+    page(&env);
+    assert_eq!(env.c.snapshot().phase, Phase::Locked);
+    env.unlock(PASSWORD);
+    assert_eq!(env.c.snapshot().error, None);
+    assert_eq!(env.c.open_vault().unwrap().path, first);
+    env.put(WsField::Password, PASSWORD);
+    env.act(WsAction::EnrollQuick(QuickPolicy::Class3));
+    assert!(env.c.quick_open());
     // Removing Second from this device's list ends its enrollment only.
     env.c.lock();
     env.c.forget_vault(env.epoch(), &second);

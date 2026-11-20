@@ -152,6 +152,15 @@ impl Core {
                 .is_some_and(|b| b.generation == generation)
         })
     }
+    /// The policy of the live enrollment of the vault at `path`, judged
+    /// as [`Self::quick_ready_for`] does (the locked screen's label).
+    pub fn quick_policy_for(&self, path: &Path) -> Option<QuickPolicy> {
+        if !self.quick_ready_for(path) {
+            return None;
+        }
+        let (vault, _) = header_ids(path)?;
+        self.quick_services().ok()?.keystore().policy(&vault)
+    }
     /// False when the last quick-unlock attempt found its vault without an
     /// enrollment or ended it; an attempt refused before naming a vault (a
     /// platform check, an unreadable header) ended nothing.
@@ -217,7 +226,7 @@ impl Core {
             .quick_services()
             .map_err(|e| early(QuickFailure::Platform, e))?;
         // The header names the vault whose enrollment applies (plan 0074).
-        let (vault, generation) = header_ids(path)
+        let (vault, generation) = read_header_ids(path)
             .ok_or_else(|| early(QuickFailure::Unreadable, CoreError::NotAllowed))?;
         *self
             .quick_vault
@@ -304,10 +313,66 @@ impl Core {
     }
 }
 /// The vault ID and key generation in the file's unverified public header.
-fn header_ids(path: &Path) -> Option<([u8; 16], u32)> {
+/// Read once per file version: the locked screen and the vault cards ask
+/// on every frame, and opening the file takes its lock, which an unlock
+/// starting at that moment would find taken (owner report, plan 0074).
+fn header_ids(path: &Path) -> Option<Ids> {
+    let stamp = stamp(path)?;
+    let mut cache = HEADERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((_, ids)) = cache.iter().find(|(s, _)| *s == stamp) {
+        return Some(*ids);
+    }
+    drop(cache);
+    let ids = read_header_ids(path)?;
+    // Changed while it was read: answer, but keep nothing.
+    if self::stamp(path).as_ref() == Some(&stamp) {
+        cache = HEADERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.retain(|(s, _)| s.path != stamp.path);
+        if cache.len() >= HEADERS_MAX {
+            cache.remove(0);
+        }
+        cache.push((stamp, ids));
+    }
+    Some(ids)
+}
+/// [`header_ids`] read from the file now, for quick unlock itself.
+fn read_header_ids(path: &Path) -> Option<Ids> {
     let f = qv_store::VaultFile::open(path).ok()?;
     let h = f.header();
     Some((h.vault_id.0, h.key_generation.0))
+}
+/// Header IDs kept for at most this many files (non-secret: vault IDs are
+/// public header fields).
+const HEADERS_MAX: usize = 32;
+static HEADERS: std::sync::Mutex<Vec<(Stamp, Ids)>> = std::sync::Mutex::new(Vec::new());
+/// A vault ID and key generation.
+type Ids = ([u8; 16], u32);
+/// A file version: its path, size, modification time and, on Unix, its
+/// identity, read without opening the file.
+#[derive(PartialEq)]
+struct Stamp {
+    path: std::path::PathBuf,
+    len: u64,
+    modified: std::time::SystemTime,
+    #[cfg(unix)]
+    id: (u64, u64),
+}
+fn stamp(path: &Path) -> Option<Stamp> {
+    let m = std::fs::symlink_metadata(path).ok()?;
+    Some(Stamp {
+        path: path.to_path_buf(),
+        len: m.len(),
+        modified: m.modified().ok()?,
+        #[cfg(unix)]
+        id: {
+            use std::os::unix::fs::MetadataExt;
+            (m.dev(), m.ino())
+        },
+    })
 }
 
 /// Synthetic backend reuse for the large-vault lifecycle fixture. It copies
@@ -534,6 +599,19 @@ mod tests {
         assert_eq!(open.quick_policy(), Some(QuickPolicy::DeviceCredential));
         open.lock();
         assert!(core.quick_ready_for(&other) && core.quick_ready_for(&env.path));
+        // A file already read is judged without opening it again: an unlock
+        // holding it (a second open is refused) is never raced by the
+        // locked screen's check (owner report, plan 0074).
+        let held = qv_store::VaultFile::open(&env.path).unwrap();
+        assert!(qv_store::VaultFile::open(&env.path).is_err());
+        assert!(core.quick_ready_for(&env.path));
+        assert_eq!(core.quick_policy_for(&env.path), Some(QuickPolicy::Class3));
+        drop(held);
+        assert_eq!(
+            core.quick_policy_for(&other),
+            Some(QuickPolicy::DeviceCredential)
+        );
+        assert_eq!(core.quick_policy_for(&missing), None);
         backend.0.store(false, Ordering::SeqCst);
         for path in [&env.path, &other] {
             let s = core.unlock_quick(path, None).unwrap();

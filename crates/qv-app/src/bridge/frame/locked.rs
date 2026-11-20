@@ -116,12 +116,12 @@ pub(super) fn locked(ctx: &mut Ctx<'_>, view: &View) -> api::Locked {
         None
     };
     let quick = view.mode == Mode::Unlock && c.quick_ready();
-    let quick_label = if c.quick_policy() == Some(qv_core::platform::QuickPolicy::DeviceCredential)
-    {
-        "Unlock with screen lock"
-    } else {
-        "Unlock with fingerprint"
-    };
+    let quick_label =
+        if c.quick_policy_selected() == Some(qv_core::platform::QuickPolicy::DeviceCredential) {
+            "Unlock with screen lock"
+        } else {
+            "Unlock with fingerprint"
+        };
     let lan = super::pages::lan(ctx);
     api::Locked {
         mode: convert::mode(view.mode),

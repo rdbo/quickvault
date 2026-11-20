@@ -131,3 +131,22 @@ check the other still works (owner, a finger is needed).
   preferences tests. All gates pass (1,390 tests); Android Clippy for
   `mobile` and `mobile,validation`. Installed on the owner's Android test
   phone (isolated copy).
+- 2026-11-20 (owner report after the install): with fingerprint unlock
+  off in one vault and the other opened by fingerprint, switching back
+  (vault cards) and entering the right password failed twice with a
+  generic error; a restart fixed it. Cause: `Core::quick_ready_for` read
+  the header with `VaultFile::open`, which takes the file's exclusive
+  lock, and the locked frame and the vault cards call it on every frame
+  (the submit itself triggers one), so the unlock's own open could find
+  the file locked (`Store(Locked)`). Before this plan the check returned
+  early with no enrollment on the device, and opened every file otherwise.
+  Fix: `header_ids` keeps the vault ID and key generation per file version
+  (path, size, modification time and, on Unix, device and inode; at most
+  32 files; non-secret header fields); `unlock_quick` still reads the
+  header fresh. Also fixed: the locked screen's label read the open
+  session's policy, so a screen-lock enrollment showed "Unlock with
+  fingerprint"; it now uses `Core::quick_policy_for` on the selected vault.
+  Tests: core `dismissal_keeps_the_enrollment_and_each_vault_has_its_own`
+  (a held file is still judged, policy per path); app
+  `quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only`
+  (the owner's sequence).
