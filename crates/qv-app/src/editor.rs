@@ -279,6 +279,9 @@ pub enum Start {
     Site(String),
     /// Anything else: a name.
     Name(Zeroizing<String>),
+    /// An `otpauth://` link: the URI to store, and the issuer and account
+    /// it names (plan 0073).
+    Totp(qv_core::SecretBytes, Option<String>, Option<String>),
 }
 /// The start step's guess (plan 0040 E1).
 pub struct Guess {
@@ -291,12 +294,39 @@ pub struct Guess {
     /// What was recognised.
     pub start: Start,
 }
+/// A pasted two-factor link starts a login with that code (plan 0073); a
+/// link that does not parse is not guessed as anything.
+fn totp_guess(text: &str) -> Option<Guess> {
+    let setup =
+        qv_core::TotpSetup::from_input(text.as_bytes(), qv_core::KeyOptions::default()).ok()?;
+    let (issuer, account) = qv_core::link_names(setup.uri.expose_secret()).unwrap_or((None, None));
+    let line = match &issuer {
+        Some(name) => format!("Login for {name}"),
+        None => "Login with a two-factor code".to_owned(),
+    };
+    let sub = match &account {
+        Some(account) => format!("Two-factor code for {account}"),
+        None => "Two-factor code from the link".to_owned(),
+    };
+    Some(Guess {
+        kind: ItemType::Login,
+        line: Zeroizing::new(line),
+        sub: Zeroizing::new(sub),
+        start: Start::Totp(setup.uri, issuer, account),
+    })
+}
 const WIFI_WORDS: [&str; 6] = ["wi-fi", "wifi", "wlan", "ssid", "router", "network"];
 /// Recognise what the start box holds, on the device.
 pub fn guess(input: &[u8]) -> Option<Guess> {
     let text = std::str::from_utf8(input).ok()?.trim();
     if text.is_empty() {
         return None;
+    }
+    if text
+        .get(..8)
+        .is_some_and(|p| p.eq_ignore_ascii_case("otpauth:"))
+    {
+        return totp_guess(text);
     }
     if let Some(d) = card_digits(text.as_bytes()).filter(|d| (12..=19).contains(&d.len())) {
         let info = CardInfo::of(&d);

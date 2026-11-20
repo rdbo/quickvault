@@ -117,7 +117,12 @@ Defaults: `secret` and `totp` fields are protected; usernames, URLs, emails
 and other fields are not. The user can toggle `protected` per field.
 
 5.4. **TOTP:** a `totp` field stores an `otpauth://` URI (RFC 6238 parameters).
-Clients generate codes locally.
+Clients generate codes locally. A setup key entered without a link is stored
+as `otpauth://totp/?secret=<key>`, with `digits`, `period` and `algorithm`
+only when they differ from the defaults; the key is base32 without spaces,
+dashes or padding, upper case. `protected` applies to the stored URI. The
+current code is derived and short-lived: a client may show it while the entry
+is open, without a reveal (0008 §4.3; plan 0073).
 
 5.5. An `icon` value of the form `hue:<n>`, with `n` a decimal integer from 0
 to 11, is a colour the user chose for the group or entry; the app shows it on
@@ -254,6 +259,9 @@ searchable. Paging MUST NOT silently omit records, fields or conflicts.
 
 ## Changelog
 
+- 2026-11-20: §5.4: a setup key is stored as an `otpauth://totp/?secret=`
+  URI (no format change); the current code may show without a reveal
+  (owner report, plan 0073).
 - 2026-11-19: §6.4: images are fetched in ranges into a renderer `Blob`
   and shown from a `blob:` URL (at most 64 MiB), since an image element
   makes one request and the scheme answers at most 64 KiB; img-src adds

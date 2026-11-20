@@ -72,6 +72,7 @@ fn ws_field(f: api::WsField) -> WsField {
         F::Confirmation => WsField::Confirmation,
         F::LanCode => WsField::LanCode,
         F::LanEndpoint => WsField::LanEndpoint,
+        F::TotpInput => WsField::TotpInput,
     }
 }
 
@@ -175,6 +176,11 @@ fn ws_back(c: &Controller, epoch: FormEpoch, refs: &Refs, a: &api::WsAct) -> Opt
         A::KeepSnapshots(b) => WsAction::KeepSnapshots(*b),
         A::Dismiss => WsAction::Dismiss,
         A::RatePassword => WsAction::RatePassword,
+        A::TotpOpen(target) => WsAction::TotpOpen(*target),
+        A::TotpCheck => WsAction::TotpCheck,
+        A::TotpOptions(o) => WsAction::TotpOptions(convert::totp_options_back(*o)),
+        A::TotpAdd => WsAction::TotpAdd,
+        A::TotpClose => WsAction::TotpClose,
     })
 }
 
@@ -519,6 +525,7 @@ fn handle_act(
             match t {
                 api::QrTarget::NewDevice => crate::qr::QrTarget::NewDevice,
                 api::QrTarget::Sync => crate::qr::QrTarget::Sync,
+                api::QrTarget::Totp => crate::qr::QrTarget::Totp,
             },
         ),
         Act::CancelQr => c.cancel_qr(epoch),

@@ -116,6 +116,19 @@ fn add_field(
     }
     Ok(())
 }
+/// Open the two-factor setup sheet (plan 0073): for field `target`, or to
+/// add a field named `name`.
+fn open_totp(ws: &mut Workspace, target: Option<u16>, name: &str) {
+    ws.inputs.remove(&WsField::TotpInput);
+    ws.totp = Some(crate::workspace::TotpSheet {
+        target,
+        name: zeroize::Zeroizing::new(name.to_owned()),
+        options: qv_core::KeyOptions::default(),
+        checked: None,
+        scanned: false,
+    });
+    Controller::hide(ws);
+}
 /// Size bound for a value shown in an editable input.
 fn editable(kind: FieldKind, value: &[u8]) -> bool {
     let limit = if kind == FieldKind::Multiline {
@@ -182,6 +195,26 @@ fn apply_start(
             (ItemType::Wifi, Some(i)) => entry.fields[i].value = field_value(&name)?,
             _ => entry.title = text(&name)?,
         },
+        Start::Totp(uri, issuer, account) => {
+            if let Some(issuer) = issuer {
+                entry.title = text(&issuer)?;
+            }
+            if let (Some(account), Some(i)) = (account, find(&entry.fields, "Username")) {
+                entry.fields[i].value = field_value(&account)?;
+            }
+            form.draft.add_field(
+                crate::workspace::TOTP_NAME,
+                FieldKind::Totp,
+                field_value("")?,
+            )?;
+            let last = form.draft.entry().fields.len().saturating_sub(1);
+            if let Some(f) = form.draft.entry_mut().fields.last_mut() {
+                f.protected = true;
+            }
+            let i = u16::try_from(last).map_err(|_| AppError::InvalidInput)?;
+            form.replacements.insert(i, uri);
+            form.filled.push(i);
+        }
     }
     Ok(())
 }
@@ -291,6 +324,109 @@ pub(crate) fn run(
                     .get(&WsField::NewPassword)
                     .map_or(&[][..], qv_core::SecretBytes::expose_secret);
                 ws.rating.rate(typed, ws.generated.as_ref().map(|(g, _)| g));
+            })
+            .ok_or(AppError::InvalidInput),
+        WsAction::TotpOpen(target) => c
+            .with_ws(epoch, |ws, _| -> Result<(), AppError> {
+                let form = ws
+                    .entry_form
+                    .as_ref()
+                    .filter(|f| !f.start)
+                    .ok_or(AppError::InvalidInput)?;
+                if let Some(i) = target
+                    && form
+                        .draft
+                        .entry()
+                        .fields
+                        .get(usize::from(i))
+                        .is_none_or(|f| f.kind != FieldKind::Totp)
+                {
+                    return Err(AppError::InvalidInput);
+                }
+                open_totp(ws, target, crate::workspace::TOTP_NAME);
+                Ok(())
+            })
+            .ok_or(AppError::InvalidInput)?,
+        WsAction::TotpCheck => c
+            .with_ws(epoch, |ws, _| {
+                // Disjoint fields: the input is read in place.
+                if let Some(sheet) = ws.totp.as_mut() {
+                    sheet.checked = ws
+                        .inputs
+                        .get(&WsField::TotpInput)
+                        .map(qv_core::SecretBytes::expose_secret)
+                        .filter(|typed| !typed.trim_ascii().is_empty())
+                        .map(|typed| qv_core::TotpSetup::from_input(typed, sheet.options));
+                }
+            })
+            .ok_or(AppError::InvalidInput),
+        WsAction::TotpOptions(options) => c
+            .with_ws(epoch, |ws, _| -> Result<(), AppError> {
+                if !(6..=8).contains(&options.digits) || !matches!(options.period, 30 | 60) {
+                    return Err(AppError::InvalidInput);
+                }
+                let sheet = ws.totp.as_mut().ok_or(AppError::InvalidInput)?;
+                sheet.options = options;
+                if sheet.checked.is_some() {
+                    sheet.checked = ws.inputs.get(&WsField::TotpInput).map(|typed| {
+                        qv_core::TotpSetup::from_input(typed.expose_secret(), options)
+                    });
+                }
+                Ok(())
+            })
+            .ok_or(AppError::InvalidInput)?,
+        WsAction::TotpAdd => c
+            .with_ws(epoch, |ws, _| -> Result<(), AppError> {
+                let sheet = ws.totp.as_mut().ok_or(AppError::InvalidInput)?;
+                let checked = ws.inputs.get(&WsField::TotpInput).map(|typed| {
+                    qv_core::TotpSetup::from_input(typed.expose_secret(), sheet.options)
+                });
+                let setup = match checked {
+                    Some(Ok(setup)) => setup,
+                    // The sheet stays open and says why.
+                    other => {
+                        sheet.checked = Some(other.unwrap_or(Err(qv_core::TotpError::InvalidUri)));
+                        return Ok(());
+                    }
+                };
+                let target = sheet.target;
+                let name = std::mem::take(&mut sheet.name);
+                let form = ws.entry_form.as_mut().ok_or(AppError::InvalidInput)?;
+                let index = match target {
+                    Some(i) => i,
+                    None => {
+                        form.draft
+                            .add_field(&name, FieldKind::Totp, field_value("")?)?;
+                        let last = form.draft.entry().fields.len().saturating_sub(1);
+                        if let Some(f) = form.draft.entry_mut().fields.last_mut() {
+                            f.protected = true;
+                        }
+                        u16::try_from(last).map_err(|_| AppError::InvalidInput)?
+                    }
+                };
+                let field = form
+                    .draft
+                    .entry()
+                    .fields
+                    .get(usize::from(index))
+                    .ok_or(AppError::InvalidInput)?;
+                if field.kind != FieldKind::Totp {
+                    return Err(AppError::InvalidInput);
+                }
+                form.replacements.insert(index, setup.uri);
+                form.generated.retain(|g| *g != index);
+                if !form.filled.contains(&index) {
+                    form.filled.push(index);
+                }
+                ws.totp = None;
+                ws.inputs.remove(&WsField::TotpInput);
+                Ok(())
+            })
+            .ok_or(AppError::InvalidInput)?,
+        WsAction::TotpClose => c
+            .with_ws(epoch, |ws, _| {
+                ws.totp = None;
+                ws.inputs.remove(&WsField::TotpInput);
             })
             .ok_or(AppError::InvalidInput),
         WsAction::Hide => c
@@ -440,6 +576,17 @@ pub(crate) fn run(
                     Some(k) => (k, k.protected_by_default()),
                     None => crate::editor::kind_for(&typed),
                 };
+                if kind == FieldKind::Totp {
+                    // A code is set up in its sheet, never typed as a value.
+                    let name = if typed.is_empty() {
+                        crate::workspace::TOTP_NAME
+                    } else {
+                        typed.as_str()
+                    };
+                    open_totp(ws, None, name);
+                    ws.inputs.remove(&WsField::NewFieldName);
+                    return Ok(());
+                }
                 let name = if typed.is_empty() {
                     // Adding without a name names the field after its kind.
                     zeroize::Zeroizing::new(crate::editor::kind_label(kind).to_owned())
@@ -454,7 +601,11 @@ pub(crate) fn run(
         WsAction::AddNamedField(name) => c
             .with_ws(epoch, |ws, _| -> Result<(), AppError> {
                 let (kind, protected) = crate::editor::kind_for(name);
-                add_field(ws, name, kind, protected)?;
+                if kind == FieldKind::Totp {
+                    open_totp(ws, None, name);
+                } else {
+                    add_field(ws, name, kind, protected)?;
+                }
                 ws.inputs.remove(&WsField::NewFieldName);
                 Ok(())
             })

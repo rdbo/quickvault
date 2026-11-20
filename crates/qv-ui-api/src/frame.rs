@@ -352,6 +352,8 @@ pub struct Shell {
     pub busy_shown: bool,
     /// A QR scan runs.
     pub scanning: bool,
+    /// The scan is for a two-factor code (plan 0073).
+    pub scanning_totp: bool,
     /// Countdowns.
     pub live: Live,
     /// Android validation banner.
@@ -567,6 +569,8 @@ pub struct MenuField {
     pub name: Z,
     /// Its icon.
     pub icon: Icon,
+    /// A two-factor code field: copying it copies the current code.
+    pub code: bool,
 }
 
 /// A group chip.
@@ -751,8 +755,8 @@ pub struct FieldLine {
     pub protected: bool,
     /// The revealed value.
     pub shown: Option<Z>,
-    /// The revealed TOTP code.
-    pub code: Option<Z>,
+    /// The current TOTP code (no reveal needed, plan 0073).
+    pub code: Option<Code>,
     /// Its reveal.
     pub reveal: RevealKey,
     /// Its code's reveal (TOTP).
@@ -912,6 +916,48 @@ pub struct FormRow {
     pub check: Option<(String, String)>,
     /// Placeholder.
     pub placeholder: String,
+    /// A two-factor field's current code.
+    pub code: Option<Code>,
+}
+
+/// A two-factor code at this moment (plan 0073).
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub struct Code {
+    /// The digits, grouped for reading ("123 456").
+    pub code: Z,
+    /// Seconds until the next code.
+    pub left: u32,
+    /// The code's time step in seconds.
+    pub period: u32,
+}
+
+/// The two-factor setup sheet (plan 0073).
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub struct TotpSheet {
+    /// It replaces a field's code.
+    pub replacing: bool,
+    /// A camera scan exists here.
+    pub can_scan: bool,
+    /// The input came from a scan.
+    pub scanned: bool,
+    /// Settings for a setup key.
+    pub options: crate::act::TotpOptions,
+    /// What the last check found.
+    pub state: TotpState,
+}
+
+/// What the setup sheet's last check found.
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum TotpState {
+    /// Nothing typed yet.
+    Empty,
+    /// Refused, with why.
+    Invalid(String),
+    /// A setup key, with its current code.
+    Key(Option<Code>),
+    /// A link (its own settings apply), with its current code.
+    Link(Option<Code>),
 }
 
 /// The generator popover.
@@ -1002,6 +1048,10 @@ pub struct Form {
     pub security: Vec<(String, String)>,
     /// Labels of every field kind, for the kind pill.
     pub kind_labels: Vec<(FieldKind, String)>,
+    /// A login without a two-factor field: offer to set one up.
+    pub totp_slot: bool,
+    /// The open two-factor setup sheet.
+    pub totp_sheet: Option<TotpSheet>,
 }
 
 /// The group editor.

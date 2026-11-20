@@ -1174,6 +1174,57 @@ pub struct FormRow {
     pub stored: bool,
     /// How the editor presents it.
     pub role: Role,
+    /// A two-factor field's current code, from its new or saved value.
+    pub code: Option<CodeNow>,
+}
+/// A two-factor code at this moment (plan 0073). The code is derived and
+/// short-lived; its key and URI never leave Rust (0008 §4.3).
+#[derive(Clone, PartialEq)]
+pub struct CodeNow {
+    /// The digits.
+    pub code: Z,
+    /// Seconds until the next code.
+    pub left: u32,
+    /// The code's time step in seconds.
+    pub period: u32,
+}
+/// The device clock as a vault timestamp.
+fn now() -> qv_core::Timestamp {
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    qv_core::Timestamp(ms)
+}
+/// `totp`'s code now, or `None` when the clock is unusable.
+pub(crate) fn code_now(totp: &qv_core::Totp) -> Option<CodeNow> {
+    let at = now();
+    Some(CodeNow {
+        code: Zeroizing::new(totp.code_at(at).ok()?.expose_secret().to_owned()),
+        left: totp.seconds_remaining(at).ok()?,
+        period: totp.period(),
+    })
+}
+/// The two-factor setup sheet, without its input (plan 0073).
+#[derive(Clone, PartialEq)]
+pub struct TotpSheetView {
+    /// It replaces a field's code.
+    pub replacing: bool,
+    /// The input came from a scan.
+    pub scanned: bool,
+    /// Settings for a setup key.
+    pub options: qv_core::KeyOptions,
+    /// What the last check found.
+    pub state: SheetState,
+}
+/// What the setup sheet's last check found.
+#[derive(Clone, PartialEq)]
+pub enum SheetState {
+    /// Nothing to check yet.
+    Empty,
+    /// Refused, with why.
+    Invalid(&'static str),
+    /// A setup key (`false`) or link (`true`), with its current code.
+    Valid(bool, Option<CodeNow>),
 }
 /// How the item editor presents a field (plan 0040 E5, E8, E9).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1262,6 +1313,10 @@ pub struct EntryFormView {
     pub showing: Option<u16>,
     /// A save would pass the naming checks (`editor::ready_to_save`).
     pub ready: bool,
+    /// A login without a two-factor field: the editor offers to set one up.
+    pub totp_slot: bool,
+    /// The open setup sheet.
+    pub totp_sheet: Option<TotpSheetView>,
 }
 fn text_of(f: &qv_core::Field) -> Z {
     z(&String::from_utf8_lossy(f.value.expose_secret()))
@@ -1303,7 +1358,31 @@ pub(crate) fn entry_form_in(
     v.kind = kind;
     for (row, field) in v.rows.iter_mut().zip(&e.fields) {
         row.role = role(kind, field);
+        if field.kind == FieldKind::Totp {
+            let value = f.replacements.get(&row.index).map_or(
+                field.value.expose_secret(),
+                qv_core::SecretBytes::expose_secret,
+            );
+            row.code = qv_core::Totp::parse(value).ok().as_ref().and_then(code_now);
+        }
     }
+    v.totp_slot =
+        kind == Some(ItemType::Login) && !e.fields.iter().any(|x| x.kind == FieldKind::Totp);
+    v.totp_sheet = ws.totp.as_ref().map(|sheet| TotpSheetView {
+        replacing: sheet.target.is_some(),
+        scanned: sheet.scanned,
+        options: sheet.options,
+        state: match &sheet.checked {
+            None => SheetState::Empty,
+            Some(Ok(setup)) => SheetState::Valid(setup.link, code_now(&setup.totp)),
+            Some(Err(qv_core::TotpError::Unsupported)) => SheetState::Invalid(
+                "QuickVault can't make codes with these settings (it supports 6 to 8 digits and SHA-1, SHA-256 or SHA-512).",
+            ),
+            Some(Err(_)) => SheetState::Invalid(
+                "That isn't a setup key or two-factor link. Check it against what the site shows.",
+            ),
+        },
+    });
     v.guess = f
         .start
         .then(|| editor::guess(ws.input(crate::workspace::WsField::Start)))
@@ -1373,6 +1452,8 @@ pub(crate) fn entry_form(f: &crate::workspace::EntryForm) -> EntryFormView {
         new_kind: (FieldKind::Text, false),
         removed: f.removed.as_ref().map(|r| z(r.field.name.expose())),
         showing: None,
+        totp_slot: false,
+        totp_sheet: None,
         ready: crate::editor::ready_to_save(f),
         new: f.new,
         id: f.draft.id_hex(),
@@ -1407,6 +1488,7 @@ pub(crate) fn entry_form(f: &crate::workspace::EntryForm) -> EntryFormView {
                     too_large,
                     stored: x.protected && !x.value.expose_secret().is_empty(),
                     role: Role::Plain,
+                    code: None,
                 })
             })
             .collect(),

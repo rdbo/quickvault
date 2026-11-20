@@ -24,6 +24,56 @@ fn ui_op(op: UiOp) {
     ui().act(Act::Ui(op));
 }
 
+/// Opens a row's menu above the row when the list has no room for it below,
+/// so the last rows' menus stay in view; a menu taller than either side
+/// scrolls. It runs before the menu is first painted, so nothing jumps. A
+/// phone's bottom-sheet menu (fixed, no offset parent) is left as it is.
+fn fit_menu(menu: NodeRef<leptos::html::Div>) {
+    const GAP: f64 = 12.0;
+    menu.on_load(|el| {
+        let (true, Some(wrap), Ok(Some(row))) = (
+            el.offset_parent().is_some(),
+            el.parent_element(),
+            el.closest(".row"),
+        ) else {
+            return;
+        };
+        let screen = web_sys::window()
+            .and_then(|w| w.inner_height().ok())
+            .and_then(|h| h.as_f64())
+            .unwrap_or(f64::MAX);
+        let (top, bottom) = match el.closest(".rows") {
+            Ok(Some(list)) => {
+                let r = list.get_bounding_client_rect();
+                (r.top().max(0.0), r.bottom().min(screen))
+            }
+            _ => (0.0, screen),
+        };
+        let row = row.get_bounding_client_rect();
+        // The layout height: the opening animation scales the box.
+        let need = f64::from(el.offset_height()) + GAP;
+        let (above, below) = (row.top() - top, bottom - row.bottom());
+        if need <= below {
+            return;
+        }
+        let room = if above > below {
+            let _ = wrap.set_attribute("data-up", "");
+            above
+        } else {
+            below
+        };
+        if need > room {
+            let _ = el.set_attribute(
+                "style",
+                &format!(
+                    "max-height:{}px;overflow-y:auto",
+                    (room - GAP).max(120.0).floor()
+                ),
+            );
+        }
+    });
+}
+
 /// The list beside a vault detail.
 #[component]
 pub(crate) fn ListPane(s: Memo<Option<S>>) -> impl IntoView {
@@ -231,7 +281,7 @@ pub(crate) fn ListPane(s: Memo<Option<S>>) -> impl IntoView {
                     <button class="mi" role="menuitem" on:click=move |e: web_sys::MouseEvent| {
                         e.stop_propagation();
                         ui_op(close.clone());
-                        ui().act(Act::Ws(WsAct::Copy(CopyKey::Field(id, f.field))));
+                        ui().act(Act::Ws(WsAct::Copy(if f.code { CopyKey::Totp(id, f.field) } else { CopyKey::Field(id, f.field) })));
                     }>
                         <Svg icon=f.icon/>{format!("Copy “{}”", f.name.as_str())}
                     </button>
@@ -298,7 +348,7 @@ pub(crate) fn ListPane(s: Memo<Option<S>>) -> impl IntoView {
                                     view! {
                                         <button class="pop-scrim" aria-label="Close menu" tabindex="-1" on:click=move |e: web_sys::MouseEvent| { e.stop_propagation(); ui_op(UiOp::CopyMenu(None)); }></button>
                                         <div class="card-menu">
-                                            <div class="menu pop end" role="menu" aria-label="Copy">{menu_buttons(id, fields, UiOp::CopyMenu(None))}</div>
+                                            <div class="menu pop end" role="menu" aria-label="Copy" node_ref={ let m = NodeRef::new(); fit_menu(m); m }>{menu_buttons(id, fields, UiOp::CopyMenu(None))}</div>
                                         </div>
                                     }
                                 })}
@@ -317,13 +367,14 @@ pub(crate) fn ListPane(s: Memo<Option<S>>) -> impl IntoView {
                 </Show>
                 {move || menu_open.get().then(|| {
                     let fields = row_menu.get().map(|(_, f)| f).unwrap_or_default();
+                    let copies = copy != RowCopy::None || !fields.is_empty();
                     let close = || ui_op(UiOp::RowMenu(None));
                     let rid = rid_select.clone();
                     view! {
                         <button class="pop-scrim" aria-label="Close menu" tabindex="-1" on:click=move |_| close()
                             on:contextmenu=move |e: web_sys::MouseEvent| { e.prevent_default(); e.stop_propagation(); close(); }></button>
                         <div class="row-menu">
-                            <div class="menu pop end" role="menu" aria-label=title.clone()>
+                            <div class="menu pop end" role="menu" aria-label=title.clone() node_ref={ let m = NodeRef::new(); fit_menu(m); m }>
                                 <button class="mi" role="menuitem" id="row-open" on:click=move |_| { close(); ui().act(Act::Select(Screen::Entry(id))); }><Svg icon=Icon::Right/>"Open"</button>
                                 {match copy {
                                     RowCopy::None => ().into_any(),
@@ -334,9 +385,11 @@ pub(crate) fn ListPane(s: Memo<Option<S>>) -> impl IntoView {
                                     RowCopy::Secret => view! {
                                         <button class="mi" role="menuitem" id="row-copy-password" on:click=move |e| { close(); quick(id, true)(e) }><Svg icon=Icon::Key/>"Copy “Password”"</button>
                                     }.into_any(),
-                                    RowCopy::Menu => menu_buttons(id, fields, UiOp::RowMenu(None)).into_any(),
+                                    RowCopy::Menu => ().into_any(),
                                 }}
-                                {(copy != RowCopy::None).then(|| view! { <hr/> })}
+                                // A Menu row's fields, or only its two-factor code.
+                                {menu_buttons(id, fields, UiOp::RowMenu(None))}
+                                {copies.then(|| view! { <hr/> })}
                                 <div class="label">"COLOR"</div>
                                 <div class="ie-swatches">
                                     {(0..12u8).map(|n| view! {
@@ -522,8 +575,33 @@ fn back_bar(close: bool) -> impl IntoView {
     }
 }
 
+/// A two-factor code with a ring for its own period (plan 0073). The text
+/// is rebuilt every tick, so a code blanked while the window was hidden
+/// (`app.js`) comes back within a second.
+pub(crate) fn code_view(c: Signal<Option<qv_ui_api::Code>>) -> impl IntoView {
+    let left = move || c.with(|c| c.as_ref().map_or(0, |c| c.left));
+    let period = move || c.with(|c| c.as_ref().map_or(30, |c| c.period.max(1)));
+    view! {
+        <span class="totp" aria-live="off">
+            <span class="code revealed">{move || c.with(|c| c.as_ref().map(|c| c.code.to_string()).unwrap_or_default())}</span>
+            <span class=move || if left() <= 5 { "totp-left soon" } else { "totp-left" } title=move || format!("New code in {} s", left())>
+                <svg class="revealring" viewBox="0 0 22 22" aria-hidden="true">
+                    <circle class="track" cx="11" cy="11" r="10"></circle>
+                    <circle class="left" cx="11" cy="11" r="10" stroke-dasharray="62.8"
+                        stroke-dashoffset=move || format!("{:.1}", 62.8 - 62.8 * f64::from(left()) / f64::from(period()))></circle>
+                </svg>
+                <span class="n">{left}</span>
+            </span>
+        </span>
+    }
+}
+
 /// One field of an entry.
-fn field_line(f: F, live: Memo<qv_ui_api::Live>) -> impl IntoView {
+fn field_line(
+    f: F,
+    live: Memo<qv_ui_api::Live>,
+    code: Signal<Option<qv_ui_api::Code>>,
+) -> impl IntoView {
     let left = move || live.get().reveal_left.min(30);
     let ring = move || {
         view! {
@@ -540,8 +618,9 @@ fn field_line(f: F, live: Memo<qv_ui_api::Live>) -> impl IntoView {
     let name = f.name.to_string();
     let value = if f.totp {
         match &f.code {
-            None => view! { <span class="v masked">"One-time code"</span> }.into_any(),
-            Some(c) => view! { <span class="totp"><span class="code revealed">{c.to_string()}</span></span> }.into_any(),
+            None => view! { <span class="v masked">"No code: set it up again in Edit"</span> }
+                .into_any(),
+            Some(_) => code_view(code).into_any(),
         }
     } else if let Some(v) = &f.value {
         view! { <pre class="v field-value">{v.to_string()}</pre> }.into_any()
@@ -551,11 +630,8 @@ fn field_line(f: F, live: Memo<qv_ui_api::Live>) -> impl IntoView {
         view! { <span class="v masked field-value">{MASK}</span> }.into_any()
     };
     let acts = if f.totp {
-        match (&f.code, f.code_key.clone()) {
-            (None, Some(k)) => view! { <button class="btn subtle" id="show-code" on:click=act(WsAct::Reveal(k))><Svg icon=Icon::Eye/>"Show code"</button> }.into_any(),
-            (Some(_), _) => view! { <button class="icon-btn" aria-label="Hide code" title=move || format!("Hide · {} s left", left()) on:click=act(WsAct::Hide)>{ring()}</button> }.into_any(),
-            _ => ().into_any(),
-        }
+        // The code shows without a reveal; a click copies it (plan 0073).
+        ().into_any()
     } else if f.protected {
         if f.shown.is_some() {
             view! { <button class="icon-btn" aria-label="Hide" title=move || format!("Hide · {} s left", left()) on:click=act(WsAct::Hide)>{ring()}</button> }.into_any()
@@ -607,7 +683,11 @@ fn qr_svg(q: &qv_ui_api::Qr) -> impl IntoView + use<> {
 }
 
 /// An entry's fields and notes, current or historical.
-fn entry_body(b: Body, live: Memo<qv_ui_api::Live>) -> impl IntoView {
+fn entry_body(
+    b: Body,
+    live: Memo<qv_ui_api::Live>,
+    codes: Memo<Vec<Option<qv_ui_api::Code>>>,
+) -> impl IntoView {
     let entry = b.entry;
     let left = move || live.get().reveal_left.min(30);
     view! {
@@ -653,7 +733,10 @@ fn entry_body(b: Body, live: Memo<qv_ui_api::Live>) -> impl IntoView {
             </div>
         })}
         {(!b.fields.is_empty()).then(|| view! {
-            <div class="card fields">{b.fields.iter().cloned().map(|f| field_line(f, live)).collect_view()}</div>
+            <div class="card fields">{b.fields.iter().cloned().enumerate().map(|(i, f)| {
+                let code = Signal::derive(move || codes.with(|c| c.get(i).cloned().flatten()));
+                field_line(f, live, code)
+            }).collect_view()}</div>
         })}
         {b.notes.clone().map(|n| view! {
             <div class="card">
@@ -672,9 +755,26 @@ fn entry_body(b: Body, live: Memo<qv_ui_api::Live>) -> impl IntoView {
 fn EntryScreen(inner: Memo<Option<DetailInner>>, live: Memo<qv_ui_api::Live>) -> impl IntoView {
     // Which ⋯ opened the menu (0 phone bar, 1 desktop toolbar).
     let menu = RwSignal::new(None::<u8>);
+    // Codes tick every second in a signal of their own; the body memo sees
+    // them blank, so the screen is not rebuilt per tick (plan 0073).
+    let codes = Memo::new(move |_| {
+        inner.with(|i| match i {
+            Some(DetailInner::Entry(e)) => e.body.fields.iter().map(|f| f.code.clone()).collect(),
+            _ => Vec::new(),
+        })
+    });
     let e = Memo::new(move |_| {
         inner.with(|i| match i {
-            Some(DetailInner::Entry(e)) => Some((**e).clone()),
+            Some(DetailInner::Entry(e)) => {
+                let mut e = (**e).clone();
+                for f in &mut e.body.fields {
+                    if let Some(c) = f.code.as_mut() {
+                        c.code = qv_ui_api::Z::from("");
+                        c.left = 0;
+                    }
+                }
+                Some(e)
+            }
             _ => None,
         })
     });
@@ -733,7 +833,7 @@ fn EntryScreen(inner: Memo<Option<DetailInner>>, live: Memo<qv_ui_api::Live>) ->
                             {move || (menu.get() == Some(1)).then(|| entry_menu(&v2))}
                         </div>
                     </div>
-                    {entry_body(v.body.clone(), live)}
+                    {entry_body(v.body.clone(), live, codes)}
                     {show_shelf.then(|| view! {
                         <div class="shelf">
                             <div class="shelf-h"><span>"FILES"</span>{(!files.is_empty()).then(|| view! { <button class="link" on:click=go(Screen::Attachments(id))>"Manage"</button> })}</div>
@@ -864,7 +964,7 @@ fn VersionScreen(inner: Memo<Option<DetailInner>>, live: Memo<qv_ui_api::Live>) 
                 <div class="detail-inner fade-in">
                     {sub_back()}
                     <div class="banner"><Svg icon=Icon::History/><span>"An earlier version. Restoring creates a new version; nothing is overwritten."</span></div>
-                    {entry_body(v.body.clone(), live)}
+                    {entry_body(v.body.clone(), live, Memo::new(|_| Vec::new()))}
                     <div class="actions">
                         <button class="btn subtle" on:click=move |_| ui().act(Act::Back)>"Back"</button>
                         {v.conflicted.then(|| view! { <button class="btn" on:click=act(WsAct::RestoreHistory(entry, version.clone(), true))>"Restore and resolve conflict"</button> })}

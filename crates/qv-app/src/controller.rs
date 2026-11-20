@@ -2424,6 +2424,9 @@ impl Controller {
         use crate::qr::QrTarget;
         match target {
             QrTarget::NewDevice => s.phase == Phase::Locked && s.mode == Mode::Join,
+            QrTarget::Totp => {
+                s.phase == Phase::Unlocked && s.workspace.as_ref().is_some_and(|w| w.totp.is_some())
+            }
             QrTarget::Sync => {
                 s.phase == Phase::Unlocked
                     && s.workspace
@@ -2451,6 +2454,9 @@ impl Controller {
     ) -> Result<bool, AppError> {
         use crate::qr::QrTarget;
         use crate::workspace::WsField;
+        if target == QrTarget::Totp {
+            return self.apply_totp_qr(epoch, payload, scan);
+        }
         let info = qv_core::inspect_lan_qr(payload)?;
         let addressed = !info.endpoints.is_empty();
         let mut s = self.state();
@@ -2490,6 +2496,45 @@ impl Controller {
         Ok(addressed)
     }
 
+    /// A scanned two-factor QR: an `otpauth://` link fills the setup sheet
+    /// (`true`: it is added at once, the scan being the user's choice); any
+    /// other code is refused in the sheet and not kept (plan 0073).
+    fn apply_totp_qr(
+        &self,
+        epoch: FormEpoch,
+        payload: &[u8],
+        scan: Option<u64>,
+    ) -> Result<bool, AppError> {
+        use crate::workspace::WsField;
+        let mut s = self.state();
+        if s.epoch != epoch.0 || !Self::qr_form(&s, crate::qr::QrTarget::Totp) {
+            return Err(AppError::InvalidInput);
+        }
+        if let Some(id) = scan
+            && s.scan
+                .as_ref()
+                .is_none_or(|running| running.id != id || running.cancel.is_cancelled())
+        {
+            return Err(CoreError::Cancelled.into());
+        }
+        let ws = s.workspace.as_mut().ok_or(AppError::InvalidInput)?;
+        let sheet = ws.totp.as_mut().ok_or(AppError::InvalidInput)?;
+        let setup = qv_core::TotpSetup::from_input(payload, sheet.options)
+            .ok()
+            .filter(|setup| setup.link);
+        let found = setup.is_some();
+        if found {
+            ws.inputs
+                .insert(WsField::TotpInput, crate::workspace::protect(payload)?);
+        } else {
+            ws.inputs.remove(&WsField::TotpInput);
+        }
+        sheet.scanned = found;
+        sheet.checked = Some(setup.ok_or(qv_core::TotpError::InvalidUri));
+        ws.error = None;
+        s.revision = s.revision.wrapping_add(1);
+        Ok(found)
+    }
     /// Starts the scanned form's action, as the scan was the user's explicit
     /// action (0014 §6.2–§6.3). A join still waits for both comparison
     /// confirmations before any key is released.
@@ -2510,6 +2555,9 @@ impl Controller {
             }
             crate::qr::QrTarget::Sync => {
                 self.dispatch(epoch, crate::workspace::WsAction::LanSync, false, false)
+            }
+            crate::qr::QrTarget::Totp => {
+                self.dispatch(epoch, crate::workspace::WsAction::TotpAdd, false, false)
             }
         };
         if let Err(error) = started {

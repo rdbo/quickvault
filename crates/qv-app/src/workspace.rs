@@ -269,13 +269,15 @@ pub enum WsField {
     LanCode,
     /// The other device's address, `ip:port`.
     LanEndpoint,
+    /// A two-factor setup key or `otpauth://` link (protected, plan 0073).
+    TotpInput,
 }
 impl WsField {
     fn limit(self, multiline: bool) -> usize {
         match self {
             Self::Query | Self::Command => QUERY_MAX,
             Self::Path => PATH_MAX,
-            Self::Notes | Self::Replacement(_) => MULTI_MAX,
+            Self::Notes | Self::Replacement(_) | Self::TotpInput => MULTI_MAX,
             Self::FieldValue(_) if multiline => MULTI_MAX,
             _ => LINE_MAX,
         }
@@ -509,6 +511,17 @@ pub enum WsAction {
     Dismiss,
     /// Rate the new master password once typing pauses (0010 §4.2).
     RatePassword,
+    /// Open the two-factor setup sheet for an entry-form field, or to add
+    /// one (plan 0073).
+    TotpOpen(Option<u16>),
+    /// Check the setup input once typing pauses.
+    TotpCheck,
+    /// Settings for a setup key.
+    TotpOptions(qv_core::KeyOptions),
+    /// Store the checked input in the form.
+    TotpAdd,
+    /// Close the sheet without changing the form.
+    TotpClose,
 }
 /// The notice of a change saved without its snapshot (0007 §3.3).
 pub(crate) const SNAPSHOT_SKIPPED: &str = "Saved, but there wasn't enough free space to keep a snapshot of the vault from before this change.";
@@ -573,6 +586,23 @@ pub(crate) struct EntryForm {
     /// The last removed field, for Undo.
     pub(crate) removed: Option<crate::editor::Removed>,
 }
+/// The two-factor setup sheet (0009 §1.8, plan 0073). The typed input is
+/// `inputs[WsField::TotpInput]`; this holds what Rust made of it.
+pub(crate) struct TotpSheet {
+    /// The entry-form field it sets; `None` adds a field named `name`.
+    pub(crate) target: Option<u16>,
+    /// The name of the field it adds.
+    pub(crate) name: zeroize::Zeroizing<String>,
+    /// Settings for a setup key (a link carries its own).
+    pub(crate) options: qv_core::KeyOptions,
+    /// The last check of the input, run once typing pauses; `None` before
+    /// one or for an empty input.
+    pub(crate) checked: Option<Result<qv_core::TotpSetup, qv_core::TotpError>>,
+    /// The input came from a camera scan (it is never rendered).
+    pub(crate) scanned: bool,
+}
+/// The name a two-factor field gets when the sheet adds it.
+pub(crate) const TOTP_NAME: &str = "Two-factor code";
 /// The group form.
 pub(crate) struct GroupForm {
     pub(crate) draft: GroupDraft,
@@ -695,6 +725,8 @@ pub struct Workspace {
     pub(crate) fair_warning: bool,
     /// The live rating of the new master password (0010 §4.2, plan 0072).
     pub(crate) rating: crate::meter::Rating,
+    /// The open two-factor setup sheet (plan 0073).
+    pub(crate) totp: Option<TotpSheet>,
     clip: Option<Clip>,
 }
 impl Drop for Workspace {
@@ -717,6 +749,10 @@ pub struct Live {
     pub generated: bool,
     /// Rust-enforced delay before weak-master-password consent.
     pub weak_seconds: u64,
+    /// The current second while two-factor codes may be on screen (an open
+    /// entry or the setup sheet), else 0: frames follow their countdown
+    /// (plan 0073).
+    pub code_tick: u64,
 }
 /// Expire time-limited values and report the visible state.
 pub(crate) fn live(s: &mut State) -> (u64, Live) {
@@ -755,6 +791,13 @@ pub(crate) fn live(s: &mut State) -> (u64, Live) {
                     let left = until.saturating_duration_since(Instant::now());
                     left.as_secs() + u64::from(left.subsec_nanos() > 0)
                 }),
+                code_tick: if matches!(ws.screen, Screen::Entry(_)) || ws.totp.is_some() {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |d| d.as_secs())
+                } else {
+                    0
+                },
             }
         }
         None => Live::default(),
@@ -803,6 +846,7 @@ impl Workspace {
             weak_accepted: false,
             fair_warning: false,
             rating: crate::meter::Rating::default(),
+            totp: None,
             clip: None,
         };
         if recovered_with_phrase {
@@ -825,6 +869,7 @@ impl Workspace {
         }
         self.inputs.clear();
         self.rating.clear();
+        self.totp = None;
         self.lan_scanned = false;
         self.generated = None;
         self.weak_until = None;
@@ -1205,6 +1250,12 @@ impl Controller {
             if field == WsField::LanCode {
                 // A typed code replaces a scanned one.
                 ws.lan_scanned = false;
+            }
+            if field == WsField::TotpInput
+                && let Some(sheet) = ws.totp.as_mut()
+            {
+                // Typing replaces a scanned code; the check runs on a pause.
+                sheet.scanned = false;
             }
             if matches!(
                 field,

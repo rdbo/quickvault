@@ -86,5 +86,5 @@ pub use record::{Deletion, RecordBody, RecordKind, RecordVersion};
 pub use summary::{HeadSummary, merge_summaries};
 pub use text::{Extensions, FieldValue, MAX_RECORD_BYTES, MAX_TEXT_BYTES, SecretText, Text};
 pub use time::Timestamp;
-pub use totp::{Totp, TotpError};
+pub use totp::{KeyOptions, Setup, Totp, TotpError, link_names};
 pub use tree::{EntryPlace, GroupNode, GroupTree, MAX_GROUPS, project_groups};

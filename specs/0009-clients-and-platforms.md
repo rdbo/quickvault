@@ -262,6 +262,27 @@ release, but no longer gates the feature.
     the field in Rust.
   - A Wi‑Fi item's page can show a `WIFI:` join QR code. It contains the
     password, so it is an explicit 30-second reveal under 0008 §4.
+  - **Two-factor codes** (owner, 2026-11-20; plan 0073). A login's editor
+    always has a "Two-factor code" row under its fields: "Set up" while it
+    has none, otherwise the current code with "Replace" (the field's menu
+    removes it). Other types reach the same sheet through "Add a field"
+    ("Two-factor code" or the one-time-code kind), which never adds an empty
+    code field. "Set up" opens a sheet in the order sites present
+    it: "Scan the QR code" where a camera scan exists (Android), then one
+    protected input for the setup key as sites print it (spaces, dashes,
+    any case) or a pasted `otpauth://` link. Rust checks the input once
+    typing pauses, never per keystroke; the page receives only whether it
+    is valid, the current code and its seconds left, so the user can finish
+    the site's setup. "More options" (digits, period, algorithm) applies
+    to a key only and is closed by default. Adding stores 0003 §5.4's URI.
+    A scanned code must be an `otpauth://` link (a UTF-8 header is
+    accepted); it is added at once, the scan being the user's choice, and
+    any other code is refused in the sheet and not kept.
+    The start box recognizes a pasted `otpauth://` link as a login with
+    that code, named from the link's issuer, with its account as the
+    username. In the entry view the code shows without a reveal, grouped
+    (for example "123 456"), with a ring for its own period; a click copies
+    it. The setup key and URI never show in the view.
   - Tiles show the colour token of 0003 §5.5.
 - **Item types and list loading** (owner, 2026-11-11; plan 0051). The
   sidebar always lists the new-item picker's five types (Logins, Cards,
@@ -275,7 +296,10 @@ release, but no longer gates the feature.
   as numbers) and never take the list's or the sidebar's groups page.
 - **Item list actions** (owner, 2026-11-07; plan 0044). A right click on an
   item row opens its menu (open, copy the first field or the password,
-  colour, move, select, move to the trash) without opening the item.
+  copy its two-factor code, colour, move, select, move to the trash)
+  without opening the item. A row's copy menu also lists its two-factor
+  code. Copying one copies the current code, never the key; a code field
+  that cannot make codes is not listed (owner, 2026-11-20).
   Multi-select: Ctrl/⌘-click toggles a row, Shift-click selects a range, a
   Select button in the list header (desktop) and, on touch screens, holding
   a row for about half a second (Android has no Select button; owner,
@@ -650,6 +674,11 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-20: §1.8 item list actions: a row's menu and copy menu copy its
+  current two-factor code (owner request).
+- 2026-11-20: §1.8 item editor: two-factor codes get a login row, a
+  setup sheet (scan, setup key or link, live code), start-box links and a
+  visible code in the view (owner report, plan 0073).
 - 2026-11-19: §1.8: the device keeps one quick-unlock enrollment; the
   post-unlock offer needs none on the device, and another vault's Settings
   names the holder and offers to move it (owner report, plan 0072).

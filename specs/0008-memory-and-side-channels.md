@@ -160,7 +160,11 @@ unregistered custom schemes. External pages never receive the privileged bridge.
 4.3. Bridge methods are allowlisted, typed, bounded and checked in Rust for
 current session, vault, field and operation. Never expose arbitrary filesystem,
 shell, SQL, network or crypto functions. Protected reveal requires an explicit
-UI action, expires after 30 seconds and is cleared on lock. Copy/autofill goes
+UI action, expires after 30 seconds and is cleared on lock. A two-factor code
+is not a reveal of its protected field: while an entry is open its current
+code reaches the page once per period, and it is dropped when the entry
+closes, on lock and when the window is hidden. The stored URI and setup key
+still need a reveal (0003 §5.4; plan 0073). Copy/autofill goes
 Rust directly to the OS. A compromised authorized webview remains a compromise
 of the trusted client; do not advertise handles as an XSS defense.
 
@@ -230,6 +234,9 @@ out of scope. Remotely supplied parser/rendering inputs remain in scope.
 
 ## Changelog
 
+- 2026-11-20: §4.3: an open entry's current two-factor code reaches the
+  page without a reveal, once per period, dropped on close, lock and hide;
+  the stored URI still needs one (owner report, plan 0073).
 - 2026-11-17: §1.1, keyboard row, §4, §4.4: the shared UI is Tauri 2 with a
   Leptos page (0009 §6): Tauri document URLs, one bounded in-process command,
   frames as command replies, references instead of handles, the `qvmedia`

@@ -72,6 +72,7 @@ pub enum WsField {
     Confirmation,
     LanCode,
     LanEndpoint,
+    TotpInput,
 }
 
 impl WsField {
@@ -107,6 +108,7 @@ impl WsField {
             Self::Confirmation => "ws-confirmation".into(),
             Self::LanCode => "ws-lan-code".into(),
             Self::LanEndpoint => "ws-lan-endpoint".into(),
+            Self::TotpInput => "ws-totp-input".into(),
         }
     }
 
@@ -115,7 +117,7 @@ impl WsField {
         match self {
             Self::Query | Self::Command => QUERY_MAX,
             Self::Path => PATH_MAX,
-            Self::Notes | Self::Replacement(_) => MULTI_MAX,
+            Self::Notes | Self::Replacement(_) | Self::TotpInput => MULTI_MAX,
             Self::FieldValue(_) if multiline => MULTI_MAX,
             _ => LINE_MAX,
         }
@@ -389,6 +391,32 @@ pub enum WsAct {
     KeepSnapshots(bool),
     Dismiss,
     RatePassword,
+    TotpOpen(Option<u16>),
+    TotpCheck,
+    TotpOptions(TotpOptions),
+    TotpAdd,
+    TotpClose,
+}
+
+/// A two-factor code's hash (`qv_core::OtpAlgorithm`).
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+#[allow(missing_docs)]
+pub enum OtpHash {
+    Sha1,
+    Sha256,
+    Sha512,
+}
+
+/// Settings for a two-factor setup key (plan 0073).
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TotpOptions {
+    /// 6–8.
+    pub digits: u8,
+    /// 30 or 60 seconds.
+    pub period: u32,
+    /// The hash.
+    pub hash: OtpHash,
 }
 
 /// Locked-screen actions (`controller::Action`).
@@ -455,6 +483,8 @@ pub enum QrTarget {
     NewDevice,
     /// Sync with the open vault.
     Sync,
+    /// Set up a two-factor code.
+    Totp,
 }
 
 /// Desktop file choices through the system picker.

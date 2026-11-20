@@ -293,6 +293,8 @@ pub struct TotpNow {
     pub code: OtpCode,
     /// Seconds until the next code.
     pub seconds_remaining: u32,
+    /// The code's time step in seconds.
+    pub period: u32,
 }
 
 redacted!(
@@ -939,6 +941,7 @@ impl Session {
             Ok(TotpNow {
                 code: totp.code_at(now)?,
                 seconds_remaining: totp.seconds_remaining(now)?,
+                period: totp.period(),
             })
         })
     }

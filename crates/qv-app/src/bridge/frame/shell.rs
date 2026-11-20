@@ -206,6 +206,7 @@ pub(super) fn shell(ctx: &mut Ctx<'_>, view: &View) -> api::Shell {
         busy,
         busy_shown: view.busy_shown,
         scanning: view.scanning,
+        scanning_totp: view.scanning && c.entry_form(epoch).is_some_and(|f| f.totp_sheet.is_some()),
         live: api::Live {
             reveal_left: view.live.reveal_left,
             clipboard: view.live.clipboard,

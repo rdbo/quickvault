@@ -488,6 +488,53 @@ pub(crate) fn vault_choice(
     }
 }
 
+/// Settings for a setup key, to the page.
+pub(crate) fn totp_options(o: qv_core::KeyOptions) -> api::TotpOptions {
+    api::TotpOptions {
+        digits: u8::try_from(o.digits).unwrap_or(6),
+        period: o.period,
+        hash: match o.algorithm {
+            qv_core::OtpAlgorithm::Sha256 => api::OtpHash::Sha256,
+            qv_core::OtpAlgorithm::Sha512 => api::OtpHash::Sha512,
+            _ => api::OtpHash::Sha1,
+        },
+    }
+}
+/// Settings for a setup key, from the page (bounds are checked by the
+/// action).
+pub(crate) fn totp_options_back(o: api::TotpOptions) -> qv_core::KeyOptions {
+    qv_core::KeyOptions {
+        digits: u32::from(o.digits),
+        period: o.period,
+        algorithm: match o.hash {
+            api::OtpHash::Sha1 => qv_core::OtpAlgorithm::Sha1,
+            api::OtpHash::Sha256 => qv_core::OtpAlgorithm::Sha256,
+            api::OtpHash::Sha512 => qv_core::OtpAlgorithm::Sha512,
+        },
+    }
+}
+/// A code for the page, grouped for reading: "123 456", "1234 5678",
+/// "123 4567" (plan 0073).
+pub(crate) fn code(c: &crate::views::CodeNow) -> api::Code {
+    let digits = c.code.as_str();
+    let split = digits.len() / 2;
+    let mut grouped = Zeroizing::new(String::with_capacity(digits.len() + 1));
+    grouped.push_str(digits.get(..split).unwrap_or_default());
+    grouped.push(' ');
+    grouped.push_str(digits.get(split..).unwrap_or_default());
+    api::Code {
+        code: Z::from(grouped),
+        left: c.left,
+        period: c.period,
+    }
+}
+
+/// A revealed value for the page. An empty value is still revealed: the
+/// page shows it empty, not masked as if it were hidden.
+pub(crate) fn shown(v: Option<qv_core::SecretBytes>) -> Option<Z> {
+    v.map(|v| Z::from(crate::views::z(&String::from_utf8_lossy(v.expose_secret()))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -509,5 +556,32 @@ mod tests {
         assert!(screen_back(&refs, &api::Screen::ConflictRecord("../etc".into())).is_none());
         assert!(screen_back(&refs, &api::Screen::Entry(api::Ref([1; 16]))).is_none());
         assert!(screen_back(&refs, &api::Screen::Kind("x".repeat(65))).is_none());
+    }
+
+    #[test]
+    fn codes_are_grouped_for_reading() {
+        let grouped = |digits: &str| {
+            super::code(&crate::views::CodeNow {
+                code: zeroize::Zeroizing::new(digits.to_owned()),
+                left: 9,
+                period: 30,
+            })
+            .code
+            .to_string()
+        };
+        assert_eq!(grouped("123456"), "123 456");
+        assert_eq!(grouped("1234567"), "123 4567");
+        assert_eq!(grouped("12345678"), "1234 5678");
+    }
+
+    #[test]
+    fn an_empty_revealed_value_is_shown_empty_not_masked() {
+        let shown = |v: &[u8]| {
+            super::shown(Some(qv_core::SecretBytes::take_from(&mut v.to_vec())))
+                .map(|z| z.to_string())
+        };
+        assert_eq!(shown(b""), Some(String::new()));
+        assert_eq!(shown(b"hunter2"), Some("hunter2".to_owned()));
+        assert_eq!(super::shown(None), None);
     }
 }

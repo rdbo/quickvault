@@ -17,6 +17,10 @@
 //! repeated known parameter is [`TotpError::InvalidUri`]; unknown parameters
 //! (`issuer`, `image`, …) and the label are ignored. The key is decoded
 //! straight into locked memory; the HMAC is `qv_crypto::hotp`.
+//!
+//! [`Setup`] turns what a user types or pastes when setting up a code (a
+//! link, or a setup key as sites print it) into the URI to store, and
+//! [`link_names`] reads a link's issuer and account (plan 0073).
 
 use core::fmt;
 
@@ -272,6 +276,169 @@ impl Totp {
     }
 }
 
+/// Settings for a setup key typed without a link (0003 §5.4); a link
+/// carries its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KeyOptions {
+    /// The HMAC hash.
+    pub algorithm: OtpAlgorithm,
+    /// The number of digits (6–8).
+    pub digits: u32,
+    /// The time step in seconds.
+    pub period: u32,
+}
+
+impl Default for KeyOptions {
+    fn default() -> Self {
+        Self {
+            algorithm: OtpAlgorithm::Sha1,
+            digits: 6,
+            period: 30,
+        }
+    }
+}
+
+/// A two-factor setup input turned into the value a `totp` field stores
+/// (plan 0073). `Debug` is redacted.
+pub struct Setup {
+    /// The `otpauth://` URI to store.
+    pub uri: SecretBytes,
+    /// It, parsed.
+    pub totp: Totp,
+    /// The input was a link (its own settings apply), not a setup key.
+    pub link: bool,
+}
+
+impl fmt::Debug for Setup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Setup(<redacted>)")
+    }
+}
+
+/// Spaces, tabs and dashes that sites print inside setup keys.
+fn key_spacing(b: u8) -> bool {
+    matches!(b, b' ' | b'\t' | b'-')
+}
+
+impl Setup {
+    /// What the user typed or pasted, as sites present it: an
+    /// `otpauth://totp` link (stored as given after it parses; `options`
+    /// are ignored), or a base32 setup key with any spacing, dashes, case
+    /// and padding, stored as `otpauth://totp/?secret=KEY` with only the
+    /// non-default `options`. Surrounding whitespace is ignored.
+    pub fn from_input(input: &[u8], options: KeyOptions) -> Result<Self, TotpError> {
+        if input.len() > MAX_TEXT_BYTES {
+            return Err(TotpError::InvalidUri);
+        }
+        let start = input.iter().position(|b| !b.is_ascii_whitespace());
+        let end = input.iter().rposition(|b| !b.is_ascii_whitespace());
+        let (Some(start), Some(end)) = (start, end) else {
+            return Err(TotpError::InvalidUri);
+        };
+        let input = input.get(start..=end).ok_or(TotpError::Internal)?;
+        if strip_prefix_ci(input, b"otpauth:").is_some() {
+            let totp = Totp::parse(input)?;
+            let uri = SecretBytes::try_init(input.len(), |b| {
+                b.copy_from_slice(input);
+                Ok::<(), TotpError>(())
+            })?;
+            return Ok(Self {
+                uri,
+                totp,
+                link: true,
+            });
+        }
+        if !(6..=8).contains(&options.digits) || !(1..=MAX_PERIOD).contains(&options.period) {
+            return Err(TotpError::Unsupported);
+        }
+        // Upper case, without spacing or padding; anything else is left
+        // for the decoder to refuse.
+        let mut key = Zeroizing::new(Vec::with_capacity(input.len()));
+        key.extend(
+            input
+                .iter()
+                .filter(|&&b| !key_spacing(b))
+                .map(u8::to_ascii_uppercase),
+        );
+        while key.last() == Some(&b'=') {
+            key.pop();
+        }
+        let decoded = base32_decode(&key)?;
+        if decoded.is_empty() || decoded.len() > MAX_KEY_BYTES {
+            return Err(TotpError::InvalidUri);
+        }
+        drop(decoded);
+        let mut uri = Zeroizing::new(Vec::with_capacity(key.len() + 64));
+        uri.extend_from_slice(b"otpauth://totp/?secret=");
+        uri.extend_from_slice(&key);
+        let defaults = KeyOptions::default();
+        if options.digits != defaults.digits {
+            uri.extend_from_slice(format!("&digits={}", options.digits).as_bytes());
+        }
+        if options.period != defaults.period {
+            uri.extend_from_slice(format!("&period={}", options.period).as_bytes());
+        }
+        match options.algorithm {
+            OtpAlgorithm::Sha1 => {}
+            OtpAlgorithm::Sha256 => uri.extend_from_slice(b"&algorithm=SHA256"),
+            OtpAlgorithm::Sha512 => uri.extend_from_slice(b"&algorithm=SHA512"),
+            // A hash this build cannot name in a URI.
+            _ => return Err(TotpError::Unsupported),
+        }
+        let totp = Totp::parse(&uri)?;
+        let stored = SecretBytes::try_init(uri.len(), |b| {
+            b.copy_from_slice(&uri);
+            Ok::<(), TotpError>(())
+        })?;
+        Ok(Self {
+            uri: stored,
+            totp,
+            link: false,
+        })
+    }
+}
+
+/// The names an `otpauth://` link carries, for naming a new login (plan
+/// 0073): the `issuer` parameter, else the label's part before `:`, and
+/// the account (the label's part after `:`, or all of it). Not secret, but
+/// vault text; `None` for a part that is absent, empty or not UTF-8.
+pub fn link_names(uri: &[u8]) -> Result<(Option<String>, Option<String>), TotpError> {
+    Totp::parse(uri)?;
+    let rest = strip_prefix_ci(uri, b"otpauth://totp/").ok_or(TotpError::InvalidUri)?;
+    let (label, query) = match rest.iter().position(|&b| b == b'?') {
+        Some(i) => (
+            rest.get(..i).unwrap_or_default(),
+            rest.get(i + 1..).unwrap_or_default(),
+        ),
+        None => (rest, &[][..]),
+    };
+    let query = query.split(|&b| b == b'#').next().unwrap_or_default();
+    let text = |raw: &[u8]| -> Result<Option<String>, TotpError> {
+        let decoded = percent_decode(raw)?;
+        Ok(std::str::from_utf8(&decoded)
+            .ok()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned))
+    };
+    let label = percent_decode(label)?;
+    let (from_label, account) = match label.iter().position(|&b| b == b':') {
+        Some(i) => (
+            text(label.get(..i).unwrap_or_default())?,
+            text(label.get(i + 1..).unwrap_or_default())?,
+        ),
+        None => (None, text(&label)?),
+    };
+    let mut issuer = None;
+    for param in query.split(|&b| b == b'&') {
+        if let Some(value) = strip_prefix_ci(param, b"issuer=") {
+            issuer = text(value)?;
+            break;
+        }
+    }
+    Ok((issuer.or(from_label), account))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -491,5 +658,127 @@ mod tests {
                 data.as_slice()
             );
         }
+    }
+
+    #[test]
+    fn setup_keys_as_sites_print_them() {
+        // RFC 6238's SHA-1 key "12345678901234567890".
+        let key = "GEZD GNBV GY3T QOJQ GEZD GNBV GY3T QOJQ";
+        for input in [
+            key,
+            "gezd-gnbv-gy3t-qojq-gezd-gnbv-gy3t-qojq",
+            "  GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ\n",
+            "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ====",
+        ] {
+            let s = Setup::from_input(input.as_bytes(), KeyOptions::default()).unwrap();
+            assert!(!s.link);
+            assert_eq!(
+                s.uri.expose_secret(),
+                b"otpauth://totp/?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+                "{input:?}"
+            );
+            assert_eq!(
+                s.totp.code_at(Timestamp(59_000)).unwrap().expose_secret(),
+                "287082"
+            );
+        }
+        let s = Setup::from_input(
+            key.as_bytes(),
+            KeyOptions {
+                algorithm: OtpAlgorithm::Sha256,
+                digits: 8,
+                period: 60,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            s.uri.expose_secret(),
+            b"otpauth://totp/?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&digits=8&period=60&algorithm=SHA256"
+        );
+        assert_eq!(
+            (s.totp.algorithm(), s.totp.digits(), s.totp.period()),
+            (OtpAlgorithm::Sha256, 8, 60)
+        );
+        assert_eq!(format!("{s:?}"), "Setup(<redacted>)");
+        use TotpError::{InvalidUri, Unsupported};
+        let refused = |input: &[u8], options| Setup::from_input(input, options).map(|_| ());
+        for bad in [&b""[..], b"   ", b"GEZD1", b"GEZD GNBV!", b"G", b"===="] {
+            assert_eq!(
+                refused(bad, KeyOptions::default()),
+                Err(InvalidUri),
+                "{bad:?}"
+            );
+        }
+        let long = vec![b'A'; MAX_TEXT_BYTES + 1];
+        assert_eq!(refused(&long, KeyOptions::default()), Err(InvalidUri));
+        // 257 bytes of key is over the decoded bound.
+        let over = base32(&[7; MAX_KEY_BYTES + 1]);
+        assert_eq!(
+            refused(over.as_bytes(), KeyOptions::default()),
+            Err(InvalidUri)
+        );
+        let at_bound = base32(&[7; MAX_KEY_BYTES]);
+        assert!(refused(at_bound.as_bytes(), KeyOptions::default()).is_ok());
+        for options in [
+            KeyOptions {
+                digits: 5,
+                ..KeyOptions::default()
+            },
+            KeyOptions {
+                digits: 9,
+                ..KeyOptions::default()
+            },
+            KeyOptions {
+                period: 0,
+                ..KeyOptions::default()
+            },
+            KeyOptions {
+                period: MAX_PERIOD + 1,
+                ..KeyOptions::default()
+            },
+        ] {
+            assert_eq!(refused(key.as_bytes(), options), Err(Unsupported));
+        }
+    }
+
+    #[test]
+    fn setup_links_are_kept_as_given_and_named() {
+        let link = "otpauth://totp/Example%20Co:alice@example.com?secret=GEZDGNBVGY3TQOJQ&issuer=Example&digits=8";
+        let s = Setup::from_input(
+            format!(" {link} ").as_bytes(),
+            KeyOptions {
+                digits: 7,
+                ..KeyOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(s.link);
+        assert_eq!(s.uri.expose_secret(), link.as_bytes());
+        assert_eq!(s.totp.digits(), 8, "a link's own settings apply");
+        assert_eq!(
+            link_names(link.as_bytes()).unwrap(),
+            (Some("Example".into()), Some("alice@example.com".into()))
+        );
+        assert_eq!(
+            link_names(b"otpauth://totp/Example%20Co:bob?secret=GE").unwrap(),
+            (Some("Example Co".into()), Some("bob".into()))
+        );
+        assert_eq!(
+            link_names(b"otpauth://totp/bob?secret=GE").unwrap(),
+            (None, Some("bob".into()))
+        );
+        assert_eq!(
+            link_names(b"otpauth://totp/?secret=GE").unwrap(),
+            (None, None)
+        );
+        assert_eq!(
+            link_names(b"otpauth://totp/%FF:%20?secret=GE&issuer=").unwrap(),
+            (None, None)
+        );
+        assert_eq!(
+            Setup::from_input(b"otpauth://hotp/x?secret=GE", KeyOptions::default()).map(|_| ()),
+            Err(TotpError::Unsupported)
+        );
+        assert_eq!(link_names(b"otpauth://totp/x"), Err(TotpError::InvalidUri));
     }
 }

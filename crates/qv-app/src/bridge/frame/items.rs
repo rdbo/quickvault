@@ -12,11 +12,6 @@ use qv_ui_api as api;
 use qv_ui_api::{BarPop, Icon, Z};
 use zeroize::Zeroizing;
 
-fn text(v: Option<qv_core::SecretBytes>) -> Option<Z> {
-    v.map(|v| Z::from(views::z(&String::from_utf8_lossy(v.expose_secret()))))
-        .filter(|z| !z.is_empty())
-}
-
 fn row_copy(c: RowCopy) -> api::RowCopy {
     match c {
         RowCopy::None => api::RowCopy::None,
@@ -90,11 +85,18 @@ fn menu_fields(ctx: &mut Ctx<'_>, h: EntryHandle, card: bool, row: bool) -> Vec<
         .and_then(Result::ok)
         .map(|v| v.fields)
         .unwrap_or_default();
+    // A code that cannot be made is not offered (plan 0073).
+    let (c, epoch) = (ctx.c, ctx.epoch);
     fields
         .iter()
-        .filter(|f| f.kind != FieldKind::Totp)
+        .filter(|f| {
+            f.kind != FieldKind::Totp || matches!(c.read(epoch, |s| s.totp(f.handle)), Some(Ok(_)))
+        })
         .map(|f| {
-            let icon = if row {
+            let code = f.kind == FieldKind::Totp;
+            let icon = if code {
+                Icon::Shield
+            } else if row {
                 if f.protected { Icon::Key } else { Icon::Copy }
             } else if card && f.name.as_str() == crate::editor::CARD_NUMBER {
                 Icon::Card
@@ -115,6 +117,7 @@ fn menu_fields(ctx: &mut Ctx<'_>, h: EntryHandle, card: bool, row: bool) -> Vec<
                 field: ctx.refs.issue(Target::Field(f.handle)),
                 name: Z::from(f.name.clone()),
                 icon,
+                code,
             }
         })
         .collect()
@@ -339,11 +342,11 @@ pub(super) fn list_pane(
         .and_then(|rid| find(&rid).map(|r| (rid, r)))
     {
         Some((rid, r)) if !in_selection && !form => {
-            let fields = if r.copy == RowCopy::Menu {
-                menu_fields(ctx, r.handle, false, true)
-            } else {
-                Vec::new()
-            };
+            // Its own copy buttons cover the rest; a code is always listed.
+            let mut fields = menu_fields(ctx, r.handle, false, true);
+            if r.copy != RowCopy::Menu {
+                fields.retain(|f| f.code);
+            }
             Some((rid, fields))
         }
         _ => None,
@@ -502,18 +505,26 @@ fn entry_body(
                 CopyKey::Field(v.handle, f.handle)
             });
             let code_key = RevealKey::Totp(f.handle);
+            // An open entry's code shows without a reveal; the stored URI
+            // never leaves Rust (0008 §4.3, plan 0073).
+            let code = (totp && current && history.is_none())
+                .then(|| c.read(epoch, |s| s.totp(f.handle)).and_then(Result::ok))
+                .flatten()
+                .map(|now| {
+                    convert::code(&views::CodeNow {
+                        code: zeroize::Zeroizing::new(now.code.expose_secret().to_owned()),
+                        left: now.seconds_remaining,
+                        period: now.period,
+                    })
+                });
             api::FieldLine {
                 name: Z::from(f.name.clone()),
                 kind_name: views::kind_name(f.kind).to_owned(),
                 totp,
                 value: f.value.clone().map(Z::from),
                 protected: f.protected,
-                shown: text(c.revealed(epoch, &reveal)),
-                code: if totp {
-                    text(c.revealed(epoch, &code_key))
-                } else {
-                    None
-                },
+                shown: convert::shown(c.revealed(epoch, &reveal)),
+                code,
                 reveal: convert::reveal(ctx.refs, &reveal),
                 code_key: totp.then(|| convert::reveal(ctx.refs, &code_key)),
                 copy: copy.map(|k| convert::copy(ctx.refs, &k)),

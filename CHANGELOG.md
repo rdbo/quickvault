@@ -7,6 +7,32 @@ Dates are ISO 8601. Newest first within each section.
 
 ## Unreleased
 
+- 2026-11-20: Fixed (owner reports): a list row's menu (right click, or a
+  card's copy menu) near the end of the list opened below the visible list;
+  it now opens above the row when there is no room below, and scrolls when
+  neither side fits. Revealing an empty protected value (an empty password)
+  kept showing the mask as if still hidden; it now shows empty, in the
+  entry view and the editor. The two-factor "More options" choices show the
+  pointer cursor and a hover state.
+- 2026-11-20: A list row's right-click menu, and a row's copy menu, copy
+  the entry's current two-factor code ("Copy “Two-factor code”"); a code
+  field that cannot make codes is not listed. Spec 0009 §1.8 amended
+  (owner request).
+- 2026-11-20: Two-factor codes you can find (plan 0073). Logins have a
+  "Two-factor code" row with "Set up", which opens a sheet: scan the site's
+  QR code (Android), or enter the setup key as the site prints it (spaces,
+  dashes, any case) or paste an `otpauth://` link. Once the input is valid
+  the sheet shows the current code, which sites ask for to finish setup;
+  "More options" covers digits, period and algorithm. A pasted
+  `otpauth://` link in "What are you saving?" starts a login named after the
+  site, with the account as username. "Add a field" opens the same sheet for
+  a code instead of an empty field. The entry view shows the current code
+  without a reveal, grouped ("123 456"), with a ring for its own period;
+  the setup key never shows. Codes are stored as before (a key becomes
+  `otpauth://totp/?secret=KEY`; no format change). Specs 0003 §5.4, 0008
+  §4.3 and 0009 §1.8 amended. Fixed: the live master-password strength
+  (plan 0072) never updated in the app, because the page's typing-pause
+  timer could not reach the bridge.
 - 2026-11-19: Owner feedback batch (plan 0072). Lists (items, trash,
   conflicts) scroll as one list: the next page loads as the end comes into
   view, up to 1,024 rows at once; beyond that "Show more" and "Back to the

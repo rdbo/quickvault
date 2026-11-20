@@ -178,12 +178,16 @@ enum ValueMode {
     Multi,
     Security,
     Plain,
+    /// A two-factor code: set up in its sheet, never typed (plan 0073).
+    Totp,
 }
 
 fn value_mode(row: &FormRow, changing: bool) -> ValueMode {
     let protected_role = matches!(row.role, Role::Password | Role::Hidden | Role::CardNumber);
     if row.too_large {
         ValueMode::TooLarge
+    } else if row.kind == FieldKind::Totp {
+        ValueMode::Totp
     } else if protected_role && (row.generated || row.filled) && row.replaced {
         ValueMode::Generated
     } else if protected_role && row.stored && !row.replaced && !changing {
@@ -219,6 +223,8 @@ fn Editor(ed: Memo<Option<qv_ui_api::Editor>>) -> impl IntoView {
     let notes_open =
         RwSignal::new(form.with_untracked(|f| f.as_ref().is_some_and(|f| f.notes_open)));
     let is_note = fb(|f| f.is_note);
+    let totp_slot = fb(|f| f.totp_slot);
+    let has_sheet = fb(|f| f.totp_sheet.is_some());
     let new = fb(|f| f.new);
     let ready = fb(|f| f.ready);
     let hue = ff(|f| f.hue.clone());
@@ -423,6 +429,30 @@ fn Editor(ed: Memo<Option<qv_ui_api::Editor>>) -> impl IntoView {
                         </div>
                     }.into_any()
                 }
+                ValueMode::Totp => {
+                    let code = Signal::derive(move || row.with(|r| r.as_ref().and_then(|r| r.code.clone())));
+                    let set_up = Memo::new(move |_| row.with(|r| r.as_ref().is_some_and(|r| r.stored || r.replaced)));
+                    let has_code = Memo::new(move |_| code.with(Option::is_some));
+                    view! {
+                        <div class="ie-box ie-totp">
+                            {move || if has_code.get() {
+                                view! {
+                                    {crate::items::code_view(code)}
+                                    <button class="ie-change" id=format!("totp-replace-{index}") on:click=act(WsAct::TotpOpen(Some(index)))>"Replace"</button>
+                                }.into_any()
+                            } else if set_up.get() {
+                                view! {
+                                    <span class="hint">"This setup can't make codes."</span>
+                                    <button class="ie-change" id=format!("totp-replace-{index}") on:click=act(WsAct::TotpOpen(Some(index)))>"Set up again"</button>
+                                }.into_any()
+                            } else {
+                                view! {
+                                    <button class="btn" id=format!("totp-setup-{index}") on:click=act(WsAct::TotpOpen(Some(index)))><Svg icon=Icon::Shield/>"Set up"</button>
+                                }.into_any()
+                            }}
+                        </div>
+                    }.into_any()
+                }
                 ValueMode::Plain => {
                     let multi = kind == FieldKind::Multiline;
                     let mono = if role == Role::Expiry { "mono" } else { "" };
@@ -439,6 +469,14 @@ fn Editor(ed: Memo<Option<qv_ui_api::Editor>>) -> impl IntoView {
         };
         let can_hide =
             kind != FieldKind::Totp && !matches!(role, Role::CardNumber | Role::Security);
+        let label = move || {
+            if kind == FieldKind::Totp && renaming.get() != Some(index) {
+                // Nothing to focus: the code is set up in its sheet.
+                view! { <span class="ie-label" title=move || name.get()>{move || name.get()}</span> }.into_any()
+            } else {
+                label().into_any()
+            }
+        };
         let menu_item = move |a: WsAct| {
             move |_| {
                 pop(None);
@@ -485,6 +523,17 @@ fn Editor(ed: Memo<Option<qv_ui_api::Editor>>) -> impl IntoView {
                     </div>
                 })
             }}
+            {move || totp_slot.get().then(|| view! {
+                <div class="ie-fields ie-slot">
+                    <div class="ie-row">
+                        <span class="ie-label">"Two-factor code"</span>
+                        <div class="ie-box ie-totp">
+                            <button class="btn" id="totp-setup" on:click=act(WsAct::TotpOpen(None))><Svg icon=Icon::Shield/>"Set up"</button>
+                            <span class="hint">"The six-digit codes a site asks for after your password"</span>
+                        </div>
+                    </div>
+                </div>
+            })}
             {move || form.with(|f| f.as_ref().and_then(|f| f.removed.clone())).map(|name| view! {
                 <div class="ie-undo" role="status"><span>{format!("Removed “{}”", name.as_str())}</span><button id="undo-remove" on:click=act(WsAct::UndoRemoveField)>"Undo"</button></div>
             })}
@@ -591,10 +640,130 @@ fn Editor(ed: Memo<Option<qv_ui_api::Editor>>) -> impl IntoView {
                 </div>
             })}
             {move || if is_note.get() { view! { {notes()}{fields()} }.into_any() } else { view! { {fields()}{notes()} }.into_any() }}
+            {move || has_sheet.get().then(|| totp_sheet(form))}
             <div class="savebar desk-only">
                 <span>"Esc cancels · Ctrl S saves"</span>
                 <button class="btn subtle" data-qv-clear="true" on:click=move |_| ui().act(Act::Back)>"Cancel"</button>
                 <button class="btn primary" id="entry-save" data-qv-clear=clear on:click=act(WsAct::SaveEntry)>{move || if new.get() { "Create item" } else { "Save changes" }}</button>
+            </div>
+        </div>
+    }
+}
+
+/// The two-factor setup sheet, in the order sites present it: scan the QR
+/// code, or enter the setup key (or paste the link). Rust checks the input
+/// once typing pauses and shows the current code, which sites ask for to
+/// finish (0009 §1.8, plan 0073). Mounted once; its parts update in place.
+fn totp_sheet(form: Memo<Option<Form>>) -> impl IntoView {
+    use qv_ui_api::{OtpHash, TotpOptions, TotpState};
+    let sheet = Memo::new(move |_| form.with(|f| f.as_ref().and_then(|f| f.totp_sheet.clone())));
+    let state = Memo::new(move |_| {
+        sheet.with(|s| s.as_ref().map_or(TotpState::Empty, |s| s.state.clone()))
+    });
+    let scanned = Memo::new(move |_| sheet.with(|s| s.as_ref().is_some_and(|s| s.scanned)));
+    let can_scan = sheet.with_untracked(|s| s.as_ref().is_some_and(|s| s.can_scan));
+    let replacing = sheet.with_untracked(|s| s.as_ref().is_some_and(|s| s.replacing));
+    let options = Memo::new(move |_| {
+        sheet
+            .with(|s| s.as_ref().map(|s| s.options))
+            .unwrap_or(TotpOptions {
+                digits: 6,
+                period: 30,
+                hash: OtpHash::Sha1,
+            })
+    });
+    let valid =
+        Memo::new(move |_| state.with(|s| matches!(s, TotpState::Key(_) | TotpState::Link(_))));
+    let is_key = Memo::new(move |_| state.with(|s| !matches!(s, TotpState::Link(_))));
+    let code = Signal::derive(move || {
+        state.with(|s| match s {
+            TotpState::Key(c) | TotpState::Link(c) => c.clone(),
+            _ => None,
+        })
+    });
+    let more = RwSignal::new(false);
+    let set = move |f: fn(&mut TotpOptions)| {
+        move |_| {
+            let mut o = options.get_untracked();
+            f(&mut o);
+            ui().act(Act::Ws(WsAct::TotpOptions(o)));
+        }
+    };
+    let close = move || ui().act(Act::Ws(WsAct::TotpClose));
+    let keys = move |e: web_sys::KeyboardEvent| {
+        if e.key() == "Escape" {
+            e.stop_propagation();
+            e.prevent_default();
+            close();
+        } else if e.key() == "Enter" && valid.get_untracked() {
+            e.prevent_default();
+            ui().act(Act::Ws(WsAct::TotpAdd));
+        }
+    };
+    let seg = move |label: &'static str, on: Memo<bool>, pick: fn(&mut TotpOptions)| {
+        view! {
+            <button role="radio" class=move || if on.get() { "on" } else { "" }
+                aria-checked=move || if on.get() { "true" } else { "false" } on:click=set(pick)>{label}</button>
+        }
+    };
+    let opt = move |f: fn(&TotpOptions) -> bool| Memo::new(move |_| f(&options.get()));
+    view! {
+        <div class="layer" on:keydown=keys>
+            <button class="scrim" aria-label="Close" on:click=move |_| close()></button>
+            <div class="dialog totp-sheet" role="dialog" aria-modal="true" aria-label="Two-factor code" id="totp-sheet">
+                <h3>{if replacing { "Replace the two-factor code" } else { "Set up a two-factor code" }}</h3>
+                <p>"On the site, turn on two-factor authentication (it may say 2FA or authenticator app). It shows a QR code."</p>
+                {can_scan.then(|| view! {
+                    <button class="btn primary totp-scan" id="totp-scan" data-qv-clear="true" on:click=move |_| ui().act(Act::RequestQr(qv_ui_api::QrTarget::Totp))>
+                        <Svg icon=Icon::Qr/>"Scan the QR code"
+                    </button>
+                })}
+                <div class="field">
+                    <label for=WsField::TotpInput.dom_id()>{if can_scan { "Or enter the setup key" } else { "Enter the setup key" }}</label>
+                    {move || if scanned.get() {
+                        view! { <p class="banner ok" role="status" id="totp-scanned"><Svg icon=Icon::Check/>" Code from the QR code"</p> }.into_any()
+                    } else {
+                        view! { <Input field=WsField::TotpInput label="Setup key" kind=Kind::Secret bare=true autofocus=!can_scan reveal=true rate=true
+                            class="mono" placeholder="ABCD EFGH IJKL MNOP"/> }.into_any()
+                    }}
+                    <p class="hint">"Sites show it under “Can't scan it?” or “Enter a key manually”. A pasted otpauth:// link works too."</p>
+                </div>
+                {move || match state.get() {
+                    TotpState::Invalid(why) => view! { <p class="hint bad" role="status" id="totp-invalid">{why}</p> }.into_any(),
+                    TotpState::Key(_) | TotpState::Link(_) => view! {
+                        <div class="totp-now" role="status" id="totp-now">
+                            <span class="k">"Your code now"</span>
+                            {crate::items::code_view(code)}
+                            <span class="hint">"If the site asks for a code to finish, type this one."</span>
+                        </div>
+                    }.into_any(),
+                    TotpState::Empty => ().into_any(),
+                }}
+                {move || is_key.get().then(|| view! {
+                    <details class="totp-more" prop:open=move || more.get() on:toggle=move |e| more.set(event_target::<web_sys::HtmlDetailsElement>(&e).open())>
+                        <summary>"More options"</summary>
+                        <p class="hint">"Only if the site lists them. Most use 6 digits every 30 seconds."</p>
+                        <div class="ie-seg" role="radiogroup" aria-label="Digits">
+                            {seg("6 digits", opt(|o| o.digits == 6), |o| o.digits = 6)}
+                            {seg("7", opt(|o| o.digits == 7), |o| o.digits = 7)}
+                            {seg("8", opt(|o| o.digits == 8), |o| o.digits = 8)}
+                        </div>
+                        <div class="ie-seg" role="radiogroup" aria-label="Period">
+                            {seg("Every 30 s", opt(|o| o.period == 30), |o| o.period = 30)}
+                            {seg("60 s", opt(|o| o.period == 60), |o| o.period = 60)}
+                        </div>
+                        <div class="ie-seg" role="radiogroup" aria-label="Algorithm">
+                            {seg("SHA-1", opt(|o| o.hash == OtpHash::Sha1), |o| o.hash = OtpHash::Sha1)}
+                            {seg("SHA-256", opt(|o| o.hash == OtpHash::Sha256), |o| o.hash = OtpHash::Sha256)}
+                            {seg("SHA-512", opt(|o| o.hash == OtpHash::Sha512), |o| o.hash = OtpHash::Sha512)}
+                        </div>
+                    </details>
+                })}
+                <div class="actions">
+                    <button class="btn subtle" data-qv-clear="true" on:click=move |_| close()>"Cancel"</button>
+                    <button class="btn primary" id="totp-add" data-qv-clear="true" disabled=move || !valid.get()
+                        on:click=act(WsAct::TotpAdd)>{if replacing { "Replace" } else { "Add" }}</button>
+                </div>
             </div>
         </div>
     }

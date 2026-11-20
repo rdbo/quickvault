@@ -4,7 +4,7 @@
 //! prefilled; a revealed replacement shows only during its 30 s reveal.
 use super::{Ctx, convert, items};
 use crate::editor::{ADD_KINDS, ItemType, SECURITY_CHOICES, kind_label};
-use crate::views::{EntryFormView, FormRow, Role};
+use crate::views::{EntryFormView, FormRow, Role, SheetState};
 use crate::workspace::{GenMode, RevealKey};
 use qv_core::FieldKind;
 use qv_ui_api as api;
@@ -30,7 +30,6 @@ fn placeholder(row: &FormRow) -> &'static str {
         (Role::CardNumber, _) => "1234 5678 9012 3456",
         (_, FieldKind::Url) => "example.com",
         (_, FieldKind::Email) => "name@example.com",
-        (_, FieldKind::Totp) => "otpauth:// link from the site",
         _ if name == "username" => "you@example.com",
         _ if name == "network name" => "What your devices show",
         _ if name == "name on card" => "As printed",
@@ -127,10 +126,7 @@ fn form_view(ctx: &mut Ctx<'_>, form: &EntryFormView, types: Vec<api::TypeChoice
         .iter()
         .map(|row| {
             let reveal_key = RevealKey::Replacement(row.index);
-            let shown = c
-                .revealed(epoch, &reveal_key)
-                .map(|v| Z::from(crate::views::z(&String::from_utf8_lossy(v.expose_secret()))))
-                .filter(|z| !z.is_empty());
+            let shown = convert::shown(c.revealed(epoch, &reveal_key));
             let masked = match (
                 row.role,
                 form.card.as_ref().and_then(|c| c.info.last4.as_ref()),
@@ -171,6 +167,7 @@ fn form_view(ctx: &mut Ctx<'_>, form: &EntryFormView, types: Vec<api::TypeChoice
                 masked,
                 check,
                 placeholder: placeholder(row).to_owned(),
+                code: row.code.as_ref().map(convert::code),
             }
         })
         .collect();
@@ -268,6 +265,23 @@ fn form_view(ctx: &mut Ctx<'_>, form: &EntryFormView, types: Vec<api::TypeChoice
         .iter()
         .map(|k| (convert::field_kind(*k), kind_label(*k).to_owned()))
         .collect(),
+        totp_slot: form.totp_slot,
+        totp_sheet: form.totp_sheet.as_ref().map(|sheet| api::TotpSheet {
+            replacing: sheet.replacing,
+            can_scan: crate::qr::camera_available(),
+            scanned: sheet.scanned,
+            options: convert::totp_options(sheet.options),
+            state: match &sheet.state {
+                SheetState::Empty => api::TotpState::Empty,
+                SheetState::Invalid(why) => api::TotpState::Invalid((*why).to_owned()),
+                SheetState::Valid(false, code) => {
+                    api::TotpState::Key(code.as_ref().map(convert::code))
+                }
+                SheetState::Valid(true, code) => {
+                    api::TotpState::Link(code.as_ref().map(convert::code))
+                }
+            },
+        }),
     }
 }
 

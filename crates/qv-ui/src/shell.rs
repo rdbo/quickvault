@@ -367,12 +367,16 @@ fn ReceiptView(lan: Memo<Option<Lan>>, expanded: RwSignal<bool>) -> impl IntoVie
 }
 
 #[component]
-pub(crate) fn ScanPanel() -> impl IntoView {
+pub(crate) fn ScanPanel(#[prop(optional, into)] totp: Signal<bool>) -> impl IntoView {
     view! {
         <div class="layer"><div class="scrim"></div>
             <div class="dialog" role="status">
                 <h3>"Scan a QR code"</h3>
-                <p>"Point the camera at the other device's code. A code that names its address connects at once; otherwise you type the address."</p>
+                <p>{move || if totp.get() {
+                    "Point the camera at the QR code the site shows for two-factor authentication."
+                } else {
+                    "Point the camera at the other device's code. A code that names its address connects at once; otherwise you type the address."
+                }}</p>
                 <div class="actions"><button class="btn" on:click=move |_| ui().act(Act::CancelQr)>"Cancel scan"</button></div>
             </div>
         </div>
@@ -661,6 +665,7 @@ pub(crate) fn Shell() -> impl IntoView {
     let new_in = field(s, None, |s| s.new_in);
     let busy_toast = field(s, false, |s| s.busy_toast);
     let scanning = field(s, false, |s| s.scanning);
+    let scanning_totp = field(s, false, |s| s.scanning_totp);
     let toasts = field(s, Default::default(), |s| s.toasts.clone());
     // Each toast fades out on its own (plan 0072); the copy toast keeps its
     // element while the seconds count down.
@@ -771,7 +776,7 @@ pub(crate) fn Shell() -> impl IntoView {
             <div class="toasts"><div class=leave("toast busy-toast", busy_leaving) role="status">"Working… other actions wait until this finishes."</div></div>
         })}
         <LanPanel source=LanSource::Unlocked/>
-        <Show when=move || scanning.get()><ScanPanel/></Show>
+        <Show when=move || scanning.get()><ScanPanel totp=scanning_totp/></Show>
         <Show when=move || sheet.get() && !busy.get()><VaultCards s open=sheet/></Show>
         {move || viewer_key.get().map(|_| view! { <items::Viewer s/> })}
         <Show when=move || !busy.get()><ConfirmView s/></Show>

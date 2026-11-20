@@ -275,3 +275,17 @@ owner.
   `quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only`
   (app: the second vault names the holder, a password unlock offers
   nothing, enrolling from its Settings moves the enrollment).
+- 2026-11-20: the live meter (D3) never updated in the app: the page's pause
+  helper called `ui()` from a timer, where `expect_context` panics. Fixed
+  under plan 0073 (the helper takes the page handle when the input is
+  built); the real-engine flow now checks the meter (stage 21).
+
+- 2026-11-20 (owner): a row's menu near the list's end opened below the
+  visible list (the list scrolls in its own box). `fit_menu` (qv-ui
+  items) measures the menu before its first paint and opens it above the
+  row when there is no room below, capped to scroll when neither side fits;
+  phones' bottom-sheet menus are untouched. The real-engine flow checks it
+  (stage 55). Also: revealing an empty protected value showed the mask,
+  because the bridge dropped empty revealed values (from the 1.2.0
+  rewrite); `convert::shown` keeps them, tested by
+  `an_empty_revealed_value_is_shown_empty_not_masked`.

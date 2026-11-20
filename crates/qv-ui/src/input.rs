@@ -28,7 +28,7 @@ pub(crate) fn SecretInput(
     rate: bool,
 ) -> impl IntoView {
     let shown = RwSignal::new(false);
-    let pause = paused(|| ui().act(Act::RatePassword));
+    let pause = paused(Act::RatePassword);
     let input = view! {
         <input id=id type=move || if secret && !shown.get() { "password" } else { "text" }
             maxlength=if field == LockedField::Path { "4096" } else { "1024" }
@@ -53,17 +53,24 @@ pub(crate) fn SecretInput(
     }
 }
 
-/// Runs `send` once input pauses for 400 ms: the live password rating asks
-/// Rust at most once per pause, never per keystroke (0010 §4.2, plan 0072).
-fn paused(send: fn()) -> impl Fn() + Copy {
+/// Sends `act` once input pauses for 400 ms: the live password rating and
+/// the two-factor check ask Rust at most once per pause, never per
+/// keystroke (0010 §4.2, plans 0072 and 0073). The page handle is taken
+/// here: the timer runs outside any reactive owner, where `ui()` has no
+/// context to find.
+fn paused(act: Act) -> impl Fn() + Copy {
+    let page = ui();
     let turn = StoredValue::new(0u64);
+    let act = StoredValue::new(act);
     move || {
         turn.update_value(|t| *t = t.wrapping_add(1));
         let mine = turn.get_value();
         set_timeout(
             move || {
-                if turn.try_get_value() == Some(mine) {
-                    send();
+                if turn.try_get_value() == Some(mine)
+                    && let Some(act) = act.try_get_value()
+                {
+                    page.act(act);
                 }
             },
             std::time::Duration::from_millis(400),
@@ -168,12 +175,19 @@ pub(crate) fn Input(
     /// Show/Hide for a secret line (typed codes only, plan 0072).
     #[prop(optional)]
     reveal: bool,
-    /// A new master password: rated once typing pauses (plan 0072).
+    /// Ask Rust once typing pauses: a new master password is rated (plan
+    /// 0072), a two-factor setup input checked (plan 0073).
     #[prop(optional)]
     rate: bool,
 ) -> impl IntoView {
     let shown = RwSignal::new(false);
-    let pause = paused(|| ui().act(Act::Ws(WsAct::RatePassword)));
+    // What a pause asks Rust: a two-factor setup input is checked, a new
+    // master password rated (plans 0072, 0073).
+    let pause = paused(Act::Ws(if field == WsField::TotpInput {
+        WsAct::TotpCheck
+    } else {
+        WsAct::RatePassword
+    }));
     let id = field.dom_id();
     let limit = field.limit(kind == Kind::Multi).to_string();
     let controlled = value.is_some();
