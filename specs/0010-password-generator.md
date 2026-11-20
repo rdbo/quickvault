@@ -148,6 +148,11 @@ user-typed master password, using the `zxcvbn` estimate and the labels of
 | Fair (50–69 bits) | Inline warning next to the field; accepted |
 | Weak (< 50 bits) | **Blocking confirmation dialog**: "This password is weak and could be guessed by an attacker who obtains your vault file. Create the vault anyway?" The confirm button stays disabled for **5 seconds** (with a visible countdown) so it can't be clicked by reflex. The default button is "Choose a stronger password". |
 
+The estimate's label and bits show next to the new-password field while the
+user types, updated once typing pauses (not on every keystroke); the Fair
+warning is part of that display. The Weak confirmation still runs when the
+user submits (owner report, 2026-11-19, plan 0072).
+
 Weak master passwords are allowed after confirmation, never silently.
 The CLI equivalent is in 0011 §5.4.
 
@@ -182,6 +187,10 @@ may never have been used.
   biased generator overstates strength.
 - `zxcvbn` estimates are heuristics; they can overestimate unusual but
   guessable passwords. They are used only for user-typed passwords.
+- `zxcvbn` copies the password into ordinary strings that are freed but not
+  zeroized, a library intermediate under 0008 §1.1. The live display of
+  §4.2 runs it once per typing pause, never per keystroke, and the page
+  receives only the label and bits.
 - A long, symbol-heavy default can be rejected by some sites; per-entry
   profiles (5.2) handle that without weakening the default.
 
@@ -201,6 +210,10 @@ may never have been used.
 None currently.
 
 ## Changelog
+
+- 2026-11-19: §4.2: a live strength display (label and bits) next to the
+  new master password, updated after typing pauses; the Weak confirmation is
+  unchanged (owner report, plan 0072).
 
 - 2026-10-14: Initial draft.
 - 2026-10-14: Weak master password: inline warning (Fair), confirmation

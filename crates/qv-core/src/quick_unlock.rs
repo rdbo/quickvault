@@ -98,6 +98,16 @@ impl Session {
         }
         checked
     }
+    /// True while the device's one live enrollment names this session's
+    /// vault and key generation, as [`Core::quick_ready_for`] judges a
+    /// closed vault. Another vault may hold it (0009 §1.8, plan 0072).
+    pub fn quick_enrolled(&self) -> bool {
+        let Some(live) = self.services.as_ref().and_then(|s| s.keystore().binding()) else {
+            return false;
+        };
+        self.read(|ctx| binding(ctx))
+            .is_ok_and(|b| b.vault == live.vault && b.generation == live.generation)
+    }
     /// Remove the in-process policy, envelope and native hardware handle.
     pub fn disable_quick(&self) -> Result<(), CoreError> {
         self.invalidate_quick()
@@ -429,9 +439,12 @@ mod tests {
         let services = Arc::new(Platform(AndroidKeystore::new(backend.clone())));
         let core = env.core().with_linux_platform(services, true);
         let s = core.unlock(&env.path, &pw(PASSWORD), None).unwrap();
+        assert!(!s.quick_enrolled());
         s.enroll_quick(&pw(PASSWORD), QuickPolicy::Class3, None)
             .unwrap();
+        assert!(s.quick_enrolled());
         s.lock();
+        assert!(!s.quick_enrolled(), "a locked session names no vault");
         assert!(core.quick_ready_for(&env.path));
         for _ in 0..4 {
             assert!(matches!(
@@ -442,10 +455,12 @@ mod tests {
         assert!(core.quick_ready_for(&env.path));
         // Another vault is refused before any prompt, keeping this one.
         let other = env.dir.path().join("other.qvault");
-        core.create(&other, &pw(PASSWORD), "Other")
-            .unwrap()
-            .session
-            .lock();
+        let open = core.create(&other, &pw(PASSWORD), "Other").unwrap().session;
+        // The device's one enrollment still belongs to the first vault
+        // while the other is open (plan 0072).
+        assert!(core.quick_ready());
+        assert!(!open.quick_enrolled());
+        open.lock();
         assert!(!core.quick_ready_for(&other));
         assert!(!core.quick_ready_for(&env.dir.path().join("missing.qvault")));
         assert!(matches!(

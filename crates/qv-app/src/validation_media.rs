@@ -85,6 +85,15 @@ pub(crate) fn install(controller: &Controller) -> Result<(), AppError> {
     drop(created.recovery_phrase);
     let entry =
         session.save_entry(session.new_entry(session.root()?, "note", "Synthetic media")?)?;
+    // More rows than one page, so the list's scrolling window is exercised
+    // (plan 0072).
+    for i in 0..40 {
+        session.save_entry(session.new_entry(
+            session.root()?,
+            "login",
+            &format!("Synthetic row {i:02}"),
+        )?)?;
+    }
     session.add_attachment(entry, "a-audio.wav", "wrong/type", &mut Wave::new(), None)?;
     for (name, bytes) in [
         (
@@ -139,7 +148,6 @@ pub(crate) fn finish(controller: &Controller, passed: bool) {
             controller.0.base.join("media-result"),
             if passed { b"PASS" } else { b"FAIL" },
         );
-        return;
     }
     #[cfg(not(target_os = "android"))]
     if passed {

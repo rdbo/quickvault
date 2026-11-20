@@ -13,9 +13,10 @@
 //! **Reduced hygiene:** `zxcvbn` copies the password into ordinary `String`s
 //! (its first 100 characters, lowercased and l33t-substituted variants, and
 //! the matched substrings). These copies are freed but not zeroized, a
-//! library intermediate of the kind 0008 §1.1 asks to audit. The estimate
-//! runs once per typed master password, before the vault exists or the
-//! password changes. Its panics (internal invariants) carry no input data.
+//! library intermediate of the kind 0008 §1.1 asks to audit. The app runs
+//! the estimate on submit and for the live display once typing pauses
+//! (0010 §4.2, plan 0072), never per keystroke. Its panics (internal
+//! invariants) carry no input data.
 
 use qv_crypto::{MasterPassword, PHRASE_WORDS, Strength};
 

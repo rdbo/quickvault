@@ -69,7 +69,7 @@ future designs, not requirements to prebuild into every subsystem.
    is not promised.
 6. **Minimize plaintext.** qv-core owns session/authorization policy; the trusted
    client includes the Rust subsystems, platform adapters and privileged frontend.
-   Protected values stay encrypted when idle; standard Dioxus controls collect
+   Protected values stay encrypted when idle; standard webview controls collect
    secret input with bounded lifetimes and best-effort cleanup. Framework/OS
    copies have documented limits. Clipboard/autofill bypass the webview. Handles reduce copies
    but do not isolate secrets from a compromised authorized UI.
@@ -93,7 +93,7 @@ rather than creating unused workspace scaffolding.
 | qv-sync | Shared causal merge candidates; LAN over TCP: the one-use sync window and the joiner in sync or new-device mode, and the two-way exchange (roadmap 2.9–2.10, plan 0042); remote candidate state and publication orchestration (planned) |
 | qv-core | Session policy, handles, lock cancellation, mutation authorization, snapshot policy/budgets (snapshots kept inside commits; the rotation's recovery file), the `verify` report, and LAN sync windows, sync from a code and new-device join for frontends; strict scanned QR kind/profile/address inspection without network I/O; opaque staged/authenticated vault-import capabilities with complete pre-publication index validation and fresh-local creation |
 | qv-platform | Injected OS traits; local unicast addresses for LAN endpoints from route probes, attached networks first (`/proc/net/route` where readable; std only); Windows WTS lock/sleep lifecycle (required), Win32 clipboard with history/cloud exclusion, native open/save/folder dialogs, the instance lock and ACL-checked explicit file input/output, with unknown persistence evidence and no quick unlock (plan 0052); Linux logind lifecycle, xdg-desktop-portal file picker (zbus, local `file:` results only), session clipboard ownership (Wayland data-control with an own bounded wire client, else X11) and, for the desktop app on Wayland, GTK clipboard ownership behind the optional `gtk` feature (plan 0055), single-instance and persistence reporting, no-follow explicit file input/output shared by CLI and app; Android lifecycle metadata and clipboard hold policy over an injected native backend; Android keystore quick unlock with boot-bound policy state that survives app restarts (on where the device supports it; plan 0045); Android storage evidence from the OS encryption status; exact-identity autofill matching; native input unavailable |
-| qv-cli / qv-app | Explicit user actions and views, including `qv lan open|sync|join` and the app's Sync screen and Join mode; qv-app's shared UI (own title bar, one DOM for desktop and phone, 0009 §1.8), its non-secret preferences file (theme, acknowledged protection status), QR rendering/decoding and bounded native Android Camera2 glue (camera on by default; `QV_APP_QR_CAMERA=0` builds without it); in-app attachment previews verified and streamed in protected chunks through a revocable `/preview/` capability on the existing bounded loopback listener (0003 §6.4); on Linux, portal file picks run in a re-executed helper process without vault data, since the portal refuses the non-dumpable app; no unrestricted crypto/file/SQL bridge |
+| qv-cli / qv-app | Explicit user actions and views, including `qv lan open|sync|join` and the app's Sync screen and Join mode; qv-app's shared UI (own title bar, one DOM for desktop and phone, 0009 §1.8), its non-secret preferences file (theme, acknowledged protection status), QR rendering/decoding and bounded native Android Camera2 glue (camera on by default; `QV_APP_QR_CAMERA=0` builds without it); in-app attachment previews verified and streamed in protected chunks through a revocable preview capability on the in-process `qvmedia` scheme, at most 64 KiB per response (0003 §6.4); on Linux, portal file picks run in a re-executed helper process without vault data, since the portal refuses the non-dumpable app; no unrestricted crypto/file/SQL bridge |
 | qv-win | Windows-only Win32 bindings on `windows-sys`: the only crate allowed `unsafe`, confined to its FFI modules with a `// SAFETY:` note per block (enforced by Clippy). Safe wrappers for security descriptors (pure Rust SID/ACL parsing and the 0009 §5.1 rules, tested everywhere), no-follow opens, file identity, byte-range locks, write-through renames, POSIX deletion, private creation, named mutexes, the session watcher, the clipboard, console input/output and file dialogs (plan 0052); depends on no other qv crate |
 | qv-server (optional; not planned, owner 2026-11-14) | Remote-sync accounts, grants, sessions, opaque objects, atomic checkpoint publication |
 
@@ -446,17 +446,22 @@ clipboard holds. Prepared key rotation runs as its own controller phase
 because core consumes the session. Android adds a JNI clipboard backend and
 document-picker streams in packaging glue; Uris never leave Kotlin.
 
-Dioxus 0.7.10 uses a maintained desktop integration: compiled local assets,
-strict CSP, exact native origin/navigation checks, bounded typed IPC and bounded
-authenticated loopback rendering. Native file-dialog/filesystem and document-eval
-routes are unavailable in this configuration. One provenance-tracked upstream
-snapshot supports the integration; see third-party/README.md. Application Rust
-secrets use protected containers; framework/DOM/OS copies have best-effort cleanup,
-not deterministic erasure. Linux real-WebKit boundary and rendered-flow tests
-pass under private Xvfb. Android APKs compile and synthetic instrumentation passes on the owner's Android test phone
-(Android 15); manual device and real-desktop lifecycle evidence remain incomplete. Dependency
-exemptions are development audit debt. Full vault browsing/editing belongs to
-roadmap 2.5; phase 2.4 foundation is implemented, with fresh-context review pending.
+The app renders with Tauri 2 and a Leptos page compiled to WebAssembly
+(`qv-ui`, plan 0071), fully in process: nothing listens on a socket. The page
+is a renderer, not a holder of state: it shows frames that Rust builds
+(`qv-app/src/bridge`) and sends typed actions back through one bounded Tauri
+command (`qv`, 64 KiB, strict decoding into the `qv-ui-api` types; frames
+arrive as long-poll replies, never through script evaluation). Handles reach
+the page only as random per-session references, cleared on lock. Compiled
+local assets, a strict CSP (no inline script; WebAssembly only), exact
+navigation checks, no new windows, downloads or devtools, an incognito
+webview and a capability that grants only `qv`; no file-dialog, filesystem or
+shell plugin exists. Attachment previews stream over the in-process `qvmedia`
+scheme. Application Rust secrets use protected containers; framework/DOM/OS
+copies have best-effort cleanup, not deterministic erasure. Linux real-WebKit
+boundary, rendered-flow and media tests pass under private Xvfb; the Android
+APK builds, and device validation of the Tauri build is pending. Dependency
+exemptions are development audit debt.
 
 Frontends call qv-core. Core injects platform traits and orchestrates model,
 store, crypto and sync. Crypto/model have no dependency on frontends. Server
@@ -482,7 +487,8 @@ validation, and does not require separate application implementations per OS.
 
 ```mermaid
 flowchart TB
-    ui["CLI / shared Dioxus UI and input"] --> core["qv-core: policy and sessions"]
+    page["Leptos page (qv-ui, wasm32): renders frames, holds no vault state"] -->|"one bounded IPC command; frames as replies; qvmedia previews (in process)"| ui
+    ui["CLI / qv-app Tauri backend: controller, frames, typed actions"] --> core["qv-core: policy and sessions"]
     core --> rust["trusted Rust: model, crypto, store, sync"]
     core --> views["structural index; bounded text cache and pages"]
     core --> platform["qv-platform: lifecycle, clipboard, protection status; gated Android keystore and autofill"]
@@ -650,7 +656,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | Language | Stable Rust; toolchain pinned to 1.98.1 (`rust-toolchain.toml`), which is the MSRV |
 | Build / CI | Cargo virtual workspace (`crates/<name>/`); GitHub Actions with SHA-pinned actions running the gates, `cargo deny` and `cargo vet` |
 | Linux release packages | Debian 12 `.deb`; separate Alpine 3.22 and Edge `.apk` builds with branch-qualified filenames; install Alpine packages in clean matching containers and check both binaries before upload (plan 0066) |
-| UI | Dioxus 0.7.10, maintained hardened dioxus-desktop integration, standard webview input; shared Android/Linux/Windows screens (WebView2 on Windows), best-effort framework cleanup; iOS later |
+| UI | Tauri 2.12 (one bounded command, in-process `qvmedia` scheme, no plugins) with a Leptos 0.8 page in WebAssembly (`qv-ui`, built by `crates/qv-ui/build.sh` with the pinned wasm-bindgen 0.2.129); standard webview input; shared Android/Linux/Windows screens (WebKitGTK, Android System WebView, WebView2), best-effort framework cleanup; iOS later (plan 0071) |
 | Android foundation | arm64/API 29+, pinned SDK/NDK recipe, FLAG_SECURE, metadata-only lifecycle adapter, private no-backup storage; device validation pending |
 | Optional remote server (not planned) | Axum/Tokio; SQLite first, Postgres deferred |
 | Local storage | rusqlite 0.41.0 with bundled SQLite 3.54.1 and trimmed compile options (`.cargo/config.toml`), encrypted immutable objects and manifests; external anchors as per-replica files in the private state directory (`$XDG_STATE_HOME/quickvault/anchors` on Linux, `%LOCALAPPDATA%\QuickVault\anchors` on Windows; keystore-backed where available later) |
@@ -665,7 +671,7 @@ A vault master password alone cannot bootstrap a new device from the server.
 | LAN password authentication (0047 implemented; release gates open) | Pinned opaque-ke 4.0.1, defaults off, ristretto255 + Argon2; isolated compatibility aliases argon2 0.5.3 and sha2 0.10.9 in qv-crypto. Checked OS-RNG adapters, protected one-shot states and the explicit-KDF suite pass component tests. Host/Android component builds are recorded. Advisory reachability is documented; exact-version vet development exemptions are unaudited debt, with genuine review still required before release. Runtime lan/2 uses ephemeral registration/authentication and explicit final-key epochs; no stored verifier or vault/archive migration. Exact evidence: [0047 dependency review](plans/0047-audit-policy-and-lan-auth/DEPENDENCIES.md). |
 | LAN QR graphics / decoding | qrcodegen-no-heap 1.8.1 (caller-owned protected scratch) and quircs 0.10.3 (bounded grayscale/binary adapter); shared SVG display; native Android Camera2/ImageReader, no image files or Play Services; exact dependency audit debt in plan 0039 |
 | Windows OS adapters | `qv-win` over windows-sys 0.61.2 (already locked and exempted; no new third-party crate): ACL checks and protected owner-only DACLs, `LockFileEx`, `MoveFileExW` write-through, WTS session notifications from a hidden window, the Win32 clipboard with exclusion formats, comdlg32/shell32 dialogs, console mode; Windows 10 22H2/11 x86_64 with WebView2; CI on the MSVC target, local cross-checks on mingw-w64 with Wine (development evidence only); quick unlock unavailable (plan 0052) |
-| Linux OS adapters | Optional logind lifecycle monitoring via zbus 6.2.0 over the fixed system-bus Unix socket; existing rustix file locks/configuration probes; shared maintained X11 clipboard and an own bounded Wayland data-control client on rustix; the desktop app's GTK 0.18 clipboard on Wayland (already locked through dioxus-desktop; plan 0055); quick unlock unavailable |
+| Linux OS adapters | Optional logind lifecycle monitoring via zbus 6.2.0 over the fixed system-bus Unix socket; existing rustix file locks/configuration probes; shared maintained X11 clipboard and an own bounded Wayland data-control client on rustix; the desktop app's GTK 0.18 clipboard on Wayland (locked through Tauri's GTK stack; plan 0055); quick unlock unavailable |
 | CLI / license | clap (builder API), rustix termios/poll for bounded no-echo prompts, signal-hook atomic flags for cancellation, own escaping and JSON writer, shared qv-platform session clipboard (own bounded Wayland data-control client, else the X11 adapter over published x11rb 0.13.2 with QuickVault's bounded transport and framing budgets); `zxcvbn` (in `qv-core`) for typed master passwords / AGPL-3.0-or-later |
 
 OPAQUE and ordinary TLS certificates are explicit classical exceptions.
@@ -680,6 +686,13 @@ intermediates have bounded, documented cleanup claims; active-content and OS
 release requirements remain. Framework selection is not validation evidence.
 Known WebKitGTK limits and their workarounds, to revisit on any engine or
 framework change, are in `crates/qv-app/WEBKIT.md`.
+
+Owner decision, 2026-11-17: replace the Dioxus desktop/mobile renderer, whose
+screen updates travel over a loopback websocket, with Tauri 2 and a Leptos
+frontend (WebAssembly), keeping one shared web UI and running fully in process
+with no listening sockets (0009 §6, plan 0070). Plan 0071 carried it out for
+1.2.0: the table above describes the result. The phase A prototype stays in
+`prototypes/tauri-leptos/`, outside the product workspace.
 
 ## 7. Delivery and validation
 

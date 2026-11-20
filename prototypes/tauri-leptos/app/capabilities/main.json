@@ -1,0 +1,6 @@
+{
+  "identifier": "main",
+  "description": "The app window: the qv command and the qv-event listener only.",
+  "windows": ["main"],
+  "permissions": ["allow-qv", "core:event:allow-listen", "core:event:allow-unlisten"]
+}

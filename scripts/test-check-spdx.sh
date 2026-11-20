@@ -6,7 +6,7 @@ set -eu
 checker=$(pwd)/scripts/check-spdx.sh
 fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
-mkdir -p "$fixture/bin" "$fixture/third-party/dioxus-desktop" "$fixture/third-party/other"
+mkdir -p "$fixture/bin" "$fixture/third-party/other"
 cat > "$fixture/bin/git" <<'EOF'
 #!/bin/sh
 [ "${QV_SPDX_TEST_GIT_FAIL:-0}" = 0 ] || exit 1
@@ -47,38 +47,14 @@ export QV_SPDX_TEST_GIT_FAIL
 check 1 product.rs
 QV_SPDX_TEST_GIT_FAIL=0
 export QV_SPDX_TEST_GIT_FAIL
-printf '// Upstream header\n' > third-party/dioxus-desktop/lib.rs
-check 1 third-party/dioxus-desktop/lib.rs
-printf '[package]\nname = "dioxus-desktop"\nversion = "0.7.10"\n' > third-party/dioxus-desktop/Cargo.toml
-printf '%s\n' 236deb81f1a04de704fb80cf7838c65607441c76914de2e036709540c540a39d > third-party/dioxus-desktop/UPSTREAM.sha256
-check 0 third-party/dioxus-desktop/lib.rs
-printf '[package]\nname = "other"\nversion = "0.7.10"\n' > third-party/dioxus-desktop/Cargo.toml
-check 1 third-party/dioxus-desktop/lib.rs
-printf '[package]\nname = "dioxus-desktop"\nversion = "0.7.11"\n[dependencies.core]\nversion = "0.7.10"\n' > third-party/dioxus-desktop/Cargo.toml
-check 1 third-party/dioxus-desktop/lib.rs
-printf '[package]\nname = "x11rb"\nversion = "0x13x2"\n' > third-party/dioxus-desktop/Cargo.toml
-check 1 third-party/dioxus-desktop/lib.rs
-printf '[package]\nname = "dioxus-desktop"\nversion = "0.7.10"\n' > third-party/dioxus-desktop/Cargo.toml
-printf 'wrong-hash\n' > third-party/dioxus-desktop/UPSTREAM.sha256
-check 1 third-party/dioxus-desktop/lib.rs
 printf '// Upstream header\n' > third-party/other/lib.rs
 check 1 third-party/other/lib.rs
 printf 'fn main() {}\n' > product.rs
 check 1 product.rs
-printf 'Write-Output 1\n' > package.ps1
-check 1 package.ps1
-printf '# SPDX-License-Identifier: AGPL-3.0-or-later\nWrite-Output 1\n' > package.ps1
-check 0 package.ps1
-mkdir -p third-party/dioxus-desktop
-printf '// Upstream header\n' > third-party/dioxus-desktop/lib.rs
-printf '[package]\nname = "dioxus-desktop"\nversion = "0.7.10"\n' > third-party/dioxus-desktop/Cargo.toml
-printf '236deb81f1a04de704fb80cf7838c65607441c76914de2e036709540c540a39d\n' > third-party/dioxus-desktop/UPSTREAM.sha256
-check 0 third-party/dioxus-desktop/lib.rs
-printf 'wrong-hash\n' > third-party/dioxus-desktop/UPSTREAM.sha256
-check 1 third-party/dioxus-desktop/lib.rs
-# Packages removed by plan 0032 are no longer exempt, even with their former
-# exact identity and upstream hash.
+# Packages removed by plans 0032 and 0071 are no longer exempt, even with
+# their former exact identity and upstream hash.
 for removed in \
+    "dioxus-desktop 0.7.10 236deb81f1a04de704fb80cf7838c65607441c76914de2e036709540c540a39d" \
     "x11rb 0.13.2 9993aa5be5a26815fe2c3eacfc1fde061fc1a1f094bf1ad2a18bf9c495dd7414" \
     "glib 0.18.5 233daaf6e83ae6a12a52055f568f9d7cf4671dabb78ff9560ab6da230ce00ee5" \
     "glib-macros 0.18.5 0bb0228f477c0900c880fd78c8759b95c7636dbd7842707f49e132378aa2acdc" \

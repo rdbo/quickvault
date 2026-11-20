@@ -24,6 +24,8 @@ pub enum QrTarget {
     NewDevice,
     /// One sync of this unlocked vault (Devices screen).
     Sync,
+    /// The two-factor setup sheet: an `otpauth://` link (plan 0073).
+    Totp,
 }
 /// A running camera scan. Its thread clears only its own scan, by `id`
 /// (plan 0068).
@@ -43,21 +45,21 @@ impl Scan {
 
 /// Whether the native camera path is available and its platform gate is open.
 pub fn camera_available() -> bool {
-    #[cfg(all(feature = "desktop", target_os = "android"))]
+    #[cfg(all(feature = "ui", target_os = "android"))]
     {
         crate::android::qr_available()
     }
-    #[cfg(not(all(feature = "desktop", target_os = "android")))]
+    #[cfg(not(all(feature = "ui", target_os = "android")))]
     {
         false
     }
 }
 pub(crate) fn capture(cancel: &qv_core::CancelToken) -> Result<SecretBytes, AppError> {
-    #[cfg(all(feature = "desktop", target_os = "android"))]
+    #[cfg(all(feature = "ui", target_os = "android"))]
     {
         crate::android::capture_qr(cancel)
     }
-    #[cfg(not(all(feature = "desktop", target_os = "android")))]
+    #[cfg(not(all(feature = "ui", target_os = "android")))]
     {
         let _ = cancel;
         Err(AppError::Unavailable)
@@ -180,7 +182,9 @@ pub fn decode(width: usize, height: usize, pixels: &[u8]) -> Result<Option<Secre
     let payload = Zeroizing::new(std::mem::take(&mut data.payload));
     if payload.len() > MAX_PAYLOAD
         || data.data_type != Some(quircs::DataType::Byte)
-        || data.eci.is_some()
+        // A UTF-8 header is how some sites mark an `otpauth://` link (plan
+        // 0073); every payload is validated for its target afterwards.
+        || data.eci.is_some_and(|e| e != quircs::Eci::Utf8)
     {
         return Err(AppError::InvalidInput);
     }
@@ -204,7 +208,7 @@ pub fn decode_frame(frame: &[u8]) -> Result<Option<SecretBytes>, AppError> {
 /// code, with several codes or with a code that is not a binary payload is
 /// skipped; the caller validates a decoded payload and ends the scan on a
 /// foreign or hostile one. Only the Android camera adapter scans.
-#[cfg(any(test, all(feature = "desktop", target_os = "android")))]
+#[cfg(any(test, all(feature = "ui", target_os = "android")))]
 pub(crate) fn scan_frame(frame: &[u8]) -> Option<SecretBytes> {
     decode_frame(frame).ok().flatten()
 }
@@ -315,5 +319,47 @@ mod tests {
         }
         let (w, p) = image(&Symbol { size, modules }, 4, false);
         assert!(decode(w, w, &p).is_err());
+    }
+
+    #[test]
+    fn qr_utf8_marked_text_is_read_and_other_encodings_refused() {
+        // Some sites mark an otpauth:// link with a UTF-8 ECI header (plan
+        // 0073); any other declared encoding is still refused.
+        let link = b"otpauth://totp/x?secret=GEZDGNBVGY3TQOJQ";
+        for (eci, read) in [(26u32, true), (4, false)] {
+            let mut header = [0u8; 4];
+            let segs = [
+                qrcodegen_no_heap::QrSegment::make_eci(eci, &mut header),
+                qrcodegen_no_heap::QrSegment::make_bytes(link),
+            ];
+            let mut out = vec![0; Version::MAX.buffer_len()];
+            let mut temp = vec![0; Version::MAX.buffer_len()];
+            let (len, ecl, version) = QrCode::encode_segments_to_codewords(
+                &segs,
+                &mut out,
+                QrCodeEcc::Medium,
+                Version::MIN,
+                Version::MAX,
+                true,
+            )
+            .unwrap();
+            let qr = QrCode::encode_codewords(&mut out, len, &mut temp, ecl, version, None);
+            let size = usize::try_from(qr.size()).unwrap();
+            let mut modules = SecretBytes::zeroed(size * size);
+            for y in 0..size {
+                for x in 0..size {
+                    modules.expose_secret_mut()[y * size + x] =
+                        u8::from(qr.get_module(x as i32, y as i32));
+                }
+            }
+            let (w, p) = image(&Symbol { size, modules }, 4, false);
+            match decode(w, w, &p) {
+                Ok(Some(payload)) => {
+                    assert!(read, "ECI {eci}");
+                    assert_eq!(payload.expose_secret(), link);
+                }
+                other => assert!(!read && other.is_err(), "ECI {eci}"),
+            }
+        }
     }
 }

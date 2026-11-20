@@ -22,6 +22,9 @@ if ! command -v rustup >/dev/null 2>&1; then
 fi
 PATH="$HOME/.cargo/bin:$PATH"
 rustup toolchain install
+# The app's page (plan 0071), embedded into quickvault at compile time.
+sh crates/qv-ui/setup-tools.sh
+sh crates/qv-ui/build.sh
 
 cargo build --release --locked -p qv-cli --bin qv
 cargo build --release --locked -p qv-app --features desktop --bin quickvault

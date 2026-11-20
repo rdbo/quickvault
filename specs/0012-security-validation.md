@@ -16,7 +16,7 @@ cryptographic audit or platform validation have been completed here.
 
 | Finding | Design requirement | Required validation |
 |---------|--------------------|---------------------|
-| Mobile deferred behind shared-UI claims | 0009 §1.4, §1.6, §6: Android-first shared app with isolated OS adapters | Early Android/Linux shared-flow evidence, real-device Dioxus input cleanup/lifecycle, keystore/autofill entry-point feasibility and unlock/memory benchmarks; neither remote server nor iOS is a prerequisite |
+| Mobile deferred behind shared-UI claims | 0009 §1.4, §1.6, §6: Android-first shared app with isolated OS adapters | Early Android/Linux shared-flow evidence, real-device webview input cleanup/lifecycle, keystore/autofill entry-point feasibility and unlock/memory benchmarks; neither remote server nor iOS is a prerequisite |
 | Unrequested synchronization | 0005 §0.5, 0009 §1.5: manual initiation first | For both modes, unlock/edit/login/discovery/timers/reconnection start no round; explicit sync exchanges data; failure/cancellation/restart leaves pending work until the next explicit sync; bounded in-operation retries stop on lock |
 | Implicit server prerequisite | 0005 §0, 0009: complete offline use | With no account/configured server and networking blocked, create/unlock/edit/recover a local vault; server outage or account expiry does not disable it |
 | Account-dependent LAN sync | 0005 §6: direct account-free exchange | With Internet access blocked and no server deployed, sync two same-network devices with a one-use code (0013), starting from either device |
@@ -37,7 +37,7 @@ cryptographic audit or platform validation have been completed here.
 | Hostile SQLite/CBOR | 0004: hardening and allocation budgets | Fuzz before/after authentication; malformed schema, lengths, nesting, pages and records |
 | Deleted-entry resurrection | 0005/0007: permanent tombstones | Merge a years-old file; concurrent delete/edit remains an explicit conflict |
 | Hardware assumptions | 0002/0009: backend-specific wrapping | Real-device algorithm/authentication/backup/reboot/lock/expiry tests; no silent fallback |
-| Webview exposure | 0008: Dioxus input cleanup, CSP and bounded bridge | Remote navigation/asset rejection, HTML/URL/IPC injection and lock-time races |
+| Webview exposure | 0008: webview input cleanup, CSP and the bounded bridge (one Tauri command, frames as replies, in-process media scheme) | Remote navigation/asset rejection, HTML/URL/IPC injection and lock-time races |
 | Self-referential/incomplete commitments | 0004: separate manifest and exact references | Missing history/chunk, duplicate references, wrong hash/role/configuration |
 | Rotation/purge ambiguity | 0002/0007: resumable generations and suppression | Offline old-generation peer, interrupted rotation, old-history reimport and partial purge acknowledgements |
 | Authentication complexity | 0006: TLS-bound opaque sessions and fixed OPAQUE profile | No token use on another TLS connection, replayed challenge or weak KSF; RFC OPAQUE vectors |
@@ -183,6 +183,7 @@ implementation evidence, not claims that this repository already has them.
 
 ## Changelog
 
+- 2026-11-18: §1 "Mobile deferred" and "Webview exposure" rows name the webview framework generically and the Tauri bridge (plan 0071); requirements unchanged.
 - 2026-11-16: §3 records the 1.0 format freeze (0015, plan 0064) and its host-only benchmark evidence.
 - 2026-11-15: §3: release artifacts carry SHA-256 checksums and are unsigned; the Android APK uses one stable project key kept as a CI secret (owner decision, plan 0056).
 - 2026-11-15: The "Snapshot disk growth" row covers room-based pruning and interrupted or unverified compaction (plan 0060).

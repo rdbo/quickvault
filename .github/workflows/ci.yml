@@ -56,12 +56,21 @@ jobs:
         run: rustup toolchain install
       - name: Native webview and test dependencies
         run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev xvfb dbus
+      # The Leptos page (plan 0071): wasm32 Clippy, then the bundle the app
+      # embeds, so the engine tests run the real page.
+      - name: Page tools (wasm32 target, pinned wasm-bindgen-cli)
+        run: sh crates/qv-ui/setup-tools.sh
+      - name: Page Clippy (wasm32)
+        run: cargo clippy --locked -p qv-ui --target wasm32-unknown-unknown -- -D warnings
+      - name: Build the page
+        run: sh crates/qv-ui/build.sh
       - name: Production UI compilation and Clippy
         run: cargo clippy --locked -p qv-app --all-targets --features validation -- -D warnings
       - name: Shared flows and actual engine boundary
+        env:
+          # Real-window tests start one Xvfb each (AGENTS.md).
+          RUST_TEST_THREADS: "1"
         run: cargo test --locked -p qv-app --features validation
-      - name: Maintained webview integration regressions
-        run: cargo test --manifest-path third-party/Cargo.toml --locked -p dioxus-desktop --no-default-features --features tokio_runtime --lib hardened
 
   # Windows (plan 0052): the gates on the MSVC target and the desktop app.
   # Release executables come from release.yml (plan 0056). Real-Windows evidence for
@@ -82,13 +91,15 @@ jobs:
         run: cargo fmt --check
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Page tools and bundle (plan 0071)
+        shell: bash
+        run: sh crates/qv-ui/setup-tools.sh && sh crates/qv-ui/build.sh
       - name: Clippy (desktop app)
         run: cargo clippy --locked -p qv-app --features desktop --all-targets -- -D warnings
+      - name: Test (desktop app bridge)
+        run: cargo test --locked -p qv-app --features desktop --lib
       - name: Test
         run: cargo test --locked
-
-      - name: Test maintained webview boundary (Windows origins)
-        run: cargo test --manifest-path third-party/Cargo.toml --locked -p dioxus-desktop --no-default-features --features tokio_runtime --lib hardened
 
   android-app-build:
     runs-on: ubuntu-latest
@@ -102,11 +113,12 @@ jobs:
         run: rustup toolchain install && rustup target add aarch64-linux-android
       - name: JDK and CLI prerequisites
         run: sudo apt-get update && sudo apt-get install -y openjdk-21-jdk pkg-config libssl-dev
-      - name: SDK, NDK and pinned packaging tool
+      - name: SDK, NDK and pinned packaging tools
         run: |
           export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
           sh scripts/setup-android.sh --accept-licenses
-          cargo install --locked dioxus-cli --version 0.7.10
+          cargo install --locked tauri-cli --version 2.12.4
+          sh crates/qv-ui/setup-tools.sh
       - name: Build and inspect app and instrumentation APKs
         run: |
           export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64

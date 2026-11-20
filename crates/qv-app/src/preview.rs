@@ -324,7 +324,7 @@ pub struct PreviewView {
     pub count: usize,
 }
 // The native media adapter is absent in the headless non-test library.
-#[cfg_attr(not(any(test, feature = "desktop")), allow(dead_code))]
+#[cfg_attr(not(any(test, feature = "ui")), allow(dead_code))]
 struct Source {
     session: Weak<qv_core::Session>,
     handle: qv_core::AttachmentHandle,
@@ -334,13 +334,13 @@ struct Source {
     allowed: AtomicBool,
 }
 impl Source {
-    #[cfg(any(test, feature = "desktop"))]
+    #[cfg(any(test, feature = "ui"))]
     fn available(&self) -> bool {
         !self.revoked.load(Ordering::SeqCst)
             && self.allowed.load(Ordering::SeqCst)
             && self.session.upgrade().is_some_and(|s| !s.is_locked())
     }
-    #[cfg(any(test, feature = "desktop"))]
+    #[cfg(any(test, feature = "ui"))]
     fn stream(&self, offset: u64, length: u64, output: &mut dyn Write) -> std::io::Result<()> {
         let unavailable = || std::io::Error::other("preview unavailable");
         let end = offset
@@ -381,7 +381,7 @@ impl Source {
     }
 }
 // In headless builds the token is only retained for revocation/drop.
-#[cfg_attr(not(any(test, feature = "desktop")), allow(dead_code))]
+#[cfg_attr(not(any(test, feature = "ui")), allow(dead_code))]
 struct Active {
     token: SecretBytes,
     source: Arc<Source>,
@@ -430,12 +430,10 @@ pub(crate) fn open(
             route.push(char::from(b"0123456789abcdef"[usize::from(byte >> 4)]));
             route.push(char::from(b"0123456789abcdef"[usize::from(byte & 15)]));
         }
+        // The in-process `qvmedia` scheme (plan 0071, 0003 §6.4).
         #[cfg(feature = "desktop")]
         {
-            let url = dioxus_desktop::hardened::preview_url(&route);
-            #[cfg(test)]
-            let url = url.or_else(|| Some(route.to_string()));
-            opened.src = Some(Zeroizing::new(url.ok_or(AppError::PreviewUnavailable)?));
+            opened.src = Some(crate::bridge::media::url(&route));
         }
         #[cfg(not(feature = "desktop"))]
         {
@@ -499,7 +497,7 @@ pub(crate) fn test_range(path: &str, offset: u64, length: usize) -> Option<Secre
     Some(bytes)
 }
 
-#[cfg(any(test, feature = "desktop"))]
+#[cfg(any(test, feature = "ui"))]
 fn source(path: &str) -> Option<Arc<Source>> {
     use ctutils::CtEq;
     let token = path.strip_prefix("/preview/")?;
@@ -531,23 +529,30 @@ fn source(path: &str) -> Option<Arc<Source>> {
     }
     Some(Arc::clone(&active.source))
 }
+/// The active preview's type and size, for the in-process media scheme.
 #[cfg(feature = "desktop")]
-impl dioxus_desktop::hardened::PreviewBody for Source {
-    fn available(&self) -> bool {
-        self.available()
-    }
-    fn write_range(&self, offset: u64, length: u64, output: &mut dyn Write) -> std::io::Result<()> {
-        self.stream(offset, length, output)
-    }
-}
-#[cfg(feature = "desktop")]
-pub(crate) fn serve(path: &str) -> Option<dioxus_desktop::hardened::Served> {
+pub(crate) fn describe(path: &str) -> Option<(&'static str, u64)> {
     let source = source(path)?;
-    Some(dioxus_desktop::hardened::Served {
-        mime: source.mime,
-        total: source.total,
-        body: source,
-    })
+    Some((source.mime, source.total))
+}
+/// One range of the active preview, at most [`RANGE_MAX`] bytes, read into a
+/// protected buffer for one scheme response (plan 0071). `None` once the
+/// preview is closed, revoked or locked.
+#[cfg(feature = "desktop")]
+pub(crate) fn read(path: &str, offset: u64, length: usize) -> Option<SecretBytes> {
+    if length > RANGE_MAX {
+        return None;
+    }
+    let source = source(path)?;
+    let mut bytes = SecretBytes::zeroed(length);
+    source
+        .stream(
+            offset,
+            length as u64,
+            &mut std::io::Cursor::new(bytes.expose_secret_mut()),
+        )
+        .ok()?;
+    Some(bytes)
 }
 
 fn image_dimensions(bytes: &[u8], mime: &str) -> Option<(u32, u32)> {
@@ -756,7 +761,7 @@ mod tests {
         )
         .unwrap();
         let path = opened.src.unwrap();
-        #[cfg(feature = "desktop")]
+        #[cfg(feature = "ui")]
         let path = path
             .find("/preview/")
             .map(|i| path[i..].to_owned())
@@ -786,7 +791,7 @@ mod tests {
         )
         .unwrap();
         let path = opened.src.unwrap();
-        #[cfg(feature = "desktop")]
+        #[cfg(feature = "ui")]
         let path = path
             .find("/preview/")
             .map(|i| path[i..].to_owned())

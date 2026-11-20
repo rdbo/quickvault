@@ -117,7 +117,12 @@ Defaults: `secret` and `totp` fields are protected; usernames, URLs, emails
 and other fields are not. The user can toggle `protected` per field.
 
 5.4. **TOTP:** a `totp` field stores an `otpauth://` URI (RFC 6238 parameters).
-Clients generate codes locally.
+Clients generate codes locally. A setup key entered without a link is stored
+as `otpauth://totp/?secret=<key>`, with `digits`, `period` and `algorithm`
+only when they differ from the defaults; the key is base32 without spaces,
+dashes or padding, upper case. `protected` applies to the stored URI. The
+current code is derived and short-lived: a client may show it while the entry
+is open, without a reveal (0008 §4.3; plan 0073).
 
 5.5. An `icon` value of the form `hue:<n>`, with `n` a decimal integer from 0
 to 11, is a colour the user chose for the group or entry; the app shows it on
@@ -161,15 +166,19 @@ the stored MIME or name, and only an allow-list is rendered:
 SVG, HTML, PDF, scripts and every other type are not rendered. The plaintext
 never touches the disk unless the user saves a copy: no temporary or cache
 file, no external app, no remote fetch. Browser-compatible playback may use the
-app's existing numeric loopback listener, with an unguessable per-preview route,
-strict Host/origin/range checks, bounded headers/connections and exact CSP origin.
-Do not reuse the edit transport's secret in media URLs. Responses are no-store;
-the adapter writes protected chunks directly rather than making plaintext Vec
-response copies. Malformed/multiple/unsatisfiable ranges fail416 without a full
-content fallback. Where the platform media engine would buffer streamed media
+app's in-process media scheme (`qvmedia`, 0008 §4), with an unguessable
+per-preview token, strict origin/range checks and exact CSP origin; nothing
+listens on a socket. Responses are no-store and carry at most 64 KiB each,
+read into a protected buffer for that one response; the engine and `player.js`
+ask again for the rest. An `<img>` asks only once, so the page fetches an
+image's route in ranges into a renderer-memory `Blob` and shows it from a
+`blob:` URL; it fetches at most 64 MiB of image bytes and revokes the URL and
+drops its copy on close, navigation, lock and hiding (owner report, plan
+0072). Malformed/multiple/unsatisfiable ranges fail 416
+without a full content fallback. Where the platform media engine would buffer streamed media
 to a file (WebKitGTK on Linux writes playing HTTP media to an unlinked file in
 `/var/tmp`), the client instead fetches the verified content over that
-route into renderer memory and plays it from there (owner request,
+scheme into renderer memory and plays it from there (owner request,
 2026-11-14): an MP4 as Media Source Extensions fragments rewritten losslessly
 from its own sample tables (no re-encoding), anything else as an in-memory blob.
 The MP4 path reads the file's index and then only the samples around the
@@ -184,12 +193,13 @@ application-owned plaintext for either action. Close, navigation, lock or hiding
 cancels pending playback loads, and late completions must not restore playback.
 A seek restores the selected position and preserves the paused state; moving
 the slider alone does not start playback.
-For that fetch the listener grants CORS to the app's own origin only, and the
-CSP adds `blob:` to media-src and the listener origin to connect-src.
+For these fetches the scheme grants CORS to the app's own origin only, and the
+CSP adds `blob:` to media-src and img-src and the scheme's origin to
+connect-src.
 An audio preview may show levels read by the engine's audio analyser from the
 playing element (owner request, 2026-11-15; plan 0061), only where the engine
 routes media through its analyser without changing what is heard: on Android,
-an element that requests the listener's route with CORS under the same
+an element that requests the scheme's route with CORS under the same
 own-origin grant. WebKitGTK's routing drops and delays sound, so Linux memory
 playback is not analysed. The analysis
 adds no fetch, file or plaintext copy beyond a small level array the page
@@ -249,6 +259,17 @@ searchable. Paging MUST NOT silently omit records, fields or conflicts.
 
 ## Changelog
 
+- 2026-11-20: §5.4: a setup key is stored as an `otpauth://totp/?secret=`
+  URI (no format change); the current code may show without a reveal
+  (owner report, plan 0073).
+- 2026-11-19: §6.4: images are fetched in ranges into a renderer `Blob`
+  and shown from a `blob:` URL (at most 64 MiB), since an image element
+  makes one request and the scheme answers at most 64 KiB; img-src adds
+  `blob:` (owner report, plan 0072).
+
+- 2026-11-17: §6.4: previews are served by the in-process `qvmedia` scheme,
+  at most 64 KiB per response, instead of the loopback listener (owner
+  decision, Tauri 2 + Leptos, plan 0071).
 - 2026-11-15: §6.4: an audio preview may show levels from the engine's
   analyser of the playing element where routing does not change what is
   heard; Android audio requests its route with CORS (owner request, plan 0061).

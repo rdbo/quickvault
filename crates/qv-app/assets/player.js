@@ -12,7 +12,8 @@
 // playback position are fetched and rewritten as fragments, so memory stays
 // bounded whatever the file size (plan 0059). Other files, and an MP4 the
 // engine cannot stream this way, are fetched whole into a blob (the app
-// refuses those over 256 MiB). Everything is dropped with the preview.
+// refuses those over 256 MiB). Images are read whole into a blob on every
+// platform (loadImage). Everything is dropped with the preview.
 const blobs=new WeakMap();
 function dropBlob(media){
     const held=blobs.get(media);
@@ -48,10 +49,11 @@ function loadBlob(media,startPlaying=false,startAt=0){
 // The largest file fetched whole (the app refuses larger non-MP4 previews).
 const MEMORY_MAX=256*1024*1024;
 function loadWhole(media,held,source,type,startAt,begin){
-    fetch(source,{cache:"no-store",credentials:"omit",referrerPolicy:"no-referrer",signal:held.abort.signal})
-        .then(response=>{if(!response.ok)throw new Error("preview unavailable");return response.arrayBuffer();})
-        .then(buffer=>{
-            const bytes=new Uint8Array(buffer);
+    // The in-process scheme answers at most 64 KiB per request, so the
+    // whole file is read range by range (plan 0071).
+    const total=Number(media.getAttribute("data-qv-size")||0);
+    (Number.isSafeInteger(total)&&total>0&&total<=MEMORY_MAX?fetchRange(source,held,0,total):Promise.reject(new Error("size")))
+        .then(bytes=>{
             if(blobs.get(media)!==held||!media.isConnected){bytes.fill(0);return;}
             playFromMemory(media,held,bytes,type);
             // A seek after EOS uses a new decoder too. Before metadata loads,
@@ -61,13 +63,37 @@ function loadWhole(media,held,source,type,startAt,begin){
         })
         .catch(()=>{if(blobs.get(media)===held)dropBlob(media);});
 }
+// Images on every platform (plan 0072): an <img> asks once and the scheme
+// answers at most 64 KiB, so the image is read range by range into a blob,
+// at most 64 MiB (the viewer offers a saved copy for larger ones).
+const IMAGE_MAX=64*1024*1024;
+function loadImage(img){
+    dropBlob(img);
+    img.removeAttribute("src");
+    img.removeAttribute("data-qv-failed");
+    const source=img.getAttribute("data-qv-src");
+    if(!source||document.hidden)return;
+    const type=img.getAttribute("data-qv-type")||"";
+    const total=Number(img.getAttribute("data-qv-size")||0);
+    const held={abort:new AbortController(),url:null,wipe(){}};
+    blobs.set(img,held);
+    (Number.isSafeInteger(total)&&total>0&&total<=IMAGE_MAX?fetchRange(source,held,0,total):Promise.reject(new Error("size")))
+        .then(bytes=>{
+            if(blobs.get(img)!==held||!img.isConnected){bytes.fill(0);return;}
+            held.url=URL.createObjectURL(new Blob([bytes],{type}));
+            bytes.fill(0);
+            img.src=held.url;
+        })
+        .catch(()=>{if(blobs.get(img)===held){dropBlob(img);img.setAttribute("data-qv-failed","true");}});
+}
+function loadSource(node){if(node instanceof HTMLImageElement)loadImage(node);else loadBlob(node);}
 function loadBlobs(records){
     for(const record of records){
-        if(record.type==="attributes"&&record.attributeName==="data-qv-src"){loadBlob(record.target);continue;}
+        if(record.type==="attributes"&&record.attributeName==="data-qv-src"){loadSource(record.target);continue;}
         for(const node of record.addedNodes){
             if(!(node instanceof Element))continue;
-            if(node.matches("audio[data-qv-src],video[data-qv-src]"))loadBlob(node);
-            for(const media of node.querySelectorAll("audio[data-qv-src],video[data-qv-src]"))loadBlob(media);
+            if(node.matches("audio[data-qv-src],video[data-qv-src],img[data-qv-src]"))loadSource(node);
+            for(const media of node.querySelectorAll("audio[data-qv-src],video[data-qv-src],img[data-qv-src]"))loadSource(media);
         }
     }
 }
@@ -120,13 +146,20 @@ function playFromMemory(media,held,bytes,type){
 // video fragment always starts at a keyframe). One range request covers the
 // samples of several fragments, at most 32 MiB.
 const AHEAD=30,BEHIND=30,WINDOW_BYTES=32*1024*1024,MOOV_MAX=64*1024*1024;
+// One request per 64 KiB, the scheme's largest answer (plan 0071).
+const CHUNK=64*1024;
 async function fetchRange(source,held,start,end){
-    const response=await fetch(source,{cache:"no-store",credentials:"omit",referrerPolicy:"no-referrer",
-        signal:held.abort.signal,headers:{Range:`bytes=${start}-${end-1}`}});
-    if(response.status!==206)throw new Error("range");
-    const bytes=new Uint8Array(await response.arrayBuffer());
-    if(bytes.byteLength!==end-start){bytes.fill(0);throw new Error("range");}
-    return bytes;
+    const out=new Uint8Array(end-start);
+    for(let at=start;at<end;){
+        const last=Math.min(at+CHUNK,end);
+        const response=await fetch(source,{cache:"no-store",credentials:"omit",referrerPolicy:"no-referrer",
+            signal:held.abort.signal,headers:{Range:`bytes=${at}-${last-1}`}});
+        if(response.status!==206){out.fill(0);throw new Error("range");}
+        const bytes=new Uint8Array(await response.arrayBuffer());
+        if(bytes.byteLength!==last-at){bytes.fill(0);out.fill(0);throw new Error("range");}
+        out.set(bytes,at-start);bytes.fill(0);at=last;
+    }
+    return out;
 }
 // Walks the top-level boxes with small reads and returns the `moov` box.
 async function readMoov(source,held,total){
@@ -194,7 +227,7 @@ async function streamMp4(media,held,source,type,total,startAt){
     const first=fragmentFor(plan,Math.max(0,startAt-1));
     // Until the first fragments are in, the position is `startAt`: WebKit
     // buffers nothing for a seek made before any media data (plan 0059).
-    const st={next:first,busy:false,window:null,seq:1,pending:startAt>0?startAt:null};
+    const st={next:first,first,turn:0,busy:false,window:null,seq:1,pending:startAt>0?startAt:null};
     held.attached=true;
     const ms=new MediaSource();
     media.setAttribute("data-qv-playback","stream");
@@ -207,6 +240,7 @@ async function streamMp4(media,held,source,type,total,startAt){
         st.busy=true;
         try{
             while(live()&&st.next<plan.runs.length){
+                const turn=st.turn;
                 const time=st.pending??media.currentTime;
                 if(plan.runs[st.next].start>time+AHEAD)break;
                 const from=st.next;
@@ -224,6 +258,8 @@ async function streamMp4(media,held,source,type,total,startAt){
                         try{await appendPart(buffer,part);}finally{part.fill(0);}
                     }
                 }finally{bytes.fill(0);st.window=null;}
+                // A seek moved the read position while this window loaded.
+                if(st.turn!==turn)continue;
                 st.next=to;
                 if(st.pending!==null){
                     const r=buffer.buffered;
@@ -239,20 +275,24 @@ async function streamMp4(media,held,source,type,total,startAt){
             if(blobs.get(media)===held)dropBlob(media);
         }finally{st.busy=false;}
     };
-    // A seek outside what is buffered starts a fresh MediaSource at the
-    // target: WebKitGTK's decoder presents no frames after its buffer is
-    // emptied and refilled, the same fault class as replay after the end
-    // (plan 0057), so the source is rebuilt from the live capability there.
-    // Positions this source will still reach by reading ahead (including its
-    // own starting seek) need no rebuild.
+    // A seek outside what is buffered moves the read position to the
+    // fragment before the target and appends there, in this MediaSource:
+    // the old data is removed only afterwards, so the buffer is never
+    // emptied (WebKitGTK presents no frames after its buffer is emptied and
+    // refilled, W5). A fresh MediaSource instead would blank the picture
+    // until its first frame (plan 0072). Positions this source will still
+    // reach by reading ahead (including its own starting seek) need nothing.
     const restart=()=>{
         if(!buffer||!live())return;
         const time=media.currentTime;
         if(buffered(buffer,time))return;
-        const from=plan.runs[first]?.start??0;
+        const from=plan.runs[st.first]?.start??0;
         const next=st.next<plan.runs.length?plan.runs[st.next].start:Infinity;
         if(time>=from&&time<=next+AHEAD)return;
-        loadBlob(media,!media.paused,time);
+        st.first=st.next=fragmentFor(plan,Math.max(0,time-1));st.turn++;
+        // Before any data the start position is still pending (W5).
+        if(st.pending!==null)st.pending=time;
+        pump();
     };
     held.wipe=()=>{
         if(st.window)st.window.fill(0);
@@ -580,7 +620,7 @@ function full(type,version,flags,...parts){return box(type,u32(version<<24|flags
 const wired=new WeakSet();
 // A drag from a control can synthesize a click on the common ancestor of
 // press and release (the viewer's backdrop). Consume that one gesture before
-// Dioxus receives it. Keep no element reference after the preview is removed.
+// the page receives it. Keep no element reference after the preview is removed.
 let playerPress=false;
 document.addEventListener("pointerdown",event=>{
     playerPress=event.target instanceof Element&&!!event.target.closest(".v-player");

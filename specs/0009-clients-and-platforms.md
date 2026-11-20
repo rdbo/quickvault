@@ -24,8 +24,8 @@ does not make these characters visible.
 
 | Client | Crate | Framework | v1 |
 |--------|-------|-----------|----|
-| Desktop app | `qv-app` | Dioxus desktop | ✅ |
-| Mobile app | `qv-app` | Dioxus mobile | ✅ |
+| Desktop app | `qv-app` | Tauri 2 + Leptos | ✅ |
+| Mobile app | `qv-app` | Tauri 2 + Leptos | ✅ |
 | CLI | `qv-cli` | clap | ✅ |
 | Browser extension | — | — | later |
 | Auto-type | — | — | not planned yet |
@@ -262,6 +262,27 @@ release, but no longer gates the feature.
     the field in Rust.
   - A Wi‑Fi item's page can show a `WIFI:` join QR code. It contains the
     password, so it is an explicit 30-second reveal under 0008 §4.
+  - **Two-factor codes** (owner, 2026-11-20; plan 0073). A login's editor
+    always has a "Two-factor code" row under its fields: "Set up" while it
+    has none, otherwise the current code with "Replace" (the field's menu
+    removes it). Other types reach the same sheet through "Add a field"
+    ("Two-factor code" or the one-time-code kind), which never adds an empty
+    code field. "Set up" opens a sheet in the order sites present
+    it: "Scan the QR code" where a camera scan exists (Android), then one
+    protected input for the setup key as sites print it (spaces, dashes,
+    any case) or a pasted `otpauth://` link. Rust checks the input once
+    typing pauses, never per keystroke; the page receives only whether it
+    is valid, the current code and its seconds left, so the user can finish
+    the site's setup. "More options" (digits, period, algorithm) applies
+    to a key only and is closed by default. Adding stores 0003 §5.4's URI.
+    A scanned code must be an `otpauth://` link (a UTF-8 header is
+    accepted); it is added at once, the scan being the user's choice, and
+    any other code is refused in the sheet and not kept.
+    The start box recognizes a pasted `otpauth://` link as a login with
+    that code, named from the link's issuer, with its account as the
+    username. In the entry view the code shows without a reveal, grouped
+    (for example "123 456"), with a ring for its own period; a click copies
+    it. The setup key and URI never show in the view.
   - Tiles show the colour token of 0003 §5.5.
 - **Item types and list loading** (owner, 2026-11-11; plan 0051). The
   sidebar always lists the new-item picker's five types (Logins, Cards,
@@ -275,7 +296,10 @@ release, but no longer gates the feature.
   as numbers) and never take the list's or the sidebar's groups page.
 - **Item list actions** (owner, 2026-11-07; plan 0044). A right click on an
   item row opens its menu (open, copy the first field or the password,
-  colour, move, select, move to the trash) without opening the item.
+  copy its two-factor code, colour, move, select, move to the trash)
+  without opening the item. A row's copy menu also lists its two-factor
+  code. Copying one copies the current code, never the key; a code field
+  that cannot make codes is not listed (owner, 2026-11-20).
   Multi-select: Ctrl/⌘-click toggles a row, Shift-click selects a range, a
   Select button in the list header (desktop) and, on touch screens, holding
   a row for about half a second (Android has no Select button; owner,
@@ -317,11 +341,16 @@ release, but no longer gates the feature.
   system prompt opens by itself when the app starts or returns to the
   foreground (not after a manual lock), only once the locked screen itself
   is drawn, and the master password field below
-  stays usable, unfocused, after a dismissal. After a master-password unlock
-  on a device that supports it, with no enrollment for that vault and quick
-  unlock not turned off, the app asks the system to enroll biometric quick
-  unlock with that password; dismissing skips it until the next password
-  unlock. The device-credential policy is offered only in Settings.
+  stays usable, unfocused, after a dismissal. The device keeps one
+  enrollment, for one vault. After a master-password unlock on a device
+  that supports it, with no enrollment on the device and quick unlock not
+  turned off, the app asks the system to enroll biometric quick unlock with
+  that password; dismissing skips it until the next password unlock. While
+  another vault holds the enrollment, nothing moves it by itself: the open
+  vault's Settings says quick unlock is off for it, names the vault that
+  has it, and offers to enroll this vault instead, which ends the other
+  vault's enrollment (owner report, 2026-11-19, plan 0072). The
+  device-credential policy is offered only in Settings.
 - **Sync page** (named Devices before 2026-11-07). It names the vault that
   will be synced, with a way to change it, because phones show no title
   bar; the code window and a running sync name it too. Two large choices,
@@ -342,13 +371,13 @@ release, but no longer gates the feature.
   playing, 0003 §6.4), text
   (reader). Other types offer only
   saving a copy. Verify through bounded protected chunks and serve authenticated
-  ranges through an unguessable per-preview route on the app's existing numeric
-  loopback listener (0003 §6.4), never a plaintext file or whole-media response
-  vector. Closing, navigating away, lock and hiding the window revoke the source.
-  CSP img/media allow only self and that exact HTTP listener origin; retain the
-  separate edit websocket policy. On Linux, media plays from renderer memory
-  instead (0003 §6.4), so the CSP also allows `blob:` media and a fetch from
-  that listener. No autoplay; an opened preview may load its media before play
+  ranges through an unguessable per-preview token on the app's in-process
+  `qvmedia` scheme (0003 §6.4, 0008 §4), never a plaintext file or whole-media
+  response. Closing, navigating away, lock and hiding the window revoke the
+  source. CSP img/media allow only self and that scheme's origin, plus `blob:`
+images that the page assembles from range fetches (0003 §6.4). On Linux,
+  media plays from renderer memory instead (0003 §6.4), so the CSP also allows
+  `blob:` media and a fetch from that scheme. No autoplay; an opened preview may load its media before play
   to show the first frame and duration (0003 §6.4). Explicit replay after the
   end uses a fresh memory source on Linux (0003 §6.4), as does a backward seek
   after the end; seeking restores the chosen position while paused. A pointer
@@ -427,7 +456,7 @@ The OS controls how password managers plug in:
 This is a packaging/OS constraint, not a language one: the logic can be Rust.
 Plan:
 
-4.1. Dioxus provides the shared UI, including standard webview secret-input
+4.1. The Tauri 2 + Leptos app provides the shared UI, including standard webview secret-input
 controls under 0008 §1.1/§4.4. Native OS autofill, keystore, biometric and
 lifecycle entry points remain platform adapters. No native password dialog
 is required solely to avoid framework-managed memory copies.
@@ -439,7 +468,7 @@ on iOS a minimal extension linking the Rust static library.
 
 4.3. Autofill uses an implemented authenticated platform-wrap backend. If it
 is unavailable/expired or a full KDF exceeds extension limits, hand off to the
-main app for the Dioxus unlock flow; never weaken the vault KDF. Process separation
+main app for its unlock flow; never weaken the vault KDF. Process separation
 uses an authenticated OS-protected channel with short-lived scoped results,
 not a shared plaintext key file. Verify app signing identity and web origin using
 platform association APIs; never match by app label, substring or unverified
@@ -563,8 +592,9 @@ Evergreen runtime.
 
 ### 6. Early cross-platform framework validation
 
-Dioxus with its standard webview renderer and input controls is the owner's
-selected shared UI framework (2026-10-26; 0008 OQ2). Validate integration on
+Tauri 2 with a Leptos page (client-side rendering, WebAssembly) and standard
+webview input controls is the owner's selected shared UI framework
+(2026-11-17, replacing Dioxus selected 2026-10-26; 0008 OQ2). Validate integration on
 Android and Linux during phase 1, before building the full application.
 Demonstrate shared vault-list and entry-editing flows against the same core,
 offline persistence, bounded secret-input cleanup and lifecycle
@@ -580,9 +610,16 @@ merely because internal copies are outside application control. Active-content,
 session, OS and release requirements remain in force. A framework replacement
 requires a new owner decision; do not create separate Android/Linux app UIs.
 
-The [Dioxus mobile guide](https://dioxuslabs.com/learn/0.7/guides/platforms/mobile/)
-describes Android/iOS support with a WebView renderer and experimental rendering
-alternatives. Android's [autofill service requirements](https://developer.android.com/identity/autofill/autofill-services)
+Owner decision, 2026-11-17: the Dioxus desktop/mobile renderer is replaced
+by Tauri 2 with a Leptos frontend compiled to WebAssembly, so the app runs
+fully in process with no listening sockets (plan 0070). One shared UI
+remains. Plan 0071 carried out the migration for 1.2.0 (owner, 2026-11-17:
+continue through the phases and test the result); the validation above
+applies to the new app on Android and Linux.
+
+The [Tauri 2 documentation](https://v2.tauri.app/) describes Android and iOS
+support with the platform WebView; the earlier [Dioxus mobile guide](https://dioxuslabs.com/learn/0.7/guides/platforms/mobile/)
+covers the previous framework. Android's [autofill service requirements](https://developer.android.com/identity/autofill/autofill-services)
 and Apple's [credential-provider extension requirements](https://developer.apple.com/documentation/authenticationservices/ascredentialproviderviewcontroller)
 remain OS integration work. These sources establish platform mechanisms, not
 QuickVault implementation readiness or validation (consulted 2026-10-24).
@@ -606,8 +643,15 @@ and reject late results by form/session epoch (0008). No secret goes into argv,
 logs or non-secret UI preferences. No extra password prompt after transfer.
 
 Browse/search/sidebar/trash/conflicts/All items consume 0004 §7's bounded page
-APIs; app residency is at most three pages plus selected detail. Do not rebuild
-a full All items vector or accumulate all pages in the frontend. Stale results
+APIs. The item, trash and conflict lists scroll continuously over a window
+of at most 32 consecutive pages (1,024 rows, 8 MiB of row text): the next
+page loads as the list's end comes into view. A full window is not trimmed
+while it scrolls (removing rows above the viewport would move the list);
+"Show more" replaces it with the next window, and "Back to the start"
+returns. A vault change reloads the window as far as it was read before
+showing it, so an edit keeps the user's rows. Other lists keep one page;
+selected detail is extra. Do not rebuild a full All items vector or
+accumulate pages beyond that window. Stale results
 are discarded and a changed-snapshot result is surfaced/restarted explicitly.
 
 ## Security Considerations
@@ -625,9 +669,32 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 3. **Framework choice resolved 2026-10-26 (owner):** use Dioxus and standard
    webview input. Phase 1 (§6) validates integration and records gaps; it does
    not reconsider native input or a custom engine just for memory-copy concerns.
+   Superseded 2026-11-17 (owner): Tauri 2 + Leptos with the same standard
+   webview input (§6, plan 0071).
 
 ## Changelog
 
+- 2026-11-20: §1.8 item list actions: a row's menu and copy menu copy its
+  current two-factor code (owner request).
+- 2026-11-20: §1.8 item editor: two-factor codes get a login row, a
+  setup sheet (scan, setup key or link, live code), start-box links and a
+  visible code in the view (owner report, plan 0073).
+- 2026-11-19: §1.8: the device keeps one quick-unlock enrollment; the
+  post-unlock offer needs none on the device, and another vault's Settings
+  names the holder and offers to move it (owner report, plan 0072).
+- 2026-11-19: §1.8 previews: images over 64 KiB load through range fetches
+  into a `blob:` image; list residency is a scrolling window of at most 32
+  pages instead of three pages, with "Show more" beyond it (owner report,
+  plan 0072).
+
+- 2026-11-18: §6: the migration is complete in 1.2.0 (plan 0071); Dioxus is
+  no longer shipped.
+- 2026-11-17: client table, §1.8 previews, §4.1, §4.3, §6: the shared UI is
+  Tauri 2 + Leptos; previews use the in-process `qvmedia` scheme; no listening
+  sockets (owner decision, plan 0071).
+- 2026-11-17: §6: owner decision to replace the Dioxus renderer with Tauri 2
+  and Leptos, with no listening sockets (plan 0070); Dioxus remains shipped
+  until the migration completes.
 - 2026-11-17: §1.8: 5-minute inactivity lock; on Android leaving the app
   locks only when that time runs out (0008 §1.4); paste in text fields
   (Android long press, Linux editing-only context menu); "Nothing to copy"

@@ -1,7 +1,8 @@
 # Known WebKitGTK limits
 
 The Linux app renders in WebKitGTK 4.1 (2.48 when these were found) through
-the vendored dioxus-desktop. Android uses the Chromium WebView and Windows
+Tauri 2 (wry; plan 0071; the vendored dioxus-desktop until 1.2.0). Android
+uses the Chromium WebView and Windows
 uses WebView2; the entries below are WebKitGTK-only unless they say otherwise.
 
 Each entry records what goes wrong, what QuickVault does about it, and what
@@ -34,12 +35,14 @@ Whenever a new WebKitGTK bug, workaround or limit is found, add an entry here
   Media Source Extensions fragments rewritten from its own sample tables,
   other formats as a whole in-memory blob. Non-MP4 Linux previews are capped
   at 256 MiB (`PreviewTooLarge`). The CSP adds `blob:` to media-src and the
-  listener origin to connect-src.
-  The fetch must send the explicit app origin (`dioxus://index.html`); an
-  opaque `null` origin receives no CORS grant. Rechecked with WebKitGTK in
-  plan 0065; do not broaden that grant to every opaque document.
+  `qvmedia` origin to connect-src.
+  The fetch must send the explicit app origin (`tauri://localhost` on Linux,
+  `src/bridge/media.rs`); an opaque `null` origin receives no CORS grant.
+  Rechecked with WebKitGTK in plan 0065 (Dioxus) and plan 0071 (Tauri); do
+  not broaden that grant to every opaque document.
 - **Code:** `assets/player.js` (header, `loadBlob`, the MP4 fragmenter),
-  the Linux branches in `src/ui/items.rs`, the bound in `src/preview.rs`.
+  the Linux branches of the viewer in `crates/qv-ui/src/items.rs`, the bound
+  in `src/preview.rs`.
 - **Docs:** 0003 §6.4, 0009 §1.8; plans 0057, 0059.
 - **Check:** `run-media.py --check-media-files` (crates/qv-app README).
 - **On change:** if the new engine streams HTTP media without a disk buffer
@@ -67,7 +70,8 @@ Whenever a new WebKitGTK bug, workaround or limit is found, add an entry here
   crates, and a range read stops at a 64 KiB chunk boundary. Video uses
   `preload="auto"`.
 - **Code:** dev profile overrides in the workspace `Cargo.toml`,
-  `src/preview.rs` (range reads), `src/ui/items.rs` (preload attributes).
+  `src/preview.rs` (range reads), `crates/qv-ui/src/items.rs` (preload
+  attributes).
 - **Docs:** plan 0057 *Diagnosis*.
 - **On change:** re-test `preload="metadata"`; it would avoid loading video
   before Play.
@@ -82,6 +86,9 @@ Whenever a new WebKitGTK bug, workaround or limit is found, add an entry here
 - **Code:** `assets/player.js` (`toggle`, the seek `change` handler).
 - **Docs:** 0003 §6.4 ("explicit replay or backward seek after the end"),
   plan 0057.
+- **Limit:** the rebuild swaps the element's source, so the picture is
+  blank for a frame or two (≈ 50–100 ms) before the first frame of the new
+  source (recorded under Xvfb with compositing, plan 0072). Not masked.
 - **On change:** if the new engine replays correctly, use an ordinary
   `currentTime = 0`.
 
@@ -90,12 +97,18 @@ Whenever a new WebKitGTK bug, workaround or limit is found, add an entry here
 - **Symptom:** the decoder presents no frames after its buffer is emptied
   and refilled. A seek made before any media data buffers nothing. A seek
   into a gap at the start stalls.
-- **Response:** a seek outside the buffered data rebuilds the MediaSource at
-  the target. The start position is set after the first window, one second
-  early (B-frames). The fragmenter starts each track at 0, so an edit
-  list's few milliseconds of encoder delay are not applied.
+- **Response:** a seek outside the buffered data moves the read position to
+  the fragment before the target and appends there in the same
+  MediaSource; data far behind is removed only after that, so the buffer
+  is never emptied. Until plan 0072 the MediaSource was rebuilt at the
+  target, which reloaded the element and could blank the picture (the
+  owner saw a flicker on a jump to the unbuffered end after a replay). The
+  start position is set after the first window, one second early
+  (B-frames). The fragmenter starts each track at 0, so an edit list's few
+  milliseconds of encoder delay are not applied.
 - **Code:** `assets/player.js` (`restart`, `streamMp4`, `fragmentMp4`).
-- **Docs:** plan 0059 (step 8).
+- **Docs:** plan 0059 (step 8), plan 0072 (step 8; the media flow asserts
+  that far seeks fire no `emptied`).
 - **On change:** drops out with W1; otherwise re-test seeks outside the
   buffer by counting presented frames.
 
@@ -104,8 +117,8 @@ Whenever a new WebKitGTK bug, workaround or limit is found, add an entry here
 - **Symptom:** the element's own full screen shows a black picture.
 - **Response:** WebKit full screen is disabled; the video button makes the
   whole window full screen instead.
-- **Code:** `set_enable_fullscreen(false)` in the vendored
-  `third-party/dioxus-desktop/src/webview.rs`; `src/ui/items.rs`.
+- **Code:** `set_enable_fullscreen(false)` in `src/bridge/webkit.rs`; the
+  viewer's full-screen button in `crates/qv-ui/src/items.rs`.
 - **Docs:** 0009 §1.8, plan 0057.
 - **On change:** use element full screen, as Android already does.
 
@@ -186,6 +199,24 @@ Whenever a new WebKitGTK bug, workaround or limit is found, add an entry here
   fields) on every platform with a hardware keyboard.
 - **Docs:** plan 0062, `CHANGELOG.md`.
 - **On change:** keep the app's hint; drop the WebKit rule if unused.
+
+### W13. Media elements cannot load a custom URI scheme
+
+- **Symptom:** an `<audio>`/`<video>` whose `src` is an app-registered
+  scheme (the plan 0070 prototype's `qvmedia://localhost/<token>`, served by
+  Tauri's in-process scheme handler) fails at once with `NotSupportedError`
+  (`MediaError` code 4). The engine makes one ranged request (`bytes=0-1445`,
+  no Origin) and then gives up, for MP4 video, MP4 audio and WAV alike.
+  `fetch()` from the page to the same URL works. Found with WebKitGTK 2.48.7
+  in the plan 0070 prototype; it applies to the app since plan 0071 moved
+  previews to the same scheme.
+- **Response:** none needed: Linux already plays previews from renderer
+  memory (W1), and that path fetches through the scheme (64 KiB per request,
+  as the scheme answers) and works.
+- **Code:** `assets/player.js` (`fetchRange`, `loadWhole`).
+- **Docs:** plan 0070 (step A6, `VALIDATION.md`), plan 0071.
+- **On change:** if a later engine plays custom-scheme `src`, it still
+  needs W1's disk check before Linux may use it.
 
 ## Testing method
 

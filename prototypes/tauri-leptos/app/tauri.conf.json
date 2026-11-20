@@ -1,0 +1,39 @@
+{
+  "productName": "QuickVault Prototype",
+  "version": "0.0.1",
+  "identifier": "org.quickvault.prototype",
+  "build": {
+    "frontendDist": "../ui/dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [],
+    "security": {
+      "csp": {
+        "default-src": "'none'",
+        "script-src": "'self' 'wasm-unsafe-eval'",
+        "style-src": "'self'",
+        "img-src": "'self'",
+        "font-src": "'self'",
+        "media-src": "'self' qvmedia: http://qvmedia.localhost blob:",
+        "connect-src": "'self' ipc: http://ipc.localhost qvmedia: http://qvmedia.localhost",
+        "object-src": "'none'",
+        "frame-src": "'none'",
+        "base-uri": "'none'",
+        "form-action": "'none'"
+      },
+      "capabilities": [
+        "main"
+      ]
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": [
+      "icons/icon.png"
+    ],
+    "android": {
+      "minSdkVersion": 29
+    }
+  }
+}

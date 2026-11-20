@@ -72,7 +72,7 @@ with log.open('w') as output:
             with (logs / 'launch.log').open('w') as launch:
                 subprocess.run([
                     adb, 'shell', 'am', 'start', '-W', '-n',
-                    'org.quickvault.app/dev.dioxus.main.MainActivity',
+                    'org.quickvault.app/.MainActivity',
                 ], stdout=launch, stderr=subprocess.STDOUT, timeout=15, check=True)
         runner.wait(timeout=210)
     except BaseException:

@@ -1,7 +1,0 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
-# Isolated focused tests for the maintained upstream package; not shipped code.
-[workspace]
-resolver = "3"
-members = ["dioxus-desktop"]
-[patch.crates-io]
-dioxus-desktop = { path = "dioxus-desktop" }

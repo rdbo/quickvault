@@ -7,6 +7,98 @@ Dates are ISO 8601. Newest first within each section.
 
 ## Unreleased
 
+- 2026-11-20: Fixed (owner reports): a list row's menu (right click, or a
+  card's copy menu) near the end of the list opened below the visible list;
+  it now opens above the row when there is no room below, and scrolls when
+  neither side fits. Revealing an empty protected value (an empty password)
+  kept showing the mask as if still hidden; it now shows empty, in the
+  entry view and the editor. The two-factor "More options" choices show the
+  pointer cursor and a hover state.
+- 2026-11-20: A list row's right-click menu, and a row's copy menu, copy
+  the entry's current two-factor code ("Copy “Two-factor code”"); a code
+  field that cannot make codes is not listed. Spec 0009 §1.8 amended
+  (owner request).
+- 2026-11-20: Two-factor codes you can find (plan 0073). Logins have a
+  "Two-factor code" row with "Set up", which opens a sheet: scan the site's
+  QR code (Android), or enter the setup key as the site prints it (spaces,
+  dashes, any case) or paste an `otpauth://` link. Once the input is valid
+  the sheet shows the current code, which sites ask for to finish setup;
+  "More options" covers digits, period and algorithm. A pasted
+  `otpauth://` link in "What are you saving?" starts a login named after the
+  site, with the account as username. "Add a field" opens the same sheet for
+  a code instead of an empty field. The entry view shows the current code
+  without a reveal, grouped ("123 456"), with a ring for its own period;
+  the setup key never shows. Codes are stored as before (a key becomes
+  `otpauth://totp/?secret=KEY`; no format change). Specs 0003 §5.4, 0008
+  §4.3 and 0009 §1.8 amended. Fixed: the live master-password strength
+  (plan 0072) never updated in the app, because the page's typing-pause
+  timer could not reach the bridge.
+- 2026-11-19: Owner feedback batch (plan 0072). Lists (items, trash,
+  conflicts) scroll as one list: the next page loads as the end comes into
+  view, up to 1,024 rows at once; beyond that "Show more" and "Back to the
+  start" replace Previous/Next, and an edit keeps the rows on screen. The
+  new master password shows its strength (label, bits, bar) while you type,
+  rated in Rust once typing pauses; the weak-password confirmation is
+  unchanged, and the Settings password field no longer runs the estimate on
+  every keystroke. The join and sync code fields have Show/Hide. Scanning a
+  join code on a new install opens the protection review and joins once it
+  is acknowledged. Toasts and the sync receipt fade out. The item editor's
+  group chip shows the group's own color. Fixed: images over 64 KiB opened
+  to an empty viewer (1.2.0; the media scheme answers 64 KiB per request and
+  an image asks only once), so the viewer now reads images in ranges into a
+  blob, up to 64 MB. Desktop video: a jump to an unbuffered position (for
+  example the end, after a replay) appends there in the same stream instead
+  of rebuilding it, so the picture no longer blanks. Specs 0003 §6.4, 0004
+  §7.4, 0009, 0010 §4.2, 0014 §6.3–§6.4 amended; WEBKIT.md W4 and W5
+  updated. Fixed: Settings said fingerprint unlock was on in every vault
+  while the phone's one enrollment belongs to a single vault; another
+  vault's Settings now names the vault that has it and offers to move it
+  here (0009 §1.8 amended).
+
+## 1.2.0 — 2026-11-18
+
+- 2026-11-18: Version 1.2.0 (release notes: `docs/release-notes/1.2.0.md`).
+- 2026-11-18: The app moves from Dioxus to Tauri 2 with a Leptos page in
+  WebAssembly (plan 0071), on Linux, Windows and Android. Nothing listens on
+  a socket any more: Rust builds every screen as a frame, the page renders it
+  and sends typed actions back through one bounded command (64 KiB, strict
+  decoding), handles reach the page only as random references cleared on
+  lock, and previews stream over the in-process `qvmedia` scheme (64 KiB per
+  response). The screens, classes and ids are the same, so the look, the
+  keyboard shortcuts and `app.css`/`app.js`/`player.js` carry over. New
+  crates `qv-ui-api` (the protocol) and `qv-ui` (the page, built by
+  `crates/qv-ui/build.sh`). The Linux webview keeps the old hardening
+  (editing-only context menu, no permission/file/auth prompts, no web
+  storage, page cache, developer extras or element full screen) and is
+  incognito; previews, harnesses and tests keep the webview's folder out of
+  the user's home. Android uses Tauri's project in `crates/qv-app/gen/android`
+  with the same activity, autofill service, tests, signing and version-code
+  rule; its classes moved from `dev.dioxus.main` to `org.quickvault.app`, so
+  after updating from 1.1.1 select QuickVault as the autofill service again
+  (Android turns it off because the service's name changed). The Windows build gets an `.ico` and swallows browser
+  shortcuts (reload, find, print). The vendored `third-party/dioxus-desktop`,
+  the Dioxus CLI and `Dioxus.toml` are gone; the SPDX checker now rejects any
+  vendored source. Specs 0003 §6.4, 0008 §1.1/§4, 0009 (table, §1.8, §4,
+  §6) and 0012 §1 were amended; see their changelogs. CI builds the page
+  (pinned wasm-bindgen-cli 0.2.129), lints it for wasm32 and packages Android
+  with tauri-cli 2.12.4. Dependency record:
+  `plans/0071-tauri-leptos-migration/DEPENDENCIES.md` (exact licence
+  exceptions, two unmaintained-crate advisories with reasons, 204 new vet
+  exemptions as audit debt).
+- 2026-11-17: Plan 0070 phase A prototype in `prototypes/tauri-leptos/`, a
+  separate workspace outside the product (its own lockfile; the product
+  workspace excludes `prototypes`). One bounded command, opaque references,
+  lock generations and an in-process `qvmedia` media scheme; on Linux it
+  passes its tests, the CSP probe and the no-listening-socket check, and
+  plays every media sample through `player.js`. The Android APK awaits the
+  owner's phone checklist (`plans/0070-tauri-leptos-ui/VALIDATION.md`).
+  New WEBKIT.md entry W13: media elements cannot load a custom URI scheme.
+- 2026-11-17: Owner decision to move the app UI from the Dioxus renderer
+  (screen updates over a loopback websocket) to Tauri 2 with a Leptos
+  frontend, fully in process with no listening sockets (0009 §6). Plan 0070
+  starts with a prototype on the Android phone and Linux; Dioxus stays the
+  shipped UI until the migration completes.
+
 ## 1.1.1 — 2026-11-17
 
 - 2026-11-17: Version 1.1.1 (release notes: `docs/release-notes/1.1.1.md`).

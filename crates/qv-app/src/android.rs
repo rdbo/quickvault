@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Minimal Wry dispatch glue; OS observations go to qv-platform through core.
+//! Minimal activity glue (Tauri, plan 0071); OS observations go to
+//! qv-platform through core.
 //! Clipboard text and attachment chunks cross JNI as documented best-effort
 //! JVM intermediates (0008 §4.4); Uris stay in Kotlin. No unsafe code.
 use crate::autofill::AutofillSink;
 use crate::controller::{AppError, Controller, FormEpoch, private_dir};
 use crate::documents::{Output, PickKind};
-use dioxus_desktop::wry::prelude::jni::{
-    self, JNIEnv, JavaVM,
+use jni::{
+    JNIEnv, JavaVM,
     objects::{GlobalRef, JObject, JValue},
 };
 use qv_core::CancelToken;
@@ -141,7 +142,7 @@ fn poll_pick(foreground: bool, seen: &mut Option<i64>) {
         && *seen != Some(id)
     {
         *seen = Some(id);
-        if let Some(Ok(c)) = crate::ui::ACTIVE.get() {
+        if let Some(Ok(c)) = crate::controller::ACTIVE.get() {
             let vault = VAULT_PICK.lock().ok().and_then(|mut v| v.take());
             if let Some((picked, epoch)) = vault
                 && picked == id
@@ -444,173 +445,170 @@ pub(crate) fn copy_out_archive(dir: &Path, id: &str) -> Result<(), AppError> {
     result
 }
 
-pub(crate) fn initialize() {
-    dioxus_desktop::wry::prelude::dispatch(move |env, activity, _| {
-        let setup = (|| {
-            let vm = env.get_java_vm().map_err(|_| ())?;
-            let activity = env.new_global_ref(activity).map_err(|_| ())?;
-            Ok::<_, ()>((vm, activity))
+/// Takes the activity from the webview's JNI handle (Tauri), then starts the
+/// lifecycle poller and the controller.
+pub(crate) fn start(env: &mut JNIEnv, activity: &JObject) {
+    let setup = (|| {
+        let vm = env.get_java_vm().map_err(|_| ())?;
+        let activity = env.new_global_ref(activity).map_err(|_| ())?;
+        Ok::<_, ()>((vm, activity))
+    })();
+    let Ok((vm, activity)) = setup else {
+        let _ = crate::controller::ACTIVE.set(Err(AppError::Unavailable));
+        return;
+    };
+    let poll_activity = activity.clone();
+    let Ok(poll_vm) = env.get_java_vm() else {
+        let _ = crate::controller::ACTIVE.set(Err(AppError::Unavailable));
+        return;
+    };
+    let _ = BRIDGE.set((vm, activity));
+    std::thread::spawn(move || {
+        #[cfg(feature = "fixture")]
+        let quick: Arc<dyn qv_core::platform::AndroidKeystoreBackend> = Arc::new(FixtureKeystore);
+        #[cfg(not(feature = "fixture"))]
+        let quick: Arc<dyn qv_core::platform::AndroidKeystoreBackend> = Arc::new(NativeKeystore);
+        let encryption =
+            call(|env, a| env.call_method(a, "qvStorageEncryption", "()I", &[])?.i()).unwrap_or(-1);
+        let initial_sdk =
+            call(|env, a| env.call_method(a, "qvInitialSdk", "()I", &[])?.i()).unwrap_or(0);
+        let os = Arc::new(
+            AndroidPlatform::default()
+                .with_background_limit(crate::workspace::IDLE)
+                .with_storage(encryption, initial_sdk)
+                .with_clipboard(Arc::new(NativeClipboard))
+                .with_keystore(Arc::new(qv_core::platform::AndroidKeystore::new(quick))),
+        );
+        let _ = OS.set(os.clone());
+        crate::autofill::set_sink(Box::new(NativeAutofill));
+        let Ok(mut env) = poll_vm.attach_current_thread() else {
+            let _ = crate::controller::ACTIVE.set(Err(AppError::Unavailable));
+            return;
+        };
+        let activity = poll_activity;
+        let root = (|| {
+            let path = env
+                .call_method(
+                    activity.as_obj(),
+                    "qvPrivateRoot",
+                    "()Ljava/lang/String;",
+                    &[],
+                )
+                .map_err(|_| ())?
+                .l()
+                .map_err(|_| ())?;
+            let path = env
+                .get_string(&path.into())
+                .map_err(|_| ())?
+                .to_string_lossy()
+                .into_owned();
+            let path = std::fs::canonicalize(path)
+                .map_err(|_| ())?
+                .join("quickvault");
+            #[cfg(feature = "fixture")]
+            let path = path.join("validation-current");
+            private_dir(&path).map_err(|_| ())?;
+            Ok::<_, ()>(path)
         })();
-        let Ok((vm, activity)) = setup else {
-            let _ = crate::ui::ACTIVE.set(Err(AppError::Unavailable));
+        let Ok(root) = root else {
+            let _ = crate::controller::ACTIVE.set(Err(AppError::Unavailable));
             return;
         };
-        let poll_activity = activity.clone();
-        let Ok(poll_vm) = env.get_java_vm() else {
-            let _ = crate::ui::ACTIVE.set(Err(AppError::Unavailable));
-            return;
-        };
-        let _ = BRIDGE.set((vm, activity));
-        std::thread::spawn(move || {
-            #[cfg(feature = "validation")]
-            let quick: Arc<dyn qv_core::platform::AndroidKeystoreBackend> =
-                Arc::new(FixtureKeystore);
-            #[cfg(not(feature = "validation"))]
-            let quick: Arc<dyn qv_core::platform::AndroidKeystoreBackend> =
-                Arc::new(NativeKeystore);
-            let encryption =
-                call(|env, a| env.call_method(a, "qvStorageEncryption", "()I", &[])?.i())
-                    .unwrap_or(-1);
-            let initial_sdk =
-                call(|env, a| env.call_method(a, "qvInitialSdk", "()I", &[])?.i()).unwrap_or(0);
-            let os = Arc::new(
-                AndroidPlatform::default()
-                    .with_background_limit(crate::workspace::IDLE)
-                    .with_storage(encryption, initial_sdk)
-                    .with_clipboard(Arc::new(NativeClipboard))
-                    .with_keystore(Arc::new(qv_core::platform::AndroidKeystore::new(quick))),
-            );
-            let _ = OS.set(os.clone());
-            crate::autofill::set_sink(Box::new(NativeAutofill));
-            let Ok(mut env) = poll_vm.attach_current_thread() else {
-                let _ = crate::ui::ACTIVE.set(Err(AppError::Unavailable));
-                return;
+        // Ciphertext staging left by an interrupted import/export is removed.
+        let _ = std::fs::remove_dir_all(root.join("staging"));
+        let _ = ROOT.set(root.clone());
+        let mut ready = false;
+        let mut generation = None;
+        let mut seen_pick = None;
+        loop {
+            let flags = env
+                .call_method(activity.as_obj(), "qvStatus", "()I", &[])
+                .and_then(|v| v.i());
+            let Ok(flags) = flags else {
+                os.update(AndroidState::default());
+                stopped(&mut env, &activity);
+                break;
             };
-            let activity = poll_activity;
-            let root = (|| {
-                let path = env
-                    .call_method(
-                        activity.as_obj(),
-                        "qvPrivateRoot",
-                        "()Ljava/lang/String;",
-                        &[],
-                    )
-                    .map_err(|_| ())?
-                    .l()
-                    .map_err(|_| ())?;
-                let path = env
-                    .get_string(&path.into())
-                    .map_err(|_| ())?
-                    .to_string_lossy()
-                    .into_owned();
-                let path = std::fs::canonicalize(path)
-                    .map_err(|_| ())?
-                    .join("quickvault");
-                #[cfg(feature = "validation")]
-                let path = path.join("validation-current");
-                private_dir(&path).map_err(|_| ())?;
-                Ok::<_, ()>(path)
-            })();
-            let Ok(root) = root else {
-                let _ = crate::ui::ACTIVE.set(Err(AppError::Unavailable));
-                return;
-            };
-            // Ciphertext staging left by an interrupted import/export is removed.
-            let _ = std::fs::remove_dir_all(root.join("staging"));
-            let _ = ROOT.set(root.clone());
-            let mut ready = false;
-            let mut generation = None;
-            let mut seen_pick = None;
-            loop {
-                let flags = env
-                    .call_method(activity.as_obj(), "qvStatus", "()I", &[])
-                    .and_then(|v| v.i());
-                let Ok(flags) = flags else {
-                    os.update(AndroidState::default());
-                    stopped(&mut env, &activity);
-                    break;
-                };
-                if flags & 16 != 0 {
-                    os.update(AndroidState::default());
-                    stopped(&mut env, &activity);
-                    break;
-                }
-                let background = env
-                    .call_method(activity.as_obj(), "qvBackgroundMillis", "()J", &[])
-                    .and_then(|v| v.j());
-                let Ok(background) = background else {
-                    os.update(AndroidState::default());
-                    stopped(&mut env, &activity);
-                    break;
-                };
-                let observed = AndroidState {
-                    monitoring: true,
-                    foreground: flags & 1 != 0,
-                    screen_unlocked: flags & 2 != 0,
-                    secure_window: flags & 4 != 0 && flags & 8 != 0,
-                    background: std::time::Duration::from_millis(
-                        u64::try_from(background).unwrap_or(0),
-                    ),
-                };
-                let next = env
-                    .call_method(activity.as_obj(), "qvGeneration", "()J", &[])
-                    .and_then(|v| v.j())
-                    .and_then(|pause| {
-                        env.call_method(activity.as_obj(), "qvScreenGeneration", "()J", &[])
-                            .and_then(|v| v.j())
-                            .map(|screen| (pause, screen))
-                    });
-                let Ok(next) = next else {
-                    os.update(AndroidState::default());
-                    stopped(&mut env, &activity);
-                    break;
-                };
-                // Preserve a pause/resume or screen-off transition that happened
-                // entirely between two polls. A screen-off (or sleep, see
-                // MainActivity.onResume) locks at once; a short pause is a
-                // background transition that expires only at the limit.
-                if let Some((pause, screen)) = generation {
-                    if screen != next.1 {
-                        os.update(AndroidState {
-                            foreground: false,
-                            screen_unlocked: false,
-                            ..observed
-                        });
-                    } else if pause != next.0 {
-                        os.update(AndroidState {
-                            foreground: false,
-                            ..observed
-                        });
-                    }
-                }
-                generation = Some(next);
-                os.update(observed);
-                poll_pick(observed.foreground, &mut seen_pick);
-                if !ready && observed.secure_window {
-                    #[cfg(not(feature = "validation"))]
-                    let controller = Controller::new(root.clone(), os.clone());
-                    #[cfg(feature = "validation")]
-                    let controller = Controller::new(root.clone(), os.clone())
-                        .inspect(|c| {
-                            c.0.fixture.store(true, std::sync::atomic::Ordering::SeqCst);
-                        })
-                        .and_then(|controller| {
-                            if crate::validation_media::enabled() {
-                                crate::validation_media::install(&controller)?;
-                            }
-                            Ok(controller)
-                        });
-                    let _ = crate::ui::ACTIVE.set(controller);
-                    ready = true;
-                }
-                // A cold-start handoff claims its request before this runtime
-                // exists; fetch it only once the controller can take it.
-                if ready {
-                    poll_autofill();
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
+            if flags & 16 != 0 {
+                os.update(AndroidState::default());
+                stopped(&mut env, &activity);
+                break;
             }
-        });
+            let background = env
+                .call_method(activity.as_obj(), "qvBackgroundMillis", "()J", &[])
+                .and_then(|v| v.j());
+            let Ok(background) = background else {
+                os.update(AndroidState::default());
+                stopped(&mut env, &activity);
+                break;
+            };
+            let observed = AndroidState {
+                monitoring: true,
+                foreground: flags & 1 != 0,
+                screen_unlocked: flags & 2 != 0,
+                secure_window: flags & 4 != 0 && flags & 8 != 0,
+                background: std::time::Duration::from_millis(
+                    u64::try_from(background).unwrap_or(0),
+                ),
+            };
+            let next = env
+                .call_method(activity.as_obj(), "qvGeneration", "()J", &[])
+                .and_then(|v| v.j())
+                .and_then(|pause| {
+                    env.call_method(activity.as_obj(), "qvScreenGeneration", "()J", &[])
+                        .and_then(|v| v.j())
+                        .map(|screen| (pause, screen))
+                });
+            let Ok(next) = next else {
+                os.update(AndroidState::default());
+                stopped(&mut env, &activity);
+                break;
+            };
+            // Preserve a pause/resume or screen-off transition that happened
+            // entirely between two polls. A screen-off (or sleep, see
+            // MainActivity.onResume) locks at once; a short pause is a
+            // background transition that expires only at the limit.
+            if let Some((pause, screen)) = generation {
+                if screen != next.1 {
+                    os.update(AndroidState {
+                        foreground: false,
+                        screen_unlocked: false,
+                        ..observed
+                    });
+                } else if pause != next.0 {
+                    os.update(AndroidState {
+                        foreground: false,
+                        ..observed
+                    });
+                }
+            }
+            generation = Some(next);
+            os.update(observed);
+            poll_pick(observed.foreground, &mut seen_pick);
+            if !ready && observed.secure_window {
+                #[cfg(not(feature = "fixture"))]
+                let controller = Controller::new(root.clone(), os.clone());
+                #[cfg(feature = "fixture")]
+                let controller = Controller::new(root.clone(), os.clone())
+                    .inspect(|c| {
+                        c.0.fixture.store(true, std::sync::atomic::Ordering::SeqCst);
+                    })
+                    .and_then(|controller| {
+                        if crate::validation_media::enabled() {
+                            crate::validation_media::install(&controller)?;
+                        }
+                        Ok(controller)
+                    });
+                let _ = crate::controller::ACTIVE.set(controller);
+                ready = true;
+            }
+            // A cold-start handoff claims its request before this runtime
+            // exists; fetch it only once the controller can take it.
+            if ready {
+                poll_autofill();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
     });
 }
 
@@ -808,9 +806,9 @@ fn quick_operation(
 
 /// Availability-only test adapter. Built solely into the explicitly marked,
 /// path-restricted synthetic fixture; hardware operations remain the real ones.
-#[cfg(feature = "validation")]
+#[cfg(feature = "fixture")]
 struct FixtureKeystore;
-#[cfg(feature = "validation")]
+#[cfg(feature = "fixture")]
 impl qv_core::platform::AndroidKeystoreBackend for FixtureKeystore {
     fn validated(&self) -> bool {
         true
@@ -915,7 +913,9 @@ fn poll_autofill() {
         )
         .map_err(|_| ())
     })();
-    let controller = crate::ui::ACTIVE.get().and_then(|c| c.as_ref().ok());
+    let controller = crate::controller::ACTIVE
+        .get()
+        .and_then(|c| c.as_ref().ok());
     match (request, controller) {
         (Ok(request), Some(c)) => {
             let requester = requester(&request);
@@ -930,7 +930,7 @@ fn poll_autofill() {
 fn requester(
     request: &qv_core::platform::autofill::FillRequest,
 ) -> qv_core::platform::autofill::Requester {
-    #[cfg(feature = "validation")]
+    #[cfg(feature = "fixture")]
     if let Some(origin) = &request.web
         && request.app.package.as_str() == "org.quickvault.app.test"
         && call(|env, a| {

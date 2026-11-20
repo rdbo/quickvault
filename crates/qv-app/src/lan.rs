@@ -1119,7 +1119,7 @@ impl Controller {
 
 /// A core peer for the synthetic Linux WebKit flow (plan 0038 step 9).
 /// No production or Android build includes this fixture command.
-#[cfg(all(feature = "validation", target_os = "linux"))]
+#[cfg(all(feature = "fixture", target_os = "linux"))]
 pub(crate) mod fixture {
     use super::*;
     use std::sync::OnceLock;

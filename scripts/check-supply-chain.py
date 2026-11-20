@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Check exact lockfile/exemption hygiene and the retained upstream JS artifact."""
-import hashlib
+"""Check exact lockfile and exemption hygiene."""
 from pathlib import Path
 import sys
 import tomllib
@@ -36,15 +35,7 @@ for name, entries in config.get("exemptions", {}).items():
                              for audit in source.get("audits", {}).get(name, []))
             if base not in delta_bases or not referenced or "delta-audit base" not in entry.get("notes", ""):
                 errors.append(f"stale exemption: {name} {entry['version']}")
-expected = {
-    "src/js/native_eval.js": "fc39bfae6f037e44dafa80b9e8ec022dd9f76f7a515dd455a30afb3d5966ca85",
-    "src/ts/native_eval.ts": "12780a5b3bdc0ad30dbe4ff5b39f3a5a4d60ee7ef8727ad3d8efcf6782c5e0f7",
-}
-for name, digest in expected.items():
-    path = root / "third-party/dioxus-desktop" / name
-    if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
-        errors.append(f"maintained prebuilt artifact requires provenance review: {name}")
 if errors:
     print("\n".join(errors), file=sys.stderr)
     raise SystemExit(1)
-print("supply-chain baseline: shared resolution, exemptions and upstream JS artifact match")
+print("supply-chain baseline: shared resolution and exemptions match")

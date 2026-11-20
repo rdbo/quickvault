@@ -450,6 +450,12 @@ fn colours_and_groups_are_saved_with_the_item() {
     env.act(WsAction::StartAs(Some(ItemType::Login)));
     assert_eq!(form(&env).group, root);
     env.act(WsAction::SetGroup(work));
+    // The form's group chip shows the group's own color, not the item's
+    // or an automatic one (plan 0072).
+    let (name, colour) = env.read(|s| views::group_chip(s, work));
+    assert_eq!((name.as_str(), colour), ("Work", Some(5)));
+    let (name, colour) = env.read(|s| views::group_chip(s, root));
+    assert_eq!((name.as_str(), colour), ("No group", None));
     env.act(WsAction::SetHue(Some(3)));
     env.act(WsAction::SetHue(Some(12)));
     assert_eq!(env.error(), Some(AppError::InvalidInput));
@@ -563,4 +569,234 @@ fn an_open_file_picker_lengthens_the_inactivity_lock() {
     // A picker closing after the lock changes nothing for the next unlock.
     drop(open);
     assert_eq!(env.c.state().pickers, 0);
+}
+
+/// RFC 6238's SHA-1 key "12345678901234567890", as sites print it.
+const SETUP_KEY: &str = "gezd gnbv gy3t qojq gezd gnbv gy3t qojq";
+const STORED: &[u8] = b"otpauth://totp/?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+
+/// `uri`'s code around now (a period can turn between two reads).
+fn codes_now(uri: &[u8]) -> [String; 2] {
+    let t = qv_core::Totp::parse(uri).unwrap();
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let at = |ms| {
+        t.code_at(qv_core::Timestamp(ms))
+            .unwrap()
+            .expose_secret()
+            .to_owned()
+    };
+    [at(ms), at(ms - 2000)]
+}
+
+#[test]
+fn a_login_sets_up_its_two_factor_code_from_a_setup_key() {
+    let _k = lock();
+    let env = Env::unlocked();
+    start(&env, "github.com");
+    env.act(WsAction::StartAs(None));
+    // A login without a code offers one; nothing is added until it is set up.
+    let f = form(&env);
+    assert!(f.totp_slot);
+    assert!(f.rows.iter().all(|r| r.kind != FieldKind::Totp));
+    env.act(WsAction::TotpOpen(None));
+    let sheet = form(&env).totp_sheet.unwrap();
+    assert!(!sheet.replacing);
+    assert!(sheet.state == views::SheetState::Empty);
+    // A wrong key is refused in the sheet, which stays open.
+    env.put(WsField::TotpInput, "not a key!");
+    env.act(WsAction::TotpCheck);
+    assert!(matches!(
+        form(&env).totp_sheet.unwrap().state,
+        views::SheetState::Invalid(_)
+    ));
+    env.act(WsAction::TotpAdd);
+    assert!(form(&env).totp_sheet.is_some());
+    assert!(form(&env).totp_slot);
+    // The key as the site prints it: checked on a pause, with today's code.
+    env.put(WsField::TotpInput, SETUP_KEY);
+    env.act(WsAction::TotpCheck);
+    match form(&env).totp_sheet.unwrap().state {
+        views::SheetState::Valid(false, Some(code)) => {
+            assert!(codes_now(STORED).iter().any(|c| *c == *code.code));
+            assert_eq!(code.period, 30);
+            assert!((1..=30).contains(&code.left));
+        }
+        _ => panic!("a valid setup key"),
+    }
+    // Settings for a key change the stored URI.
+    env.act(WsAction::TotpOptions(qv_core::KeyOptions {
+        digits: 8,
+        ..qv_core::KeyOptions::default()
+    }));
+    match form(&env).totp_sheet.unwrap().state {
+        views::SheetState::Valid(false, Some(code)) => assert_eq!(code.code.len(), 8),
+        _ => panic!("still valid"),
+    }
+    env.act(WsAction::TotpOptions(qv_core::KeyOptions::default()));
+    env.act(WsAction::TotpAdd);
+    let f = form(&env);
+    assert!(f.totp_sheet.is_none());
+    assert!(!f.totp_slot);
+    let i = row(&f, "Two-factor code");
+    let r = f.rows.iter().find(|r| r.index == i).unwrap();
+    assert_eq!(
+        (r.kind, r.protected, r.replaced),
+        (FieldKind::Totp, true, true)
+    );
+    assert!(
+        codes_now(STORED)
+            .iter()
+            .any(|c| *c == *r.code.as_ref().unwrap().code)
+    );
+    // Neither the key nor the URI is in anything the form renders.
+    let shown = rendered(&f);
+    assert!(!shown.to_lowercase().contains("gezd"), "{shown}");
+    let e = saved(&env);
+    assert_eq!(reveal(&env, e, "Two-factor code"), STORED);
+    let now = env.read(|s| {
+        let view = views::entry(s, e)?;
+        let field = view
+            .fields
+            .iter()
+            .find(|f| f.kind == FieldKind::Totp)
+            .unwrap();
+        s.totp(field.handle)
+    });
+    assert!(codes_now(STORED).contains(&now.code.expose_secret().to_owned()));
+    assert_eq!(now.period, 30);
+    // Replacing it targets the same field.
+    env.act(WsAction::EditEntry(e));
+    let i = row(&form(&env), "Two-factor code");
+    env.act(WsAction::TotpOpen(Some(i)));
+    assert!(form(&env).totp_sheet.unwrap().replacing);
+    env.put(
+        WsField::TotpInput,
+        "otpauth://totp/x?secret=GEZDGNBVGY3TQOJQ&digits=7",
+    );
+    env.act(WsAction::TotpAdd);
+    let f = form(&env);
+    assert_eq!(
+        f.rows.iter().filter(|r| r.kind == FieldKind::Totp).count(),
+        1
+    );
+    assert_eq!(
+        f.rows
+            .iter()
+            .find(|r| r.index == i)
+            .unwrap()
+            .code
+            .as_ref()
+            .unwrap()
+            .code
+            .len(),
+        7
+    );
+    // Opening it for a field that is not a code is refused.
+    let user = row(&f, "Username");
+    env.act(WsAction::TotpOpen(Some(user)));
+    assert_eq!(env.error(), Some(AppError::InvalidInput));
+}
+
+#[test]
+fn a_pasted_two_factor_link_starts_a_login_with_its_code() {
+    let _k = lock();
+    let env = Env::unlocked();
+    let link = "otpauth://totp/Example%20Co:alice%40example.com?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=Example";
+    start(&env, link);
+    let g = form(&env).guess.unwrap();
+    assert_eq!(g.kind, ItemType::Login);
+    assert_eq!(g.line.as_str(), "Login for Example");
+    assert_eq!(g.sub.as_str(), "Two-factor code for alice@example.com");
+    env.act(WsAction::StartAs(None));
+    let f = form(&env);
+    assert_eq!(f.title.as_str(), "Example");
+    let user = row(&f, "Username");
+    let r = f.rows.iter().find(|r| r.index == user).unwrap();
+    assert_eq!(r.value.as_ref().unwrap().as_str(), "alice@example.com");
+    assert!(!f.totp_slot);
+    let i = row(&f, "Two-factor code");
+    let r = f.rows.iter().find(|r| r.index == i).unwrap();
+    assert!(r.filled && r.code.is_some());
+    assert!(!rendered(&f).contains("GEZD"));
+    let e = saved(&env);
+    assert_eq!(reveal(&env, e, "Two-factor code"), link.as_bytes());
+    // A link that does not parse is not taken for a code.
+    start(&env, "otpauth://totp/x?secret=1");
+    assert_ne!(
+        form(&env).guess.map(|g| g.line.to_string()),
+        Some("Login with a two-factor code".to_owned())
+    );
+}
+
+#[test]
+fn adding_a_two_factor_field_opens_its_setup_and_a_lock_drops_it() {
+    let _k = lock();
+    let env = Env::unlocked();
+    start(&env, "Server");
+    env.act(WsAction::StartAs(Some(ItemType::Other)));
+    // The common name and the kind both open the sheet, not an empty field.
+    env.act(WsAction::AddNamedField("Two-factor code"));
+    assert!(form(&env).totp_sheet.is_some());
+    assert!(form(&env).rows.is_empty());
+    env.act(WsAction::TotpClose);
+    assert!(form(&env).totp_sheet.is_none());
+    env.put(WsField::NewFieldName, "Authenticator");
+    env.act(WsAction::AddField(Some(FieldKind::Totp)));
+    assert!(form(&env).rows.is_empty());
+    env.put(WsField::TotpInput, SETUP_KEY);
+    env.act(WsAction::TotpAdd);
+    let f = form(&env);
+    assert_eq!(names(&f), ["Authenticator"]);
+    // Only logins get the empty slot.
+    assert!(!f.totp_slot);
+    // An open sheet and its input end with the lock.
+    let i = row(&f, "Authenticator");
+    env.act(WsAction::TotpOpen(Some(i)));
+    env.put(WsField::TotpInput, SETUP_KEY);
+    env.c.lock();
+    env.unlock(crate::workspace_tests::PASSWORD);
+    assert!(env.c.entry_form(env.epoch()).is_none());
+}
+
+#[test]
+fn a_scanned_two_factor_link_is_added_and_other_codes_are_not_kept() {
+    use crate::qr::{QrTarget, TEST_PAIR};
+    let _k = lock();
+    let env = Env::unlocked();
+    start(&env, "github.com");
+    env.act(WsAction::StartAs(None));
+    // No sheet, no scan target.
+    let link = b"otpauth://totp/GitHub:me?secret=GEZDGNBVGY3TQOJQ";
+    assert!(env.c.accept_qr(env.epoch(), QrTarget::Totp, link).is_err());
+    env.act(WsAction::TotpOpen(None));
+    // A sync code is refused in the sheet and not kept as its input.
+    assert_eq!(
+        env.c.accept_qr(env.epoch(), QrTarget::Totp, TEST_PAIR),
+        Ok(false)
+    );
+    let sheet = form(&env).totp_sheet.unwrap();
+    assert!(!sheet.scanned);
+    assert!(matches!(sheet.state, views::SheetState::Invalid(_)));
+    // So is a bare setup key: a site's QR code is always a link.
+    let key = b"GEZDGNBVGY3TQOJQ";
+    assert_eq!(env.c.accept_qr(env.epoch(), QrTarget::Totp, key), Ok(false));
+    // A link fills the sheet and, being the user's scan, is added at once.
+    assert_eq!(env.c.accept_qr(env.epoch(), QrTarget::Totp, link), Ok(true));
+    let sheet = form(&env).totp_sheet.unwrap();
+    assert!(sheet.scanned);
+    assert!(matches!(
+        sheet.state,
+        views::SheetState::Valid(true, Some(_))
+    ));
+    env.c.start_scanned(env.epoch(), QrTarget::Totp);
+    env.wait();
+    let f = form(&env);
+    assert!(f.totp_sheet.is_none());
+    let i = row(&f, "Two-factor code");
+    assert!(f.rows.iter().find(|r| r.index == i).unwrap().code.is_some());
+    let e = saved(&env);
+    assert_eq!(reveal(&env, e, "Two-factor code"), link);
 }

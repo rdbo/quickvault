@@ -35,6 +35,10 @@ rustup toolchain install
 # musl targets link statically by default; the app needs the system GTK and
 # WebKitGTK shared libraries.
 export RUSTFLAGS="-C target-feature=-crt-static"
+# The app's page (plan 0071), embedded into quickvault at compile time. The
+# host flag above is for the native binaries, not the wasm32 page.
+sh crates/qv-ui/setup-tools.sh
+RUSTFLAGS= sh crates/qv-ui/build.sh
 
 cargo build --release --locked -p qv-cli --bin qv
 cargo build --release --locked -p qv-app --features desktop --bin quickvault

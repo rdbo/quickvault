@@ -272,6 +272,9 @@ input::-webkit-caps-lock-indicator{display:none;content:none}
 /* A card row's copy menu (plan 0063): like the row menu, on phones too. */
 .row>.card-menu{position:absolute;right:8px;top:100%;z-index:40;pointer-events:auto}
 .card-menu .menu.pop{top:4px}
+/* No room below the row (the list's last rows): the menu opens above it. */
+.row>.row-menu[data-up],.row>.card-menu[data-up]{top:auto;bottom:100%}
+.row-menu[data-up] .menu.pop,.card-menu[data-up] .menu.pop{top:auto;bottom:4px}
 .ph-row{display:flex;align-items:baseline;gap:10px}
 .ph-row h2{flex:1}
 .ph-row .link{font-size:15px}
@@ -307,6 +310,8 @@ input::-webkit-caps-lock-indicator{display:none;content:none}
 .fld .k small{font-weight:400;margin-left:6px}
 .fld .v{font-size:14.5px;overflow-wrap:anywhere;white-space:pre-wrap;margin:0;font-family:inherit}
 .fld .v.masked{letter-spacing:.18em}
+/* A revealed empty value keeps its line, so the row does not shrink. */
+.fld .v.revealed:empty::before,.ie-saved .revealed:empty::before{content:"\200b"}
 .fld .acts{display:flex;gap:2px}
 .revealed{font-family:ui-monospace,"JetBrains Mono","DejaVu Sans Mono",monospace;user-select:none;-webkit-user-select:none}
 .revealring{width:22px;height:22px;transform:rotate(-90deg)}
@@ -316,6 +321,28 @@ input::-webkit-caps-lock-indicator{display:none;content:none}
 .revealring circle{fill:none;stroke-width:2.5}
 .totp{display:flex;align-items:center;gap:10px}
 .totp .code{font-size:18px;font-weight:600;letter-spacing:.12em}
+/* Two-factor codes (plan 0073): digits, then a ring for the code's period. */
+.totp .code{font-variant-numeric:tabular-nums;font-family:var(--mono,ui-monospace,monospace)}
+.totp-left{position:relative;width:24px;height:24px;display:grid;place-items:center;flex:none}
+.totp-left .revealring{position:absolute;inset:0;width:100%;height:100%}
+.totp-left .n{font-size:10px;color:var(--text3);font-variant-numeric:tabular-nums}
+.totp-left.soon .left{stroke:var(--danger)}
+.ie-totp{gap:10px;padding:4px 6px 4px 12px}
+.ie-totp .totp .code{font-size:16px}
+.ie-totp>.hint{flex:1;min-width:0}
+.ie-slot{margin-top:8px}
+.totp-sheet .totp-scan{width:100%;justify-content:center;margin:4px 0 14px}
+.totp-sheet .field{margin-bottom:10px}
+.totp-sheet .field .hint{margin:6px 0 0}
+.totp-sheet .hint.bad{color:var(--danger);margin:0 0 10px}
+.totp-now{display:grid;gap:6px;justify-items:start;padding:12px 14px;margin:0 0 12px;border-radius:12px;background:var(--soft);border:1px solid var(--line)}
+.totp-now .k{font-size:12px;color:var(--text3)}
+.totp-now .totp .code{font-size:24px}
+.totp-now .hint{margin:0}
+.totp-more{margin:0 0 12px}
+.totp-more summary{cursor:pointer;color:var(--text2);font-size:13px;padding:4px 0}
+.totp-more .hint{margin:4px 0}
+.totp-more .ie-seg{display:flex}
 .notes{padding:12px 16px 14px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font-family:inherit;user-select:text;-webkit-user-select:text}
 .files{display:flex;flex-wrap:wrap;gap:8px;padding:12px}
 .file{display:flex;align-items:center;gap:8px;padding:8px 10px 8px 12px;border-radius:10px;background:var(--raised);font-size:12.5px;max-width:100%}
@@ -436,6 +463,21 @@ button.set-row:hover:enabled{background:var(--raised)}
 .field textarea{height:96px;padding:10px 12px;resize:none}
 .field input:focus,.field textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--soft)}
 .field input:disabled{opacity:.6}
+.reveal-wrap{position:relative}
+/* The end of a scrolling list while its next page loads (plan 0072). */
+.list-more{display:block;width:100%;border:0;background:none;color:var(--text3);font-size:12.5px;padding:14px 0;text-align:center}
+/* Live master-password strength (plan 0072); widths by class (CSP). */
+.meter{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin:-4px 0 10px;font-size:12.5px;color:var(--text2)}
+.meter-bar{display:flex;gap:4px;width:120px}
+.meter-bar i{flex:1;height:4px;border-radius:2px;background:var(--line);transition:background .2s}
+.meter.m0 .meter-bar i:nth-child(-n+1){background:var(--danger)}
+.meter.m1 .meter-bar i:nth-child(-n+2){background:var(--warn)}
+.meter.m2 .meter-bar i:nth-child(-n+3),.meter.m3 .meter-bar i{background:var(--accent)}
+.meter-note{flex-basis:100%}
+.meter.m0 .meter-l b{color:var(--danger)}
+.meter.m1 .meter-l b{color:var(--warn)}
+.field .reveal-wrap input{padding-right:42px}
+.reveal-wrap .reveal{position:absolute;right:5px;top:5px}
 .str{display:flex;align-items:center;gap:8px;margin-top:5px;font-size:11.5px;color:var(--text3)}
 .str i{display:flex;gap:3px}
 .str i b{width:22px;height:4px;border-radius:2px;background:var(--line)}
@@ -683,8 +725,9 @@ button.set-row:hover:enabled{background:var(--raised)}
 .ie-check{font-size:11.5px;color:var(--text3);white-space:nowrap;padding-right:4px}
 .ie-check.ok{color:var(--accent)}.ie-check.bad{color:var(--danger)}
 .ie-seg{display:inline-flex;gap:4px;flex-wrap:wrap;padding:5px 0}
-.ie-seg button{border:1px solid var(--line);background:none;border-radius:8px;padding:5px 11px;font-size:12.5px;color:var(--text2)}
-.ie-seg button.on{border-color:var(--accent);background:var(--soft);color:var(--text)}
+.ie-seg button{border:1px solid var(--line);background:none;border-radius:8px;padding:5px 11px;font-size:12.5px;color:var(--text2);cursor:pointer}
+@media (hover:hover){.ie-seg button:hover{border-color:var(--text3);color:var(--text)}}
+.ie-seg button.on,.ie-seg button.on:hover{border-color:var(--accent);background:var(--soft);color:var(--text)}
 .ie-undo{display:flex;align-items:center;gap:12px;margin:6px 0 0 140px;color:var(--text3);font-size:12.5px}
 .ie-undo button{border:0;background:none;color:var(--accent);font-weight:600;padding:2px 4px}
 .ie-addrow{display:grid;grid-template-columns:128px minmax(0,1fr) 30px;gap:12px;align-items:center;margin-top:4px}
@@ -776,6 +819,11 @@ button.set-row:hover:enabled{background:var(--raised)}
 .r-close:hover{background:var(--raised);color:var(--text)}
 .r-close .r-ring{position:absolute;inset:2px;transform:rotate(-90deg)}
 .r-close .r-ring circle{stroke:var(--accent);transition:stroke-dashoffset 1s linear}
+/* Exit fades (plan 0072): the page keeps a leaving card for 180 ms. */
+.toast.leaving{animation:toastOut .18s ease-in forwards;pointer-events:none}
+.receipt.leaving{animation:receiptOut .18s ease-in forwards;pointer-events:none}
+@keyframes toastOut{to{opacity:0;transform:translateY(6px)}}
+@keyframes receiptOut{to{opacity:0;transform:translate(-50%,10px)}}
 @keyframes receiptIn{from{opacity:0;transform:translate(-50%,24px) scale(.96)}to{opacity:1;transform:translate(-50%,0) scale(1)}}
 @keyframes markPop{0%{transform:scale(.4) rotate(-12deg);opacity:0}70%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
 .sync-orbit{display:flex;align-items:center;justify-content:center;gap:10px;margin:6px auto 14px}

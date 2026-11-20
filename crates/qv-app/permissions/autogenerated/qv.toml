@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-qv"
+description = "Enables the qv command without any pre-configured scope."
+commands.allow = ["qv"]
+
+[[permission]]
+identifier = "deny-qv"
+description = "Denies the qv command without any pre-configured scope."
+commands.deny = ["qv"]

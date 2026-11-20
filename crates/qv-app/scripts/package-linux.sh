@@ -11,6 +11,8 @@ set -eu
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 cd "$root"
 
+# The app's page (plan 0071); needs crates/qv-ui/setup-tools.sh once.
+sh crates/qv-ui/build.sh
 cargo build --release --locked -p qv-cli --bin qv
 cargo build --release --locked -p qv-app --features desktop --bin quickvault
 

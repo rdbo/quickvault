@@ -62,7 +62,7 @@ impl Drop for PickerOpen {
 impl Controller {
     /// Mark a system file picker open until the guard drops. Never hold the
     /// state lock while the guard drops.
-    #[cfg_attr(not(feature = "desktop"), allow(dead_code))] // Pickers need the UI.
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))] // Pickers need the UI.
     pub(crate) fn picker_open(&self) -> PickerOpen {
         let mut s = self.state();
         s.pickers = s.pickers.saturating_add(1);
@@ -76,7 +76,7 @@ impl Controller {
 
 /// Waits until [`wake_ui`] or `timeout`, whichever comes first; true when woken.
 /// Only the UI poll (built with `desktop`) and tests wait.
-#[cfg(any(feature = "desktop", test))]
+#[cfg(any(feature = "ui", test))]
 pub(crate) fn wait_ui(timeout: Duration) -> bool {
     let (flag, ready) = &UI_WAKE;
     let guard = flag
@@ -405,9 +405,24 @@ const ROTATION_CANCELLED: &str = "Key rotation cancelled; nothing changed.";
 /// A scanned code with endpoints that waits for the protection
 /// acknowledgement, which Join asks for first.
 const QR_READY: &str = "Code scanned. Choose Join to continue.";
+/// The app's one controller, or why it could not start; set once by the
+/// app's startup (Tauri, plan 0071) or the Android glue.
+#[cfg(feature = "ui")]
+pub(crate) static ACTIVE: std::sync::OnceLock<Result<Controller, AppError>> =
+    std::sync::OnceLock::new();
 /// A current form generation; late input cannot affect a new generation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FormEpoch(pub u64);
+/// Which vault holds the device's one quick-unlock enrollment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum QuickHolder {
+    /// No live enrollment.
+    None,
+    /// The open vault.
+    Open,
+    /// Another vault: its name, when the vault list has it.
+    Other(Option<String>),
+}
 /// Redacted UI snapshot. Phrase display is a separate protected operation.
 #[derive(PartialEq, Eq)]
 pub struct View {
@@ -436,6 +451,8 @@ pub struct View {
     pub positions: [usize; 3],
     /// A fair master password receives an inline warning.
     pub fair_warning: bool,
+    /// The live rating of the new master password (0010 §4.2).
+    pub meter: Option<crate::meter::Meter>,
     /// A generated six-word suggestion is currently visible.
     pub suggestion_visible: bool,
     /// Current process and memory-lock hardening is reduced.
@@ -472,6 +489,11 @@ impl View {
     /// Whether the Join form's code came from a scan (it is never rendered).
     pub fn code_scanned(&self) -> bool {
         self.status == QR_SCANNED || self.status == QR_READY
+    }
+    /// A scanned join with endpoints waits only for the protection review,
+    /// which the page opens at once (0014 §6.3, plan 0072).
+    pub fn join_review(&self) -> bool {
+        self.status == QR_READY
     }
     /// A locked-screen confirmation to show, if the status is one.
     pub fn notice(&self) -> Option<&'static str> {
@@ -540,6 +562,7 @@ pub(crate) struct State {
     pub(crate) active: Instant,
     weak_until: Option<Instant>,
     fair_warning: bool,
+    rating: crate::meter::Rating,
     suggestion: Option<qv_core::Generated>,
     suggestion_until: Option<Instant>,
     /// Advanced only by a lock; worker results apply to the same generation.
@@ -582,6 +605,7 @@ pub(crate) struct State {
 }
 impl State {
     fn clear_inputs(&mut self) {
+        self.rating.clear();
         self.suggestion = None;
         self.suggestion_until = None;
         for input in &mut self.inputs {
@@ -597,7 +621,7 @@ impl State {
         if let Some(scan) = self.scan.take() {
             scan.cancel.cancel();
         }
-        #[cfg(all(feature = "desktop", target_os = "android"))]
+        #[cfg(all(feature = "ui", target_os = "android"))]
         crate::android::forget_scan();
         let creating = self.phase == Phase::Opening
             && matches!(self.status, "Creating vault…" | "Importing vault…");
@@ -606,7 +630,7 @@ impl State {
         let interrupted = self.op_running;
         self.lock_gen = self.lock_gen.wrapping_add(1);
         self.pickers = 0;
-        #[cfg(all(feature = "desktop", target_os = "android"))]
+        #[cfg(all(feature = "ui", target_os = "android"))]
         crate::android::forget_pick();
         self.op_running = false;
         self.rotating = false;
@@ -656,7 +680,7 @@ pub(crate) struct Inner {
     state: Mutex<State>,
     pub(crate) working: AtomicBool,
     // Component IDs are only requested by the optional native UI reader.
-    #[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub(crate) page_owner: AtomicU64,
     /// Worker permits released; part of the view revision because reads that
     /// were refused while busy become available (lock-free, so a guard may be
@@ -683,9 +707,9 @@ pub(crate) struct Inner {
     /// selected vault).
     #[allow(clippy::type_complexity)]
     quick_auto: Mutex<Option<((u64, u64, Option<PathBuf>), Instant, bool)>>,
-    #[cfg(feature = "validation")]
+    #[cfg(feature = "fixture")]
     preview: AtomicBool,
-    #[cfg(feature = "validation")]
+    #[cfg(feature = "fixture")]
     pub(crate) fixture: AtomicBool,
 }
 /// Shared application controller; event callbacks contain only a weak reference.
@@ -739,6 +763,7 @@ impl Controller {
                 active: Instant::now(),
                 weak_until: None,
                 fair_warning: false,
+                rating: crate::meter::Rating::default(),
                 suggestion: None,
                 suggestion_until: None,
                 lock_gen: 0,
@@ -776,9 +801,9 @@ impl Controller {
             quick_prompted: AtomicU64::new(0),
             quick_opened: AtomicU64::new(0),
             quick_auto: Mutex::new(None),
-            #[cfg(feature = "validation")]
+            #[cfg(feature = "fixture")]
             preview: AtomicBool::new(false),
-            #[cfg(feature = "validation")]
+            #[cfg(feature = "fixture")]
             fixture: AtomicBool::new(false),
         });
         let weak = Arc::downgrade(&inner);
@@ -807,13 +832,13 @@ impl Controller {
         Ok(controller)
     }
     /// Whether this controller is a synthetic read-only preview.
-    #[cfg(feature = "validation")]
+    #[cfg(feature = "fixture")]
     pub fn is_preview(&self) -> bool {
         self.0.preview.load(Ordering::SeqCst)
     }
 
     /// Read-only synthetic UI preview. It cannot create or open a vault.
-    #[cfg(feature = "validation")]
+    #[cfg(feature = "fixture")]
     pub fn preview() -> Result<Self, AppError> {
         use qv_core::platform::*;
         struct Preview;
@@ -854,7 +879,7 @@ impl Controller {
     }
     /// Full-flow synthetic fixture. It owns a newly created private temporary
     /// root and simulates only OS lifecycle; vault crypto/storage are real.
-    #[cfg(feature = "validation")]
+    #[cfg(feature = "fixture")]
     pub fn validation_fixture() -> Result<Self, AppError> {
         use qv_core::platform::*;
         struct Fixture;
@@ -922,11 +947,11 @@ impl Controller {
         crate::documents::force_no_picker();
         Ok(controller)
     }
-    #[cfg(feature = "validation")]
+    #[cfg(feature = "fixture")]
     pub(crate) fn is_fixture(&self) -> bool {
         self.0.fixture.load(Ordering::SeqCst)
     }
-    #[cfg(feature = "validation")]
+    #[cfg(feature = "fixture")]
     pub(crate) fn finish_fixture(&self, passed: bool) -> ! {
         if !self.is_fixture() {
             std::process::exit(2)
@@ -968,7 +993,7 @@ impl Controller {
     }
     /// Current platform protection; configuration uncertainty is never hidden.
     /// Show a data-free error on the current screen, if it is still current.
-    #[cfg_attr(not(feature = "desktop"), allow(dead_code))]
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub(crate) fn report(&self, epoch: FormEpoch, error: AppError) {
         let mut s = self.state();
         if s.epoch != epoch.0 {
@@ -1216,6 +1241,27 @@ impl Controller {
     pub fn quick_policy(&self) -> Option<qv_core::platform::QuickPolicy> {
         self.0.services.keystore().policy()
     }
+    /// Where the device's one quick-unlock enrollment is (0009 §1.8, plan
+    /// 0072): the open vault, another vault (with its name when it is
+    /// listed), or nowhere.
+    pub fn quick_holder(&self) -> QuickHolder {
+        if self.quick_policy().is_none() {
+            return QuickHolder::None;
+        }
+        let session = self.state().session.clone();
+        if session.is_some_and(|s| s.quick_enrolled()) {
+            return QuickHolder::Open;
+        }
+        let open = self.state().vault_path.clone();
+        QuickHolder::Other(
+            self.vaults()
+                .into_iter()
+                .find(|v| {
+                    open.as_ref() != Some(&v.path) && v.exists && self.quick_ready_for(&v.path)
+                })
+                .map(|v| v.name),
+        )
+    }
     /// Background work the polled UI drives (plan 0045): run the pending
     /// quick-unlock offer once the vault is open.
     pub fn pump(&self) {
@@ -1393,6 +1439,11 @@ impl Controller {
             reduced_lifecycle: cfg!(target_os = "linux")
                 && !self.0.monitoring.load(Ordering::SeqCst),
             fair_warning: s.fair_warning,
+            // Cleared inputs show no stale rating.
+            meter: s
+                .rating
+                .meter
+                .filter(|_| !s.inputs[InputField::Password.index()].is_empty()),
             suggestion_visible: s.suggestion.is_some()
                 && s.suggestion_until.is_some_and(|t| Instant::now() < t),
             rotation_confirmed: s.rotation_confirmed,
@@ -1494,6 +1545,9 @@ impl Controller {
                     // The chosen file name and the repeat check gate creation.
                     s.revision = s.revision.wrapping_add(1);
                 }
+                if field == InputField::Password {
+                    s.rating.typed(value.is_empty());
+                }
                 if matches!(field, InputField::Password | InputField::Repeat) {
                     s.weak_until = None;
                     if s.phase == Phase::WeakPassword {
@@ -1504,6 +1558,21 @@ impl Controller {
         }
         value.zeroize();
         value.clear();
+    }
+    /// Rates the new master password once typing pauses (0010 §4.2, plan
+    /// 0072); a no-op unless it changed since the last rating.
+    pub fn rate_password(&self, epoch: FormEpoch) {
+        let mut s = self.state();
+        if epoch.0 != s.epoch || s.mode != Mode::Create || self.0.working.load(Ordering::SeqCst) {
+            return;
+        }
+        let s = &mut *s;
+        if s.rating.rate(
+            s.inputs[InputField::Password.index()].expose_secret(),
+            s.suggestion.as_ref(),
+        ) {
+            s.revision = s.revision.wrapping_add(1);
+        }
     }
     /// Copy the phrase only for the current confirmation screen. Application
     /// state never holds a plaintext String; the trusted renderer has best-effort
@@ -1561,7 +1630,7 @@ impl Controller {
         action: Action,
         acknowledged: bool,
     ) -> Result<(), AppError> {
-        #[cfg(feature = "validation")]
+        #[cfg(feature = "fixture")]
         if self.0.preview.load(Ordering::SeqCst) {
             return Err(AppError::Unavailable);
         }
@@ -1824,7 +1893,7 @@ impl Controller {
             .map_err(|_| AppError::Unavailable)?;
         Ok(())
     }
-    #[cfg(feature = "desktop")]
+    #[cfg(feature = "ui")]
     pub(crate) fn perform(&self, epoch: FormEpoch, action: Action, consent: bool) {
         if let Err(error) = self.submit(epoch, action, consent) {
             let mut s = self.state();
@@ -1891,7 +1960,7 @@ impl Controller {
         if creating && std::fs::symlink_metadata(&path).is_ok() {
             return Err(AppError::VaultExists);
         }
-        #[cfg(all(feature = "validation", target_os = "android"))]
+        #[cfg(all(feature = "fixture", target_os = "android"))]
         if self.is_fixture() && path.parent() != Some(self.0.base.join("vaults").as_path()) {
             return Err(AppError::InvalidInput);
         }
@@ -1959,8 +2028,9 @@ impl Controller {
                     core.unlock(&path, &password, Some(token))?
                 };
                 // Offer quick unlock with this password where the device
-                // has it, the user did not turn it off and this vault has
-                // no enrollment yet (0009 §1.8, plan 0045).
+                // has it, the user did not turn it off and the device has
+                // no enrollment yet: another vault's is never moved without
+                // asking (0009 §1.8, plans 0045 and 0072).
                 let offer = matches!(action, Action::Unlock)
                     && !self.prefs().quick_off
                     && self.0.services.status().quick_unlock
@@ -2354,6 +2424,9 @@ impl Controller {
         use crate::qr::QrTarget;
         match target {
             QrTarget::NewDevice => s.phase == Phase::Locked && s.mode == Mode::Join,
+            QrTarget::Totp => {
+                s.phase == Phase::Unlocked && s.workspace.as_ref().is_some_and(|w| w.totp.is_some())
+            }
             QrTarget::Sync => {
                 s.phase == Phase::Unlocked
                     && s.workspace
@@ -2381,6 +2454,9 @@ impl Controller {
     ) -> Result<bool, AppError> {
         use crate::qr::QrTarget;
         use crate::workspace::WsField;
+        if target == QrTarget::Totp {
+            return self.apply_totp_qr(epoch, payload, scan);
+        }
         let info = qv_core::inspect_lan_qr(payload)?;
         let addressed = !info.endpoints.is_empty();
         let mut s = self.state();
@@ -2420,6 +2496,45 @@ impl Controller {
         Ok(addressed)
     }
 
+    /// A scanned two-factor QR: an `otpauth://` link fills the setup sheet
+    /// (`true`: it is added at once, the scan being the user's choice); any
+    /// other code is refused in the sheet and not kept (plan 0073).
+    fn apply_totp_qr(
+        &self,
+        epoch: FormEpoch,
+        payload: &[u8],
+        scan: Option<u64>,
+    ) -> Result<bool, AppError> {
+        use crate::workspace::WsField;
+        let mut s = self.state();
+        if s.epoch != epoch.0 || !Self::qr_form(&s, crate::qr::QrTarget::Totp) {
+            return Err(AppError::InvalidInput);
+        }
+        if let Some(id) = scan
+            && s.scan
+                .as_ref()
+                .is_none_or(|running| running.id != id || running.cancel.is_cancelled())
+        {
+            return Err(CoreError::Cancelled.into());
+        }
+        let ws = s.workspace.as_mut().ok_or(AppError::InvalidInput)?;
+        let sheet = ws.totp.as_mut().ok_or(AppError::InvalidInput)?;
+        let setup = qv_core::TotpSetup::from_input(payload, sheet.options)
+            .ok()
+            .filter(|setup| setup.link);
+        let found = setup.is_some();
+        if found {
+            ws.inputs
+                .insert(WsField::TotpInput, crate::workspace::protect(payload)?);
+        } else {
+            ws.inputs.remove(&WsField::TotpInput);
+        }
+        sheet.scanned = found;
+        sheet.checked = Some(setup.ok_or(qv_core::TotpError::InvalidUri));
+        ws.error = None;
+        s.revision = s.revision.wrapping_add(1);
+        Ok(found)
+    }
     /// Starts the scanned form's action, as the scan was the user's explicit
     /// action (0014 §6.2–§6.3). A join still waits for both comparison
     /// confirmations before any key is released.
@@ -2441,6 +2556,9 @@ impl Controller {
             crate::qr::QrTarget::Sync => {
                 self.dispatch(epoch, crate::workspace::WsAction::LanSync, false, false)
             }
+            crate::qr::QrTarget::Totp => {
+                self.dispatch(epoch, crate::workspace::WsAction::TotpAdd, false, false)
+            }
         };
         if let Err(error) = started {
             let mut s = self.state();
@@ -2454,7 +2572,7 @@ impl Controller {
         }
     }
     /// Record a data-free startup failure in the current rendered form.
-    #[cfg(feature = "desktop")]
+    #[cfg(feature = "ui")]
     pub(crate) fn request_qr(&self, epoch: FormEpoch, target: crate::qr::QrTarget) {
         if let Err(error) = self.scan_qr(epoch, target) {
             let mut s = self.state();
@@ -2560,7 +2678,7 @@ impl Controller {
             scan.cancel.cancel();
             s.active = Instant::now();
             s.revision = s.revision.wrapping_add(1);
-            #[cfg(all(feature = "desktop", target_os = "android"))]
+            #[cfg(all(feature = "ui", target_os = "android"))]
             crate::android::forget_scan();
         }
     }
@@ -2898,6 +3016,46 @@ mod tests {
         );
         assert!(!env.dir.join("vaults/main.qvault").exists());
     }
+    #[test]
+    fn create_rates_the_new_password_only_when_asked_and_drops_it_on_lock() {
+        let env = Env::new();
+        env.controller
+            .select_mode(env.controller.snapshot().epoch, Mode::Create);
+        env.fill(InputField::Password, "password");
+        assert_eq!(
+            env.controller.snapshot().meter,
+            None,
+            "typing alone rates nothing"
+        );
+        let epoch = env.controller.snapshot().epoch;
+        env.controller.rate_password(epoch);
+        let weak = env.controller.snapshot().meter.unwrap();
+        assert_eq!(weak.strength, qv_core::Strength::Weak);
+        // The repeat field is not rated; the rating stays until the next pause.
+        env.fill(InputField::Repeat, "password");
+        env.fill(
+            InputField::Password,
+            "correct horse battery staple tumbles over quietly",
+        );
+        assert_eq!(env.controller.snapshot().meter, Some(weak));
+        env.controller.rate_password(epoch);
+        assert!(env.controller.snapshot().meter.unwrap().bits > weak.bits);
+        // An emptied field shows no rating; a stale epoch rates nothing.
+        env.fill(InputField::Password, "");
+        assert_eq!(env.controller.snapshot().meter, None);
+        env.fill(InputField::Password, "password");
+        env.controller
+            .rate_password(FormEpoch(epoch.0.wrapping_add(1)));
+        assert_eq!(env.controller.snapshot().meter, None);
+        env.controller.rate_password(epoch);
+        assert!(env.controller.snapshot().meter.is_some());
+        env.os.event();
+        assert_eq!(
+            env.controller.snapshot().meter,
+            None,
+            "lock clears the rating"
+        );
+    }
     // 0012 §1: Webview exposure
     #[test]
     fn controller_generator_display_expires_and_lock_discards_the_suggestion() {
@@ -3135,6 +3293,7 @@ mod qr_tests {
             );
             assert_eq!(env.c.snapshot().notice(), Some(QR_READY));
             assert!(env.c.snapshot().code_scanned());
+            assert!(env.c.snapshot().join_review(), "the page opens the review");
         }
         assert!(
             !env.c.snapshot().busy,

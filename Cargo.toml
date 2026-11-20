@@ -1,11 +1,12 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
-# Fuzz targets have their own workspace and lockfile (fuzz/Cargo.toml).
-exclude = ["third-party", "fuzz", "third-party/dioxus-desktop"]
+# Fuzz targets (fuzz/Cargo.toml) and the plan 0070 prototype
+# (prototypes/tauri-leptos) have their own workspaces and lockfiles.
+exclude = ["fuzz", "prototypes"]
 
 [workspace.package]
-version = "1.1.1"
+version = "1.2.0"
 edition = "2024"
 rust-version = "1.98.1"
 license = "AGPL-3.0-or-later"
@@ -27,16 +28,19 @@ proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
 opaque-ke = { version = "=4.0.1", default-features = false, features = ["ristretto255", "argon2"] }
 argon2-opaque = { package = "argon2", version = "=0.5.3", default-features = false, features = ["alloc", "zeroize"] }
 sha2-opaque = { package = "sha2", version = "=0.10.9", default-features = false }
-qv-core = { path = "crates/qv-core", version = "=1.1.1" }
-qv-crypto = { path = "crates/qv-crypto", version = "=1.1.1" }
-qv-encoding = { path = "crates/qv-encoding", version = "=1.1.1" }
-qv-model = { path = "crates/qv-model", version = "=1.1.1" }
-qv-store = { path = "crates/qv-store", version = "=1.1.1" }
-qv-platform = { path = "crates/qv-platform", version = "=1.1.1" }
-qv-protocol = { path = "crates/qv-protocol", version = "=1.1.1" }
-qv-sync = { path = "crates/qv-sync", version = "=1.1.1" }
-qv-win = { path = "crates/qv-win", version = "=1.1.1" }
+qv-core = { path = "crates/qv-core", version = "=1.2.0" }
+qv-crypto = { path = "crates/qv-crypto", version = "=1.2.0" }
+qv-encoding = { path = "crates/qv-encoding", version = "=1.2.0" }
+qv-model = { path = "crates/qv-model", version = "=1.2.0" }
+qv-store = { path = "crates/qv-store", version = "=1.2.0" }
+qv-platform = { path = "crates/qv-platform", version = "=1.2.0" }
+qv-protocol = { path = "crates/qv-protocol", version = "=1.2.0" }
+qv-sync = { path = "crates/qv-sync", version = "=1.2.0" }
+qv-win = { path = "crates/qv-win", version = "=1.2.0" }
+qv-ui-api = { path = "crates/qv-ui-api", version = "=1.2.0" }
 region = "=4.0.1"
+serde = { version = "=1.0.229", default-features = false, features = ["std", "derive"] }
+serde_json = { version = "=1.0.154", default-features = false, features = ["std"] }
 rusqlite = { version = "=0.41.0", default-features = false, features = ["bundled", "hooks", "limits"] }
 rustix = { version = "=1.1.6", default-features = false, features = ["std", "process"] }
 sha1 = { version = "=0.11.0", default-features = false, features = ["zeroize"] }
@@ -77,6 +81,14 @@ opt-level = 3
 [profile.dev.package.zeroize]
 opt-level = 3
 
+# The app page (crates/qv-ui, wasm32): small, built by crates/qv-ui/build.sh.
+[profile.wasm]
+inherits = "release"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+
 # Tests run optimized: unoptimized, the stock-budget large-vault test alone
 # took over 20 minutes and CI test jobs over an hour. Debug assertions and
 # overflow checks stay on (inherited from dev).
@@ -94,6 +106,3 @@ panic = "deny"
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
-
-[patch.crates-io]
-dioxus-desktop = { path = "third-party/dioxus-desktop" }

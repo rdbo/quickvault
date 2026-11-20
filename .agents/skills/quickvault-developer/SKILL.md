@@ -15,10 +15,8 @@ the context budget rules. Read the plan, the files it names and the spec
 sections it cites. Follow relevant callers and cross-references when needed
 for correctness; avoid unrelated exploration.
 
-For the exact approved vendor package (dioxus-desktop, plans 0030/0032), follow
-`third-party/README.md`: preserve upstream licensing/headers/lints, verify the
-archive hash and identity, document exact patches and run their focused tests.
-Product code still uses workspace rules; no other vendor exception is implied.
+No sources are vendored (plan 0071 removed the last fork); vendoring needs a
+plan and an owner decision.
 
 ## Before you start
 

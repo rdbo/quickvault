@@ -196,9 +196,14 @@ the address; "Sync" starts it.
 endpoints connects at once and goes straight to the comparison step. A
 scan without endpoints behaves like §6.2. VK is released only after A's
 confirmation, and nothing is published before B's confirmation and
-password check (0013 §10).
+password check (0013 §10). If B's protection status still needs the user's
+acknowledgement, the review opens at once and the join starts when it is
+acknowledged; dismissing the review leaves the filled form (owner report,
+2026-11-19, plan 0072).
 
-6.4. **Typing** stays available everywhere: the manual code (secret input)
+6.4. **Typing** stays available everywhere: the manual code (secret input,
+with a Show/Hide toggle that masks it again on submit, scan, lock, hiding
+and leaving the screen)
 and the address, then Sync or Join. Scanned endpoints are hints only and
 grant no trust (0013 §3.1). A manually typed address replaces scanned ones.
 
@@ -336,6 +341,10 @@ In addition to 0013's current rows:
    OQ1, to revisit after user testing.
 
 ## Changelog
+
+- 2026-11-19: §6.3: a scanned join that needs the protection review opens
+  it and continues once acknowledged; §6.4: Show/Hide for the typed code
+  (owner report, plan 0072).
 
 - 2026-11-09: Reconcile security/testing requirements with §15 credential authentication and single admission; preserve historical v1 descriptions above.
 - 2026-11-09: Apply owner-approved ephemeral credential authentication and one admitted connection.

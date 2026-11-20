@@ -1,0 +1,6 @@
+{
+  "identifier": "main",
+  "description": "The app window: the qv command only. No plugins, no window, file, shell, HTTP, dialog or opener rights (0008 §4).",
+  "windows": ["main"],
+  "permissions": ["allow-qv"]
+}

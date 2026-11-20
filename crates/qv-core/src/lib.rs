@@ -176,15 +176,17 @@ pub use views::{
 // `qv-core` only (`ARCHITECTURE.md` §3).
 pub use qv_crypto::{
     Argon2Params, Capitalization, CharacterSettings, CryptoError, Estimate, Generated,
-    GeneratorError, GeneratorSettings, Hardening, MasterPassword, MemoryProtection, OtpCode,
-    PHRASE_WORDS, PassphraseSettings, PinSettings, ProcessHardening, RecordId, RecoveryPhrase,
-    SecretBytes, Strength, WordListId,
+    GeneratorError, GeneratorSettings, Hardening, MasterPassword, MemoryProtection, OtpAlgorithm,
+    OtpCode, PHRASE_WORDS, PassphraseSettings, PinSettings, ProcessHardening, RecordId,
+    RecoveryPhrase, SecretBytes, Strength, WordListId,
 };
 pub use qv_model::{
     Entry, Extensions, Field, FieldId, FieldKind, FieldValue, GeneratorDefaults, Group,
     MAX_ATTACHMENT_BYTES, RandomId, SecretText, Settings, Text, Timestamp, TotpError, VaultMeta,
     VersionId, WriterId,
 };
+/// Two-factor setup input and link names (plan 0073).
+pub use qv_model::{KeyOptions, Setup as TotpSetup, Totp, link_names};
 /// Creates owner-only directories (0700, or a private DACL on Windows).
 #[cfg(any(target_os = "linux", target_os = "android", windows))]
 pub use qv_store::create_private_dirs;

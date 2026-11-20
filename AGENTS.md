@@ -102,14 +102,9 @@ requests override the named intermediate commit/session boundary.
   by SHA, with gates plus deny/vet (D2).
 - Every source starts with `// SPDX-License-Identifier: AGPL-3.0-or-later`
   (shell scripts use `#`, after the shebang); CI checks headers (D3).
-  Approved vendored exception: dioxus-desktop 0.7.10 only (0030; the other
-  forks were removed by 0032, owner 2026-11-02). See `third-party/README.md`: retain
-  upstream licenses/headers/lints, exclude them from the product workspace and
-  validate package identity metadata in the header checker. The checker does
-  not verify source contents or provenance; review against the hashed upstream
-  archive as described in `third-party/README.md`.
-  QuickVault adapter code still follows all product header/lint rules. Review
-  the local vendor patch as maintained application code; run its focused tests.
+  No vendored sources: the last fork (dioxus-desktop) left with the Dioxus
+  renderer (plan 0071), and the header checker rejects anything under
+  `third-party/`. Vendoring again needs a plan and an owner decision.
 - Crates opt into workspace lints (`[lints] workspace = true`): `unsafe_code`
   forbidden; `unwrap`/`expect`/`panic!` denied outside tests. `unsafe` requires
   plan permission and a `// SAFETY:` comment. The one exception is `qv-win`
@@ -122,7 +117,7 @@ requests override the named intermediate commit/session boundary.
   evidence only; see plan 0052.
 - Application-controlled Rust secrets live in `qv_crypto::{SecretBytes,
   SecretArray}`, accessed via `expose_secret*`; zeroize, no secret-bearing
-  `Debug`/`Display`, logs, errors, panics or argv (0008, 0011 §3). Dioxus input
+  `Debug`/`Display`, logs, errors, panics or argv (0008, 0011 §3). Webview input
   and framework/OS intermediates follow 0008 §1.1/§4.4: bound input, promptly
   convert to protected Rust containers, clear controls/state, and document
   best-effort cleanup limits. Framework copies alone do not require native

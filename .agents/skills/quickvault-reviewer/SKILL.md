@@ -15,11 +15,9 @@ Review the **diff** and the code it touches, not the whole codebase.
 Follow affected callers, tests and spec cross-references as needed to establish
 correctness. Use `.agents/README.md` for navigation, not as review evidence.
 
-For the exact approved vendor package (dioxus-desktop, plans 0030/0032), follow
-`third-party/README.md`: verify identity/provenance and the exact diff from the
-hashed upstream archive, then review local patches as maintained application
-code and run their focused tests. Upstream headers/lints remain; product code
-and all other packages retain the ordinary rules. Metadata checks are not audits.
+No sources are vendored (plan 0071 removed the last fork); flag any new
+vendored code that lacks a plan and an owner decision. Metadata checks are
+not audits.
 
 ## Inputs
 
@@ -46,7 +44,7 @@ and all other packages retain the ordinary rules. Metadata checks are not audits
 4. **Is it secure?** These points are specific to QuickVault:
    - Application-controlled Rust secrets are zeroized, have no secret-bearing
      `Debug`/`Display`, and never appear in logs, errors, panics or argv (0008,
-     0011 §3). Dioxus/framework input follows 0008 §1.1/§4.4: bounds, prompt
+     0011 §3). Webview/framework input follows 0008 §1.1/§4.4: bounds, prompt
      conversion to protected containers, control/state cleanup and documented
      residual-copy limits. Do not equate native widgets with guaranteed erasure.
    - Untrusted input is bounded before allocation and authenticated before

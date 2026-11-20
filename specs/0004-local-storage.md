@@ -543,8 +543,12 @@ StateChanged, never mixed-snapshot output. Scans process at most 16 records
 per session read, check cancellation between heads, release the mutex between
 batches and reject changed revisions. No detached key copy may bypass locking.
 
-7.4. Frontends retain bounded pages (app: current plus adjacent pages, at
-most three, plus selected detail) and clear stale/locked rows. CLI listings,
+7.4. Frontends retain bounded pages (app: the item, trash and conflict
+lists scroll as one window of consecutive pages, at most 32 pages (1,024
+rows) and 8 MiB of row text, loaded as the list's end comes into view; a
+full window is replaced by the next one on request, and a window that does
+not start at the first row offers a return to the start; other lists one
+page; plus selected detail) and clear stale/locked rows. CLI listings,
 search, paths and JSON stream pages without a full text/path map. A stale
 snapshot after partial output fails explicitly without silent restart or
 repeated rows. Path components may be resolved and emitted incrementally.
@@ -587,6 +591,11 @@ is unsupported ([SQLite warning](https://www.sqlite.org/howtocorrupt.html)).
    exists. A later change is a documented policy/version update (0015 §1.5).
 
 ## Changelog
+
+- 2026-11-19: §7.4: the app's item, trash and conflict lists scroll over a
+  window of at most 32 consecutive pages (1,024 rows, 8 MiB of row text)
+  instead of three pages with Previous/Next; beyond it, "Show more" starts
+  the next window (owner report, plan 0072).
 
 - 2026-11-17: §7.3: groups are listed by lowercase name, then ID, instead
   of the stored order key (owner report, plan 0069).

@@ -139,7 +139,9 @@ follow.
 git clone https://github.com/rdbo/quickvault.git
 cd quickvault
 
-# Desktop app (Linux; Windows uses WebView2)
+# Desktop app (Linux; Windows uses WebView2). The page is built first:
+sh crates/qv-ui/setup-tools.sh   # once: wasm32 target, wasm-bindgen-cli 0.2.129
+sh crates/qv-ui/build.sh
 cargo run --locked --release -p qv-app --features desktop --bin quickvault
 
 # Command-line client
@@ -156,12 +158,14 @@ Windows).
 
 ### Android
 
-Android (arm64, API 29+) builds use a pinned SDK/NDK recipe, JDK 21 and the
-Dioxus CLI 0.7.10:
+Android (arm64, API 29+) builds use a pinned SDK/NDK recipe, JDK 21 and
+tauri-cli 2.12.4:
 
 ```sh
 sh scripts/setup-android.sh --accept-licenses
 eval "$(sh scripts/setup-android.sh --print-env)"
+cargo install --locked tauri-cli --version 2.12.4
+sh crates/qv-ui/setup-tools.sh
 sh crates/qv-app/scripts/build-android.sh   # APKs land in crates/qv-app/dist/
 ```
 
@@ -261,7 +265,8 @@ QuickVault is a Cargo workspace of small crates. Frontends talk only to
 
 ```mermaid
 flowchart TD
-    app["<b>qv-app</b><br/>Dioxus UI · Linux / Android / Windows"]
+    page["<b>qv-ui</b><br/>Leptos page (WebAssembly)"]
+    app["<b>qv-app</b><br/>Tauri app · Linux / Android / Windows"]
     cli["<b>qv-cli</b><br/>the qv command"]
     core["<b>qv-core</b><br/>sessions · authorization · search · policy"]
     sync["<b>qv-sync</b><br/>causal merge · LAN sync"]
@@ -273,6 +278,7 @@ flowchart TD
     win["<b>qv-win</b><br/>Win32 bindings"]
     encoding["<b>qv-encoding</b><br/>deterministic bounded CBOR"]
 
+    page -. "one IPC command" .-> app
     app --> core
     cli --> core
     core --> sync
@@ -300,7 +306,9 @@ flowchart TD
 | [`qv-platform`](crates/qv-platform) | OS adapters: clipboard, lock/sleep signals, file pickers, Android keystore |
 | [`qv-win`](crates/qv-win) | Windows-only Win32 FFI; the only crate allowed `unsafe` |
 | [`qv-cli`](crates/qv-cli) | The `qv` command-line client |
-| [`qv-app`](crates/qv-app) | The shared Dioxus app for desktop and phone |
+| [`qv-app`](crates/qv-app) | The shared app for desktop and phone: controller and Tauri backend |
+| [`qv-ui`](crates/qv-ui) | The app's page, in Leptos (WebAssembly); renders frames, holds no vault state |
+| [`qv-ui-api`](crates/qv-ui-api) | The page/backend protocol: requests, actions and frames |
 
 [`ARCHITECTURE.md`](ARCHITECTURE.md) covers trust boundaries, the key
 lifecycle and the main flows in depth.
@@ -351,5 +359,3 @@ contributor workflow.
 
 QuickVault is free software, licensed under the
 [GNU Affero General Public License v3.0 or later](LICENSE).
-The vendored `dioxus-desktop` fork under [`third-party/`](third-party/README.md)
-keeps its upstream MIT/Apache-2.0 license.

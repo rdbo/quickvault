@@ -62,11 +62,12 @@ jobs:
         run: rustup toolchain install && rustup target add aarch64-linux-android
       - name: JDK and CLI prerequisites
         run: sudo apt-get update && sudo apt-get install -y openjdk-21-jdk pkg-config libssl-dev
-      - name: SDK, NDK and pinned packaging tool
+      - name: SDK, NDK and pinned packaging tools
         run: |
           export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
           sh scripts/setup-android.sh --accept-licenses
-          cargo install --locked dioxus-cli --version 0.7.10
+          cargo install --locked tauri-cli --version 2.12.4
+          sh crates/qv-ui/setup-tools.sh
       - name: Release APK, signed with the project key
         env:
           KEYSTORE_B64: ${{ secrets.QV_ANDROID_KEYSTORE_B64 }}
@@ -100,6 +101,9 @@ jobs:
           persist-credentials: false
       - name: Toolchain (from rust-toolchain.toml)
         run: rustup toolchain install
+      - name: Page tools and bundle (plan 0071)
+        shell: bash
+        run: sh crates/qv-ui/setup-tools.sh && sh crates/qv-ui/build.sh
       - name: Build
         run: |
           cargo build --release --locked -p qv-cli --bin qv

@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "qv-proto-app"
+description = "Plan 0070 prototype: the Tauri backend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "qv_proto_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "qv-proto"
+path = "src/main.rs"
+
+[dependencies]
+qv-proto-api.workspace = true
+qv-core = { path = "../../../crates/qv-core" }
+serde_json.workspace = true
+zeroize.workspace = true
+getrandom = "=0.4.3"
+tauri = { version = "=2.12.5", default-features = false, features = ["wry"] }
+
+# Android: the activity's methods through JNI, at the version wry uses.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "=0.21.1", default-features = false }
+
+[dev-dependencies]
+# Test builds bound and memoize Argon2id derivations (AGENTS.md).
+qv-core = { path = "../../../crates/qv-core", features = ["test-kdf-limit"] }
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", features = [] }
+
+[lints]
+workspace = true

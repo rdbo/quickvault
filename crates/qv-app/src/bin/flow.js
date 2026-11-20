@@ -34,7 +34,10 @@ try{
  }
  await tap("welcome-create");
  stage=2;await until(()=>!!$("#vault-name"));
- input("vault-name","Synthetic vault");await tap("create-next");input("password",password);input("repeat",password);await tap("create-submit");
+ input("vault-name","Synthetic vault");await tap("create-next");input("password",password);
+ // The live rating arrives once typing pauses (0010 §4.2, plan 0072).
+ stage=21;await until(()=>/bits/.test($("#password-meter")?.textContent||""));
+ input("repeat",password);await tap("create-submit");
  stage=3;await until(()=>!!$("#phrase-show"));await tap("phrase-show");
  const words=Array.from(document.querySelectorAll(".phrase .w")).map(w=>w.textContent.trim());
  if(words.length!==24)throw new Error("synthetic phrase length");
@@ -49,11 +52,32 @@ try{
  const generated=byId("gen-value").textContent;await tap("gen-use");await until(()=>!!$(".ie-saved.generated")&&!$("#gen-value"));
  if($("#ws-replacement-1")?.value||Array.from(document.querySelectorAll("input,textarea")).some(i=>i.value.includes(generated)))throw new Error("synthetic generated value prefilled");
  if(document.body.textContent.includes(generated))throw new Error("synthetic generated value shown");
+ // Two-factor code (plan 0073): the login's slot opens the sheet; a setup key
+ // as sites print it is checked on a pause and shows today's code; neither
+ // the key nor its URI reaches the page.
+ stage=41;await tap("totp-setup");await until(()=>!!$("#totp-sheet")&&!!$("#ws-totp-input"));
+ stage=43;if(byId("ws-totp-input").type!=="password")throw new Error("synthetic setup key unmasked");
+ if(!byId("totp-add").disabled)throw new Error("synthetic empty setup accepted");
+ stage=44;input("ws-totp-input","not a key!");await until(()=>!!$("#totp-invalid"));
+ stage=45;input("ws-totp-input","gezd gnbv gy3t qojq gezd gnbv gy3t qojq");
+ await until(()=>/^\d{3} \d{3}$/.test($("#totp-now .code")?.textContent||"")&&!byId("totp-add").disabled);
+ stage=46;await tap("totp-add");await until(()=>!$("#totp-sheet")&&/^\d{3} \d{3}$/.test($(".ie-totp .code")?.textContent||""));
+ stage=47;if(/gezd|otpauth/i.test(document.body.textContent)||Array.from(document.querySelectorAll("input,textarea")).some(i=>/gezd/i.test(i.value)))throw new Error("synthetic setup key shown");
  await tap("entry-save");stage=5;await until(()=>title().startsWith("Synthetic <img"));await unlocked();
+ stage=48;await until(()=>/^\d{3} \d{3}$/.test($(".fld .totp .code")?.textContent||""));
+ if($("#show-code")||/gezd|otpauth/i.test(document.body.textContent))throw new Error("synthetic code behind a reveal or key shown");
  stage=51;if($(".shell img")||window.flowBad)throw new Error("synthetic markup executed");
  stage=52;if(!Array.from(document.querySelectorAll(".fld .masked")).some(v=>v.textContent==="••••••••"))throw new Error("synthetic protected value shown");
  stage=53;await press(()=>$('[aria-label="Reveal for 30 seconds"]'),"reveal");await until(()=>($(".field-value.revealed")?.textContent||"").length>=8);
  stage=54;await press(()=>$('.fld [aria-label="Hide"]'),"hide");await until(()=>!$(".field-value.revealed"));
+ // A row's menu at the list's end opens above the row, inside the list (owner, 2026-11-20).
+ stage=55;{const rows=$(".rows");const row=Array.from(rows.querySelectorAll(".row")).pop();rows.style.paddingTop=Math.max(0,rows.clientHeight-row.offsetHeight-20)+"px";
+  row.dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true}));await until(()=>!!$(".row-menu .menu"));
+  const m=$(".row-menu .menu").getBoundingClientRect(),r=row.getBoundingClientRect(),b=rows.getBoundingClientRect();
+  if(m.bottom>r.top+1||m.top<b.top-1)throw new Error("synthetic row menu out of view");
+  // It copies the entry's two-factor code (owner, 2026-11-20).
+  if(!Array.from(document.querySelectorAll(".row-menu .mi")).some(b=>b.textContent==="Copy “Two-factor code”"))throw new Error("synthetic row menu has no code");
+  $(".row>.pop-scrim").click();await until(()=>!$(".row-menu"));rows.style.paddingTop="";}
  stage=6;await press(()=>$('.fld [aria-label="Copy"]'),"copy");
  const copied=()=>Array.from(document.querySelectorAll(".toast")).some(t=>t.textContent.startsWith("Copied"));
  if(clipboard===null)await until(()=>copied()||!!$(".error"));else if(clipboard)await until(copied);else await until(()=>!!$(".error"));

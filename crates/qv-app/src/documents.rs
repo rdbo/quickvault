@@ -15,11 +15,11 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
 
-#[cfg(all(feature = "desktop", windows))]
+#[cfg(all(feature = "ui", windows))]
 pub(crate) use qv_core::platform::WindowsPick as Pick;
 /// The system picker's choice kind: the desktop portal on Linux, the
 /// native dialogs on Windows (plan 0052).
-#[cfg(all(feature = "desktop", target_os = "linux"))]
+#[cfg(all(feature = "ui", target_os = "linux"))]
 pub(crate) use qv_core::platform::portal::Pick;
 
 /// Attachment bound shared with the CLI and model (2 GiB).
@@ -38,7 +38,7 @@ fn file_error(e: qv_core::platform::PlatformError) -> AppError {
 }
 
 /// What a document picker is choosing for (Android); used by the UI.
-#[cfg(feature = "desktop")]
+#[cfg(feature = "ui")]
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PickKind {
@@ -50,7 +50,7 @@ pub enum PickKind {
     Vault,
 }
 /// Which screen's path input a system picker fills.
-#[cfg(feature = "desktop")]
+#[cfg(feature = "ui")]
 #[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))] // Linux portal picker only.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PathFor {
@@ -63,16 +63,16 @@ pub enum PathFor {
     /// The folder new vaults go to.
     Folder,
 }
-#[cfg(all(feature = "desktop", any(target_os = "linux", windows)))]
+#[cfg(all(feature = "ui", any(target_os = "linux", windows)))]
 static NO_PICKER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Validation fixtures never open a real desktop dialog: they use the typed
 /// fallback, which the synthetic flows exercise.
-#[cfg(all(feature = "validation", target_os = "linux"))]
+#[cfg(all(feature = "fixture", target_os = "linux"))]
 pub(crate) fn force_no_picker() {
     NO_PICKER.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 /// No system picker answered here; screens then offer a typed path instead.
-#[cfg(feature = "desktop")]
+#[cfg(feature = "ui")]
 pub fn picker_missing() -> bool {
     #[cfg(any(target_os = "linux", windows))]
     {
@@ -86,7 +86,7 @@ pub fn picker_missing() -> bool {
 
 /// Open a vault through the platform picker. Android returns a document
 /// capability for verified private import; Linux retains the original path.
-#[cfg(feature = "desktop")]
+#[cfg(feature = "ui")]
 pub(crate) fn pick_vault(c: &Controller, epoch: crate::controller::FormEpoch) {
     #[cfg(any(target_os = "linux", windows))]
     pick_path(
@@ -104,7 +104,7 @@ pub(crate) fn pick_vault(c: &Controller, epoch: crate::controller::FormEpoch) {
 }
 
 /// Switching obeys the same unsaved-input/lock rules as the existing list.
-#[cfg(feature = "desktop")]
+#[cfg(feature = "ui")]
 pub(crate) fn switch_to_file(c: &Controller, epoch: crate::controller::FormEpoch) {
     if c.switch_vault(
         epoch,
@@ -116,7 +116,7 @@ pub(crate) fn switch_to_file(c: &Controller, epoch: crate::controller::FormEpoch
 /// Linux: show the desktop's file picker on a worker thread and put the choice
 /// into the current screen's protected path input (0009 §1.8). Cancelling
 /// changes nothing; a stale screen ignores the result.
-#[cfg(all(feature = "desktop", any(target_os = "linux", windows)))]
+#[cfg(all(feature = "ui", any(target_os = "linux", windows)))]
 pub(crate) fn pick_path(
     c: &Controller,
     epoch: crate::controller::FormEpoch,
