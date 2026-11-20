@@ -3,7 +3,7 @@
 //! Section pages and the LAN panel.
 use super::super::refs::Target;
 use super::{Ctx, convert, items};
-use crate::controller::{QuickHolder, View};
+use crate::controller::View;
 use crate::page_read::{Lane, Rows, Spec};
 use crate::views;
 use crate::workspace::{Pane, Report, RevealKey, Screen, WsField};
@@ -43,26 +43,13 @@ pub(super) fn page(
     }
 }
 
-/// Settings' quick-unlock line: "on" only for the vault that holds the
-/// device's one enrollment; another vault's is named (plan 0072).
-fn quick_line(policy: Option<qv_core::platform::QuickPolicy>, holder: QuickHolder) -> String {
-    let on = match policy {
+/// Settings' quick-unlock line for the open vault: each vault has its own
+/// (plan 0074).
+fn quick_line(policy: Option<qv_core::platform::QuickPolicy>) -> &'static str {
+    match policy {
         Some(qv_core::platform::QuickPolicy::Class3) => "Fingerprint unlock is on",
         Some(qv_core::platform::QuickPolicy::DeviceCredential) => "Screen-lock unlock is on",
-        None => return "Fingerprint unlock; autofill on supported phones".to_owned(),
-    };
-    match holder {
-        QuickHolder::Open => on.to_owned(),
-        QuickHolder::Other(Some(name)) => {
-            format!(
-                "Off here; {} for {}",
-                on.to_lowercase(),
-                views::z(&name).as_str()
-            )
-        }
-        QuickHolder::Other(None) | QuickHolder::None => {
-            format!("Off here; {} for another vault", on.to_lowercase())
-        }
+        None => "Fingerprint unlock; autofill on supported phones",
     }
 }
 
@@ -353,7 +340,7 @@ fn settings(ctx: &mut Ctx<'_>, view: &View, pane: Pane) -> api::PageBody {
                 detail,
                 level: level.label().to_owned(),
                 tone: level.tone().to_owned(),
-                quick: quick_line(c.quick_policy(), c.quick_holder()),
+                quick: quick_line(c.quick_policy()).to_owned(),
                 file: c
                     .open_vault()
                     .map(|v| (Z::from(views::z(&v.file)), Z::from(views::z(&v.place)))),
@@ -371,12 +358,6 @@ fn settings(ctx: &mut Ctx<'_>, view: &View, pane: Pane) -> api::PageBody {
         Pane::Password => api::SettingsBody::Password(api::PasswordPane {
             quick_available: c.protection().quick_unlock,
             policy: c.quick_policy().map(convert::quick_policy),
-            elsewhere: match c.quick_holder() {
-                QuickHolder::Other(name) => {
-                    Some(name.map(|n| views::z(&n).to_string()).unwrap_or_default())
-                }
-                QuickHolder::None | QuickHolder::Open => None,
-            },
             autofill: c.autofill_available(),
             guidance: guidance(ctx),
         }),

@@ -132,7 +132,8 @@ fixed in one batch:
   holder and offers to enroll this vault instead, which ends the other
   vault's enrollment (the existing enroll replaces the slot). The vault
   sheet's "open vault has quick unlock" uses the same check instead of
-  "no other listed vault has it".
+  "no other listed vault has it". Superseded on 2026-11-20 by plan 0074
+  (owner: one enrollment per vault).
 
 ## Steps
 

@@ -37,6 +37,9 @@ pub struct VaultList {
     pub recent: Vec<PathBuf>,
     /// The name each remembered vault had when last opened here.
     pub names: std::collections::BTreeMap<PathBuf, String>,
+    /// Remembered vaults whose quick unlock the user turned off here: no
+    /// offer after a password unlock (plan 0074).
+    pub quick_off: std::collections::BTreeSet<PathBuf>,
 }
 /// A name as remembered: one line, no control characters, bounded.
 fn shown_name(name: &str) -> Option<String> {
@@ -81,6 +84,11 @@ impl VaultList {
                         list.recent.push(p);
                     }
                 }
+                Some(("quick-off", p)) => {
+                    if let Some(p) = valid_path(p) {
+                        list.quick_off.insert(p);
+                    }
+                }
                 Some(("name", rest)) => {
                     if let Some((p, n)) = rest.split_once('\t')
                         && let (Some(p), Some(n)) = (valid_path(p), shown_name(n))
@@ -91,9 +99,10 @@ impl VaultList {
                 _ => {}
             }
         }
-        // Names only for remembered vaults.
+        // Names and settings only for remembered vaults.
         let recent = list.recent.clone();
         list.names.retain(|p, _| recent.contains(p));
+        list.quick_off.retain(|p| recent.contains(p));
         list
     }
     /// The file contents.
@@ -112,6 +121,11 @@ impl VaultList {
         }
         for p in self.recent.iter().take(MAX_VAULTS) {
             line("vault", p);
+        }
+        for p in self.recent.iter().take(MAX_VAULTS) {
+            if self.quick_off.contains(p) {
+                line("quick-off", p);
+            }
         }
         for p in self.recent.iter().take(MAX_VAULTS) {
             if let (Some(n), Some(ps)) = (self.names.get(p).and_then(|n| shown_name(n)), p.to_str())
@@ -148,6 +162,7 @@ impl VaultList {
         self.recent.truncate(MAX_VAULTS);
         let recent = self.recent.clone();
         self.names.retain(|p, _| recent.contains(p));
+        self.quick_off.retain(|p| recent.contains(p));
     }
     /// Remember a vault's name; returns whether it changed. Only for a
     /// remembered vault.
@@ -157,10 +172,19 @@ impl VaultList {
         };
         self.names.insert(path.to_path_buf(), name.clone()) != Some(name)
     }
+    /// Record whether quick unlock is turned off for a remembered vault;
+    /// returns whether it changed.
+    pub fn set_quick_off(&mut self, path: &Path, off: bool) -> bool {
+        if !off {
+            return self.quick_off.remove(path);
+        }
+        self.recent.iter().any(|p| p == path) && self.quick_off.insert(path.to_path_buf())
+    }
     /// Drop a remembered vault (the file is untouched).
     pub fn forget(&mut self, path: &Path) {
         self.recent.retain(|p| p != path);
         self.names.remove(path);
+        self.quick_off.remove(path);
     }
 }
 
@@ -388,6 +412,15 @@ mod tests {
         );
         assert_eq!(named.names.len(), 1);
         assert_eq!(VaultList::parse(named.encode().as_bytes()), named);
+        // Quick unlock turned off: per remembered vault (plan 0074).
+        let off = VaultList::parse(
+            b"vault /v/A.qvault\nvault /v/B.qvault\nquick-off /v/B.qvault\nquick-off /v/C.qvault\nquick-off rel.qvault\n",
+        );
+        assert_eq!(
+            off.quick_off.iter().collect::<Vec<_>>(),
+            [Path::new("/v/B.qvault")]
+        );
+        assert_eq!(VaultList::parse(off.encode().as_bytes()), off);
         assert_eq!(
             VaultList::parse(&vec![b'a'; MAX_LIST + 1]),
             VaultList::default()
@@ -426,9 +459,15 @@ mod tests {
         let long = "é".repeat(MAX_SHOWN);
         assert!(l.set_name(Path::new("/v/40.qvault"), &long));
         assert!(l.names[Path::new("/v/40.qvault")].len() <= MAX_SHOWN);
+        assert!(l.set_quick_off(Path::new("/v/40.qvault"), true));
+        assert!(!l.set_quick_off(Path::new("/v/40.qvault"), true));
+        assert!(!l.set_quick_off(Path::new("/v/unknown.qvault"), true));
+        assert!(l.set_quick_off(Path::new("/v/41.qvault"), true));
+        assert!(l.set_quick_off(Path::new("/v/41.qvault"), false));
         l.forget(Path::new("/v/40.qvault"));
         assert!(!l.recent.contains(&PathBuf::from("/v/40.qvault")));
         assert!(l.names.is_empty());
+        assert!(l.quick_off.is_empty());
         // Not vault files, or not absolute: ignored.
         l.remember(Path::new("/v/notes.txt"));
         l.remember(Path::new("rel.qvault"));

@@ -94,52 +94,94 @@ impl Session {
             Ok(())
         });
         if checked.is_err() {
-            let _ = services.keystore().invalidate();
+            let _ = services.keystore().invalidate(&expected.vault);
         }
         checked
     }
-    /// True while the device's one live enrollment names this session's
-    /// vault and key generation, as [`Core::quick_ready_for`] judges a
-    /// closed vault. Another vault may hold it (0009 §1.8, plan 0072).
+    /// True while this session's vault has a live enrollment for its key
+    /// generation, as [`Core::quick_ready_for`] judges a closed vault. Each
+    /// vault has its own (0002 §5.1, plan 0074).
     pub fn quick_enrolled(&self) -> bool {
-        let Some(live) = self.services.as_ref().and_then(|s| s.keystore().binding()) else {
+        let Some(services) = self.services.as_ref() else {
             return false;
         };
-        self.read(|ctx| binding(ctx))
-            .is_ok_and(|b| b.vault == live.vault && b.generation == live.generation)
+        self.read(|ctx| binding(ctx)).is_ok_and(|b| {
+            services
+                .keystore()
+                .binding(&b.vault)
+                .is_some_and(|live| live.generation == b.generation)
+        })
+    }
+    /// This vault's enrollment policy, while it has a live enrollment.
+    pub fn quick_policy(&self) -> Option<QuickPolicy> {
+        let services = self.services.as_ref()?;
+        let vault = self
+            .read(|ctx| Ok(ctx.open.vault.header().vault_id.0))
+            .ok()?;
+        services.keystore().policy(&vault)
     }
     /// Remove the in-process policy, envelope and native hardware handle.
     pub fn disable_quick(&self) -> Result<(), CoreError> {
         self.invalidate_quick()
     }
+    /// Ends only this vault's enrollment (0002 §5.4, plan 0074).
     pub(crate) fn invalidate_quick(&self) -> Result<(), CoreError> {
         if let Some(services) = &self.services {
+            let vault = self.read(|ctx| Ok(ctx.open.vault.header().vault_id.0))?;
             services
                 .keystore()
-                .invalidate()
+                .invalidate(&vault)
                 .map_err(crate::platform::error)?;
         }
         Ok(())
     }
 }
 impl Core {
-    /// True only while a validated backend retains a live trusted binding.
-    pub fn quick_ready(&self) -> bool {
-        self.quick_services()
-            .is_ok_and(|s| s.keystore().binding().is_some())
-    }
-    /// True while the live binding names the vault at `path`, judged from
-    /// its unverified public header (vault ID and key generation). Opening
-    /// still verifies everything; this only decides what to offer.
+    /// True while the vault at `path` has a live enrollment for its key
+    /// generation, judged from its unverified public header (vault ID and
+    /// key generation). Opening still verifies everything; this only
+    /// decides what to offer.
     pub fn quick_ready_for(&self, path: &Path) -> bool {
-        let Some(binding) = self
-            .quick_services()
-            .ok()
-            .and_then(|s| s.keystore().binding())
-        else {
+        let Ok(services) = self.quick_services() else {
             return false;
         };
-        same_vault(path, binding)
+        header_ids(path).is_some_and(|(vault, generation)| {
+            services
+                .keystore()
+                .binding(&vault)
+                .is_some_and(|b| b.generation == generation)
+        })
+    }
+    /// False when the last quick-unlock attempt found its vault without an
+    /// enrollment or ended it; an attempt refused before naming a vault (a
+    /// platform check, an unreadable header) ended nothing.
+    pub fn quick_kept(&self) -> bool {
+        let last = *self
+            .quick_vault
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        last.is_none_or(|vault| {
+            self.quick_services()
+                .is_ok_and(|s| s.keystore().binding(&vault).is_some())
+        })
+    }
+    /// Ends the enrollment of the vault at `path` when it is removed from
+    /// this device's list (plan 0074), unless one of `others` (the files
+    /// still listed) is the same vault, such as a copy.
+    pub fn forget_quick<P: AsRef<Path>>(&self, path: &Path, others: &[P]) -> Result<(), CoreError> {
+        let (Ok(services), Some((vault, _))) = (self.quick_services(), header_ids(path)) else {
+            return Ok(());
+        };
+        if others
+            .iter()
+            .any(|p| header_ids(p.as_ref()).is_some_and(|(v, _)| v == vault))
+        {
+            return Ok(());
+        }
+        services
+            .keystore()
+            .invalidate(&vault)
+            .map_err(crate::platform::error)
     }
     /// Why the last quick unlock failed, if it did.
     pub fn quick_failure(&self) -> Option<QuickFailure> {
@@ -160,6 +202,10 @@ impl Core {
         path: &Path,
         cancel: Option<&CancelToken>,
     ) -> Result<Session, CoreError> {
+        *self
+            .quick_vault
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         // Steps before the prompt record why they refused too (plan 0063).
         let early = |failure: QuickFailure, e: CoreError| {
             self.note_quick(Some(failure));
@@ -170,19 +216,21 @@ impl Core {
         let services = self
             .quick_services()
             .map_err(|e| early(QuickFailure::Platform, e))?;
+        // The header names the vault whose enrollment applies (plan 0074).
+        let (vault, generation) = header_ids(path)
+            .ok_or_else(|| early(QuickFailure::Unreadable, CoreError::NotAllowed))?;
+        *self
+            .quick_vault
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(vault);
         let expected = services
             .keystore()
-            .binding()
+            .binding(&vault)
             .ok_or_else(|| early(QuickFailure::NotEnrolled, CoreError::NotAllowed))?;
-        // Another vault: refuse before prompting, keeping the enrollment.
-        match qv_store::VaultFile::open(path) {
-            Err(_) => return Err(early(QuickFailure::Unreadable, CoreError::NotAllowed)),
-            Ok(f) => {
-                let h = f.header();
-                if h.vault_id.0 != expected.vault || h.key_generation.0 != expected.generation {
-                    return Err(early(QuickFailure::OtherVault, CoreError::NotAllowed));
-                }
-            }
+        // Another key generation (an older copy of the vault): refuse before
+        // prompting, keeping the enrollment.
+        if generation != expected.generation {
+            return Err(early(QuickFailure::OtherVault, CoreError::NotAllowed));
         }
         let token = cancel.cloned();
         let cancelled: qv_platform::Cancellation =
@@ -248,18 +296,18 @@ impl Core {
             // The phrase did not open this vault as bound: the state is stale.
             Err(e) => {
                 self.note_quick(Some(step));
-                let _ = services.keystore().invalidate();
+                let _ = services.keystore().invalidate(&expected.vault);
                 Err(e)
             }
             Ok(session) => Ok(session),
         }
     }
 }
-fn same_vault(path: &Path, binding: QuickBinding) -> bool {
-    qv_store::VaultFile::open(path).is_ok_and(|f| {
-        let h = f.header();
-        h.vault_id.0 == binding.vault && h.key_generation.0 == binding.generation
-    })
+/// The vault ID and key generation in the file's unverified public header.
+fn header_ids(path: &Path) -> Option<([u8; 16], u32)> {
+    let f = qv_store::VaultFile::open(path).ok()?;
+    let h = f.header();
+    Some((h.vault_id.0, h.key_generation.0))
 }
 
 /// Synthetic backend reuse for the large-vault lifecycle fixture. It copies
@@ -358,18 +406,21 @@ mod tests {
             s.enroll_quick(&pw("wrong"), QuickPolicy::Class3, None)
                 .is_err()
         );
-        assert!(!core.quick_ready());
+        // An open vault's file is held: its session answers for it.
+        assert!(!s.quick_enrolled());
         s.enroll_quick(&pw(PASSWORD), QuickPolicy::Class3, None)
             .unwrap();
-        assert!(core.quick_ready());
+        assert!(s.quick_enrolled());
         s.lock();
+        assert!(core.quick_ready_for(&env.path));
         let quick = core.unlock_quick(&env.path, None).unwrap();
         assert!(quick.verify(None).unwrap().ok());
         quick
             .change_password(&pw("new master password for quick test"), None)
             .unwrap();
-        assert!(!core.quick_ready());
+        assert!(!quick.quick_enrolled());
         quick.lock();
+        assert!(!core.quick_ready_for(&env.path));
         assert!(core.unlock_quick(&env.path, None).is_err());
         let new = pw("new master password for quick test");
         let session = core.unlock(&env.path, &new, None).unwrap();
@@ -382,10 +433,10 @@ mod tests {
         let outside = env.core().unlock(&env.path, &new, None).unwrap();
         outside.change_password(&new, None).unwrap();
         outside.lock();
-        assert!(core.quick_ready());
+        assert!(core.quick_ready_for(&env.path));
         assert!(core.unlock_quick(&env.path, None).is_err());
         assert_eq!(core.quick_failure(), Some(QuickFailure::Binding));
-        assert!(!core.quick_ready());
+        assert!(!core.quick_ready_for(&env.path));
         let session = core.unlock(&env.path, &new, None).unwrap();
         session
             .enroll_quick(&new, QuickPolicy::Class3, None)
@@ -396,7 +447,7 @@ mod tests {
         }
         assert!(core.unlock_quick(&env.path, None).is_err());
         assert_eq!(core.quick_failure(), Some(QuickFailure::Anchor));
-        assert!(!core.quick_ready());
+        assert!(!core.quick_ready_for(&env.path));
     }
 
     /// Opens like `Native`, or reports a dismissal when `cancel` is set.
@@ -432,7 +483,7 @@ mod tests {
     }
     // 0012 §1: Hardware assumptions
     #[test]
-    fn dismissal_and_another_vault_keep_the_enrollment() {
+    fn dismissal_keeps_the_enrollment_and_each_vault_has_its_own() {
         let env = Env::new();
         let _k = kdf();
         let backend = Arc::new(Dismissable(std::sync::atomic::AtomicBool::new(true)));
@@ -453,30 +504,57 @@ mod tests {
             ));
         }
         assert!(core.quick_ready_for(&env.path));
-        // Another vault is refused before any prompt, keeping this one.
+        // Another vault has no enrollment of its own yet: refused before any
+        // prompt, keeping the first vault's.
         let other = env.dir.path().join("other.qvault");
         let open = core.create(&other, &pw(PASSWORD), "Other").unwrap().session;
-        // The device's one enrollment still belongs to the first vault
-        // while the other is open (plan 0072).
-        assert!(core.quick_ready());
+        assert!(core.quick_ready_for(&env.path));
         assert!(!open.quick_enrolled());
+        assert_eq!(open.quick_policy(), None);
         open.lock();
         assert!(!core.quick_ready_for(&other));
-        assert!(!core.quick_ready_for(&env.dir.path().join("missing.qvault")));
+        let missing = env.dir.path().join("missing.qvault");
+        assert!(!core.quick_ready_for(&missing));
         assert!(matches!(
             core.unlock_quick(&other, None),
             Err(CoreError::NotAllowed)
         ));
-        assert_eq!(core.quick_failure(), Some(QuickFailure::OtherVault));
+        assert_eq!(core.quick_failure(), Some(QuickFailure::NotEnrolled));
+        assert!(!core.quick_kept());
+        // An unreadable file names no vault and ends nothing.
+        assert!(core.unlock_quick(&missing, None).is_err());
+        assert_eq!(core.quick_failure(), Some(QuickFailure::Unreadable));
+        assert!(core.quick_kept());
         assert!(core.quick_ready_for(&env.path));
+        // Each vault gets its own enrollment; the first keeps its (plan 0074).
+        let open = core.unlock(&other, &pw(PASSWORD), None).unwrap();
+        open.enroll_quick(&pw(PASSWORD), QuickPolicy::DeviceCredential, None)
+            .unwrap();
+        assert!(open.quick_enrolled());
+        assert_eq!(open.quick_policy(), Some(QuickPolicy::DeviceCredential));
+        open.lock();
+        assert!(core.quick_ready_for(&other) && core.quick_ready_for(&env.path));
         backend.0.store(false, Ordering::SeqCst);
-        assert!(
-            core.unlock_quick(&env.path, None)
-                .unwrap()
-                .verify(None)
-                .unwrap()
-                .ok()
-        );
+        for path in [&env.path, &other] {
+            let s = core.unlock_quick(path, None).unwrap();
+            assert!(s.verify(None).unwrap().ok());
+            s.lock();
+        }
+        // Turning one off, or forgetting it, leaves the other.
+        let s = core.unlock_quick(&other, None).unwrap();
+        s.disable_quick().unwrap();
+        s.lock();
+        assert!(!core.quick_ready_for(&other) && core.quick_ready_for(&env.path));
+        let none: [&Path; 0] = [];
+        core.forget_quick(&missing, &none).unwrap();
+        assert!(core.quick_ready_for(&env.path));
+        // A listed copy of the same vault keeps it; removing the last ends it.
+        let copy = env.dir.path().join("copy.qvault");
+        std::fs::copy(&env.path, &copy).unwrap();
+        core.forget_quick(&env.path, &[&copy, &other]).unwrap();
+        assert!(core.quick_ready_for(&env.path));
+        core.forget_quick(&env.path, &[&other]).unwrap();
+        assert!(!core.quick_ready_for(&env.path) && !core.quick_ready_for(&copy));
     }
 
     /// What [`Scripted`] does when the key is released.
@@ -584,6 +662,7 @@ mod tests {
         assert_eq!(core.quick_failure(), Some(QuickFailure::Storage));
         drop(backend.held.lock().unwrap().take());
         assert!(core.quick_ready_for(&env.path));
+        assert!(core.quick_kept());
 
         // A cancellation after the release is neither a failure nor stale.
         backend.set(Release::Cancel);
@@ -598,7 +677,8 @@ mod tests {
         backend.set(Release::Wrong);
         assert!(core.unlock_quick(&env.path, None).is_err());
         assert_eq!(core.quick_failure(), Some(QuickFailure::Open));
-        assert!(!core.quick_ready());
+        assert!(!core.quick_ready_for(&env.path));
+        assert!(!core.quick_kept());
 
         // Enrolled again, it works and clears the reason.
         backend.set(Release::Phrase);

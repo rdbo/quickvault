@@ -63,7 +63,8 @@ class MainActivity : TauriActivity() {
     fun qvQuickResult(id:Long):ByteArray? = quick.result(id)
     fun qvQuickFinish(id:Long,keep:Boolean) = quick.finish(id,keep)
     fun qvQuickDelete(envelope:ByteArray):Boolean = quick.delete(envelope)
-    fun qvQuickRetain(envelope:ByteArray?,enrolled:Long) = quick.retain(envelope,enrolled)
+    fun qvQuickKeep(envelope:ByteArray,enrolled:Long) = quick.keep(envelope,enrolled)
+    fun qvQuickSweep() = quick.sweep()
     // The boot the quick-unlock state is bound to (0002 §5.4, plan 0045).
     fun qvBootCount():Int = try { android.provider.Settings.Global.getInt(contentResolver,android.provider.Settings.Global.BOOT_COUNT) } catch (_:Exception) { -1 }
     fun qvUptime():Long = android.os.SystemClock.elapsedRealtime()
@@ -512,15 +513,20 @@ private class NativeQuickUnlock(private val activity: MainActivity) {
     private var input: ByteArray? = null
     private var signal: android.os.CancellationSignal? = null
     private var created: String? = null
-    // Rust calls `retain` once at startup with the persisted envelope (or
-    // none): that key stays, every other QuickVault key is deleted.
-    @Synchronized fun retain(envelope: ByteArray?, enrolled: Long) {
-        val keep = envelope?.takeIf { it.size in 63..1536 && it[0].toInt()==1 && it[1].toInt()==1 }?.let { e ->
-            device = e.copyOfRange(3,19)
-            alias(e).also { born[it]=enrolled }
-        }
-        // Keys this process created (in `born`) are live enrollments, not leftovers.
-        try { store.aliases().toList().filter { it.startsWith(prefix) && it != keep && it !in born }.forEach { store.deleteEntry(it) } } catch (_:Exception) {}
+    // Rust calls `keep` once at startup for each persisted envelope (one per
+    // enrolled vault, plan 0074), then `sweep`: those keys stay, every other
+    // QuickVault key is deleted. All live envelopes carry this install's
+    // device ID, adopted from the first; one with another ID is not kept.
+    private var adopted = false
+    @Synchronized fun keep(envelope: ByteArray, enrolled: Long) {
+        if (envelope.size !in 63..1536 || envelope[0].toInt()!=1 || envelope[1].toInt()!=1) return
+        val id = envelope.copyOfRange(3,19)
+        if (!adopted) { device = id; adopted = true } else if (!java.security.MessageDigest.isEqual(device,id)) return
+        born[alias(envelope)] = enrolled
+    }
+    // Keys this process created or kept (in `born`) are live enrollments, not leftovers.
+    @Synchronized fun sweep() {
+        try { store.aliases().toList().filter { it.startsWith(prefix) && it !in born }.forEach { store.deleteEntry(it) } } catch (_:Exception) {}
     }
     fun available(): Boolean {
         if(android.os.Build.VERSION.SDK_INT < 30)return false

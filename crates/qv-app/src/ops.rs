@@ -1193,7 +1193,15 @@ pub(crate) fn run(
                 .peek(epoch, |ws| password(ws, WsField::Password))
                 .ok_or(AppError::InvalidInput)??;
             c.run_op(epoch, None, move |s, token, c| {
-                s.enroll_quick(&pw, policy, Some(token))?;
+                match s.enroll_quick(&pw, policy, Some(token)) {
+                    Err(CoreError::LimitExceeded) => {
+                        return Ok(on_ws(|ws| {
+                            ws.inputs.clear();
+                            ws.notice = Some(crate::workspace::QUICK_LIMIT);
+                        }));
+                    }
+                    done => done?,
+                }
                 c.set_quick_off(false);
                 Ok(on_ws(|ws| { ws.inputs.clear(); ws.notice = Some("Quick unlock is on. A restart of the phone, seven days, three failed attempts or a password change ask for the master password again."); }))
             })

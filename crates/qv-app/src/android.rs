@@ -674,23 +674,23 @@ impl qv_core::platform::AndroidKeystoreBackend for NativeKeystore {
             _ => Ok(()),
         }
     }
-    fn retain(&self, keep: Option<(&qv_core::SecretBytes, u64)>) {
-        let _ = call(|env, a| {
-            let (array, enrolled) = match keep {
-                Some((envelope, at)) => (
-                    JObject::from(env.byte_array_from_slice(envelope.expose_secret())?),
-                    i64::try_from(at).unwrap_or(i64::MAX),
-                ),
-                None => (JObject::null(), 0),
-            };
-            env.call_method(
-                a,
-                "qvQuickRetain",
-                "([BJ)V",
-                &[JValue::Object(&array), JValue::Long(enrolled)],
-            )
-            .map(|_| ())
-        });
+    fn retain(&self, keep: &[(&qv_core::SecretBytes, u64)]) {
+        // Each live envelope is kept, then every other key is swept; a
+        // failed keep call only means that key is swept (plan 0074).
+        for (envelope, at) in keep {
+            let _ = call(|env, a| {
+                let array = env.byte_array_from_slice(envelope.expose_secret())?;
+                let enrolled = i64::try_from(*at).unwrap_or(i64::MAX);
+                env.call_method(
+                    a,
+                    "qvQuickKeep",
+                    "([BJ)V",
+                    &[JValue::Object(&array), JValue::Long(enrolled)],
+                )
+                .map(|_| ())
+            });
+        }
+        let _ = call(|env, a| env.call_method(a, "qvQuickSweep", "()V", &[]).map(|_| ()));
     }
 }
 /// The quick-unlock policy state in the private no-backup root (0002 §5.4).
@@ -846,7 +846,7 @@ impl qv_core::platform::AndroidKeystoreBackend for FixtureKeystore {
     fn clear(&self) -> Result<(), PlatformError> {
         qv_core::platform::AndroidKeystoreBackend::clear(&NativeKeystore)
     }
-    fn retain(&self, keep: Option<(&qv_core::SecretBytes, u64)>) {
+    fn retain(&self, keep: &[(&qv_core::SecretBytes, u64)]) {
         qv_core::platform::AndroidKeystoreBackend::retain(&NativeKeystore, keep)
     }
 }

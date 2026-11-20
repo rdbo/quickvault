@@ -7,6 +7,18 @@ Dates are ISO 8601. Newest first within each section.
 
 ## Unreleased
 
+- 2026-11-20: Fingerprint unlock per vault (plan 0074, owner report). Each
+  vault on a phone can have its own fingerprint (or screen-lock) unlock, up
+  to 16, instead of one per device: turning it on for one no longer turns
+  it off for another. Each has its own key, seven-day limit and three
+  failed attempts; turning it off, a password change or removing the vault
+  from the list ends only that vault's. A restart of the phone still ends
+  them all. Settings shows only this vault's state (the "on for another
+  vault" banner and move button are gone), and "turned off" is remembered
+  per vault in the vault list instead of the preferences file. The
+  quick-unlock state file moves to version 2 and still reads version 1, so
+  an existing enrollment survives the update. Specs 0002 §5.1, §5.4 and
+  0009 §1.8 amended.
 - 2026-11-20: Fixed (owner reports): a list row's menu (right click, or a
   card's copy menu) near the end of the list opened below the visible list;
   it now opens above the row when there is no room below, and scrolls when

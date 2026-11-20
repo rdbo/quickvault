@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Device-local quick-unlock policy (0002 §5). The policy survives an app
-//! restart only in the backend's private, non-backed-up state file and only
-//! for the same boot (0002 §5.4, plan 0045); without a boot stamp it lasts
-//! for this process alone.
+//! Device-local quick-unlock policy (0002 §5). Each vault has its own
+//! enrollment, up to [`MAX_SLOTS`] on a device (plan 0074). The policy
+//! survives an app restart only in the backend's private, non-backed-up
+//! state file and only for the same boot (0002 §5.4, plan 0045); without a
+//! boot stamp it lasts for this process alone.
 use crate::{Cancellation, Keystore, PlatformError};
 use qv_crypto::SecretBytes;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -17,14 +18,20 @@ pub const MAX_PLAINTEXT: usize = 1024;
 pub const MAX_ENVELOPE: usize = 1536;
 /// Smallest native envelope: 35-byte header, 12-byte nonce, 16-byte tag.
 pub const MIN_ENVELOPE: usize = 63;
-/// Failed attempts that end the enrollment.
+/// Failed attempts that end a vault's enrollment.
 pub const MAX_FAILURES: u8 = 3;
+/// Vaults a device keeps enrolled at once (0002 §5.1, plan 0074).
+pub const MAX_SLOTS: usize = 16;
 const MAGIC: &[u8; 4] = b"QVQU";
-const STATE_VERSION: u8 = 1;
-const STATE_HEADER: usize = 4 + 1 + 1 + 4 + 8 + 1 + 36 + 2;
-/// Largest persisted state record read or written.
-pub const STATE_MAX: usize = 1600;
-const _: () = assert!(STATE_HEADER + MAX_ENVELOPE <= STATE_MAX);
+/// Version 1 held one record; version 2 a count and up to [`MAX_SLOTS`].
+const LEGACY_VERSION: u8 = 1;
+const STATE_VERSION: u8 = 2;
+/// Policy, boot count, boot uptime, failures, binding, envelope length.
+const RECORD_HEADER: usize = 1 + 4 + 8 + 1 + 36 + 2;
+/// Magic, version and record count.
+const STATE_HEADER: usize = 4 + 1 + 1;
+/// Largest persisted state file read or written.
+pub const STATE_MAX: usize = STATE_HEADER + MAX_SLOTS * (RECORD_HEADER + MAX_ENVELOPE);
 /// Authenticated vault and current password-slot identity, bound as AAD.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct QuickBinding {
@@ -109,21 +116,21 @@ pub trait AndroidKeystoreBackend: Send + Sync {
     fn boot(&self) -> Option<BootStamp> {
         None
     }
-    /// The persisted state record, at most [`STATE_MAX`] bytes.
+    /// The persisted state file, at most [`STATE_MAX`] bytes.
     fn load(&self) -> Option<Vec<u8>> {
         None
     }
-    /// Replace the persisted state record atomically.
+    /// Replace the persisted state file atomically.
     fn save(&self, _state: &[u8]) -> Result<(), PlatformError> {
         Err(PlatformError::Unavailable)
     }
-    /// Remove the persisted state record.
+    /// Remove the persisted state file.
     fn clear(&self) -> Result<(), PlatformError> {
         Ok(())
     }
-    /// Keep only this envelope's handle (with its enrollment uptime) and
-    /// destroy every other QuickVault handle; `None` destroys them all.
-    fn retain(&self, _keep: Option<(&SecretBytes, u64)>) {}
+    /// Keep only these envelopes' handles (each with its enrollment uptime)
+    /// and destroy every other QuickVault handle; empty destroys them all.
+    fn retain(&self, _keep: &[(&SecretBytes, u64)]) {}
 }
 struct Slot {
     binding: QuickBinding,
@@ -141,13 +148,10 @@ impl Slot {
     fn expired(&self) -> bool {
         self.offset.saturating_add(self.since.elapsed()) >= MAX_AGE || self.failures >= MAX_FAILURES
     }
-    /// The persisted record; no plaintext secret (the envelope is
+    /// Append the persisted record; no plaintext secret (the envelope is
     /// hardware-key ciphertext).
-    fn encode(&self, enrolled: BootStamp) -> Option<Vec<u8>> {
+    fn encode(&self, enrolled: BootStamp, out: &mut Vec<u8>) -> Option<()> {
         let len = u16::try_from(self.envelope.len()).ok()?;
-        let mut out = Vec::with_capacity(STATE_HEADER + self.envelope.len());
-        out.extend_from_slice(MAGIC);
-        out.push(STATE_VERSION);
         out.push(self.policy as u8);
         out.extend_from_slice(&enrolled.count.to_be_bytes());
         out.extend_from_slice(&enrolled.uptime_ms.to_be_bytes());
@@ -155,7 +159,7 @@ impl Slot {
         out.extend_from_slice(&self.binding.encode());
         out.extend_from_slice(&len.to_be_bytes());
         out.extend_from_slice(self.envelope.expose_secret());
-        Some(out)
+        Some(())
     }
 }
 /// A decoded state record, before the boot and age checks.
@@ -166,42 +170,65 @@ struct Stored {
     binding: QuickBinding,
     envelope: SecretBytes,
 }
-fn decode(b: &[u8]) -> Option<Stored> {
-    if b.len() < STATE_HEADER || b.len() > STATE_MAX || b.get(..4)? != MAGIC {
+/// The whole state file, or `None` when any part of it is malformed:
+/// a bad header or count, a bad record, two records for one vault or
+/// trailing bytes. A version-1 file is its one record.
+fn decode(b: &[u8]) -> Option<Vec<Stored>> {
+    if b.len() > STATE_MAX || b.get(..4)? != MAGIC {
         return None;
     }
-    if b[4] != STATE_VERSION {
+    let (count, mut rest) = match *b.get(4)? {
+        LEGACY_VERSION => (1, b.get(5..)?),
+        STATE_VERSION => (usize::from(*b.get(5)?), b.get(STATE_HEADER..)?),
+        _ => return None,
+    };
+    if count == 0 || count > MAX_SLOTS {
         return None;
     }
-    let policy = QuickPolicy::from_u8(b[5])?;
-    let count = u32::from_be_bytes(b.get(6..10)?.try_into().ok()?);
-    let uptime_ms = u64::from_be_bytes(b.get(10..18)?.try_into().ok()?);
-    let failures = b[18];
-    let binding = QuickBinding::decode(b.get(19..55)?)?;
-    let len = usize::from(u16::from_be_bytes(b.get(55..57)?.try_into().ok()?));
-    if !(MIN_ENVELOPE..=MAX_ENVELOPE).contains(&len)
-        || b.len() != STATE_HEADER + len
-        || failures >= MAX_FAILURES
-    {
+    let mut out: Vec<Stored> = Vec::with_capacity(count);
+    for _ in 0..count {
+        let (stored, next) = record(rest)?;
+        if out.iter().any(|s| s.binding.vault == stored.binding.vault) {
+            return None;
+        }
+        out.push(stored);
+        rest = next;
+    }
+    rest.is_empty().then_some(out)
+}
+fn record(b: &[u8]) -> Option<(Stored, &[u8])> {
+    let policy = QuickPolicy::from_u8(*b.first()?)?;
+    let count = u32::from_be_bytes(b.get(1..5)?.try_into().ok()?);
+    let uptime_ms = u64::from_be_bytes(b.get(5..13)?.try_into().ok()?);
+    let failures = *b.get(13)?;
+    let binding = QuickBinding::decode(b.get(14..50)?)?;
+    let len = usize::from(u16::from_be_bytes(
+        b.get(50..RECORD_HEADER)?.try_into().ok()?,
+    ));
+    if !(MIN_ENVELOPE..=MAX_ENVELOPE).contains(&len) || failures >= MAX_FAILURES {
         return None;
     }
+    let body = b.get(RECORD_HEADER..RECORD_HEADER + len)?;
     let envelope = SecretBytes::try_init(len, |out| {
-        out.copy_from_slice(&b[STATE_HEADER..]);
+        out.copy_from_slice(body);
         Ok::<(), PlatformError>(())
     })
     .ok()?;
-    Some(Stored {
-        policy,
-        enrolled: BootStamp { count, uptime_ms },
-        failures,
-        binding,
-        envelope,
-    })
+    Some((
+        Stored {
+            policy,
+            enrolled: BootStamp { count, uptime_ms },
+            failures,
+            binding,
+            envelope,
+        },
+        b.get(RECORD_HEADER + len..)?,
+    ))
 }
 /// Serialized trusted policy. No export, Debug or plaintext cache.
 pub struct AndroidKeystore {
     backend: Arc<dyn AndroidKeystoreBackend>,
-    slot: Mutex<Option<Slot>>,
+    slots: Mutex<Vec<Slot>>,
     loaded: std::sync::Once,
     serial: std::sync::atomic::AtomicU64,
 }
@@ -210,7 +237,7 @@ impl AndroidKeystore {
     pub fn new(backend: Arc<dyn AndroidKeystoreBackend>) -> Self {
         Self {
             backend,
-            slot: Mutex::new(None),
+            slots: Mutex::new(Vec::new()),
             loaded: std::sync::Once::new(),
             serial: std::sync::atomic::AtomicU64::new(0),
         }
@@ -221,75 +248,159 @@ impl AndroidKeystore {
             .wrapping_add(1)
     }
     /// The policy mutex, after the once-only restore of persisted state.
-    fn lock(&self) -> MutexGuard<'_, Option<Slot>> {
+    fn lock(&self) -> MutexGuard<'_, Vec<Slot>> {
         self.loaded.call_once(|| {
             let restored = self.restore();
-            let mut slot = self.slot.lock().unwrap_or_else(|p| p.into_inner());
-            if slot.is_none() {
-                *slot = restored;
+            let mut slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+            if slots.is_empty() {
+                *slots = restored;
             }
         });
-        self.slot.lock().unwrap_or_else(|p| p.into_inner())
+        self.slots.lock().unwrap_or_else(|p| p.into_inner())
     }
-    /// Restore a slot persisted during this boot; anything else clears the
-    /// state and destroys every QuickVault handle.
+    /// Restore the slots persisted during this boot. A record past its age
+    /// is dropped alone; anything else wrong (another boot, a clock that went
+    /// back, a malformed file, an unvalidated backend) clears the state and
+    /// destroys every QuickVault handle.
     /// Without a boot stamp nothing is persisted or touched.
-    fn restore(&self) -> Option<Slot> {
-        let now = self.backend.boot()?;
+    fn restore(&self) -> Vec<Slot> {
+        let Some(now) = self.backend.boot() else {
+            return Vec::new();
+        };
         let bytes = self.backend.load();
         let restored = (|| {
             let stored = decode(bytes.as_deref()?)?;
-            let age = now.uptime_ms.checked_sub(stored.enrolled.uptime_ms)?;
-            let offset = Duration::from_millis(age);
-            if !self.backend.validated() || now.count != stored.enrolled.count || offset >= MAX_AGE
-            {
+            if !self.backend.validated() {
                 return None;
             }
-            self.backend
-                .retain(Some((&stored.envelope, stored.enrolled.uptime_ms)));
-            Some(Slot {
-                binding: stored.binding,
-                policy: stored.policy,
-                envelope: stored.envelope,
-                offset,
-                since: Instant::now(),
-                enrolled: Some(stored.enrolled),
-                failures: stored.failures,
-                serial: self.next_serial(),
-            })
-        })();
-        if restored.is_none() {
-            if bytes.is_some() {
-                let _ = self.backend.clear();
+            let read = stored.len();
+            let mut slots = Vec::with_capacity(read);
+            for s in stored {
+                let age = now.uptime_ms.checked_sub(s.enrolled.uptime_ms)?;
+                if now.count != s.enrolled.count {
+                    return None;
+                }
+                let offset = Duration::from_millis(age);
+                if offset >= MAX_AGE {
+                    continue;
+                }
+                slots.push(Slot {
+                    binding: s.binding,
+                    policy: s.policy,
+                    envelope: s.envelope,
+                    offset,
+                    since: Instant::now(),
+                    enrolled: Some(s.enrolled),
+                    failures: s.failures,
+                    serial: self.next_serial(),
+                });
             }
-            self.backend.retain(None);
+            Some((slots, read))
+        })();
+        match restored {
+            Some((slots, read)) if !slots.is_empty() => {
+                let keep: Vec<(&SecretBytes, u64)> = slots
+                    .iter()
+                    .map(|s| (&s.envelope, s.enrolled.map_or(0, |e| e.uptime_ms)))
+                    .collect();
+                self.backend.retain(&keep);
+                // Rewritten without the expired records (and as version 2).
+                if slots.len() != read
+                    || bytes.as_deref().and_then(|b| b.get(4)) != Some(&STATE_VERSION)
+                {
+                    let _ = self.save(&slots);
+                }
+                slots
+            }
+            _ => {
+                if bytes.is_some() {
+                    let _ = self.backend.clear();
+                }
+                self.backend.retain(&[]);
+                Vec::new()
+            }
         }
-        restored
     }
-    /// Persist the slot (a no-op without a boot stamp).
-    fn persist(&self, slot: &Slot) -> Result<(), PlatformError> {
-        let Some(enrolled) = slot.enrolled else {
-            return Ok(());
-        };
-        if slot.envelope.len() < MIN_ENVELOPE {
-            return Err(PlatformError::InvalidInput);
+    /// Persist every slot that has a boot stamp; with none left, remove the
+    /// file. A no-op when no slot is persisted (no boot stamp).
+    fn save(&self, slots: &[Slot]) -> Result<(), PlatformError> {
+        let mut body = Vec::new();
+        let mut count = 0u8;
+        for s in slots {
+            let Some(enrolled) = s.enrolled else {
+                continue;
+            };
+            if s.envelope.len() < MIN_ENVELOPE {
+                return Err(PlatformError::InvalidInput);
+            }
+            s.encode(enrolled, &mut body)
+                .ok_or(PlatformError::InvalidInput)?;
+            count += 1;
         }
-        let bytes = slot.encode(enrolled).ok_or(PlatformError::InvalidInput)?;
+        if count == 0 {
+            return Ok(());
+        }
+        let mut bytes = Vec::with_capacity(STATE_HEADER + body.len());
+        bytes.extend_from_slice(MAGIC);
+        bytes.push(STATE_VERSION);
+        bytes.push(count);
+        bytes.extend_from_slice(&body);
         self.backend.save(&bytes)
     }
-    /// Clear the persisted state first, then destroy the handle, so a
-    /// restart never refers to a destroyed key.
-    fn destroy(&self, slot: &mut Option<Slot>) -> Result<(), PlatformError> {
-        if let Some(old) = slot.take() {
-            let cleared = if old.enrolled.is_some() {
-                self.backend.clear()
-            } else {
-                Ok(())
-            };
-            self.backend.delete(&old.envelope)?;
-            cleared?;
+    /// Save the slots after a persisted slot left: rewrite the file, or
+    /// remove it when no persisted slot remains. A failed rewrite removes
+    /// the file, so a restart never refers to a destroyed key (the other
+    /// slots then last for this process only).
+    fn forget(&self, slots: &[Slot]) -> Result<(), PlatformError> {
+        let result = if slots.iter().any(|s| s.enrolled.is_some()) {
+            self.save(slots)
+        } else {
+            self.backend.clear()
+        };
+        if result.is_err() {
+            return self.backend.clear().and(result);
         }
-        Ok(())
+        result
+    }
+    /// Remove one slot from the persisted state first, then destroy its
+    /// handle.
+    fn destroy(&self, slots: &mut Vec<Slot>, at: usize) -> Result<(), PlatformError> {
+        if at >= slots.len() {
+            return Ok(());
+        }
+        let old = slots.remove(at);
+        let saved = if old.enrolled.is_some() {
+            self.forget(slots)
+        } else {
+            Ok(())
+        };
+        self.backend.delete(&old.envelope)?;
+        saved
+    }
+    /// Clear the persisted state first, then destroy every handle.
+    fn destroy_all(&self, slots: &mut Vec<Slot>) -> Result<(), PlatformError> {
+        let old = std::mem::take(slots);
+        let cleared = if old.iter().any(|s| s.enrolled.is_some()) {
+            self.backend.clear()
+        } else {
+            Ok(())
+        };
+        let mut deleted = Ok(());
+        for s in &old {
+            if let Err(e) = self.backend.delete(&s.envelope) {
+                deleted = Err(e);
+            }
+        }
+        deleted.and(cleared)
+    }
+    /// This vault's slot, after removing it if it has expired.
+    fn find(&self, slots: &mut Vec<Slot>, vault: &[u8; 16]) -> Option<usize> {
+        let at = slots.iter().position(|s| s.binding.vault == *vault)?;
+        if slots[at].expired() {
+            let _ = self.destroy(slots, at);
+            return None;
+        }
+        Some(at)
     }
 }
 impl Keystore for AndroidKeystore {
@@ -302,17 +413,23 @@ impl Keystore for AndroidKeystore {
     fn unwrap(&self, _: &SecretBytes) -> Result<SecretBytes, PlatformError> {
         Err(PlatformError::Unavailable)
     }
-    fn binding(&self) -> Option<QuickBinding> {
-        let mut slot = self.lock();
-        if !self.available() || slot.as_ref().is_some_and(Slot::expired) {
-            let _ = self.destroy(&mut slot);
+    fn binding(&self, vault: &[u8; 16]) -> Option<QuickBinding> {
+        let mut slots = self.lock();
+        if !self.available() {
+            let _ = self.destroy_all(&mut slots);
             return None;
         }
-        slot.as_ref().map(|s| s.binding)
+        let at = self.find(&mut slots, vault)?;
+        Some(slots[at].binding)
     }
-    fn policy(&self) -> Option<QuickPolicy> {
-        self.binding()?;
-        self.lock().as_ref().map(|s| s.policy)
+    fn policy(&self, vault: &[u8; 16]) -> Option<QuickPolicy> {
+        let mut slots = self.lock();
+        if !self.available() {
+            let _ = self.destroy_all(&mut slots);
+            return None;
+        }
+        let at = self.find(&mut slots, vault)?;
+        Some(slots[at].policy)
     }
     fn enroll(
         &self,
@@ -321,13 +438,22 @@ impl Keystore for AndroidKeystore {
         secret: &SecretBytes,
         cancel: Cancellation,
     ) -> Result<(), PlatformError> {
-        let mut slot = self.lock();
-        self.destroy(&mut slot)?;
+        let mut slots = self.lock();
+        if let Some(at) = slots.iter().position(|s| s.binding.vault == binding.vault) {
+            self.destroy(&mut slots, at)?;
+        }
         if !self.available() {
             return Err(PlatformError::Unavailable);
         }
         if binding.generation == 0 || secret.is_empty() || secret.len() > MAX_PLAINTEXT {
             return Err(PlatformError::InvalidInput);
+        }
+        // Expired slots do not count against the limit.
+        while let Some(at) = slots.iter().position(Slot::expired) {
+            self.destroy(&mut slots, at)?;
+        }
+        if slots.len() >= MAX_SLOTS {
+            return Err(PlatformError::LimitExceeded);
         }
         if cancel() {
             return Err(PlatformError::Cancelled);
@@ -337,7 +463,7 @@ impl Keystore for AndroidKeystore {
             self.backend.delete(&envelope)?;
             return Err(PlatformError::Cancelled);
         }
-        let new = Slot {
+        slots.push(Slot {
             binding,
             policy,
             envelope,
@@ -346,14 +472,15 @@ impl Keystore for AndroidKeystore {
             enrolled: self.backend.boot(),
             failures: 0,
             serial: self.next_serial(),
-        };
+        });
         // Saved before success is reported; a failed save leaves no key.
-        if let Err(e) = self.persist(&new) {
-            let _ = self.backend.clear();
-            self.backend.delete(&new.envelope)?;
+        if let Err(e) = self.save(&slots) {
+            if let Some(new) = slots.pop() {
+                let _ = self.forget(&slots);
+                self.backend.delete(&new.envelope)?;
+            }
             return Err(e);
         }
-        *slot = Some(new);
         Ok(())
     }
     fn unlock_bound(
@@ -365,23 +492,25 @@ impl Keystore for AndroidKeystore {
         // copy the envelope, then release the policy mutex for the native
         // prompt so readiness queries never wait on it.
         let (serial, policy, envelope) = {
-            let mut slot = self.lock();
-            if !self.available()
-                || slot
-                    .as_ref()
-                    .is_none_or(|s| s.binding != binding || s.expired())
-            {
-                self.destroy(&mut slot)?;
+            let mut slots = self.lock();
+            if !self.available() {
+                self.destroy_all(&mut slots)?;
                 return Err(PlatformError::Unavailable);
             }
-            let Some(current) = slot.as_mut() else {
+            let Some(at) = self.find(&mut slots, &binding.vault) else {
                 return Err(PlatformError::Unavailable);
             };
-            current.failures += 1;
-            if let Err(e) = self.persist(current) {
-                current.failures -= 1;
+            // A changed generation or password keyslot: this vault's slot is stale.
+            if slots[at].binding != binding {
+                self.destroy(&mut slots, at)?;
+                return Err(PlatformError::Unavailable);
+            }
+            slots[at].failures += 1;
+            if let Err(e) = self.save(&slots) {
+                slots[at].failures -= 1;
                 return Err(e);
             }
+            let current = &slots[at];
             let envelope = SecretBytes::try_init(current.envelope.len(), |b| {
                 b.copy_from_slice(current.envelope.expose_secret());
                 Ok::<(), PlatformError>(())
@@ -395,37 +524,37 @@ impl Keystore for AndroidKeystore {
                 .open(binding, policy, &envelope, cancel.clone())
         };
         drop(envelope);
-        let mut slot = self.lock();
+        let mut slots = self.lock();
         // Invalidated or re-enrolled during the prompt: the result belongs to
         // no current policy and is discarded without touching the new slot.
-        let Some(current) = slot.as_mut().filter(|s| s.serial == serial) else {
+        let Some(at) = slots.iter().position(|s| s.serial == serial) else {
             return Err(PlatformError::Cancelled);
         };
         // A successful prompt whose result is cancelled before delivery is
         // also a dismissal, not a failed authentication (0002 §5.4).
         if result.is_ok() && cancel() {
-            current.failures -= 1;
-            let _ = self.persist(current);
+            slots[at].failures -= 1;
+            let _ = self.save(&slots);
             return Err(PlatformError::Cancelled);
         }
         match result {
             Ok(plain) if !plain.is_empty() && plain.len() <= MAX_PLAINTEXT => {
-                current.failures -= 1;
+                slots[at].failures -= 1;
                 // The attempt stays recorded if this save fails; still open.
-                let _ = self.persist(current);
+                let _ = self.save(&slots);
                 Ok(plain)
             }
             // A dismissal is not a failed attempt (0002 §5.4).
             Err(PlatformError::Cancelled) => {
-                current.failures -= 1;
-                let _ = self.persist(current);
+                slots[at].failures -= 1;
+                let _ = self.save(&slots);
                 Err(PlatformError::Cancelled)
             }
             result => {
-                if current.failures >= MAX_FAILURES
+                if slots[at].failures >= MAX_FAILURES
                     || matches!(result, Err(PlatformError::Unavailable))
                 {
-                    self.destroy(&mut slot)?;
+                    self.destroy(&mut slots, at)?;
                 }
                 match result {
                     Err(e) => Err(e),
@@ -434,8 +563,15 @@ impl Keystore for AndroidKeystore {
             }
         }
     }
-    fn invalidate(&self) -> Result<(), PlatformError> {
-        self.destroy(&mut self.lock())
+    fn invalidate(&self, vault: &[u8; 16]) -> Result<(), PlatformError> {
+        let mut slots = self.lock();
+        match slots.iter().position(|s| s.binding.vault == *vault) {
+            Some(at) => self.destroy(&mut slots, at),
+            None => Ok(()),
+        }
+    }
+    fn invalidate_all(&self) -> Result<(), PlatformError> {
+        self.destroy_all(&mut self.lock())
     }
 }
 
@@ -489,9 +625,10 @@ mod tests {
             Ok(())
         }
     }
+    const V: [u8; 16] = [1; 16];
     fn binding() -> QuickBinding {
         QuickBinding {
-            vault: [1; 16],
+            vault: V,
             generation: 1,
             password_version: [2; 16],
         }
@@ -521,28 +658,28 @@ mod tests {
         for _ in 0..3 {
             assert!(os.unlock_bound(binding(), cancel()).is_err());
         }
-        assert!(os.binding().is_none());
+        assert!(os.binding(&V).is_none());
         assert_eq!(backend.deletes.load(Ordering::SeqCst), 1);
         backend.fail.store(false, Ordering::SeqCst);
         os.enroll(binding(), QuickPolicy::Class3, &bytes(), cancel())
             .unwrap();
-        os.slot.lock().unwrap().as_mut().unwrap().since = Instant::now() - MAX_AGE;
-        assert!(os.binding().is_none());
+        os.slots.lock().unwrap()[0].since = Instant::now() - MAX_AGE;
+        assert!(os.binding(&V).is_none());
         os.enroll(binding(), QuickPolicy::DeviceCredential, &bytes(), cancel())
             .unwrap();
         let mut wrong = binding();
         wrong.generation += 1;
         assert!(os.unlock_bound(wrong, cancel()).is_err());
-        assert!(os.binding().is_none());
+        assert!(os.binding(&V).is_none());
         assert!(
             os.enroll(binding(), QuickPolicy::Class3, &bytes(), Arc::new(|| true))
                 .is_err()
         );
-        assert!(os.binding().is_none());
+        assert!(os.binding(&V).is_none());
         os.enroll(binding(), QuickPolicy::Class3, &bytes(), cancel())
             .unwrap();
-        os.invalidate().unwrap();
-        assert!(os.binding().is_none());
+        os.invalidate(&V).unwrap();
+        assert!(os.binding(&V).is_none());
         assert!(os.wrap(&bytes()).is_err());
         assert!(os.unwrap(&bytes()).is_err());
     }
@@ -566,8 +703,8 @@ mod tests {
                 os.unlock_bound(binding(), cancelled).err(),
                 Some(PlatformError::Cancelled)
             );
-            assert_eq!(os.slot.lock().unwrap().as_ref().unwrap().failures, 0);
-            assert!(os.binding() == Some(binding()));
+            assert_eq!(os.slots.lock().unwrap()[0].failures, 0);
+            assert!(os.binding(&V) == Some(binding()));
         }
         assert_eq!(backend.deletes.load(Ordering::SeqCst), 0);
         assert_eq!(
@@ -629,7 +766,7 @@ mod tests {
         };
         entered.recv().unwrap();
         // The prompt is in flight: readiness answers without waiting for it.
-        assert!(os.binding().is_some());
+        assert!(os.binding(&V).is_some());
         // Re-enrollment during the prompt replaces the slot; the old prompt's
         // plaintext must not be returned or charged to the new slot.
         os.enroll(binding(), QuickPolicy::DeviceCredential, &bytes(), cancel())
@@ -640,7 +777,7 @@ mod tests {
             Err(PlatformError::Cancelled)
         ));
         assert_eq!(
-            os.slot.lock().unwrap().as_ref().map(|s| s.failures),
+            os.slots.lock().unwrap().first().map(|s| s.failures),
             Some(0)
         );
         // Invalidation during a prompt likewise discards the late result.
@@ -649,13 +786,13 @@ mod tests {
             std::thread::spawn(move || os.unlock_bound(binding(), cancel()))
         };
         entered.recv().unwrap();
-        os.invalidate().unwrap();
+        os.invalidate(&V).unwrap();
         release.send(()).unwrap();
         assert!(matches!(
             worker.join().unwrap(),
             Err(PlatformError::Cancelled)
         ));
-        assert!(os.binding().is_none());
+        assert!(os.binding(&V).is_none());
         // An undisturbed prompt still succeeds and restores the attempt.
         os.enroll(binding(), QuickPolicy::Class3, &bytes(), cancel())
             .unwrap();
@@ -667,7 +804,7 @@ mod tests {
         release.send(()).unwrap();
         assert_eq!(worker.join().unwrap().unwrap().expose_secret(), b"test");
         assert_eq!(
-            os.slot.lock().unwrap().as_ref().map(|s| s.failures),
+            os.slots.lock().unwrap().first().map(|s| s.failures),
             Some(0)
         );
     }
@@ -688,7 +825,7 @@ mod tests {
             os.unlock_bound(binding(), cancel()),
             Err(PlatformError::Unavailable)
         ));
-        assert!(os.binding().is_none());
+        assert!(os.binding(&V).is_none());
         assert_eq!(backend.deletes.load(Ordering::SeqCst), 1);
     }
 
@@ -700,7 +837,7 @@ mod tests {
         open: Mutex<Option<PlatformError>>,
         save_fails: AtomicBool,
         deletes: AtomicUsize,
-        retained: Mutex<Vec<Option<u64>>>,
+        retained: Mutex<Vec<Vec<u64>>>,
         /// The state file seen while the prompt is open.
         during: Mutex<Option<Vec<u8>>>,
     }
@@ -758,8 +895,11 @@ mod tests {
             *self.state.lock().unwrap() = None;
             Ok(())
         }
-        fn retain(&self, keep: Option<(&SecretBytes, u64)>) {
-            self.retained.lock().unwrap().push(keep.map(|(_, t)| t));
+        fn retain(&self, keep: &[(&SecretBytes, u64)]) {
+            self.retained
+                .lock()
+                .unwrap()
+                .push(keep.iter().map(|(_, t)| *t).collect());
         }
     }
     fn disk() -> Arc<Disk> {
@@ -773,8 +913,9 @@ mod tests {
     fn set_boot(d: &Disk, count: u32, uptime_ms: u64) {
         *d.boot.lock().unwrap() = Some(BootStamp { count, uptime_ms });
     }
+    /// The first record's failed attempts.
     fn failures(state: &[u8]) -> u8 {
-        state[18]
+        state[STATE_HEADER + 13]
     }
 
     // 0012 §1: Hardware assumptions
@@ -786,13 +927,16 @@ mod tests {
             .unwrap();
         assert!(d.state.lock().unwrap().is_some());
         // The first process found no state and swept stale handles.
-        assert_eq!(std::mem::take(&mut *d.retained.lock().unwrap()), vec![None]);
+        assert_eq!(
+            std::mem::take(&mut *d.retained.lock().unwrap()),
+            vec![Vec::<u64>::new()]
+        );
         // A restart in the same boot keeps it, and keeps the key.
         set_boot(&d, 5, 60_000);
         let os = AndroidKeystore::new(d.clone());
-        assert!(os.binding() == Some(binding()));
-        assert_eq!(os.policy(), Some(QuickPolicy::Class3));
-        assert_eq!(*d.retained.lock().unwrap(), vec![Some(1_000)]);
+        assert!(os.binding(&V) == Some(binding()));
+        assert_eq!(os.policy(&V), Some(QuickPolicy::Class3));
+        assert_eq!(*d.retained.lock().unwrap(), vec![vec![1_000]]);
         assert_eq!(
             os.unlock_bound(binding(), cancel())
                 .unwrap()
@@ -811,22 +955,22 @@ mod tests {
             d.retained.lock().unwrap().clear();
             set_boot(&d, count, uptime);
             let os = AndroidKeystore::new(d.clone());
-            assert!(os.binding().is_none(), "boot {count} uptime {uptime}");
+            assert!(os.binding(&V).is_none(), "boot {count} uptime {uptime}");
             assert!(d.state.lock().unwrap().is_none());
-            assert_eq!(*d.retained.lock().unwrap(), vec![None]);
+            assert_eq!(*d.retained.lock().unwrap(), vec![Vec::<u64>::new()]);
         }
         // No boot stamp: nothing persisted is trusted, or touched.
         *d.state.lock().unwrap() = stale.clone();
         d.retained.lock().unwrap().clear();
         *d.boot.lock().unwrap() = None;
-        assert!(AndroidKeystore::new(d.clone()).binding().is_none());
+        assert!(AndroidKeystore::new(d.clone()).binding(&V).is_none());
         assert_eq!(*d.state.lock().unwrap(), stale);
         assert!(d.retained.lock().unwrap().is_empty());
         // No state file: every leftover handle is destroyed.
         *d.state.lock().unwrap() = None;
         set_boot(&d, 5, 2_000);
-        assert!(AndroidKeystore::new(d.clone()).binding().is_none());
-        assert_eq!(*d.retained.lock().unwrap(), vec![None]);
+        assert!(AndroidKeystore::new(d.clone()).binding(&V).is_none());
+        assert_eq!(*d.retained.lock().unwrap(), vec![Vec::<u64>::new()]);
     }
 
     // 0012 §1: Hardware assumptions
@@ -837,38 +981,211 @@ mod tests {
             .enroll(binding(), QuickPolicy::Class3, &bytes(), cancel())
             .unwrap();
         let good = d.state.lock().unwrap().clone().unwrap();
-        assert_eq!(good.len(), STATE_HEADER + MIN_ENVELOPE);
+        assert_eq!(good.len(), STATE_HEADER + RECORD_HEADER + MIN_ENVELOPE);
+        // The record starts after the magic, version and count.
+        let r = STATE_HEADER;
         let mut bad: Vec<Vec<u8>> = vec![
             Vec::new(),
             good[..STATE_HEADER].to_vec(),
+            good[..r + RECORD_HEADER].to_vec(),
             good[..good.len() - 1].to_vec(),
             [good.clone(), vec![0]].concat(),
             vec![0; STATE_MAX + 1],
+            // Two records for one vault.
+            [&good[..5], &[2], &good[r..], &good[r..]].concat(),
         ];
-        for (at, value) in [(0, b'X'), (4, 2), (5, 0), (5, 3), (18, 3), (19 + 16, 0)] {
+        for (at, value) in [
+            (0, b'X'),
+            (4, 0),
+            (4, 3),
+            (5, 0),
+            (5, 2),
+            (5, MAX_SLOTS as u8 + 1),
+            (r, 0),
+            (r, 3),
+            (r + 13, 3),
+            (r + 14 + 16, 0),
+        ] {
             let mut b = good.clone();
             b[at] = value;
-            if at == 19 + 16 {
-                b[19 + 16..19 + 20].fill(0); // generation 0
+            if at == r + 14 + 16 {
+                b[r + 30..r + 34].fill(0); // generation 0
             }
             bad.push(b);
         }
+        let len = r + 50..r + RECORD_HEADER;
         let mut short = good.clone();
-        short[55..57].copy_from_slice(&((MIN_ENVELOPE - 1) as u16).to_be_bytes());
+        short[len.clone()].copy_from_slice(&((MIN_ENVELOPE - 1) as u16).to_be_bytes());
         short.pop();
         bad.push(short);
         let mut long = good.clone();
-        long[55..57].copy_from_slice(&((MAX_ENVELOPE + 1) as u16).to_be_bytes());
-        long.resize(STATE_HEADER + MAX_ENVELOPE + 1, 0);
+        long[len].copy_from_slice(&((MAX_ENVELOPE + 1) as u16).to_be_bytes());
+        long.resize(r + RECORD_HEADER + MAX_ENVELOPE + 1, 0);
         bad.push(long);
+        // A version-1 file is one record with no count; trailing bytes are not.
+        let legacy = [&good[..4], &[LEGACY_VERSION], &good[r..]].concat();
+        bad.push([legacy.clone(), vec![0]].concat());
         for b in bad {
             *d.state.lock().unwrap() = Some(b.clone());
             d.retained.lock().unwrap().clear();
             let os = AndroidKeystore::new(d.clone());
-            assert!(os.binding().is_none(), "{} bytes", b.len());
+            assert!(os.binding(&V).is_none(), "{} bytes", b.len());
             assert!(d.state.lock().unwrap().is_none());
-            assert_eq!(*d.retained.lock().unwrap(), vec![None]);
+            assert_eq!(*d.retained.lock().unwrap(), vec![Vec::<u64>::new()]);
         }
+        // The version-1 file itself is read and rewritten as version 2, so
+        // an enrollment from before plan 0074 survives the update.
+        *d.state.lock().unwrap() = Some(legacy);
+        d.retained.lock().unwrap().clear();
+        let os = AndroidKeystore::new(d.clone());
+        assert!(os.binding(&V) == Some(binding()));
+        assert_eq!(*d.retained.lock().unwrap(), vec![vec![1_000]]);
+        assert_eq!(d.state.lock().unwrap().as_deref(), Some(&good[..]));
+    }
+
+    fn vault(n: u8) -> QuickBinding {
+        QuickBinding {
+            vault: [n; 16],
+            generation: 1,
+            password_version: [n; 16],
+        }
+    }
+
+    // 0012 §1: Hardware assumptions
+    #[test]
+    fn each_vault_keeps_its_own_enrollment_attempts_and_age() {
+        let d = disk();
+        let os = AndroidKeystore::new(d.clone());
+        let (a, b) = (vault(1), vault(2));
+        os.enroll(a, QuickPolicy::Class3, &bytes(), cancel())
+            .unwrap();
+        os.enroll(b, QuickPolicy::DeviceCredential, &bytes(), cancel())
+            .unwrap();
+        assert!(os.binding(&a.vault) == Some(a) && os.binding(&b.vault) == Some(b));
+        assert_eq!(os.policy(&a.vault), Some(QuickPolicy::Class3));
+        assert_eq!(os.policy(&b.vault), Some(QuickPolicy::DeviceCredential));
+        assert!(os.binding(&[3; 16]).is_none());
+        // Re-enrolling one replaces only its own key.
+        os.enroll(a, QuickPolicy::DeviceCredential, &bytes(), cancel())
+            .unwrap();
+        assert_eq!(d.deletes.load(Ordering::SeqCst), 1);
+        assert_eq!(os.policy(&a.vault), Some(QuickPolicy::DeviceCredential));
+        assert!(os.binding(&b.vault) == Some(b));
+        // Both survive a restart in the same boot, each with its own key.
+        set_boot(&d, 5, 60_000);
+        d.retained.lock().unwrap().clear();
+        let os = AndroidKeystore::new(d.clone());
+        assert!(os.binding(&a.vault) == Some(a) && os.binding(&b.vault) == Some(b));
+        assert_eq!(*d.retained.lock().unwrap(), vec![vec![1_000, 1_000]]);
+        // Lockouts on one end only its enrollment.
+        *d.open.lock().unwrap() = Some(PlatformError::Denied);
+        for _ in 0..MAX_FAILURES {
+            assert!(os.unlock_bound(a, cancel()).is_err());
+        }
+        assert!(os.binding(&a.vault).is_none());
+        assert!(os.binding(&b.vault) == Some(b));
+        assert_eq!(d.deletes.load(Ordering::SeqCst), 2);
+        *d.open.lock().unwrap() = None;
+        assert_eq!(
+            os.unlock_bound(b, cancel()).unwrap().expose_secret(),
+            b"test"
+        );
+        // A stale binding (another generation) ends only that vault's slot.
+        os.enroll(a, QuickPolicy::Class3, &bytes(), cancel())
+            .unwrap();
+        let mut rotated = b;
+        rotated.generation += 1;
+        assert!(os.unlock_bound(rotated, cancel()).is_err());
+        assert!(os.binding(&b.vault).is_none());
+        assert!(os.binding(&a.vault) == Some(a));
+        // Turning one off leaves the other, in memory and on disk.
+        os.enroll(b, QuickPolicy::Class3, &bytes(), cancel())
+            .unwrap();
+        os.invalidate(&a.vault).unwrap();
+        assert!(os.binding(&a.vault).is_none() && os.binding(&b.vault) == Some(b));
+        let os = AndroidKeystore::new(d.clone());
+        assert!(os.binding(&a.vault).is_none() && os.binding(&b.vault) == Some(b));
+        // Seven days end each enrollment on its own; the file keeps the rest.
+        os.enroll(a, QuickPolicy::Class3, &bytes(), cancel())
+            .unwrap();
+        os.slots
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|s| s.binding == b)
+            .unwrap()
+            .since = Instant::now() - MAX_AGE;
+        assert!(os.binding(&b.vault).is_none() && os.binding(&a.vault) == Some(a));
+        assert_eq!(d.state.lock().unwrap().as_ref().unwrap()[5], 1);
+        // The last one turned off removes the file.
+        os.invalidate(&a.vault).unwrap();
+        assert!(d.state.lock().unwrap().is_none());
+    }
+
+    // 0012 §1: Hardware assumptions
+    #[test]
+    fn a_restart_drops_expired_records_alone_and_a_new_boot_drops_all() {
+        let d = disk();
+        let os = AndroidKeystore::new(d.clone());
+        os.enroll(vault(1), QuickPolicy::Class3, &bytes(), cancel())
+            .unwrap();
+        set_boot(&d, 5, 1_000 + MAX_AGE.as_millis() as u64 - 10);
+        os.enroll(vault(2), QuickPolicy::Class3, &bytes(), cancel())
+            .unwrap();
+        let both = d.state.lock().unwrap().clone();
+        // The first is seven days old; the second is not.
+        set_boot(&d, 5, 1_000 + MAX_AGE.as_millis() as u64);
+        d.retained.lock().unwrap().clear();
+        let os = AndroidKeystore::new(d.clone());
+        assert!(os.binding(&[1; 16]).is_none());
+        assert!(os.binding(&[2; 16]) == Some(vault(2)));
+        assert_eq!(
+            *d.retained.lock().unwrap(),
+            vec![vec![1_000 + MAX_AGE.as_millis() as u64 - 10]]
+        );
+        assert_eq!(d.state.lock().unwrap().as_ref().unwrap()[5], 1);
+        // Another boot ends every enrollment and every key.
+        *d.state.lock().unwrap() = both;
+        d.retained.lock().unwrap().clear();
+        set_boot(&d, 6, 5_000);
+        let os = AndroidKeystore::new(d.clone());
+        assert!(os.binding(&[1; 16]).is_none() && os.binding(&[2; 16]).is_none());
+        assert!(d.state.lock().unwrap().is_none());
+        assert_eq!(*d.retained.lock().unwrap(), vec![Vec::<u64>::new()]);
+    }
+
+    // 0012 §1: Hardware assumptions
+    #[test]
+    fn a_device_keeps_at_most_sixteen_enrolled_vaults() {
+        let d = disk();
+        let os = AndroidKeystore::new(d.clone());
+        for n in 1..=MAX_SLOTS as u8 {
+            os.enroll(vault(n), QuickPolicy::Class3, &bytes(), cancel())
+                .unwrap();
+        }
+        let full = d.state.lock().unwrap().clone().unwrap();
+        assert!(full.len() <= STATE_MAX);
+        assert_eq!(full[5], MAX_SLOTS as u8);
+        // A seventeenth is refused; nothing is moved or evicted.
+        let extra = vault(MAX_SLOTS as u8 + 1);
+        assert_eq!(
+            os.enroll(extra, QuickPolicy::Class3, &bytes(), cancel()),
+            Err(PlatformError::LimitExceeded)
+        );
+        assert_eq!(d.deletes.load(Ordering::SeqCst), 0);
+        assert!((1..=MAX_SLOTS as u8).all(|n| os.binding(&[n; 16]).is_some()));
+        // Re-enrolling one already counted is fine.
+        os.enroll(vault(3), QuickPolicy::Class3, &bytes(), cancel())
+            .unwrap();
+        // An expired slot makes room.
+        os.slots.lock().unwrap()[0].since = Instant::now() - MAX_AGE;
+        os.enroll(extra, QuickPolicy::Class3, &bytes(), cancel())
+            .unwrap();
+        assert!(os.binding(&extra.vault).is_some());
+        // The full file is read back whole.
+        let os = AndroidKeystore::new(d.clone());
+        assert!(os.binding(&extra.vault).is_some());
+        assert!((2..=MAX_SLOTS as u8).all(|n| os.binding(&[n; 16]).is_some()));
     }
 
     // 0012 §1: Hardware assumptions
@@ -889,12 +1206,12 @@ mod tests {
             assert_eq!(failures(d.during.lock().unwrap().as_ref().unwrap()), 1);
             assert_eq!(failures(d.state.lock().unwrap().as_ref().unwrap()), 0);
         }
-        assert!(os.binding().is_some());
+        assert!(os.binding(&V).is_some());
         // A prompt killed with the process counts after the restart.
         let killed = d.during.lock().unwrap().clone();
         *d.state.lock().unwrap() = killed;
         let os = AndroidKeystore::new(d.clone());
-        assert!(os.binding().is_some());
+        assert!(os.binding(&V).is_some());
         // Lockouts count; the third ends the enrollment.
         *d.open.lock().unwrap() = Some(PlatformError::Denied);
         assert!(matches!(
@@ -906,7 +1223,7 @@ mod tests {
             os.unlock_bound(binding(), cancel()),
             Err(PlatformError::Denied)
         ));
-        assert!(os.binding().is_none());
+        assert!(os.binding(&V).is_none());
         assert!(d.state.lock().unwrap().is_none());
         assert_eq!(d.deletes.load(Ordering::SeqCst), 1);
     }
@@ -921,7 +1238,7 @@ mod tests {
             os.enroll(binding(), QuickPolicy::Class3, &bytes(), cancel())
                 .is_err()
         );
-        assert!(os.binding().is_none());
+        assert!(os.binding(&V).is_none());
         assert_eq!(d.deletes.load(Ordering::SeqCst), 1);
         d.save_fails.store(false, Ordering::SeqCst);
         os.enroll(binding(), QuickPolicy::Class3, &bytes(), cancel())
@@ -934,8 +1251,8 @@ mod tests {
         assert_eq!(failures(d.state.lock().unwrap().as_ref().unwrap()), 0);
         // Invalidation clears the state before the key goes.
         d.save_fails.store(false, Ordering::SeqCst);
-        os.invalidate().unwrap();
+        os.invalidate(&V).unwrap();
         assert!(d.state.lock().unwrap().is_none());
-        assert!(AndroidKeystore::new(d.clone()).binding().is_none());
+        assert!(AndroidKeystore::new(d.clone()).binding(&V).is_none());
     }
 }

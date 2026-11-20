@@ -4,9 +4,7 @@
 //! fake OS (lifecycle and a recording clipboard). All values are synthetic.
 // Tests fail loudly on fixture errors; never touch an existing user vault.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use crate::controller::{
-    Action, AppError, Controller, FormEpoch, InputField, Phase, QuickHolder, private_dir,
-};
+use crate::controller::{Action, AppError, Controller, FormEpoch, InputField, Phase, private_dir};
 use crate::views;
 use crate::workspace::{
     ConfirmKind, CopyKey, Pane, Report, RevealKey, Screen, Workspace, WsAction, WsField,
@@ -1614,7 +1612,6 @@ fn protection_acknowledgement_is_explicit_remembered_and_status_bound() {
     Prefs {
         theme: Theme::Light,
         protection: Some("svwvhvl1c1p0".into()),
-        quick_off: false,
     }
     .save(&env.dir)
     .unwrap();
@@ -2211,22 +2208,19 @@ fn quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only() 
     env.wait();
     assert_eq!(env.c.open_vault().unwrap().name, "Second");
     assert!(env.c.quick_ready_for(&first));
-    // The device keeps one enrollment (plan 0072): Second's Settings names
-    // the vault that has it, and a password unlock of Second offers nothing.
-    let first_name = env
-        .c
-        .vaults()
-        .into_iter()
-        .find(|v| v.path == first)
-        .unwrap()
-        .name;
-    let elsewhere = QuickHolder::Other(Some(first_name.clone()));
-    assert_eq!(env.c.quick_holder(), elsewhere);
+    // Each vault has its own enrollment (plan 0074): Second has none yet,
+    // and its password unlock offers one without touching the first's.
+    assert_eq!(env.c.quick_policy(), None);
+    assert!(!env.c.quick_open());
+    let second = env.c.open_vault().unwrap().path;
     env.c.lock();
     env.unlock(PASSWORD);
     page(&env);
-    assert_eq!(env.notice(), None);
-    assert_eq!(env.c.quick_holder(), elsewhere);
+    assert_eq!(
+        env.notice(),
+        Some("Fingerprint unlock is on for this vault.")
+    );
+    assert!(env.c.quick_open());
     assert!(env.c.quick_ready_for(&first));
     page(&env);
     assert_eq!(opened.load(Ordering::SeqCst), 2);
@@ -2237,47 +2231,42 @@ fn quick_unlock_is_offered_after_a_password_unlock_and_prompts_on_return_only() 
     page(&env);
     assert_eq!(opened.load(Ordering::SeqCst), 3);
     assert_eq!(env.c.open_vault().unwrap().path, first);
+    assert!(env.c.quick_open());
     env.c.lock();
     page(&env);
     assert_eq!(opened.load(Ordering::SeqCst), 3);
-    // Turning it off in Settings stops the offer after a password unlock.
+    assert!(env.c.quick_ready_for(&second));
+    // Turning it off in the first vault's Settings ends only its own and
+    // stops the offer for it alone.
     env.unlock(PASSWORD);
+    page(&env);
+    assert_eq!(env.notice(), None, "an enrolled vault is not offered again");
     env.c
         .navigate(env.epoch(), Screen::Settings(Pane::Password));
     env.act(WsAction::DisableQuick);
     assert_eq!(env.c.quick_policy(), None);
-    assert!(crate::prefs::Prefs::load(&env.dir).quick_off);
+    let list = crate::vaults::VaultList::load(&env.dir);
+    assert!(list.quick_off.contains(&first) && !list.quick_off.contains(&second));
     env.c.lock();
+    assert!(!env.c.quick_ready_for(&first) && env.c.quick_ready_for(&second));
     env.unlock(PASSWORD);
     page(&env);
+    assert_eq!(env.notice(), None);
     assert_eq!(env.c.quick_policy(), None);
-    assert_eq!(env.c.quick_holder(), QuickHolder::None);
-    // Moving it (plan 0072): enrolling the first vault again in Settings,
-    // then Second from its own Settings, ends the first vault's enrollment.
-    env.put(WsField::Password, PASSWORD);
-    env.act(WsAction::EnrollQuick(QuickPolicy::Class3));
-    assert_eq!(env.c.quick_holder(), QuickHolder::Open);
-    let second = env
-        .c
-        .vaults()
-        .into_iter()
-        .find(|v| v.name == "Second")
-        .unwrap()
-        .path;
-    assert!(
-        env.c
-            .switch_vault(env.epoch(), crate::controller::SwitchTo::Vault(second))
-    );
-    env.unlock(PASSWORD);
-    page(&env);
-    assert_eq!(env.c.quick_holder(), QuickHolder::Other(Some(first_name)));
-    env.c
-        .navigate(env.epoch(), Screen::Settings(Pane::Password));
+    // Turning it on again in Settings clears that choice.
     env.put(WsField::Password, PASSWORD);
     env.act(WsAction::EnrollQuick(QuickPolicy::Class3));
     assert_eq!(env.error(), None);
-    assert_eq!(env.c.quick_holder(), QuickHolder::Open);
-    assert!(!env.c.quick_ready_for(&first));
+    assert!(env.c.quick_open());
+    assert!(
+        crate::vaults::VaultList::load(&env.dir)
+            .quick_off
+            .is_empty()
+    );
+    // Removing Second from this device's list ends its enrollment only.
+    env.c.lock();
+    env.c.forget_vault(env.epoch(), &second);
+    assert!(!env.c.quick_ready_for(&second) && env.c.quick_ready_for(&first));
 }
 
 /// A conflict on the entry "Twice" (plan 0062): a copy of this vault (the

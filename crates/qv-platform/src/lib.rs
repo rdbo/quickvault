@@ -139,15 +139,18 @@ pub trait Keystore: Send + Sync {
     fn wrap(&self, secret: &SecretBytes) -> Result<SecretBytes, PlatformError>;
     /// Require OS authentication and return protected bytes.
     fn unwrap(&self, envelope: &SecretBytes) -> Result<SecretBytes, PlatformError>;
-    /// The live trusted policy binding, or None after state loss/expiry.
-    fn binding(&self) -> Option<QuickBinding> {
+    /// This vault's live trusted policy binding, or None after state
+    /// loss/expiry. Each vault has its own (0002 §5.1, plan 0074).
+    fn binding(&self, _vault: &[u8; 16]) -> Option<QuickBinding> {
         None
     }
-    /// The policy of the live binding, if any.
-    fn policy(&self) -> Option<QuickPolicy> {
+    /// The policy of this vault's live binding, if any.
+    fn policy(&self, _vault: &[u8; 16]) -> Option<QuickPolicy> {
         None
     }
     /// Enroll only following master-password reauthentication in core.
+    /// It replaces only the same vault's enrollment; past the device limit
+    /// it fails with `LimitExceeded`.
     fn enroll(
         &self,
         _: QuickBinding,
@@ -161,8 +164,12 @@ pub trait Keystore: Send + Sync {
     fn unlock_bound(&self, _: QuickBinding, _: Cancellation) -> Result<SecretBytes, PlatformError> {
         Err(PlatformError::Unavailable)
     }
-    /// Drop device-local state and destroy associated keystore handles.
-    fn invalidate(&self) -> Result<(), PlatformError> {
+    /// Drop this vault's device-local state and destroy its keystore handle.
+    fn invalidate(&self, _vault: &[u8; 16]) -> Result<(), PlatformError> {
+        Ok(())
+    }
+    /// Drop every vault's state and destroy every keystore handle.
+    fn invalidate_all(&self) -> Result<(), PlatformError> {
         Ok(())
     }
 }

@@ -590,34 +590,15 @@ fn guidance(g: qv_ui_api::Guidance) -> impl IntoView {
 /// The quick-unlock card for the current policy (plan 0068). The device
 /// keeps one enrollment; while another vault holds it, this vault's card
 /// says so and offers to move it here (plan 0072).
-fn quick_card(policy: Option<QuickPolicy>, elsewhere: Option<String>) -> impl IntoView {
+fn quick_card(policy: Option<QuickPolicy>) -> impl IntoView {
     let enroll = |p: QuickPolicy| act(WsAct::EnrollQuick(p));
     let password =
         || view! { <Input field=WsField::Password label="Master password" kind=Kind::Secret/> };
     let expiry = || view! { <p class="hint">"Restarting the phone, seven days, three failed attempts or a password change ask for the master password again."</p> };
-    if let (Some(held), Some(other)) = (policy, elsewhere) {
-        let what = match held {
-            QuickPolicy::Class3 => "Fingerprint",
-            QuickPolicy::DeviceCredential => "Screen-lock",
-        };
-        let vault = if other.is_empty() {
-            "another vault".to_owned()
-        } else {
-            format!("\u{201c}{other}\u{201d}")
-        };
-        return view! {
-            <div class="banner" id="quick-elsewhere"><Svg icon=Icon::Finger/><span>{format!("Off for this vault. {what} unlock is on for {vault}; this phone keeps it for one vault at a time, so turning it on here turns it off there.")}</span></div>
-            {expiry()}
-            {password()}
-            <div class="actions stack">
-                <button class="btn primary" id="quick-move" data-qv-clear="true" on:click=enroll(QuickPolicy::Class3)><Svg icon=Icon::Finger/>"Use fingerprint for this vault"</button>
-                <button class="btn" data-qv-clear="true" on:click=enroll(QuickPolicy::DeviceCredential)>"Use your screen lock PIN or pattern instead (lower protection)…"</button>
-            </div>
-        }.into_any();
-    }
+    // Each vault has its own (plan 0074): this card is this vault's only.
     match policy {
         None => view! {
-            <p class="hint">"Off. Enter your master password to turn on fingerprint unlock."</p>
+            <p class="hint">"Off for this vault. Enter your master password to turn on fingerprint unlock."</p>
             {expiry()}
             {password()}
             <div class="actions stack">
@@ -626,7 +607,7 @@ fn quick_card(policy: Option<QuickPolicy>, elsewhere: Option<String>) -> impl In
             </div>
         }.into_any(),
         Some(QuickPolicy::Class3) => view! {
-            <div class="banner ok" id="quick-on"><Svg icon=Icon::Finger/><span>"Fingerprint unlock is on. The locked screen asks for your fingerprint first."</span></div>
+            <div class="banner ok" id="quick-on"><Svg icon=Icon::Finger/><span>"Fingerprint unlock is on for this vault. The locked screen asks for your fingerprint first."</span></div>
             {expiry()}
             <div class="actions stack"><button class="btn" id="quick-off" on:click=act(WsAct::DisableQuick)>"Turn off fingerprint unlock"</button></div>
             <div class="quick-alt">
@@ -758,14 +739,14 @@ fn settings(body: Memo<Option<PageBody>>, pane: Pane) -> impl IntoView {
                 Some(SettingsBody::Password(p)) => Some(p.clone()),
                 _ => None,
             }));
-            let policy = Memo::new(move |_| p.with(|p| p.as_ref().map(|p| (p.quick_available, p.policy, p.elsewhere.clone(), p.autofill))));
+            let policy = Memo::new(move |_| p.with(|p| p.as_ref().map(|p| (p.quick_available, p.policy, p.autofill))));
             let g = Memo::new(move |_| p.with(|p| p.as_ref().map(|p| p.guidance.clone())));
             view! {
                 {head("Password and quick unlock".into(), String::new(), nested)}
-                {move || policy.get().map(|(available, policy, elsewhere, autofill)| view! {
+                {move || policy.get().map(|(available, policy, autofill)| view! {
                     <div class="group-t">"QUICK UNLOCK"</div>
                     <div class="card card-pad">
-                        {if available { quick_card(policy, elsewhere).into_any() } else {
+                        {if available { quick_card(policy).into_any() } else {
                             view! { <p class="hint">"Unavailable: this device has no supported fingerprint or screen lock for QuickVault. The master password still works."</p> }.into_any()
                         }}
                     </div>

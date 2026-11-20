@@ -164,6 +164,8 @@ pub struct Core {
     pub(crate) platform: Option<crate::platform::PlatformPolicy>,
     /// Why the last quick unlock failed, for the user's message (plan 0063).
     pub(crate) quick_failure: std::sync::Mutex<Option<crate::QuickFailure>>,
+    /// The vault of the last quick-unlock attempt (plan 0074).
+    pub(crate) quick_vault: std::sync::Mutex<Option<[u8; 16]>>,
 }
 
 impl core::fmt::Debug for Core {
@@ -191,6 +193,7 @@ impl Core {
             snapshots: config.snapshots.map(Arc::new),
             platform: None,
             quick_failure: std::sync::Mutex::new(None),
+            quick_vault: std::sync::Mutex::new(None),
         }
     }
 

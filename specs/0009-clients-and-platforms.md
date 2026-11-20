@@ -111,8 +111,7 @@ release, but no longer gates the feature.
 - **Preferences.** The app keeps one non-secret preferences file in its
   private state directory:
   - the theme (dark, light or follow the system);
-  - the protection status the user last acknowledged;
-  - `quick=off` once the user turned quick unlock off (no vault data).
+  - the protection status the user last acknowledged.
 
   It is bounded (at most 256 bytes), parsed strictly, written to a mode-0600
   temporary file and renamed into place, and never followed through a link.
@@ -200,6 +199,10 @@ release, but no longer gates the feature.
       can show it.
     - A vault never opened on this device shows its file name until then.
     - Files are never renamed.
+  - **Quick unlock turned off** (plan 0074): the private list also marks
+    each remembered vault whose quick unlock the user turned off here, so
+    its password unlocks offer nothing; a `quick=off` preference from before
+    is ignored.
   - **Create:** a vault is created by name in a default folder; its file
     starts as `<name>.qvault`.
     - Linux: `$XDG_DATA_HOME/quickvault/vaults` (absolute only) or
@@ -341,16 +344,17 @@ release, but no longer gates the feature.
   system prompt opens by itself when the app starts or returns to the
   foreground (not after a manual lock), only once the locked screen itself
   is drawn, and the master password field below
-  stays usable, unfocused, after a dismissal. The device keeps one
-  enrollment, for one vault. After a master-password unlock on a device
-  that supports it, with no enrollment on the device and quick unlock not
-  turned off, the app asks the system to enroll biometric quick unlock with
-  that password; dismissing skips it until the next password unlock. While
-  another vault holds the enrollment, nothing moves it by itself: the open
-  vault's Settings says quick unlock is off for it, names the vault that
-  has it, and offers to enroll this vault instead, which ends the other
-  vault's enrollment (owner report, 2026-11-19, plan 0072). The
-  device-credential policy is offered only in Settings.
+  stays usable, unfocused, after a dismissal. Each vault has its own
+  enrollment, independent of the others (0002 §5.1; owner, 2026-11-20,
+  plan 0074). After a master-password unlock on a device that supports it,
+  with no enrollment for this vault and quick unlock not turned off for it,
+  the app asks the system to enroll biometric quick unlock with that
+  password; dismissing skips it until the next password unlock. A vault's
+  Settings shows and changes only its own quick unlock; turning it off
+  stops the offer for that vault only. At the device limit (16) enrolling
+  is refused with a message to turn one off first. Removing a vault from
+  this device's list removes its enrollment. The device-credential policy
+  is offered only in Settings.
 - **Sync page** (named Devices before 2026-11-07). It names the vault that
   will be synced, with a way to change it, because phones show no title
   bar; the code window and a running sync name it too. Two large choices,
@@ -674,6 +678,10 @@ does not establish input cleanup, keystore enforcement or autofill-origin trust.
 
 ## Changelog
 
+- 2026-11-20: §1.8: quick unlock per vault: each vault's enrollment, offer
+  and Settings are its own, replacing the one-enrollment rule of
+  2026-11-19; "turned off" moves from the preferences file to the vault
+  list (owner report, plan 0074).
 - 2026-11-20: §1.8 item list actions: a row's menu and copy menu copy its
   current two-factor code (owner request).
 - 2026-11-20: §1.8 item editor: two-factor codes get a login row, a

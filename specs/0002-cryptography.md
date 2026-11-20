@@ -208,6 +208,9 @@ stored there in attackable form.
 5.1. Opt-in, device-local. Store a versioned backend envelope identifying its
 algorithm, keystore key handle, authenticated vault ID/generation and access
 policy. It is not required to implement XChaCha inside secure hardware.
+Each vault on a device has at most one enrollment, with its own hardware
+key, and a device keeps at most 16; enrolling one vault never changes
+another's (owner, 2026-11-20, plan 0074).
 
 5.2. Android profile uses a generated nonexportable AES-256-GCM keystore key
 with authentication required for each operation; prefer StrongBox when available.
@@ -241,6 +244,11 @@ biometric lockout or a failed unwrap; a prompt the user or the system
 dismisses is not one, and the platform prompt's own retries within one
 attempt are not counted separately. The attempt is recorded before the
 prompt opens, so an interrupted prompt counts (owner, 2026-11-07, plan 0045).
+Age, attempts and the policy are kept per enrolled vault: turning one off, a
+password change, a rotation, an expiry or a failure limit destroys only that
+vault's slot. A changed boot, a clock that went backwards, unreadable or
+unknown state or a backend that is no longer validated destroys every slot;
+the OS biometric lockout is device-wide (plan 0074).
 After the key is released, a phrase that does not open the vault, a missing,
 damaged or mismatched anchor, a changed binding (vault, generation or
 password keyslot) or a refused platform check destroys the slot and its
@@ -334,6 +342,9 @@ password guessing and device compromise are separate from vault encryption.
 
 ## Changelog
 
+- 2026-11-20: §5.1, §5.4: one quick-unlock enrollment per vault (at most
+  16 per device), each with its own key, age and attempts; device-wide
+  events still clear all (owner report, plan 0074).
 - 2026-11-16: §1.3 password-kdf/1 frozen at 1.0 with unchanged parameters;
   Open Question 1 resolved (owner-delegated, plan 0064).
 

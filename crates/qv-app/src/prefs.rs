@@ -53,8 +53,6 @@ pub struct Prefs {
     pub theme: Theme,
     /// The reduced-protection status the user acknowledged, if any.
     pub protection: Option<String>,
-    /// The user turned quick unlock off: no offer after a password unlock.
-    pub quick_off: bool,
 }
 impl Prefs {
     /// Parse bounded bytes; unknown keys and malformed lines are ignored.
@@ -76,7 +74,6 @@ impl Prefs {
                 Some(("protection", v)) if valid_fingerprint(v) => {
                     prefs.protection = Some(v.to_owned());
                 }
-                Some(("quick", "off")) => prefs.quick_off = true,
                 _ => {}
             }
         }
@@ -89,9 +86,6 @@ impl Prefs {
             out.push_str("protection=");
             out.push_str(p);
             out.push('\n');
-        }
-        if self.quick_off {
-            out.push_str("quick=off\n");
         }
         out
     }
@@ -271,17 +265,13 @@ mod tests {
         assert_eq!(Prefs::parse(b"theme=\xff"), Prefs::default());
         let long = format!("protection={}", "a".repeat(MAX_FINGERPRINT + 1));
         assert_eq!(Prefs::parse(long.as_bytes()).protection, None);
-        // Quick unlock turned off: only the exact value counts.
-        let off = Prefs::parse(b"theme=dark\nquick=off\n");
-        assert!(off.quick_off);
-        assert_eq!(Prefs::parse(off.encode().as_bytes()), off);
-        assert!(!Prefs::parse(b"quick=on\nquick=OFF\nquick=off \n").quick_off);
-        assert!(!Prefs::parse(Prefs::default().encode().as_bytes()).quick_off);
+        // The device-wide `quick=off` of before plan 0074 is dropped: each
+        // vault's own setting is in the vault list.
+        assert_eq!(Prefs::parse(b"quick=off\n"), Prefs::default());
         // Every key at its longest still fits the bound.
         let full = Prefs {
             theme: Theme::System,
             protection: Some("a".repeat(MAX_FINGERPRINT)),
-            quick_off: true,
         };
         assert!(full.encode().len() <= MAX_PREFS);
         assert_eq!(Prefs::parse(full.encode().as_bytes()), full);
@@ -351,7 +341,6 @@ mod tests {
         let p = Prefs {
             theme: Theme::System,
             protection: Some("suwuhul1c1p0".into()),
-            quick_off: true,
         };
         p.save(&dir).unwrap();
         assert_eq!(Prefs::load(&dir), p);

@@ -1610,9 +1610,6 @@ pub struct PasswordPane {
     pub quick_available: bool,
     /// The enrolled policy.
     pub policy: Option<QuickPolicy>,
-    /// The enrollment belongs to another vault: its name, empty when the
-    /// vault list does not have it (the device keeps one, plan 0072).
-    pub elsewhere: Option<String>,
     /// Autofill is available.
     pub autofill: bool,
     /// Guidance.

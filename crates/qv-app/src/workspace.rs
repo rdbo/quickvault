@@ -38,6 +38,8 @@ const _: () =
 /// Copy feedback without touching the clipboard (plan 0069).
 pub(crate) const NOTHING_TO_COPY: &str = "Nothing to copy: this field is empty.";
 pub(crate) const NO_NOTES: &str = "Nothing to copy: this item has no notes.";
+/// Enrolling past the device's limit of quick-unlock vaults (plan 0074).
+pub(crate) const QUICK_LIMIT: &str = "Fingerprint unlock is on for 16 vaults on this phone, the most it keeps. Turn it off in one of their Settings first.";
 /// The hold ended because something else was copied (0008 §3 replacement).
 pub(crate) const CLIPBOARD_REPLACED: &str =
     "The clipboard now holds something else, so QuickVault left it alone.";

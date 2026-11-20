@@ -413,16 +413,6 @@ pub(crate) static ACTIVE: std::sync::OnceLock<Result<Controller, AppError>> =
 /// A current form generation; late input cannot affect a new generation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FormEpoch(pub u64);
-/// Which vault holds the device's one quick-unlock enrollment.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum QuickHolder {
-    /// No live enrollment.
-    None,
-    /// The open vault.
-    Open,
-    /// Another vault: its name, when the vault list has it.
-    Other(Option<String>),
-}
 /// Redacted UI snapshot. Phrase display is a separate protected operation.
 #[derive(PartialEq, Eq)]
 pub struct View {
@@ -1052,9 +1042,21 @@ impl Controller {
         }
     }
     /// Remove a remembered vault from the list; the file is never touched.
+    /// Its quick unlock ends unless another listed file is the same vault
+    /// (0009 §1.8, plan 0074).
     pub fn forget_vault(&self, epoch: FormEpoch, path: &std::path::Path) {
         if self.state().epoch != epoch.0 {
             return;
+        }
+        let others: Vec<PathBuf> = self
+            .vault_list()
+            .recent
+            .iter()
+            .filter(|p| p.as_path() != path)
+            .cloned()
+            .collect();
+        if let Ok(core) = self.core() {
+            let _ = core.forget_quick(path, &others);
         }
         let saved = {
             let mut list = self.vault_list();
@@ -1217,12 +1219,15 @@ impl Controller {
             }
         }
     }
-    /// Record whether the user turned quick unlock off (plan 0045).
+    /// Record whether the user turned the open vault's quick unlock off
+    /// (plans 0045, 0074): no offer after its password unlocks.
     pub(crate) fn set_quick_off(&self, off: bool) {
-        let mut prefs = self.prefs();
-        if prefs.quick_off != off {
-            prefs.quick_off = off;
-            let _ = prefs.save(&self.0.base);
+        let Some(path) = self.state().vault_path.clone() else {
+            return;
+        };
+        let mut list = self.vault_list();
+        if list.set_quick_off(&path, off) {
+            let _ = list.save(&self.0.base);
         }
     }
     /// Quick unlock is enrolled for the vault the locked screen opens.
@@ -1237,30 +1242,16 @@ impl Controller {
     pub fn quick_ready_for(&self, path: &std::path::Path) -> bool {
         self.core().is_ok_and(|c| c.quick_ready_for(path))
     }
-    /// The enrolled quick-unlock policy, while one is live.
+    /// The open vault's quick-unlock policy, while it has a live
+    /// enrollment (each vault has its own, plan 0074).
     pub fn quick_policy(&self) -> Option<qv_core::platform::QuickPolicy> {
-        self.0.services.keystore().policy()
+        let session = self.state().session.clone()?;
+        session.quick_policy()
     }
-    /// Where the device's one quick-unlock enrollment is (0009 §1.8, plan
-    /// 0072): the open vault, another vault (with its name when it is
-    /// listed), or nowhere.
-    pub fn quick_holder(&self) -> QuickHolder {
-        if self.quick_policy().is_none() {
-            return QuickHolder::None;
-        }
+    /// The open vault has a live quick-unlock enrollment.
+    pub fn quick_open(&self) -> bool {
         let session = self.state().session.clone();
-        if session.is_some_and(|s| s.quick_enrolled()) {
-            return QuickHolder::Open;
-        }
-        let open = self.state().vault_path.clone();
-        QuickHolder::Other(
-            self.vaults()
-                .into_iter()
-                .find(|v| {
-                    open.as_ref() != Some(&v.path) && v.exists && self.quick_ready_for(&v.path)
-                })
-                .map(|v| v.name),
-        )
+        session.is_some_and(|s| s.quick_enrolled())
     }
     /// Background work the polled UI drives (plan 0045): run the pending
     /// quick-unlock offer once the vault is open.
@@ -1296,6 +1287,7 @@ impl Controller {
             let notice = match &done {
                 Ok(()) => Some("Fingerprint unlock is on for this vault."),
                 Err(CoreError::Cancelled) => None,
+                Err(CoreError::LimitExceeded) => Some(crate::workspace::QUICK_LIMIT),
                 Err(_) => Some(
                     "Fingerprint unlock could not be turned on. You can try again in Settings.",
                 ),
@@ -2015,7 +2007,7 @@ impl Controller {
                 Err(CoreError::Cancelled) => Err(AppError::Core(CoreError::Cancelled)),
                 // The enrollment itself decides (plan 0063): re-reading the
                 // vault header here could fail and wrongly say "off".
-                Err(_) if core.quick_ready() => Err(AppError::QuickFailed(core.quick_failure())),
+                Err(_) if core.quick_kept() => Err(AppError::QuickFailed(core.quick_failure())),
                 Err(_) => Err(AppError::QuickEnded(core.quick_failure())),
             },
             Action::Unlock | Action::RecoverPassword => {
@@ -2028,13 +2020,12 @@ impl Controller {
                     core.unlock(&path, &password, Some(token))?
                 };
                 // Offer quick unlock with this password where the device
-                // has it, the user did not turn it off and the device has
-                // no enrollment yet: another vault's is never moved without
-                // asking (0009 §1.8, plans 0045 and 0072).
+                // has it, this vault has none yet and the user did not turn
+                // it off for this vault (0009 §1.8, plans 0045 and 0074).
                 let offer = matches!(action, Action::Unlock)
-                    && !self.prefs().quick_off
+                    && !self.vault_list().quick_off.contains(&path)
                     && self.0.services.status().quick_unlock
-                    && !core.quick_ready()
+                    && !session.quick_enrolled()
                     && session.is_read_only().is_ok_and(|ro| !ro);
                 Ok(Opened::Session(
                     session,
