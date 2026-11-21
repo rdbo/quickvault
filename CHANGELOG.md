@@ -7,6 +7,9 @@ Dates are ISO 8601. Newest first within each section.
 
 ## Unreleased
 
+- 2026-11-21: Fixed (owner report): the "Copied · clears in …" notice,
+  and other notices or the sync receipt, covered an open menu, such as a
+  row's copy menu on the phone. While a menu is open it stays on top.
 - 2026-11-20: Fixed (owner report, plan 0074): a correct master password
   could fail with an error right after switching vaults on the phone, until
   the app was restarted. The locked screen and the vault cards checked

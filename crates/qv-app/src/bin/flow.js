@@ -77,7 +77,12 @@ try{
   if(m.bottom>r.top+1||m.top<b.top-1)throw new Error("synthetic row menu out of view");
   // It copies the entry's two-factor code (owner, 2026-11-20).
   if(!Array.from(document.querySelectorAll(".row-menu .mi")).some(b=>b.textContent==="Copy “Two-factor code”"))throw new Error("synthetic row menu has no code");
-  $(".row>.pop-scrim").click();await until(()=>!$(".row-menu"));rows.style.paddingTop="";}
+  // An open menu stays above a notice such as "Copied" (owner, 2026-11-21).
+  const t=document.createElement("div"),n=document.createElement("div");t.className="toasts";n.className="toast";t.appendChild(n);$(".shell").parentElement.appendChild(t);const z=e=>+getComputedStyle(e).zIndex;
+  t.style.left=m.left+"px";t.style.top=m.top+"px";t.style.bottom="auto";t.style.transform="none";n.style.width=m.width+"px";n.style.height=m.height+"px";
+  if(!document.elementFromPoint(m.left+m.width/2,m.top+m.height/2)?.closest(".row-menu"))throw new Error("synthetic notice above an open menu");
+  $(".row>.pop-scrim").click();await until(()=>!$(".row-menu"));rows.style.paddingTop="";
+  if(z(t)<=40)throw new Error("synthetic notice below the page");t.remove();}
  stage=6;await press(()=>$('.fld [aria-label="Copy"]'),"copy");
  const copied=()=>Array.from(document.querySelectorAll(".toast")).some(t=>t.textContent.startsWith("Copied"));
  if(clipboard===null)await until(()=>copied()||!!$(".error"));else if(clipboard)await until(copied);else await until(()=>!!$(".error"));

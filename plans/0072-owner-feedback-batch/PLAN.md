@@ -290,3 +290,11 @@ owner.
   because the bridge dropped empty revealed values (from the 1.2.0
   rewrite); `convert::shown` keeps them, tested by
   `an_empty_revealed_value_is_shown_empty_not_masked`.
+- 2026-11-21 (owner report): notices (`.toasts`, z-index 60) and the sync
+  receipt (40) covered open menus (row and card menus 40, other popup
+  menus 31), most visibly the phone's bottom-sheet menu above the tab bar.
+  While any popup menu is open (its `.pop-scrim` exists), both drop to
+  z-index 29: below every menu, above the page. Real-engine flow stage 55
+  places a notice over the open row menu and hit-tests its center (fails
+  without the rule, passes with it), then checks the notice is back above
+  the page once the menu closes.

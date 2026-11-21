@@ -523,6 +523,8 @@ button.set-row:hover:enabled{background:var(--raised)}
 .palette .it small{margin-left:auto;color:var(--text3)}
 .palette .foot2{display:flex;gap:14px;padding:8px 14px;border-top:1px solid var(--line2);color:var(--text3);font-size:12px}
 .toasts{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;align-items:center;z-index:60;width:max-content;max-width:calc(100% - 24px)}
+/* An open menu stays above notices and the sync receipt (owner report, 2026-11-21). */
+body:has(.pop-scrim) .toasts,body:has(.pop-scrim) .receipt{z-index:29}
 .toast{position:relative;overflow:hidden;display:flex;align-items:center;gap:12px;padding:10px 12px 10px 14px;border-radius:12px;background:var(--toast);color:var(--toast-ink);box-shadow:var(--pop);animation:rise .2s ease-out;font-size:13px}
 .toast .ico{color:var(--toast-acc)}
 .toast button{border:0;background:none;color:var(--toast-acc);font-weight:600;padding:2px 4px}
