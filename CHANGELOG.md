@@ -7,6 +7,11 @@ Dates are ISO 8601. Newest first within each section.
 
 ## Unreleased
 
+## 1.2.0 — 2026-11-21
+
+- 2026-11-21: Version 1.2.0 (release notes: `docs/release-notes/1.2.0.md`),
+  prepared on 2026-11-18 and not tagged then; it also carries plans
+  0072–0074 and the fixes below.
 - 2026-11-21: Fixed (owner report): the "Copied · clears in …" notice,
   and other notices or the sync receipt, covered an open menu, such as a
   row's copy menu on the phone. While a menu is open it stays on top.
@@ -78,9 +83,6 @@ Dates are ISO 8601. Newest first within each section.
   vault's Settings now names the vault that has it and offers to move it
   here (0009 §1.8 amended).
 
-## 1.2.0 — 2026-11-18
-
-- 2026-11-18: Version 1.2.0 (release notes: `docs/release-notes/1.2.0.md`).
 - 2026-11-18: The app moves from Dioxus to Tauri 2 with a Leptos page in
   WebAssembly (plan 0071), on Linux, Windows and Android. Nothing listens on
   a socket any more: Rust builds every screen as a frame, the page renders it
