@@ -317,3 +317,12 @@ that named the Dioxus bridge are remapped in F1.
   background activity starts unless the tester allows it once per install
   (an app-ops setting); the run hangs at `startActivitySync` otherwise, and
   also when the phone is locked.
+- 2026-11-21 (owner report, release workflow): the release APK failed in
+  `:app:lintVitalAnalyzeUniversalRelease`, a pass only release builds run:
+  androidx.lifecycle 2.10.0's `NonNullableMutableLiveDataDetector` throws
+  `IncompatibleClassChangeError` (`KaCallableMemberCall`) under AGP 8.7.0's
+  lint. Reproduced locally with `QV_APP_RELEASE=1` and a throwaway key.
+  Fix: `lint { disable += "NullSafeMutableLiveData" }` in
+  `gen/android/app/build.gradle.kts` (no LiveData in the app). The local
+  release build then passes; release lint reports no issues. The throwaway
+  key and APK were deleted.

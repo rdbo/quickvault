@@ -7,11 +7,22 @@ Dates are ISO 8601. Newest first within each section.
 
 ## Unreleased
 
-## 1.2.0 — 2026-11-21
+## 1.2.1 — 2026-11-21
+
+- 2026-11-21: Version 1.2.1 (release notes: `docs/release-notes/1.2.1.md`),
+  the first published 1.2 release: 1.2.0 was tagged but its release build
+  failed, so it was never published. 1.2.1 is 1.2.0 plus the fix below;
+  its notes cover everything since 1.1.1. Android version code 10201.
+- 2026-11-21: Fixed: the release APK build failed in Android lint's
+  release pass (`lintVitalAnalyzeUniversalRelease`): lifecycle 2.10.0's
+  `NullSafeMutableLiveData` check crashes under AGP 8.7.0's lint. That one
+  check is disabled (the app uses no LiveData); debug builds never ran it.
+
+## 1.2.0 — 2026-11-21 (tagged, not published)
 
 - 2026-11-21: Version 1.2.0 (release notes: `docs/release-notes/1.2.0.md`),
   prepared on 2026-11-18 and not tagged then; it also carries plans
-  0072–0074 and the fixes below.
+  0072–0074 and the fixes below. Its release build failed (see 1.2.1).
 - 2026-11-21: Fixed (owner report): the "Copied · clears in …" notice,
   and other notices or the sync receipt, covered an open menu, such as a
   row's copy menu on the phone. While a menu is open it stays on top.

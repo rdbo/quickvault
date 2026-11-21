@@ -69,6 +69,13 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    lint {
+        // lifecycle 2.10.0's LiveData check is built for a newer lint than
+        // AGP 8.7.0's and crashes the release build's lintVital pass
+        // (IncompatibleClassChangeError). The app uses no LiveData; every
+        // other check still runs.
+        disable += "NullSafeMutableLiveData"
+    }
 }
 
 kotlin {
