@@ -11,7 +11,7 @@ No account, no server and no Internet connection required. Sync is optional and 
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 [![Rust 1.98.1](https://img.shields.io/badge/rust-1.98.1-orange.svg?logo=rust)](rust-toolchain.toml)
 ![Platforms](https://img.shields.io/badge/platforms-Linux%20%C2%B7%20Android%20%C2%B7%20Windows-informational)
-![Status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-yellow.svg)
+[![Release](https://img.shields.io/github/v/release/rdbo/quickvault)](https://github.com/rdbo/quickvault/releases/latest)
 
 <br>
 
@@ -20,9 +20,11 @@ No account, no server and no Internet connection required. Sync is optional and 
 </div>
 
 > [!WARNING]
-> QuickVault is **pre-1.0 and under active development**. File and wire
-> formats may still change, and the code has not been independently audited.
-> Don't keep your only copy of important secrets in it yet.
+> QuickVault **has not had an independent security audit**. The vault,
+> archive and snapshot formats have been frozen since 1.0, so every later
+> version opens files from 1.0. Keep backups (archives, or the recovery
+> phrase) and read the [security status](#security-design) before you rely
+> on it.
 
 ## Contents
 
@@ -64,14 +66,14 @@ that only ever sees ciphertext) but is not planned for now.
 |---|---|
 | 🔐 **Encrypted vault** | One SQLite file of encrypted objects. Argon2id key derivation, XChaCha20-Poly1305, an authenticated manifest and rollback anchors. |
 | 🗂️ **Organize** | Nested groups; logins, secure notes, cards, Wi-Fi networks and custom items; custom fields; colors; fast full search over non-secret fields. |
-| 📎 **Attachments** | Files stored in encrypted, padded 64 KiB chunks, with in-memory previews for images and media. |
-| ⏱️ **TOTP** | Built-in one-time codes for two-factor logins. |
+| 📎 **Attachments** | Files up to 2 GiB, stored in encrypted, padded 64 KiB chunks, with in-memory previews for images and media. |
+| ⏱️ **Two-factor codes** | Set up from a scanned QR code, a typed setup key or a pasted `otpauth://` link. The current code shows at a glance and copies from the list; the setup key never shows. |
 | 🎲 **Generator** | Random passwords and word passphrases with strength estimates. |
 | 🕓 **History & recovery** | Every edit kept in history; trash; local snapshots; 24-word recovery phrase; key rotation; a full `verify` pass. |
 | 🔄 **LAN sync** | Peer-to-peer over the local network with one-use QR or typed codes. Post-quantum hybrid key exchange (X-Wing). |
 | ⚖️ **Conflicts** | Causal, whole-record merging. Concurrent versions stay intact until you pick one. |
 | 📦 **Archives** | Authenticated encrypted archives for backups, or for exchanging a vault through Syncthing, Dropbox or a USB stick. |
-| 📱 **Android** | Fingerprint quick unlock backed by hardware keys, exact-match autofill, in-app QR scanner, `FLAG_SECURE`. |
+| 📱 **Android** | Fingerprint (or screen-lock) quick unlock for each vault, backed by hardware keys; exact-match autofill; in-app QR scanner; `FLAG_SECURE`. |
 | 🧹 **Secret hygiene** | Secrets held in zeroizing containers, clipboard cleared after 20 s, reveal times out after 30 s, auto-lock after 5 minutes idle or on screen lock. |
 | ⌨️ **CLI** | `qv`, a full scriptable client for the same vaults, with JSON output. |
 
@@ -115,11 +117,28 @@ All screenshots show a throwaway demo vault filled with made-up data.
 
 ## Getting started
 
-Prebuilt packages are available on [GitHub Releases](https://github.com/rdbo/quickvault/releases).
-See the [release instructions](docs/RELEASE.md) to choose the package for
-your platform. New releases provide separate Alpine 3.22 and Edge builds;
-the original 1.0.0 Alpine package targets 3.22. Source build instructions
-follow.
+### Install a release
+
+Prebuilt packages are on [GitHub Releases](https://github.com/rdbo/quickvault/releases/latest),
+with a `SHA256SUMS` file:
+
+| Platform | Package |
+|----------|---------|
+| Android (arm64, API 29+) | `quickvault-<version>-android-arm64.apk` |
+| Windows 10/11 (x86_64) | `quickvault-<version>-windows-x86_64.exe` (app), `qv-<version>-windows-x86_64.exe` (CLI) |
+| Debian 12+, Ubuntu 24.04+ | `quickvault_<version>_amd64.deb` |
+| Alpine 3.22 / Edge | `quickvault-<version>-r0-alpine-3.22-x86_64.apk` / `…-alpine-edge-x86_64.apk` |
+
+[`docs/RELEASE.md`](docs/RELEASE.md) has the install commands and explains
+signing and checksums. The notes for each release are in
+[`docs/release-notes/`](docs/release-notes/).
+
+> [!NOTE]
+> If you update from 1.1.x on Android, select QuickVault as the autofill
+> service again. Android turns it off because the service's class name
+> changed in 1.2.
+
+To build from source instead, read on.
 
 ### Prerequisites
 
@@ -252,11 +271,17 @@ brief:
   Dependencies are checked with `cargo deny` and `cargo vet`, and decoders
   are fuzzed weekly in CI.
 
+- **No listening sockets.** The app runs fully in process: the page and
+  the Rust backend talk through one bounded IPC command, and previews
+  stream over an in-process scheme.
+
 > [!NOTE]
 > A written spec or a passing test suite doesn't prove that something is
-> secure. The release gates in
-> [spec 0012](specs/0012-security-validation.md), including independent
-> review of the sync protocols, are still open.
+> secure. QuickVault has had agent-run code and protocol reviews, but no
+> independent audit. The independent review of the LAN protocol, audits of
+> several pinned security-critical crates and attended device checks are
+> still open. The [1.0.0 release record](docs/release-notes/1.0.0.md#security-status-what-was-not-done)
+> lists what was and wasn't checked, along with the known limitations.
 
 ## Architecture
 
@@ -315,18 +340,24 @@ lifecycle and the main flows in depth.
 
 ## Project status
 
+QuickVault 1.0 (2026-11-16) shipped the offline vault and LAN sync on
+Linux, Android and Windows. The current release is **1.2.1** (2026-11-21).
+In 1.2 the app moved from Dioxus to Tauri 2 with a Leptos page, and it added
+easier two-factor setup, a fingerprint unlock for each vault, and lists that
+scroll continuously.
+
 | Phase | Scope | State |
 |-------|-------|-------|
-| 1 | Offline core, encrypted vault, history and recovery, Linux CLI | ✅ Done |
-| 2 | Linux and Android apps, LAN sync, conflicts, archive exchange | 🚧 Implemented; device validation and owner review in progress |
-| 3 | Windows | 🚧 Implemented; Windows gate evidence pending |
+| 1 | Offline core, encrypted vault, history and recovery, Linux CLI | ✅ Released |
+| 2 | Linux and Android apps, LAN sync, conflicts, archive exchange | ✅ Released; attended device checks still open |
+| 3 | Windows | ✅ Released; attended Windows checklist still open |
 | 4 | Optional self-hosted server and remote sync | ⏸️ Not planned (design kept in the specs) |
 | Later | Automatic sync, import/export from other managers, iOS/macOS, browser extension | 💭 Future |
 
-The detailed roadmap is in [`plans/0002-roadmap`](plans/0002-roadmap/PLAN.md)
-and changes are listed in [`CHANGELOG.md`](CHANGELOG.md). What remains before
-1.0 (offline vault plus LAN sync on Linux, Android and Windows) is tracked in
-[plan 0056](plans/0056-release-1-0/PLAN.md).
+Changes are listed in [`CHANGELOG.md`](CHANGELOG.md) and the release notes
+in [`docs/release-notes/`](docs/release-notes/). The roadmap is in
+[`plans/0002-roadmap`](plans/0002-roadmap/PLAN.md), and the 1.0 release
+plan, with its open gates, is [plan 0056](plans/0056-release-1-0/PLAN.md).
 
 ## Contributing
 
@@ -346,9 +377,10 @@ QuickVault is developed spec-first:
    cargo test --locked
    ```
 
-   The app's UI code also needs `--features desktop` (or `validation`) for
-   Clippy and tests. Dependency changes also run `cargo deny check` and
-   `cargo vet --locked`.
+   The app backend also needs `--features desktop` (or `validation`) for
+   Clippy and tests, and the page is linted for WebAssembly with
+   `cargo clippy --locked -p qv-ui --target wasm32-unknown-unknown -- -D warnings`.
+   Dependency changes also run `cargo deny check` and `cargo vet --locked`.
 
 Every source file starts with `// SPDX-License-Identifier: AGPL-3.0-or-later`.
 `unsafe` is forbidden outside `qv-win`, and `unwrap`/`expect`/`panic!` are

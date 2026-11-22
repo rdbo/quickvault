@@ -7,6 +7,13 @@ Dates are ISO 8601. Newest first within each section.
 
 ## Unreleased
 
+- 2026-11-22: README updated for the released state. It drops the pre-1.0
+  warning and badge for an audit warning and a release badge, adds a
+  release download table and the Android autofill re-selection note,
+  describes 1.2's two-factor setup, fingerprint unlock for each vault and
+  no-socket app, points to the release records for security status, and
+  marks phases 1–3 as released.
+
 ## 1.2.1 — 2026-11-21
 
 - 2026-11-21: Version 1.2.1 (release notes: `docs/release-notes/1.2.1.md`),
